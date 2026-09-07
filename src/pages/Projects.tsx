@@ -263,7 +263,7 @@ function CategoryIcon({ iconName, tone, size = 13 }: { iconName?: string; tone?:
   return <Icon size={size} color={color} style={{ flexShrink: 0 }} />;
 }
 
-const PROJECT_COLUMN_ORDER = ["name", "project_number", "created_at", "owner", "category", "source", "planning_type", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level"];
+const PROJECT_COLUMN_ORDER = ["name", "project_number", "created_at", "closed_at", "owner", "category", "source", "planning_type", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level"];
 
 // Default hidden-columns set for a brand-new Projects Timeline view (see
 // timelineDefaultHiddenColumns on ViewTabs / initialHiddenColumns on
@@ -990,6 +990,13 @@ export default function Projects() {
   // open. Counts are fetched once in loadAll() and kept in sync afterward
   // by NotesSidebar itself calling onCountChange whenever it loads/posts.
   const [noteCounts, setNoteCounts] = useState<Record<string, number>>({});
+  // 2026-09-07 (Sandra: Sign Off Date -- "capture sign off date, that's
+  // when the project was tagged as closed"): project_closeouts.closed_at
+  // per project, keyed by project_id -- a separate table (stamped by
+  // decide_wbs_closure at approval), not a projects column, so it can't
+  // ride along on the plain projects select("*") below like Project
+  // ID/Created can.
+  const [closedAtByProjectId, setClosedAtByProjectId] = useState<Record<string, string>>({});
   const [notesSidebarProjectId, setNotesSidebarProjectId] = useState<string | null>(null);
   // Per-person Spent Hrs breakdown popup (2026-08-14) -- which task's
   // breakdown modal (if any) is currently open.
@@ -1116,7 +1123,7 @@ export default function Projects() {
   async function loadAll() {
     setLoading(true);
     purgeExpiredArchives();
-    const [{ data: projectData }, { data: taskData }, { data: peopleData }, { data: chainPeopleData }, { data: holidayData }, { data: extReqData }, { data: timeEntryData }, { data: noteData }, { data: delSpentData }, { data: workTypeData }, { data: projectSourceData }, { data: projectCategoryData }, { data: projectPhaseData }, { data: phaseMappingData }, { data: pendingBaselineData }, { data: projectPlanningTypeData }] = await Promise.all([
+    const [{ data: projectData }, { data: taskData }, { data: peopleData }, { data: chainPeopleData }, { data: holidayData }, { data: extReqData }, { data: timeEntryData }, { data: noteData }, { data: delSpentData }, { data: workTypeData }, { data: projectSourceData }, { data: projectCategoryData }, { data: projectPhaseData }, { data: phaseMappingData }, { data: pendingBaselineData }, { data: projectPlanningTypeData }, { data: closeoutData }] = await Promise.all([
       supabase.from("projects").select("*").eq("is_archived", false).order("sort_order"),
       supabase.from("tasks").select("*").eq("is_archived", false).order("sort_order"),
       supabase.from("people").select("id,name,color").eq("is_active", true).order("name"),
@@ -1151,6 +1158,8 @@ export default function Projects() {
       // immediately flips it to approved/rejected).
       supabase.from("project_baseline_requests").select("project_id").eq("status", "pending"),
       supabase.from("project_planning_types").select("id,name,is_active,sort_order").order("sort_order"),
+      // 2026-09-07 (Sandra: Sign Off Date) -- see closedAtByProjectId above.
+      supabase.from("project_closeouts").select("project_id,closed_at"),
     ]);
     const nextProjects = (projectData as ProjectRow[]) ?? [];
     const nextTasks = (taskData as TaskRow[]) ?? [];
@@ -1169,6 +1178,12 @@ export default function Projects() {
     setPhaseStatusMapping((phaseMappingData as { status: string; phase_id: string }[]) ?? []);
     setPendingBaselineProjectIds(new Set(((pendingBaselineData as { project_id: string }[]) ?? []).map((r) => r.project_id)));
     setProjectPlanningTypes((projectPlanningTypeData as ProjectPlanningTypeOption[]) ?? []);
+    // 2026-09-07 (Sandra: Sign Off Date).
+    const nextClosedAt: Record<string, string> = {};
+    for (const row of (closeoutData as { project_id: string; closed_at: string }[]) ?? []) {
+      nextClosedAt[row.project_id] = row.closed_at;
+    }
+    setClosedAtByProjectId(nextClosedAt);
     const nextNoteCounts: Record<string, number> = {};
     for (const row of (noteData as { project_id: string }[]) ?? []) {
       nextNoteCounts[row.project_id] = (nextNoteCounts[row.project_id] ?? 0) + 1;
@@ -1953,7 +1968,11 @@ export default function Projects() {
     // columnOrder array simply doesn't contain "planning_type"). 3 =
     // 2026-09-07: same reasoning for the new Project ID/Created columns
     // inserted after Name.
-    columnOrderVersion: 3,
+    // 2026-09-07: bumped again for the new "closed_at" (Sign Off Date)
+    // column inserted after Created -- same reasoning as every prior bump
+    // here, a stale saved column order otherwise never picks up new
+    // columns.
+    columnOrderVersion: 4,
     hiddenColumns: [],
     columnWidths: {},
     groupBy: null,
@@ -2073,6 +2092,21 @@ export default function Projects() {
         defaultWidth: 110,
         maxWidth: 130,
         render: (p) => <span>{formatDate(p.created_at.slice(0, 10))}</span>,
+      },
+      {
+        // Added 2026-09-07 (Sandra: "capture sign off date -- that's when
+        // the project was tagged as closed") -- sourced from
+        // closedAtByProjectId (project_closeouts.closed_at, a separate
+        // table, see loadAll), not a projects column. Blank for every
+        // project that hasn't been closed yet.
+        key: "closed_at",
+        label: "Closed",
+        defaultWidth: 110,
+        maxWidth: 130,
+        render: (p) => {
+          const closedAt = closedAtByProjectId[p.id];
+          return <span>{closedAt ? formatDate(closedAt.slice(0, 10)) : "—"}</span>;
+        },
       },
       {
         key: "owner",
@@ -2520,7 +2554,7 @@ export default function Projects() {
         },
       },
     ],
-    [people, projects, me, tasks, holidayDates, projectViews.activeView.progressDisplay, projectViews.activeView.priorityDisplay, projectViews.activeView.complexityDisplay, noteCounts, timeEntries, deletedSpentHours, projectCategoryOptions, categoryIconMap, categoryToneMap, projectPhases, phaseStatusMapping, activePhaseNames, projectPlanningTypes]
+    [people, projects, me, tasks, holidayDates, projectViews.activeView.progressDisplay, projectViews.activeView.priorityDisplay, projectViews.activeView.complexityDisplay, noteCounts, timeEntries, deletedSpentHours, projectCategoryOptions, categoryIconMap, categoryToneMap, projectPhases, phaseStatusMapping, activePhaseNames, projectPlanningTypes, closedAtByProjectId]
   );
 
   // Board-view card body. Name always renders first/bold as the card's
@@ -2859,6 +2893,7 @@ export default function Projects() {
     { key: "name", label: "Project", getValue: (p) => p.name ?? "" },
     { key: "project_number", label: "Project ID", getValue: (p) => p.project_number },
     { key: "created_at", label: "Created", getValue: (p) => new Date(p.created_at).getTime() },
+    { key: "closed_at", label: "Closed", getValue: (p) => (closedAtByProjectId[p.id] ? new Date(closedAtByProjectId[p.id]).getTime() : -1) },
     { key: "owner", label: "Owner", getValue: (p) => ownerName(p.owner_id) },
     { key: "priority", label: "Priority", getValue: (p) => PROJECT_PRIORITY_OPTIONS.indexOf(p.priority ?? "") },
     { key: "status", label: "Status", getValue: (p) => PROJECT_STATUS_OPTIONS.indexOf(p.status ?? "") },

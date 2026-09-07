@@ -63,6 +63,23 @@ interface ProjectRow {
   effort_level: string | null;
   description: string | null;
   project_number: number;
+  // 2026-09-07 (Sandra: "confirm when the project was actually closed but
+  // capture sign off date -- that's when the project was tagged as
+  // closed"): two distinct dates, same split as a task's own
+  // actual_completion_date (when the work genuinely wrapped, requester-
+  // set) vs validated_completion_date (when a manager signed off on it).
+  // actual_close_date is that requester-set date, edited inline here like
+  // Start date; the Sign Off date itself is NOT a projects column -- it's
+  // project_closeouts.closed_at, auto-stamped by decide_wbs_closure the
+  // moment an approver actually clicks Approve & Close, fetched separately
+  // below (see closeoutClosedAt).
+  actual_close_date: string | null;
+  // Lessons Learned -- added same day (Sandra: "ask for lesson learned,
+  // what worked and what did not work"). Two separate fields (her explicit
+  // choice over one combined free-text box) so closed projects can be
+  // scanned/mined for recurring themes later, not just re-read one by one.
+  lessons_learned_worked: string | null;
+  lessons_learned_not_worked: string | null;
 }
 interface TaskRow {
   id: string;
@@ -846,6 +863,9 @@ export default function WbsPlanning() {
   // Phase 2/3 workflow state.
   const [activeRevision, setActiveRevision] = useState<RevisionRow | null>(null);
   const [pendingClosure, setPendingClosure] = useState<ClosureRequestRow | null>(null);
+  // 2026-09-07 (Sandra: Sign Off Date) -- project_closeouts.closed_at,
+  // fetched in loadAll above. null until wbs_status is actually 'closed'.
+  const [closeoutClosedAt, setCloseoutClosedAt] = useState<string | null>(null);
   // Phase 6 (2026-08-21): Baseline Approval workflow, replacing the manual
   // Start Revision / Apply Revision / Discard Revision cycle -- see
   // [[project_capaciq_phase6_baseline_approval]]. One request type covers
@@ -922,7 +942,7 @@ export default function WbsPlanning() {
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
     const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description,project_number").eq("id", projectId).single(),
+      supabase.from("projects").select("id,name,owner_id,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -984,7 +1004,7 @@ export default function WbsPlanning() {
       setTimeEntries([]);
     }
 
-    const [{ data: revRow }, { data: closureRow }, { data: baselineRow }, { data: baselineReqRow }] = await Promise.all([
+    const [{ data: revRow }, { data: closureRow }, { data: baselineRow }, { data: baselineReqRow }, { data: closeoutRow }] = await Promise.all([
       supabase
         .from("project_revisions")
         .select("id,revision_number,reason,status,started_at")
@@ -1011,11 +1031,18 @@ export default function WbsPlanning() {
         .eq("project_id", projectId)
         .eq("status", "pending")
         .maybeSingle(),
+      // 2026-09-07 (Sandra: Sign Off Date): project_closeouts.closed_at is
+      // stamped by decide_wbs_closure the moment a closure is actually
+      // approved -- this is the authoritative "when was this project
+      // tagged closed" date. Only exists once wbs_status has actually
+      // reached 'closed'; harmless maybeSingle() no-op before that.
+      supabase.from("project_closeouts").select("closed_at").eq("project_id", projectId).maybeSingle(),
     ]);
     setActiveRevision((revRow as RevisionRow) ?? null);
     setPendingClosure((closureRow as ClosureRequestRow) ?? null);
     setActiveBaseline((baselineRow as ActiveBaselineRow) ?? null);
     setPendingBaselineRequest((baselineReqRow as BaselineRequestRow) ?? null);
+    setCloseoutClosedAt((closeoutRow as { closed_at: string } | null)?.closed_at ?? null);
     if (baselineRow) {
       loadLatestRevisionChanges();
       loadBaselineTaskSnapshot();
@@ -2238,6 +2265,15 @@ export default function WbsPlanning() {
     // that were baselined before this field existed and so never hit
     // the Start Project gate above.
     if (!project.description) missingProjectFields.push("Description");
+    // 2026-09-07 (Sandra: "confirm when the project was actually closed"
+    // + "ask for lesson learned, what worked and what did not work") --
+    // same required-before-closure treatment as the fields above. Sign
+    // Off date itself is NOT gated here -- it's stamped automatically at
+    // approval (project_closeouts.closed_at), not something anyone fills
+    // in.
+    if (!project.actual_close_date) missingProjectFields.push("Actual Close Date");
+    if (!project.lessons_learned_worked) missingProjectFields.push("Lessons Learned (What Worked)");
+    if (!project.lessons_learned_not_worked) missingProjectFields.push("Lessons Learned (What Didn't Work)");
     if (missingProjectFields.length) {
       await alert(
         `Can't request closure yet -- this project is still missing: ${missingProjectFields.join(", ")}. Set these on the Projects & Tasks list first.`
@@ -2286,6 +2322,10 @@ export default function WbsPlanning() {
       if (!project.source_id) missingProjectFields.push("Source");
       if (!project.effort_level) missingProjectFields.push("Complexity");
       if (!project.description) missingProjectFields.push("Description");
+      // Same gate as handleRequestClosure above.
+      if (!project.actual_close_date) missingProjectFields.push("Actual Close Date");
+      if (!project.lessons_learned_worked) missingProjectFields.push("Lessons Learned (What Worked)");
+      if (!project.lessons_learned_not_worked) missingProjectFields.push("Lessons Learned (What Didn't Work)");
       if (missingProjectFields.length) {
         await alert(
           `Can't approve closure yet -- this project is still missing: ${missingProjectFields.join(", ")}. Set these on the Projects & Tasks list first.`
@@ -4057,6 +4097,17 @@ export default function WbsPlanning() {
             Baseline V{activeBaseline.version_number} (locked {formatDate(activeBaseline.captured_at.slice(0, 10))})
           </span>
         )}
+        {/* 2026-09-07 (Sandra: "capture sign off date -- that's when the
+            project was tagged as closed"): closeoutClosedAt is
+            project_closeouts.closed_at, stamped by decide_wbs_closure at
+            the moment of approval -- this is the official Sign Off date,
+            distinct from project.actual_close_date (when the work itself
+            actually wrapped, shown down in Project Details -- can be
+            earlier, e.g. work finished yesterday but only got signed off
+            today). */}
+        {project.wbs_status === "closed" && closeoutClosedAt && (
+          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Signed off {formatDate(closeoutClosedAt.slice(0, 10))}</span>
+        )}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
           {/* 2026-08-27 (Sandra: "can we just add an action button
               instead and from there pick Re-Baseline and Close project")
@@ -4259,6 +4310,35 @@ export default function WbsPlanning() {
                 <Info size={13} style={{ color: "var(--muted)" }} />
               </span>
             </div>
+            {/* 2026-09-07 (Sandra: "capture sign off date -- that's when
+                the project was tagged as closed. But the actual closed
+                date is like validation, when it was really closed, as the
+                sign off maybe later. Say actual close was yesterday but
+                just signed off today"): this is that first, requester-set
+                date -- when the work actually wrapped, editable like Start
+                date. The Sign Off date itself (when an approver actually
+                clicked Approve & Close) is NOT editable here -- it's
+                project_closeouts.closed_at, shown as a read-only "Signed
+                off ..." badge in the status banner above once the project
+                reaches wbs_status='closed'. Required before requesting
+                closure (see handleRequestClosure's missingProjectFields
+                gate below), same treatment as Description. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Actual Close Date:</span>
+              <div className="wbs-field-box" style={fieldBoxStyle(!!project.actual_close_date, 110, !canEditWbs)}>
+                <InlineDate
+                  value={project.actual_close_date}
+                  editable={canEditWbs}
+                  onCommit={(v) => saveProjectField({ actual_close_date: v })}
+                />
+              </div>
+              <span
+                title="When the work on this project actually wrapped -- may be earlier than the Sign Off date above if approval happens later. Required before requesting closure."
+                style={{ display: "inline-flex", cursor: "help", flexShrink: 0 }}
+              >
+                <Info size={13} style={{ color: "var(--muted)" }} />
+              </span>
+            </div>
             {/* 2026-09-03 (Sandra: "add these 3 new fields in the WBS UI
                 along with name/owner/start date... push that these are
                 filled in before starting project or locking baseline")
@@ -4386,6 +4466,40 @@ export default function WbsPlanning() {
                 placeholder="What is this project about?"
                 onCommit={(v) => saveProjectField({ description: v })}
               />
+            </div>
+          </div>
+
+          {/* Lessons Learned -- added 2026-09-07 (Sandra: "ask for lesson
+              learned, what worked and what did not work"). Two separate
+              fields (her explicit call over one combined free-text box) so
+              closed projects can be scanned for recurring themes later.
+              Same card treatment and canEditWbs gate as Description above,
+              required before Closure (see handleRequestClosure/
+              handleDecideClosure's missingProjectFields gate below) -- NOT
+              at Start Project, since there's nothing to reflect on yet
+              that early. */}
+          <div className="card" style={{ padding: 14, marginBottom: 12, display: "flex", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 300px", minWidth: 260 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Worked:</div>
+              <div className="wbs-field-box" style={fieldBoxStyle(!!project.lessons_learned_worked, undefined, !canEditWbs)}>
+                <InlineTextArea
+                  value={project.lessons_learned_worked ?? ""}
+                  editable={canEditWbs}
+                  placeholder="What went well on this project?"
+                  onCommit={(v) => saveProjectField({ lessons_learned_worked: v })}
+                />
+              </div>
+            </div>
+            <div style={{ flex: "1 1 300px", minWidth: 260 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Didn't Work:</div>
+              <div className="wbs-field-box" style={fieldBoxStyle(!!project.lessons_learned_not_worked, undefined, !canEditWbs)}>
+                <InlineTextArea
+                  value={project.lessons_learned_not_worked ?? ""}
+                  editable={canEditWbs}
+                  placeholder="What would you do differently next time?"
+                  onCommit={(v) => saveProjectField({ lessons_learned_not_worked: v })}
+                />
+              </div>
             </div>
           </div>
 
