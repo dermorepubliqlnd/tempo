@@ -3262,6 +3262,27 @@ export default function Projects() {
         // date (+ the Validate/Reopen buttons); "Validated By" (below,
         // same validated_by column) is now its own separate cell.
         render: (t) => {
+          // 2026-09-07 bugfix (Sandra: reopening a validation "gets it
+          // back to In Progress and can't be changed"): a parent task's
+          // Validate/Reopen used to be reachable exactly like any leaf
+          // task's -- but Status on a parent is now fully computed (see
+          // the Status column above), with no dropdown left to fix it if
+          // reopen_task's server-side "status = In Progress" write ever
+          // disagreed with what the children actually say. Root-caused to
+          // the "Revise deck" parent task in Dermorepubliq Corporate 2026
+          // Deck: it had been independently Validated, then Reopened --
+          // both of which only ever made sense for a leaf's own reported
+          // work, not a parent whose completion is entirely derived from
+          // its sub-tasks. Parent completion is never independently
+          // validated at all now, matching Work Type's "N/A" treatment.
+          const isParent = t._depth === 0 && hasChildren(t.id);
+          if (isParent) {
+            return (
+              <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="Not applicable -- a parent task's completion is fully computed from its sub-tasks, never independently validated.">
+                N/A
+              </span>
+            );
+          }
           const canValidate = canValidateTask(t);
           if (t.status !== "Done") {
             return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>—</span>;
@@ -3306,8 +3327,18 @@ export default function Projects() {
             });
             if (!ok) return;
             const { error } = await supabase.rpc("reopen_task", { p_task_id: t.id });
-            if (error) alert(`Couldn't reopen: ${error.message}`);
-            else loadAll();
+            if (error) {
+              alert(`Couldn't reopen: ${error.message}`);
+              return;
+            }
+            // 2026-09-07: reopen_task is a direct server-side RPC, not a
+            // client updateTask() call -- it never went through the
+            // recomputeAncestorStatus cascade the Status column's own
+            // onCommit gets, so a reopened leaf's parent was silently
+            // left stale (still showing Done) until something else
+            // happened to touch a sibling. Cascade it explicitly here too.
+            await recomputeAncestorStatus(t.id, tasks.map((row) => (row.id === t.id ? { ...row, status: "In Progress" } : row)));
+            loadAll();
           }
           return (
             <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -3417,6 +3448,20 @@ export default function Projects() {
         // freezes once validated (isTaskLocked), enforced both here and
         // at the DB layer (enforce_task_validation_field_lock).
         render: (t) => {
+          // 2026-09-07: same "N/A, fully computed" treatment as Status
+          // and Validate/Reopen above -- a parent's own Actual Completion
+          // Date was independently editable and gated by the same
+          // per-task ownHoursFor() check that never made sense for a
+          // parent (its hours are a rollup of its children, not its own),
+          // same bug class as the Status/logged-hours issue Sandra found.
+          const isParent = t._depth === 0 && hasChildren(t.id);
+          if (isParent) {
+            return (
+              <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="Not applicable -- a parent task's completion is fully computed from its sub-tasks.">
+                N/A
+              </span>
+            );
+          }
           const editable = canEditTask(t) && !isTaskLocked(t);
           if (t.status !== "Done" && !t.actual_completion_date) {
             return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>—</span>;
