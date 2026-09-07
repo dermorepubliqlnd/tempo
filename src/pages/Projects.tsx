@@ -1302,8 +1302,17 @@ export default function Projects() {
   // validate; someone further up only if the immediate manager's account
   // is inactive. Approximate here (see nearestActiveManagerClient above);
   // validate_task_completion is the real gate.
+  // 2026-09-07 (Sandra: "ensure that the person cannot validate his or
+  // her own work -- only the one up [immediate manager] or [skip-level]
+  // should be able to validate") -- self-validation was reachable
+  // whenever the assignee happened to ALSO be Full Access or the
+  // project owner (canManageTasksIn short-circuited true with no check
+  // against who the assignee was). Hard self-check up front, before any
+  // other authority branch, so it can never be bypassed by an
+  // otherwise-legitimate role.
   function canValidateTask(t: TaskRow): boolean {
     if (isProjectClosed(t.project_id)) return false;
+    if (t.assignee_id && t.assignee_id === me?.id) return false;
     if (canManageTasksIn(t.project_id)) return true;
     if (!t.assignee_id || !me?.id) return false;
     const immediateManager = chainPeople.find((p) => p.id === t.assignee_id)?.reports_to ?? null;
