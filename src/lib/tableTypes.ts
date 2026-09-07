@@ -1,5 +1,16 @@
 import type { ReactNode } from "react";
 
+// 2026-09-08 (Sandra: "group by Projects assigned to me", with rows that
+// don't qualify hidden entirely rather than dumped in a catch-all
+// bucket): a GroupOption's getGroup() can return this sentinel for a row
+// that should not appear in ANY group section when this grouping is
+// active -- DataTable skips it completely (not even an "—" bucket),
+// unlike every other falsy-ish value which still gets a group. Kept as a
+// plain exported string (not a Symbol) so it survives being read back
+// out of a getGroup call with no special-casing needed at the call site
+// beyond the equality check in DataTable.
+export const GROUP_EXCLUDE = "__group_exclude__";
+
 export interface ColumnDef<T> {
   key: string;
   // Usually a plain string, but a column can supply richer header content

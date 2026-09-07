@@ -20,7 +20,7 @@ import ProgressCell, { ProgressDisplayToggle } from "../components/ProgressCell"
 import SymbolTextBadge, { SymbolTextDisplayToggle } from "../components/SymbolTextBadge";
 import { PROJECT_PRIORITY_SYMBOLS, PROJECT_EFFORT_LEVEL_SYMBOLS } from "../lib/notionOptions";
 import type { ColumnDef, GroupOption, SortOption } from "../lib/tableTypes";
-import { sortRows, sortRowsHierarchical, visibleOrderedColumns, resolveFilterPersonIds } from "../lib/tableTypes";
+import { sortRows, sortRowsHierarchical, visibleOrderedColumns, resolveFilterPersonIds, GROUP_EXCLUDE } from "../lib/tableTypes";
 import { formatDate } from "../lib/formatDate";
 import { WBS_STATUS_META, wbsStatusMetaFor, type WbsStatus } from "../lib/wbsStatus";
 
@@ -3789,6 +3789,33 @@ export default function Projects() {
       // freshly created project isn't invisible in this view -- it gets
       // an empty section with its own "+ New task" trigger instead.
       allGroups: () => projects.map((p) => p.name),
+    },
+    {
+      // Added 2026-09-08 (Sandra: "group by Projects assigned to me" --
+      // clarified via AskUserQuestion: "mine" = projects I own OR
+      // projects where I have at least one task assigned, whichever is
+      // broader; and "make sure those with 0 values does not show" --
+      // opposite of the plain "Project" grouping above, which
+      // deliberately pre-seeds every project as an empty section. This
+      // one has NO allGroups at all, so a project only gets a section
+      // here if it actually has a qualifying task; every task belonging
+      // to a project that isn't "mine" returns GROUP_EXCLUDE from
+      // getGroup and is dropped entirely (not bucketed under "—") --
+      // see GROUP_EXCLUDE's own doc comment in tableTypes.ts.
+      key: "my_projects",
+      label: "Projects Assigned to Me",
+      getGroup: (t) => {
+        const proj = projects.find((p) => p.id === t.project_id);
+        if (!proj) return GROUP_EXCLUDE;
+        const isOwner = proj.owner_id === me?.id;
+        const hasMyTask = tasks.some((tt) => tt.project_id === proj.id && tt.assignee_id === me?.id);
+        if (!isOwner && !hasMyTask) return GROUP_EXCLUDE;
+        return proj.name ?? "Untitled";
+      },
+      getTone: (t) => {
+        const proj = projects.find((p) => p.id === t.project_id);
+        return (proj?.category && categoryToneMap[proj.category]) || "neutral";
+      },
     },
     {
       key: "status",

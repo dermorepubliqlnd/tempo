@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronRight, GripVertical, Pin, PinOff } from "lucide-react";
 import type { ColumnDef, GroupOption, SortOption, TableView } from "../lib/tableTypes";
+import { GROUP_EXCLUDE } from "../lib/tableTypes";
 import { sortRows, sortRowsHierarchical, resolveTone } from "../lib/tableTypes";
 
 interface DataTableProps<T> {
@@ -311,7 +312,11 @@ export default function DataTable<T>({
     if (!activeGroupOption) return [];
     const names = new Set<string>();
     activeGroupOption.allGroups?.().forEach((g) => names.add(g));
-    sortedRows.forEach((row) => names.add(activeGroupOption.getGroup(row) || "—"));
+    sortedRows.forEach((row) => {
+      const g = activeGroupOption.getGroup(row);
+      if (g === GROUP_EXCLUDE) return;
+      names.add(g || "—");
+    });
     const hiddenGroups = view.hiddenGroups ?? [];
     return Array.from(names).filter((n) => !hiddenGroups.includes(n));
   }, [activeGroupOption, sortedRows, view.hiddenGroups]);
@@ -557,7 +562,9 @@ export default function DataTable<T>({
       if (!groups.has(g)) groups.set(g, []);
     });
     sortedRows.forEach((row) => {
-      const g = activeGroupOption.getGroup(row) || "—";
+      const rawGroup = activeGroupOption.getGroup(row);
+      if (rawGroup === GROUP_EXCLUDE) return;
+      const g = rawGroup || "—";
       if (!groups.has(g)) groups.set(g, []);
       groups.get(g)!.push(row);
     });
