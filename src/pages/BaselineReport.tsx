@@ -40,6 +40,14 @@ interface ProjectRow {
   id: string;
   name: string;
   wbs_status: WbsStatus;
+  // 2026-09-07 (Sandra: "make sure the learnings also show in the report
+  // page") -- same Lessons Learned fields captured on the WBS Planning
+  // page at closure (see [[project_capaciq_closure_actual_date_signoff_lessons_learned_2026_09_07]]),
+  // surfaced here too since this is the page meant for reviewing a
+  // project's Baseline-vs-Final story after the fact.
+  actual_close_date: string | null;
+  lessons_learned_worked: string | null;
+  lessons_learned_not_worked: string | null;
 }
 interface TaskRow {
   id: string;
@@ -104,7 +112,7 @@ export default function BaselineReport() {
     if (!projectId) return;
     setLoading(true);
     const [{ data: proj }, { data: tks }, { data: bl }, { data: co }] = await Promise.all([
-      supabase.from("projects").select("id,name,wbs_status").eq("id", projectId).single(),
+      supabase.from("projects").select("id,name,wbs_status,actual_close_date,lessons_learned_worked,lessons_learned_not_worked").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select("id,project_id,parent_task_id,name,estimated_hours,start_date,current_due_date,is_archived")
@@ -257,6 +265,26 @@ export default function BaselineReport() {
           Go to WBS Planning →
         </Link>
       </div>
+
+      {/* 2026-09-07 (Sandra: "make sure the learnings also show in the
+          report page") -- only meaningful once Final is actually
+          captured, so gated on isClosed same as the rest of this page's
+          Final-side content. */}
+      {isClosed && (
+        <div className="card" style={{ padding: 14, marginBottom: 14, display: "flex", gap: 14, flexWrap: "wrap" }}>
+          <div style={{ flexBasis: "100%", fontWeight: 600, fontSize: 12.5, marginBottom: 2 }}>
+            Lessons Learned{project.actual_close_date ? ` -- closed ${formatDate(project.actual_close_date)}` : ""}
+          </div>
+          <div style={{ flex: "1 1 300px", minWidth: 260 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>What Worked</div>
+            <div style={{ fontSize: 12.5, whiteSpace: "pre-wrap" }}>{project.lessons_learned_worked || "—"}</div>
+          </div>
+          <div style={{ flex: "1 1 300px", minWidth: 260 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>What Didn't Work</div>
+            <div style={{ fontSize: 12.5, whiteSpace: "pre-wrap" }}>{project.lessons_learned_not_worked || "—"}</div>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <div className="card" style={{ padding: 14, flex: 1, minWidth: 280 }}>
