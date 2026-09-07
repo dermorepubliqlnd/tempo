@@ -62,6 +62,7 @@ interface ProjectRow {
   priority: string | null;
   effort_level: string | null;
   description: string | null;
+  project_number: number;
 }
 interface TaskRow {
   id: string;
@@ -921,7 +922,7 @@ export default function WbsPlanning() {
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
     const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description").eq("id", projectId).single(),
+      supabase.from("projects").select("id,name,owner_id,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description,project_number").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -4192,6 +4193,18 @@ export default function WbsPlanning() {
           before), matching her reference mockup. Main content is the
           flex:1 left column; the rail is a fixed-width sibling. */}
           <div className="card" style={{ padding: 14, marginBottom: 12, display: "flex", alignItems: "center", gap: 16, flexWrap: "nowrap", overflowX: "auto" }}>
+            {/* Project ID -- added 2026-09-07 (Sandra: "add a project ID,
+                automated sequence number based on the date the project
+                was added/created"). Always read-only, same treatment as
+                Baseline below -- there's no direct-edit path, it's
+                assigned once by the DB (see project_number in
+                phase41_migration.sql) and never changes. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Project ID:</span>
+              <div className="wbs-field-box" style={fieldBoxStyle(true, 80, true)}>
+                <span style={{ fontSize: 12.5 }}>P-{String(project.project_number).padStart(4, "0")}</span>
+              </div>
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
               <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Project:</span>
               <div className="wbs-field-box" style={fieldBoxStyle(!!project.name, 170, !canEditWbs)}>
