@@ -1607,6 +1607,43 @@ export default function Projects() {
     }
   }
 
+  // Added 2026-09-07 (Sandra: "isn't [parent status] supposed to be In
+  // Progress if all sub tasks are in progress or [some] done, and auto
+  // compute to Done when all sub tasks are done" -- confirmed via
+  // AskUserQuestion: Not Started only when EVERY child is Not Started,
+  // Done only when EVERY child is Done, In Progress for any other mix;
+  // and the parent's Status becomes fully computed/read-only, same
+  // treatment as Work Type ("N/A") and Dates/Scoped Hours (mirrored from
+  // sub-tasks) already get on parent rows on this page).
+  function deriveParentStatus(childStatuses: (string | null)[]): "Not Started" | "In Progress" | "Done" {
+    if (childStatuses.every((s) => s === "Done")) return "Done";
+    if (childStatuses.every((s) => !s || s === "Not Started")) return "Not Started";
+    return "In Progress";
+  }
+
+  // Walks up from a just-changed task to its parent (and grandparent, if
+  // any) recomputing+persisting each ancestor's own status from ITS
+  // children. `tasksSnapshot` carries the patch that triggered this call
+  // forward explicitly, rather than reading the `tasks` state variable --
+  // setTasks() updates are async, so a freshly-committed child status
+  // wouldn't be visible yet through the normal closure if this read
+  // `tasks` directly.
+  async function recomputeAncestorStatus(childId: string, tasksSnapshot: TaskRow[]): Promise<void> {
+    const child = tasksSnapshot.find((t) => t.id === childId);
+    if (!child?.parent_task_id) return;
+    const parentId = child.parent_task_id;
+    const siblingStatuses = tasksSnapshot.filter((t) => t.parent_task_id === parentId).map((t) => t.status);
+    const computed = deriveParentStatus(siblingStatuses);
+    const parent = tasksSnapshot.find((t) => t.id === parentId);
+    if (!parent || parent.status === computed) return;
+    const patch: Partial<TaskRow> =
+      computed === "Done"
+        ? { status: computed, submitted_on: new Date().toISOString(), submitted_by: null }
+        : { status: computed, submitted_on: null, submitted_by: null };
+    await updateTask(parentId, patch);
+    await recomputeAncestorStatus(parentId, tasksSnapshot.map((t) => (t.id === parentId ? { ...t, ...patch } : t)));
+  }
+
   // current_due_date is DB-locked (see the tasks_due_date_lock trigger) --
   // this is the only path that ever changes it, going through
   // extension_requests so there's always an approval trail. Submitting
@@ -1815,13 +1852,29 @@ export default function Projects() {
   }
 
   async function bulkUpdateTasks(patch: Partial<TaskRow>) {
-    const ids = selectedTaskIds;
+    let ids = selectedTaskIds;
     if (ids.length === 0) return;
+    // 2026-09-07: Status is no longer settable on parent rows at all (see
+    // the Status column's own isParent branch above) -- silently drop
+    // any selected parent from a bulk Status edit rather than writing a
+    // value that'll just get overwritten by recomputeAncestorStatus
+    // below the moment any of its children next changes.
+    if ("status" in patch) {
+      ids = ids.filter((id) => !(!tasks.find((t) => t.id === id)?.parent_task_id && hasChildren(id)));
+      if (ids.length === 0) return;
+    }
     setTasks((prev) => prev.map((t) => (ids.includes(t.id) ? { ...t, ...patch } : t)));
     const { error } = await supabase.from("tasks").update(patch).in("id", ids);
     if (error) {
       alert(`Couldn't update: ${error.message}`);
       loadAll();
+      return;
+    }
+    if ("status" in patch) {
+      const snapshot = tasks.map((t) => (ids.includes(t.id) ? { ...t, ...patch } : t));
+      for (const id of ids) {
+        await recomputeAncestorStatus(id, snapshot);
+      }
     }
   }
 
@@ -2953,50 +3006,82 @@ export default function Projects() {
         label: "Status",
         defaultWidth: 140,
         maxWidth: 200,
-        render: (t) => (
-          <InlineSelect
-            value={t.status ?? ""}
-            // Sandra, 2026-08-24: status changes, time logging, and
-            // extension requests are all locked until the project's
-            // baseline is locked (isProjectLocked reads timelines_locked,
-            // which flips true in lockstep with wbs_status leaving
-            // "draft" -- see [[project_capaciq...baseline_lock_gating]]).
-            // Planning freely pre-baseline shouldn't look like real
-            // progress tracking.
-            editable={canEditTask(t) && !isTaskLocked(t) && isProjectLocked(t.project_id)}
-            allowEmpty
-            // Flat list, not TASK_STATUS_GROUPED -- the grouped <optgroup>
-            // headers ("To-do"/"In Progress"/"Complete") each wrapped
-            // exactly one identical-named option, so the dropdown showed
-            // redundant parent labels. Sandra: just the 3 plain options.
-            options={TASK_STATUS_OPTIONS}
-            renderReadOnly={() =>
-              t.status ? <span className={`status-pill ${statusTone(statusGroupOf(TASK_STATUS_GROUPED, t.status))}`}>{t.status}</span> : "—"
-            }
-            onCommit={async (v) => {
-              // Flipping to Done stamps the assignee's own self-reported
-              // completion moment -- separate from validated_completion_date,
-              // which is the project owner/manager's independent check (see
-              // the Validated column below). Moving *off* Done clears the
-              // stamp so a task that's reopened doesn't keep a stale
-              // "submitted" record.
-              if (v === "Done") {
-                // Sandra, 2026-08-26: don't allow tagging a task Done
-                // without any logged time behind it -- gated on the same
-                // Confirmed/Approved hours that already feed Spent Hrs
-                // (ownHoursFor, not the parent rollup -- this is about
-                // THIS task's own work, not its sub-tasks').
-                if (ownHoursFor(timeEntries, t.id) <= 0) {
-                  await alert("This task can't be marked Done yet -- it has no logged hours (Confirmed or Approved) on it. Log time first, then mark it Done.");
-                  return;
-                }
-                updateTask(t.id, { status: v, submitted_on: new Date().toISOString(), submitted_by: me?.id ?? null });
-              } else {
-                updateTask(t.id, { status: v || null, submitted_on: null, submitted_by: null });
+        render: (t) => {
+          const isParent = t._depth === 0 && hasChildren(t.id);
+          // 2026-09-07 (Sandra): a parent's own Status is now fully
+          // computed from its sub-tasks -- same "N/A"/mirrored treatment
+          // Work Type and Dates/Scoped Hours already get on parent rows.
+          // No manual dropdown, and no logged-hours Done-gate either --
+          // that gate is about a task's own reported work, which a
+          // parent never directly does (see deriveParentStatus /
+          // recomputeAncestorStatus above, kept in sync on every child
+          // status change).
+          if (isParent) {
+            return t.status ? (
+              <span
+                className={`status-pill ${statusTone(statusGroupOf(TASK_STATUS_GROUPED, t.status))}`}
+                title="Computed from this task's own sub-tasks -- Done only once every sub-task is Done."
+              >
+                {t.status}
+              </span>
+            ) : (
+              "—"
+            );
+          }
+          return (
+            <InlineSelect
+              value={t.status ?? ""}
+              // Sandra, 2026-08-24: status changes, time logging, and
+              // extension requests are all locked until the project's
+              // baseline is locked (isProjectLocked reads timelines_locked,
+              // which flips true in lockstep with wbs_status leaving
+              // "draft" -- see [[project_capaciq...baseline_lock_gating]]).
+              // Planning freely pre-baseline shouldn't look like real
+              // progress tracking.
+              editable={canEditTask(t) && !isTaskLocked(t) && isProjectLocked(t.project_id)}
+              allowEmpty
+              // Flat list, not TASK_STATUS_GROUPED -- the grouped <optgroup>
+              // headers ("To-do"/"In Progress"/"Complete") each wrapped
+              // exactly one identical-named option, so the dropdown showed
+              // redundant parent labels. Sandra: just the 3 plain options.
+              options={TASK_STATUS_OPTIONS}
+              renderReadOnly={() =>
+                t.status ? <span className={`status-pill ${statusTone(statusGroupOf(TASK_STATUS_GROUPED, t.status))}`}>{t.status}</span> : "—"
               }
-            }}
-          />
-        ),
+              onCommit={async (v) => {
+                // Flipping to Done stamps the assignee's own self-reported
+                // completion moment -- separate from validated_completion_date,
+                // which is the project owner/manager's independent check (see
+                // the Validated column below). Moving *off* Done clears the
+                // stamp so a task that's reopened doesn't keep a stale
+                // "submitted" record.
+                let patch: Partial<TaskRow>;
+                if (v === "Done") {
+                  // Sandra, 2026-08-26: don't allow tagging a task Done
+                  // without any logged time behind it -- gated on the same
+                  // Confirmed/Approved hours that already feed Spent Hrs
+                  // (ownHoursFor, not the parent rollup -- this is about
+                  // THIS task's own work, not its sub-tasks').
+                  if (ownHoursFor(timeEntries, t.id) <= 0) {
+                    await alert("This task can't be marked Done yet -- it has no logged hours (Confirmed or Approved) on it. Log time first, then mark it Done.");
+                    return;
+                  }
+                  patch = { status: v, submitted_on: new Date().toISOString(), submitted_by: me?.id ?? null };
+                } else {
+                  patch = { status: v || null, submitted_on: null, submitted_by: null };
+                }
+                await updateTask(t.id, patch);
+                // 2026-09-07: cascade this leaf's new status up to its
+                // parent (and grandparent, if any) so their own computed
+                // Status stays correct immediately, not just on next load.
+                await recomputeAncestorStatus(
+                  t.id,
+                  tasks.map((row) => (row.id === t.id ? { ...row, ...patch } : row))
+                );
+              }}
+            />
+          );
+        },
       },
       {
         key: "effort",
