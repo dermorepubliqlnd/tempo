@@ -179,6 +179,8 @@ export interface ProjectRow {
   original_start_date: string | null;
   original_due_date: string | null;
   wbs_status: WbsStatus;
+  project_number: number;
+  created_at: string;
 }
 
 export interface TaskRow {
@@ -261,7 +263,7 @@ function CategoryIcon({ iconName, tone, size = 13 }: { iconName?: string; tone?:
   return <Icon size={size} color={color} style={{ flexShrink: 0 }} />;
 }
 
-const PROJECT_COLUMN_ORDER = ["name", "owner", "category", "source", "planning_type", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level"];
+const PROJECT_COLUMN_ORDER = ["name", "project_number", "created_at", "owner", "category", "source", "planning_type", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level"];
 
 // Default hidden-columns set for a brand-new Projects Timeline view (see
 // timelineDefaultHiddenColumns on ViewTabs / initialHiddenColumns on
@@ -1880,8 +1882,10 @@ export default function Projects() {
     // Complexity last). 2 = 2026-09-03: new Planning Type column inserted
     // after Source -- without this bump, anyone with an already-saved
     // "default" view would never see the new column at all (their stale
-    // columnOrder array simply doesn't contain "planning_type").
-    columnOrderVersion: 2,
+    // columnOrder array simply doesn't contain "planning_type"). 3 =
+    // 2026-09-07: same reasoning for the new Project ID/Created columns
+    // inserted after Name.
+    columnOrderVersion: 3,
     hiddenColumns: [],
     columnWidths: {},
     groupBy: null,
@@ -1978,6 +1982,29 @@ export default function Projects() {
             </div>
           );
         },
+      },
+      {
+        // Added 2026-09-07 (Sandra: "can the project ID and project
+        // create date also show in the projects list please") --
+        // read-only, no edit path anywhere (assigned once by the DB, see
+        // project_number in phase41_migration.sql), same treatment as
+        // the WBS header's own Project ID field.
+        key: "project_number",
+        label: "Project ID",
+        defaultWidth: 100,
+        maxWidth: 120,
+        render: (p) => <span>P-{String(p.project_number).padStart(4, "0")}</span>,
+      },
+      {
+        // Same 2026-09-07 request -- created_at is the same column that
+        // drives Project ID's ordering (see phase41_migration.sql):
+        // real timestamp for every project made from now on, backfilled
+        // for older projects from their start date / earliest task date.
+        key: "created_at",
+        label: "Created",
+        defaultWidth: 110,
+        maxWidth: 130,
+        render: (p) => <span>{formatDate(p.created_at.slice(0, 10))}</span>,
       },
       {
         key: "owner",
@@ -2762,6 +2789,8 @@ export default function Projects() {
 
   const projectSortOptions: SortOption<ProjectRow>[] = [
     { key: "name", label: "Project", getValue: (p) => p.name ?? "" },
+    { key: "project_number", label: "Project ID", getValue: (p) => p.project_number },
+    { key: "created_at", label: "Created", getValue: (p) => new Date(p.created_at).getTime() },
     { key: "owner", label: "Owner", getValue: (p) => ownerName(p.owner_id) },
     { key: "priority", label: "Priority", getValue: (p) => PROJECT_PRIORITY_OPTIONS.indexOf(p.priority ?? "") },
     { key: "status", label: "Status", getValue: (p) => PROJECT_STATUS_OPTIONS.indexOf(p.status ?? "") },
