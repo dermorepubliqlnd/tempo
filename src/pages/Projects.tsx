@@ -594,6 +594,12 @@ const TASK_TIMING_BOARD_COLUMNS: BoardColumnDef[] = [
   { value: "On time", label: "On time", tone: "success" },
   { value: "Early", label: "Early", tone: "success" },
   { value: "Pending", label: "Pending", tone: "neutral" },
+  // 2026-09-07: a parent row's Timing is N/A -- its own completion is
+  // never independently tracked, see the Timing column's isParent
+  // branch. Needs its own real swimlane here or Board grouped by Timing
+  // would silently drop parent cards (getTaskBoardValue returns "N/A",
+  // which wouldn't match any of the columns above).
+  { value: "N/A", label: "N/A", tone: "neutral" },
 ];
 
 // Board can group by any of these fields (their values form a fixed,
@@ -3178,6 +3184,24 @@ export default function Projects() {
         defaultWidth: 110,
         maxWidth: 150,
         render: (t) => {
+          // 2026-09-07 (Sandra, following the Validate/Reopen and Actual
+          // Completion N/A fix): Timing's On time/Late/Early calc reads
+          // actualCompletionDateOf(), which chains validated_completion_date
+          // -> actual_completion_date -> submitted_on -- all three of
+          // which are now permanently blank on a parent row (parent
+          // completion is never independently validated/reported). That
+          // left Timing stuck showing "Pending" forever on a Done parent
+          // rather than resolving, which reads as "still waiting on
+          // something" when really the question just doesn't apply to a
+          // parent the same way it does a leaf. Same N/A treatment.
+          const isParent = t._depth === 0 && hasChildren(t.id);
+          if (isParent) {
+            return (
+              <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="Not applicable -- a parent task's own completion is never independently tracked.">
+                N/A
+              </span>
+            );
+          }
           const timing = timingOf(t);
           return <span className={`status-pill ${timing.tone}`}>{timing.label}</span>;
         },
@@ -3188,6 +3212,14 @@ export default function Projects() {
         defaultWidth: 90,
         maxWidth: 110,
         render: (t) => {
+          const isParent = t._depth === 0 && hasChildren(t.id);
+          if (isParent) {
+            return (
+              <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="Not applicable -- a parent task's own completion is never independently tracked.">
+                N/A
+              </span>
+            );
+          }
           const days = timingVarianceDays(t);
           if (days === null) return <span style={{ color: "var(--muted)" }}>—</span>;
           if (days === 0) return <span className="status-pill success">On time</span>;
@@ -3782,8 +3814,12 @@ export default function Projects() {
     {
       key: "timing",
       label: "Timing",
-      getGroup: (t) => timingOf(t).label,
-      getTone: (t) => timingOf(t).tone,
+      // 2026-09-07: parent rows never resolve Timing (see the Timing
+      // column's own isParent branch above) -- group them under "N/A"
+      // rather than letting them fall into whatever timingOf() computes
+      // now that its underlying fields are permanently blank on a parent.
+      getGroup: (t) => (t._depth === 0 && hasChildren(t.id) ? "N/A" : timingOf(t).label),
+      getTone: (t) => (t._depth === 0 && hasChildren(t.id) ? "neutral" : timingOf(t).tone),
       allGroups: () => TASK_TIMING_BOARD_COLUMNS.map((c) => c.value),
     },
     {
@@ -3819,8 +3855,8 @@ export default function Projects() {
     {
       key: "timing",
       label: "Timing",
-      getGroup: (t) => timingOf(t).label,
-      getTone: (t) => timingOf(t).tone,
+      getGroup: (t) => (t._depth === 0 && hasChildren(t.id) ? "N/A" : timingOf(t).label),
+      getTone: (t) => (t._depth === 0 && hasChildren(t.id) ? "neutral" : timingOf(t).tone),
       boardGroupable: true,
     },
     { key: "start_date", label: "Start", getGroup: () => "", boardGroupable: false },
@@ -3886,7 +3922,7 @@ export default function Projects() {
     if (groupBy === "effort") return t.effort;
     if (groupBy === "work_type") return t.work_type_id;
     if (groupBy === "project") return t.project_id;
-    if (groupBy === "timing") return timingOf(t).label;
+    if (groupBy === "timing") return t._depth === 0 && hasChildren(t.id) ? "N/A" : timingOf(t).label;
     if (groupBy === "due_date_ext") return dueDateExtStatus(t).label;
     return t.status;
   }
@@ -3914,7 +3950,7 @@ export default function Projects() {
     { key: "effort", label: "Effort", getValue: (t) => (t.effort ? (TASK_EFFORT_OPTIONS.indexOf(t.effort) + 1 || null) : null) },
     { key: "work_type", label: "Work Type", getValue: (t) => workTypes.find((w) => w.id === t.work_type_id)?.name ?? "" },
     { key: "start_date", label: "Start", getValue: (t) => (t.start_date ? new Date(t.start_date).getTime() : null) },
-    { key: "timing", label: "Timing", getValue: (t) => timingRank(timingOf(t).label) },
+    { key: "timing", label: "Timing", getValue: (t) => (t._depth === 0 && hasChildren(t.id) ? -1 : timingRank(timingOf(t).label)) },
     { key: "current_due_date", label: "Due", getValue: (t) => (t.current_due_date ? new Date(t.current_due_date).getTime() : null) },
     { key: "estimated_hours", label: "Scoped Hours", getValue: (t) => t.estimated_hours ?? null },
     { key: "time_spent_hours", label: "Spent hrs", getValue: (t) => spentHoursFor(t.id) },
