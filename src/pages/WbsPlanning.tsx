@@ -5,7 +5,7 @@ import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTri
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
-import { InlineText, InlineNumber, InlineSelect, InlineDate } from "../components/InlineCell";
+import { InlineText, InlineNumber, InlineSelect, InlineDate, InlineTextArea } from "../components/InlineCell";
 import { formatDate } from "../lib/formatDate";
 import { rollupHoursFor, formatHours, type TimeEntryRow } from "../lib/timeTracking";
 import { addDays, buildHolidaySet, isWorkingDay, parseLocalDate, toISO, workingDaysBetween, type HolidaySet } from "../lib/workingDays";
@@ -61,6 +61,7 @@ interface ProjectRow {
   source_id: string | null;
   priority: string | null;
   effort_level: string | null;
+  description: string | null;
 }
 interface TaskRow {
   id: string;
@@ -920,7 +921,7 @@ export default function WbsPlanning() {
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
     const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level").eq("id", projectId).single(),
+      supabase.from("projects").select("id,name,owner_id,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -2084,6 +2085,11 @@ export default function WbsPlanning() {
     if (!project.category) missingSetupFields.push("Category");
     if (!project.source_id) missingSetupFields.push("Source");
     if (!project.effort_level) missingSetupFields.push("Complexity");
+    // 2026-09-07 (Sandra: "add project description... have this been
+    // required before starting a project or locking baseline") -- same
+    // gate, same no-Full-Access-override treatment as Category/Source/
+    // Complexity above.
+    if (!project.description) missingSetupFields.push("Description");
     if (missingSetupFields.length) {
       await alert(
         `Can't start this project yet -- it's still missing: ${missingSetupFields.join(", ")}. Set these above (Project Details) or on the Projects & Tasks list first.`
@@ -2165,6 +2171,7 @@ export default function WbsPlanning() {
       if (!project.category) missingSetupFields.push("Category");
       if (!project.source_id) missingSetupFields.push("Source");
       if (!project.effort_level) missingSetupFields.push("Complexity");
+      if (!project.description) missingSetupFields.push("Description");
       if (missingSetupFields.length) {
         await alert(
           `Can't approve yet -- this project is still missing: ${missingSetupFields.join(", ")}. Set these above (Project Details) or on the Projects & Tasks list first.`
@@ -2220,6 +2227,11 @@ export default function WbsPlanning() {
     if (!project.priority) missingProjectFields.push("Priority");
     if (!project.source_id) missingProjectFields.push("Source");
     if (!project.effort_level) missingProjectFields.push("Complexity");
+    // 2026-09-07 (Sandra: "for those baseline that are already locked
+    // make it mandatory before closing a project") -- covers projects
+    // that were baselined before this field existed and so never hit
+    // the Start Project gate above.
+    if (!project.description) missingProjectFields.push("Description");
     if (missingProjectFields.length) {
       await alert(
         `Can't request closure yet -- this project is still missing: ${missingProjectFields.join(", ")}. Set these on the Projects & Tasks list first.`
@@ -2261,6 +2273,7 @@ export default function WbsPlanning() {
       if (!project.priority) missingProjectFields.push("Priority");
       if (!project.source_id) missingProjectFields.push("Source");
       if (!project.effort_level) missingProjectFields.push("Complexity");
+      if (!project.description) missingProjectFields.push("Description");
       if (missingProjectFields.length) {
         await alert(
           `Can't approve closure yet -- this project is still missing: ${missingProjectFields.join(", ")}. Set these on the Projects & Tasks list first.`
@@ -4324,6 +4337,30 @@ export default function WbsPlanning() {
               ) : (
                 <span style={{ fontSize: 11, color: "var(--muted)" }}>Not saved yet</span>
               )}
+            </div>
+          </div>
+
+          {/* Project Description -- added 2026-09-07 (Sandra: "add project
+              description in the WBS please, just below the project
+              information. And have this been required before starting a
+              project or locking baseline" + follow-up: "for those baseline
+              that are already locked make it mandatory before closing a
+              project"). Sits in its own full-width card right below the
+              Project Details strip above. Same canEditWbs gate as the rest
+              of this header -- required at Start Project (see
+              handleRequestBaseline/handleDecideBaselineRequest) and, for
+              projects that were already baselined before this field
+              existed, at Closure instead (handleRequestClosure/
+              handleDecideClosure). */}
+          <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>Description:</div>
+            <div className="wbs-field-box" style={fieldBoxStyle(!!project.description, undefined, !canEditWbs)}>
+              <InlineTextArea
+                value={project.description ?? ""}
+                editable={canEditWbs}
+                placeholder="What is this project about?"
+                onCommit={(v) => saveProjectField({ description: v })}
+              />
             </div>
           </div>
 

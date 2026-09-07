@@ -195,3 +195,44 @@ export function InlineNumber({ value, onCommit, editable, step = 0.5, emptyLabel
     />
   );
 }
+
+interface InlineTextAreaProps extends BaseProps {
+  value: string;
+  onCommit: (value: string) => void;
+  placeholder?: string;
+}
+
+// Added 2026-09-07 (Sandra: "add project description in the WBS...
+// required before starting a project or locking baseline") -- same
+// commit-on-blur pattern as InlineText above (won't commit an
+// empty/whitespace-only draft, so the field can't be blanked out once
+// set -- matches the existing convention rather than introducing a new
+// clearable-field behavior), just a multi-line <textarea> instead of a
+// single-line <input> since a project description needs more room.
+export function InlineTextArea({ value, onCommit, editable, emptyLabel = "—", placeholder }: InlineTextAreaProps) {
+  const [draft, setDraft] = useState(value);
+  if (!editable) return <span style={{ whiteSpace: "pre-wrap" }}>{value || emptyLabel}</span>;
+  return (
+    <textarea
+      className="inline-cell"
+      spellCheck={false}
+      rows={2}
+      placeholder={placeholder}
+      style={{ width: "100%", resize: "vertical", fontFamily: "inherit" }}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={() => setDraft(value)}
+      onBlur={() => {
+        if (draft !== value && draft.trim()) onCommit(draft.trim());
+        else setDraft(value);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          setDraft(value);
+          (e.target as HTMLTextAreaElement).blur();
+        }
+      }}
+      onClick={(e) => e.stopPropagation()}
+    />
+  );
+}

@@ -1,0 +1,14 @@
+-- Phase 40 (2026-09-07): Project Description field
+-- Sandra: "add project description in the WBS please, just below the
+-- project information. And have this been required before starting a
+-- project or locking baseline" + follow-up: "for those baseline that are
+-- already locked make it mandatory before closing a project."
+--
+-- The `summary` column already existed on `projects` (part of the original
+-- schema.sql baseline) but was never wired into any UI or query in the app
+-- (verified via grep across src/ and supabase/*.sql before this migration) --
+-- reused it as the Description field instead of adding a new column.
+--
+-- Applied live via the Supabase SQL editor on 2026-09-07:
+--   alter table projects rename column summary to description;
+alter table projects rename column summary to description;
