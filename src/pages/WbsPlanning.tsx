@@ -2247,7 +2247,13 @@ export default function WbsPlanning() {
     // Sandra, 2026-08-26: "output count will be required on project close
     // request and approval" -- unlike Output Type (required at Baseline),
     // Output Count is allowed to stay blank right up until closure.
-    const missingOutputCount = orderedTasks.filter((t) => t.output_count === null || t.output_count === undefined);
+    // 2026-09-07 (bugfix): parent/grouping rows are exempt, same as the
+    // missingOutputType check above -- a parent's own output_count is
+    // locked/blank by design (see the InlineNumber editable={canEditWbs
+    // && !isParent} a few hundred lines down), so this was flagging every
+    // baselined project's parent tasks as "missing" and permanently
+    // blocking closure until this fix.
+    const missingOutputCount = orderedTasks.filter((t) => (t.output_count === null || t.output_count === undefined) && !(t.depth === 0 && hasChildren(t.id)));
     if (missingOutputCount.length) {
       await alert(`Can't request closure yet -- ${missingOutputCount.length} task(s) still need an Output Count.`);
       return;
@@ -2286,7 +2292,8 @@ export default function WbsPlanning() {
         );
         return;
       }
-      const missingOutputCount = orderedTasks.filter((t) => t.output_count === null || t.output_count === undefined);
+      // Same parent-row exemption as handleRequestClosure above.
+      const missingOutputCount = orderedTasks.filter((t) => (t.output_count === null || t.output_count === undefined) && !(t.depth === 0 && hasChildren(t.id)));
       if (missingOutputCount.length) {
         await alert(`Can't approve closure yet -- ${missingOutputCount.length} task(s) still need an Output Count.`);
         return;
