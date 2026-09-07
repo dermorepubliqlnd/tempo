@@ -2168,11 +2168,16 @@ export default function WbsPlanning() {
       // Category/Source/Complexity just because the request itself
       // slipped through before this gate existed (mirrors the same
       // belt-and-suspenders pattern used for Closure's request+decide).
+      // 2026-09-07 (Sandra: "make sure the description is required from
+      // the project owner or whoever is creating the WBS or requesting
+      // for baseline lock, not the approver of baseline") -- Description
+      // is the one exception to that belt-and-suspenders pattern: it's
+      // only ever enforced on the requester's own action
+      // (handleRequestBaseline above), never re-checked here on approval.
       const missingSetupFields: string[] = [];
       if (!project.category) missingSetupFields.push("Category");
       if (!project.source_id) missingSetupFields.push("Source");
       if (!project.effort_level) missingSetupFields.push("Complexity");
-      if (!project.description) missingSetupFields.push("Description");
       if (missingSetupFields.length) {
         await alert(
           `Can't approve yet -- this project is still missing: ${missingSetupFields.join(", ")}. Set these above (Project Details) or on the Projects & Tasks list first.`
