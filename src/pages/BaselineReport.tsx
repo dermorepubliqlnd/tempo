@@ -30,11 +30,11 @@ import { WBS_STATUS_META, type WbsStatus } from "../lib/wbsStatus";
 // Projects page (shown once wbs_status has moved past Draft, i.e. once a
 // baseline exists).
 
-// Phase 21 (2026-08-24): kept in sync with WbsPlanning.tsx rename --
-// baseline.mode will always be "manual" (Forecasted) going forward now
-// that Save no longer offers a mode picker, but old baselines captured
-// under full_capacity/standard still need a readable label here.
-const MODE_LABEL: Record<string, string> = { full_capacity: "Full", standard: "Capacity-Based", manual: "Forecasted" };
+// Phase 21 (2026-08-24): MODE_LABEL used to back a "Mode" row on the
+// Baseline card here, but every baseline has been captured under
+// Forecasted since Save stopped offering a mode picker -- the row was
+// always the same value and added nothing. Removed 2026-09-08 (Sandra:
+// "remove mode in baseline").
 
 interface ProjectRow {
   id: string;
@@ -220,18 +220,32 @@ export default function BaselineReport() {
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
         {statCard(`Baseline V${baseline.version_number} (at lock)`, <Lock size={13} />, "var(--navy)", [
           { label: "Captured", value: formatDate(baseline.captured_at.slice(0, 10)) },
-          { label: "Mode", value: MODE_LABEL[baseline.mode] ?? baseline.mode },
           { label: "Est. hours", value: `${baseline.total_est_hours}` },
           { label: "Tasks", value: `${baseline.task_count}` },
           { label: "Start", value: baseline.start_date ? formatDate(baseline.start_date) : "—" },
           { label: "End", value: baseline.end_date ? formatDate(baseline.end_date) : "—" },
         ])}
 
+        {/* 2026-09-08 (Sandra: "the project close [row] should be the
+            actual project closed date -- please rename, then on the end
+            replace it with Project's signed off date"): this card's first
+            row used to be labeled "Closed" and show closeout.closed_at
+            (the Sign Off date) -- now it's "Project Closed" showing
+            project.actual_close_date (when the work genuinely wrapped,
+            same field/distinction as the WBS page's own Actual Project
+            Close Date vs Signed Off Date badge -- see
+            [[project_capaciq_closure_actual_date_signoff_lessons_learned_2026_09_07]]).
+            The Sign Off date itself moved to its own row at the end of
+            this card instead of being displaced entirely. */}
         {statCard(closeout ? "Final (closed out)" : "Final — not closed out yet", <Flag size={13} />, closeout ? "#1a7f37" : "var(--muted)", [
-          { label: closeout ? "Closed" : "Live (preview)", value: closeout ? formatDate(closeout.closed_at.slice(0, 10)) : "current" },
+          {
+            label: closeout ? "Project Closed" : "Live (preview)",
+            value: closeout ? (project.actual_close_date ? formatDate(project.actual_close_date) : "—") : "current",
+          },
           { label: "Est. hours", value: `${finalTotals ? finalTotals.totalEstHours : live.totalEstHours}` },
           { label: "Tasks", value: `${finalTotals ? finalTotals.taskCount : live.taskCount}` },
           { label: "End", value: compareEnd ? formatDate(compareEnd) : "—" },
+          ...(closeout ? [{ label: "Signed Off Date", value: formatDate(closeout.closed_at.slice(0, 10)) }] : []),
         ])}
 
         {statCard("Variance", <TrendingUp size={13} />, hoursDelta > 0 || taskDelta > 0 ? "#b45309" : "var(--navy)", [
