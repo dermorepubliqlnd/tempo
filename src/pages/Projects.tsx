@@ -1233,10 +1233,18 @@ export default function Projects() {
   // is not locked yet ... the only time status and phase be available is
   // if the baseline status is WBS Locked") -- mirrors the existing
   // canEditProjectSetupField pattern (Category/Source/Complexity) but
-  // inverted: those 3 fields lock ONCE a project leaves Draft, Status/
-  // Phase lock WHILE it's still in Draft (a Draft project is forced to
-  // stay "Not Started" until Start Project happens).
-  const canEditStatusPhase = (p: ProjectRow) => canEditProject(p) && p.wbs_status !== "draft";
+  // inverted: those 3 fields lock ONCE a project leaves Draft, Status
+  // locks WHILE it's still in Draft (a Draft project is forced to stay
+  // "Not Started" until Start Project happens).
+  const canEditStatus = (p: ProjectRow) => canEditProject(p) && p.wbs_status !== "draft";
+  // 2026-09-08 (Sandra: "if a project WBS is in Draft the Status is not
+  // Started and the only options for phases are scoping, queued or
+  // backlog. the phases should be changeable even if draft WBS but only
+  // to Not Started phases") -- Phase, unlike Status, stays editable while
+  // Draft; phaseOptionsForStatus below is what actually restricts the
+  // picker to only "Not Started"-mapped phases in that case (see its call
+  // sites), this flag just governs whether the picker opens at all.
+  const canEditPhase = (p: ProjectRow) => canEditProject(p);
   // 2026-09-03 (Sandra: "add these 3 new fields in the WBS UI... in the
   // project list view these are view only and can't be changed [once
   // locked]. but as long as the WBS is still draft, still allow change
@@ -1769,6 +1777,42 @@ export default function Projects() {
     }
   }
 
+  // 2026-09-08 (Sandra: "if a status is moved and the phase is not a
+  // conditional phase of that status -- make it blank and force the
+  // correct phase") -- the single-row Status cell and Board drag both
+  // already cascade Phase correctly via changeProjectStatus/
+  // nextPhaseForStatusLive; this is the same rule for the Tasks list's
+  // bulk "Status" action, which used to send one flat { status } patch to
+  // every selected row (only special-casing Completed->Done) and leave
+  // each row's prior Phase sitting there even if it became invalid for
+  // the new Status. Draft rows are skipped entirely (Status stays forced
+  // to "Not Started" while Draft, same as the single-row lock) rather
+  // than silently overwritten by a bulk action that has no per-row
+  // Draft-awareness otherwise.
+  async function bulkChangeProjectStatus(newStatus: string | null) {
+    const ids = selectedProjectIds;
+    if (ids.length === 0) return;
+    const skippedDraft = projects.some((p) => ids.includes(p.id) && p.wbs_status === "draft");
+    const targets = projects.filter((p) => ids.includes(p.id) && p.wbs_status !== "draft");
+    if (targets.length === 0) {
+      if (skippedDraft) alert(`Status stays "Not Started" for Draft projects until Start Project is run on their WBS page -- nothing was changed.`);
+      return;
+    }
+    const nextPhaseById = new Map(targets.map((p) => [p.id, newStatus ? nextPhaseForStatusLive(p.phase, newStatus) : p.phase]));
+    setProjects((prev) =>
+      prev.map((p) => (nextPhaseById.has(p.id) ? { ...p, status: newStatus, phase: nextPhaseById.get(p.id) ?? p.phase } : p))
+    );
+    const results = await Promise.all(
+      targets.map((p) => supabase.from("projects").update({ status: newStatus, phase: nextPhaseById.get(p.id) ?? p.phase }).eq("id", p.id))
+    );
+    if (results.some((r) => r.error)) {
+      alert(`Couldn't update some projects.`);
+      loadAll();
+    } else if (skippedDraft) {
+      alert(`Status stays "Not Started" for any Draft projects in the selection until Start Project is run on their WBS page -- the rest were updated.`);
+    }
+  }
+
   // Shared archive-projects logic, used by both the Table view's bulk
   // "Archive" bar button and the new single-card action menu on
   // Board/Calendar/Timeline (Quality audit follow-on, UX #5, 2026-08-21:
@@ -2162,7 +2206,7 @@ export default function Projects() {
           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
             <InlineSelect
               value={p.status ?? ""}
-              editable={canEditStatusPhase(p)}
+              editable={canEditStatus(p)}
               allowEmpty
               options={PROJECT_STATUS_OPTIONS}
               renderReadOnly={() =>
@@ -2218,13 +2262,20 @@ export default function Projects() {
         render: (p) => (
           <InlineSelect
             value={p.phase ?? ""}
-            editable={canEditStatusPhase(p)}
+            editable={canEditPhase(p)}
             allowEmpty
-            options={phaseOptionsForStatus(p.status, p.phase)}
+            options={phaseOptionsForStatus(p.wbs_status === "draft" ? "Not Started" : p.status, p.phase)}
             renderReadOnly={() => (p.phase ? <span className={`status-pill ${PROJECT_PHASE_TONES[p.phase ?? ""] ?? "neutral"}`}>{p.phase}</span> : "—")}
             onCommit={async (v) => {
-              if (p.wbs_status === "draft") {
-                alert(`"${p.name}" hasn't started yet -- Phase stays locked until Start Project is run on its WBS page.`);
+              // 2026-09-08: Phase used to be fully locked while Draft (see
+              // canEditPhase's doc comment) -- now allowed, but the options
+              // list above already restricts a Draft project to only
+              // "Not Started"-mapped phases, so defensively re-check here
+              // too (defense-in-depth, same convention as every other
+              // write-site guard on this page) rather than trusting the
+              // picker alone.
+              if (p.wbs_status === "draft" && !phaseOptionsForStatus("Not Started", p.phase).includes(v)) {
+                alert(`"${p.name}" hasn't started yet -- while still Draft, Phase can only be set to a "Not Started" phase (e.g. Scoping, Queued, Backlog).`);
                 return;
               }
               if (v === "Design" && p.phase !== "Design" && !(await guardDesignPhaseLock(p))) return;
@@ -2881,8 +2932,12 @@ export default function Projects() {
     // between Phase columns writes phase directly and never touches Status.
     if (groupBy === "status") return (p, v) => changeProjectStatus(p, v || null);
     return (p, v) => {
-      if (p.wbs_status === "draft") {
-        alert(`"${p.name}" hasn't started yet -- Phase stays locked until Start Project is run on its WBS page.`);
+      // 2026-09-08: Phase is now editable while Draft (restricted to
+      // "Not Started"-mapped phases), same rule as the Phase column's own
+      // onCommit above -- a Board drag has to re-check the same thing
+      // since it writes phase directly, bypassing that cell entirely.
+      if (p.wbs_status === "draft" && !phaseOptionsForStatus("Not Started", p.phase).includes(v)) {
+        alert(`"${p.name}" hasn't started yet -- while still Draft, Phase can only be moved to a "Not Started" phase (e.g. Scoping, Queued, Backlog).`);
         return;
       }
       updateProject(p.id, { phase: v || null });
@@ -4381,16 +4436,43 @@ export default function Projects() {
               <FieldPickerButton
                 label="Status"
                 options={PROJECT_STATUS_OPTIONS}
-                // Bulk edit can't cascade Phase per-row the way the single-row
-                // Status cell does (changeProjectStatus) -- every selected row
-                // gets the exact same flat patch. Completed is the one case
-                // that's unambiguous regardless of each row's prior phase (it
-                // always means Done), so that's force-set here too; for the
-                // other statuses the bulk action leaves each row's existing
-                // Phase untouched rather than guessing.
-                onPick={(v) => bulkUpdateProjects(v === "Completed" ? { status: v, phase: "Done" } : { status: v || null })}
+                // 2026-09-08: now cascades Phase per-row via
+                // bulkChangeProjectStatus/nextPhaseForStatusLive instead of
+                // sending one flat patch -- see that function's doc comment.
+                onPick={(v) => bulkChangeProjectStatus(v || null)}
               />
-              <FieldPickerButton label="Phase" options={activePhaseNames} onPick={(v) => bulkUpdateProjects({ phase: v || null })} />
+              <FieldPickerButton
+                label="Phase"
+                options={activePhaseNames}
+                // Draft rows keep Phase restricted to "Not Started"-mapped
+                // values everywhere else on this page (table cell, Board
+                // drag) -- bulk-edit is the one path that can't show a
+                // per-row-correct options list (each selected row may have a
+                // different Status), so it just skips any Draft rows in the
+                // selection rather than risk writing an invalid Phase to one.
+                onPick={(v) => {
+                  const ids = selectedProjectIds;
+                  const skippedDraft = projects.some((p) => ids.includes(p.id) && p.wbs_status === "draft");
+                  const nonDraftIds = projects.filter((p) => ids.includes(p.id) && p.wbs_status !== "draft").map((p) => p.id);
+                  if (nonDraftIds.length === 0) {
+                    if (skippedDraft) alert(`Draft projects can only have their Phase changed from the table row (restricted to "Not Started" phases) -- nothing was changed.`);
+                    return;
+                  }
+                  setProjects((prev) => prev.map((p) => (nonDraftIds.includes(p.id) ? { ...p, phase: v || null } : p)));
+                  supabase
+                    .from("projects")
+                    .update({ phase: v || null })
+                    .in("id", nonDraftIds)
+                    .then(({ error }) => {
+                      if (error) {
+                        alert(`Couldn't update: ${error.message}`);
+                        loadAll();
+                      } else if (skippedDraft) {
+                        alert(`Draft projects in the selection were skipped (Phase there is restricted to "Not Started" phases and changed from the table row instead) -- the rest were updated.`);
+                      }
+                    });
+                }}
+              />
               <button className="bulk-bar-delete" onClick={bulkDeleteProjects}>
                 <Archive size={12} />
                 Archive
