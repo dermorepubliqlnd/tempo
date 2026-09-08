@@ -397,13 +397,35 @@ function loadDismissedDoneSuggestions(storageKey: string): Set<string> {
 //      excluding weekends and Holiday-calendar dates): within 10 points
 //      behind (or ahead) is On track (green), 11-20 points behind is At
 //      risk (yellow), more than 20 points behind is Off track (red).
+// 2026-09-08 (Sandra: "not all projects with Draft status have not
+// started status" -- caught live after Phase became editable while
+// Draft, which assumed the existing invariant "Status is forced to Not
+// Started while Draft" actually held). It didn't: createBlankProject
+// never set an initial status (so brand-new Drafts land on whatever the
+// status column defaults to -- NULL) and the one-time 2026-09-03 SQL
+// reset was exactly that, one-time, so any project's status field
+// edited by other means since then (or never touched at all) can still
+// carry a stale non-"Not Started" value while wbs_status stays "draft".
+// Rather than trust to a fresh backfill never drifting again, every
+// Status read for DISPLAY/grouping/sorting/health now goes through this
+// normalizer so a Draft project reads as "Not Started" everywhere,
+// regardless of what's actually sitting in the status column -- the
+// same defensive-recompute approach already used for Phase's options
+// list. Status WRITES stay gated by canEditStatus/changeProjectStatus as
+// before; this only affects what gets displayed for a value nobody can
+// currently edit anyway.
+function projectStatusOf(p: ProjectRow): string | null {
+  return p.wbs_status === "draft" ? "Not Started" : p.status;
+}
+
 export function healthOf(
   p: ProjectRow,
   allTasks: TaskRow[],
   holidayDates: Set<string>
 ): { label: string; tone: "success" | "warning" | "danger" | "neutral" | "purple" | "slate" } {
-  if (p.status === "Completed" || p.status === "Cancelled") return { label: p.status, tone: "neutral" };
-  if (p.status === "Paused") return { label: "Paused", tone: "purple" };
+  const status = projectStatusOf(p);
+  if (status === "Completed" || status === "Cancelled") return { label: status, tone: "neutral" };
+  if (status === "Paused") return { label: "Paused", tone: "purple" };
 
   const actual = actualProgress(p.id, allTasks);
   if (actual === 100) return { label: "Completed", tone: "success" };
@@ -1261,7 +1283,7 @@ export default function Projects() {
   // Deliberately a suggestion, not an auto-set of status -- see the
   // dismissal-helper comment above for why.
   function shouldSuggestDone(p: ProjectRow): boolean {
-    if (p.status === "Completed" || p.status === "Cancelled") return false;
+    if (projectStatusOf(p) === "Completed" || projectStatusOf(p) === "Cancelled") return false;
     if (dismissedDoneSuggestions.has(p.id)) return false;
     return actualProgress(p.id, tasks) === 100;
   }
@@ -2046,7 +2068,7 @@ export default function Projects() {
     }
     if (view.filterStatuses && view.filterStatuses.length > 0) {
       const statuses = view.filterStatuses;
-      out = out.filter((p) => statuses.includes(p.status ?? ""));
+      out = out.filter((p) => statuses.includes(projectStatusOf(p) ?? ""));
     }
     return out;
   }, [projects, projectViews.activeView, me?.id]);
@@ -2205,13 +2227,14 @@ export default function Projects() {
         render: (p) => (
           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
             <InlineSelect
-              value={p.status ?? ""}
+              value={projectStatusOf(p) ?? ""}
               editable={canEditStatus(p)}
               allowEmpty
               options={PROJECT_STATUS_OPTIONS}
-              renderReadOnly={() =>
-                p.status ? <span className={`status-pill ${PROJECT_STATUS_TONES[p.status ?? ""] ?? "neutral"}`}>{p.status}</span> : "—"
-              }
+              renderReadOnly={() => {
+                const status = projectStatusOf(p);
+                return status ? <span className={`status-pill ${PROJECT_STATUS_TONES[status] ?? "neutral"}`}>{status}</span> : "—";
+              }}
               onCommit={(v) => changeProjectStatus(p, v || null)}
             />
             {shouldSuggestDone(p) && canEditProject(p) && (
@@ -2264,7 +2287,7 @@ export default function Projects() {
             value={p.phase ?? ""}
             editable={canEditPhase(p)}
             allowEmpty
-            options={phaseOptionsForStatus(p.wbs_status === "draft" ? "Not Started" : p.status, p.phase)}
+            options={phaseOptionsForStatus(projectStatusOf(p), p.phase)}
             renderReadOnly={() => (p.phase ? <span className={`status-pill ${PROJECT_PHASE_TONES[p.phase ?? ""] ?? "neutral"}`}>{p.phase}</span> : "—")}
             onCommit={async (v) => {
               // 2026-09-08: Phase used to be fully locked while Draft (see
@@ -2677,8 +2700,8 @@ export default function Projects() {
     {
       key: "status",
       label: "Status",
-      getGroup: (p) => p.status ?? "No status",
-      getTone: (p) => PROJECT_STATUS_TONES[p.status ?? ""] ?? "neutral",
+      getGroup: (p) => projectStatusOf(p) ?? "No status",
+      getTone: (p) => PROJECT_STATUS_TONES[projectStatusOf(p) ?? ""] ?? "neutral",
       // Phase 23 follow-up (2026-08-25, Sandra: "that's ok to fix too to
       // avoid confusion"): same treatment as taskGroupOptions above --
       // every groupable field gets its own canonical section order
@@ -2780,8 +2803,8 @@ export default function Projects() {
     {
       key: "status",
       label: "Status",
-      getGroup: (p) => p.status ?? "No status",
-      getTone: (p) => PROJECT_STATUS_TONES[p.status ?? ""] ?? "neutral",
+      getGroup: (p) => projectStatusOf(p) ?? "No status",
+      getTone: (p) => PROJECT_STATUS_TONES[projectStatusOf(p) ?? ""] ?? "neutral",
       boardGroupable: true,
     },
     {
@@ -2887,7 +2910,7 @@ export default function Projects() {
     if (groupBy === "effort_level") return p.effort_level;
     if (groupBy === "owner") return p.owner_id;
     if (groupBy === "wbs_status") return p.wbs_status;
-    if (groupBy === "status") return p.status;
+    if (groupBy === "status") return projectStatusOf(p);
     return p.phase;
   }
 
@@ -2951,7 +2974,7 @@ export default function Projects() {
     { key: "closed_at", label: "Closed", getValue: (p) => (closedAtByProjectId[p.id] ? new Date(closedAtByProjectId[p.id]).getTime() : -1) },
     { key: "owner", label: "Owner", getValue: (p) => ownerName(p.owner_id) },
     { key: "priority", label: "Priority", getValue: (p) => PROJECT_PRIORITY_OPTIONS.indexOf(p.priority ?? "") },
-    { key: "status", label: "Status", getValue: (p) => PROJECT_STATUS_OPTIONS.indexOf(p.status ?? "") },
+    { key: "status", label: "Status", getValue: (p) => PROJECT_STATUS_OPTIONS.indexOf(projectStatusOf(p) ?? "") },
     { key: "phase", label: "Phase", getValue: (p) => activePhaseNames.indexOf(p.phase ?? "") },
     { key: "category", label: "Category", getValue: (p) => p.category ?? "" },
     { key: "source", label: "Source", getValue: (p) => projectSources.find((s) => s.id === p.source_id)?.name ?? "" },
@@ -2985,7 +3008,14 @@ export default function Projects() {
     // the project afterward (projects_update/canEditProject both key off
     // owner_id) -- previously only Full Access ever created projects, and
     // owner_id was left to be set later from the WBS header.
-    const { data, error } = await supabase.from("projects").insert({ name: "Untitled", sort_order: Date.now(), owner_id: me?.id ?? null }).select("id").single();
+    // 2026-09-08: explicitly seed status so a brand-new (Draft) project
+    // never lands on a bare NULL status column default -- see
+    // projectStatusOf's doc comment for why this drifted before.
+    const { data, error } = await supabase
+      .from("projects")
+      .insert({ name: "Untitled", sort_order: Date.now(), owner_id: me?.id ?? null, status: "Not Started" })
+      .select("id")
+      .single();
     if (error || !data) {
       alert(`Couldn't create project: ${error?.message ?? "unknown error"}`);
       return;
@@ -4512,7 +4542,7 @@ export default function Projects() {
               getDue={(p) => p.end_date}
               dateMode={projectViews.activeView.timelineDateMode ?? "range"}
               scale={projectViews.activeView.timelineScale ?? "month"}
-              getTone={(p) => PROJECT_STATUS_TONES[p.status ?? ""] ?? "neutral"}
+              getTone={(p) => PROJECT_STATUS_TONES[projectStatusOf(p) ?? ""] ?? "neutral"}
               getTooltip={(p) => `${p.name} · ${formatDate(p.start_date)} → ${formatDate(p.end_date)}`}
               emptyLabel="No projects yet. Add one below."
               propertyColumns={projectTimelinePropertyColumns}
@@ -4545,7 +4575,7 @@ export default function Projects() {
               renderLabel={(p) => projectColumns.find((c) => c.key === "name")?.render(p)}
               getStart={(p) => p.start_date}
               getDue={(p) => p.end_date}
-              getTone={(p) => PROJECT_STATUS_TONES[p.status ?? ""] ?? "neutral"}
+              getTone={(p) => PROJECT_STATUS_TONES[projectStatusOf(p) ?? ""] ?? "neutral"}
               getTooltip={(p) => `${p.name} · ${formatDate(p.start_date)} → ${formatDate(p.end_date)}`}
               emptyLabel="No projects yet. Add one below."
               dateMode={projectViews.activeView.timelineDateMode ?? "range"}
