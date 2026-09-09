@@ -263,7 +263,7 @@ function CategoryIcon({ iconName, tone, size = 13 }: { iconName?: string; tone?:
   return <Icon size={size} color={color} style={{ flexShrink: 0 }} />;
 }
 
-const PROJECT_COLUMN_ORDER = ["name", "project_number", "created_at", "closed_at", "owner", "category", "source", "planning_type", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level"];
+const PROJECT_COLUMN_ORDER = ["name", "project_number", "created_at", "closed_at", "owner", "category", "source", "planning_type", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at"];
 
 // Default hidden-columns set for a brand-new Projects Timeline view (see
 // timelineDefaultHiddenColumns on ViewTabs / initialHiddenColumns on
@@ -967,6 +967,15 @@ export default function Projects() {
   // wbsStatusMetaFor). Not the same thing as the request itself (no
   // reason/decision data needed here, just "is one pending right now").
   const [pendingBaselineProjectIds, setPendingBaselineProjectIds] = useState<Set<string>>(new Set());
+  // 2026-09-08 (Sandra: WBS status when a Start Project request is
+  // declined) -- project_id -> most recent decline_reason, built
+  // client-side from every rejected request (a project can have more
+  // than one over time; only the newest one's reason is kept). Display
+  // only matters while wbs_status is still 'draft' AND there's no
+  // pending request right now (pendingBaselineProjectIds takes priority
+  // at every render site below, same rule WbsPlanning.tsx's own badge
+  // uses).
+  const [declinedBaselineByProjectId, setDeclinedBaselineByProjectId] = useState<Record<string, string | null>>({});
   const activePhaseNames = useMemo(
     () => projectPhases.filter((ph) => ph.is_active).map((ph) => ph.name),
     [projectPhases]
@@ -1019,6 +1028,13 @@ export default function Projects() {
   // ride along on the plain projects select("*") below like Project
   // ID/Created can.
   const [closedAtByProjectId, setClosedAtByProjectId] = useState<Record<string, string>>({});
+  // 2026-09-08 (Sandra: baseline-approver columns) -- keyed by project_id,
+  // built from the is_active project_baselines row's captured_by/
+  // captured_at (see loadAll's fetch comment above). approvedBy is a
+  // person id, resolved to a display name at render time via ownerName
+  // the same way owner_id already is, rather than storing the name
+  // directly, so a later person-rename stays correct here too.
+  const [baselineApprovalByProjectId, setBaselineApprovalByProjectId] = useState<Record<string, { approvedBy: string | null; approvedAt: string | null }>>({});
   const [notesSidebarProjectId, setNotesSidebarProjectId] = useState<string | null>(null);
   // Per-person Spent Hrs breakdown popup (2026-08-14) -- which task's
   // breakdown modal (if any) is currently open.
@@ -1145,7 +1161,7 @@ export default function Projects() {
   async function loadAll() {
     setLoading(true);
     purgeExpiredArchives();
-    const [{ data: projectData }, { data: taskData }, { data: peopleData }, { data: chainPeopleData }, { data: holidayData }, { data: extReqData }, { data: timeEntryData }, { data: noteData }, { data: delSpentData }, { data: workTypeData }, { data: projectSourceData }, { data: projectCategoryData }, { data: projectPhaseData }, { data: phaseMappingData }, { data: pendingBaselineData }, { data: projectPlanningTypeData }, { data: closeoutData }] = await Promise.all([
+    const [{ data: projectData }, { data: taskData }, { data: peopleData }, { data: chainPeopleData }, { data: holidayData }, { data: extReqData }, { data: timeEntryData }, { data: noteData }, { data: delSpentData }, { data: workTypeData }, { data: projectSourceData }, { data: projectCategoryData }, { data: projectPhaseData }, { data: phaseMappingData }, { data: pendingBaselineData }, { data: projectPlanningTypeData }, { data: closeoutData }, { data: baselineApprovalData }, { data: declinedBaselineData }] = await Promise.all([
       supabase.from("projects").select("*").eq("is_archived", false).order("sort_order"),
       supabase.from("tasks").select("*").eq("is_archived", false).order("sort_order"),
       supabase.from("people").select("id,name,color").eq("is_active", true).order("name"),
@@ -1182,6 +1198,21 @@ export default function Projects() {
       supabase.from("project_planning_types").select("id,name,is_active,sort_order").order("sort_order"),
       // 2026-09-07 (Sandra: Sign Off Date) -- see closedAtByProjectId above.
       supabase.from("project_closeouts").select("project_id,closed_at"),
+      // 2026-09-08 (Sandra: "I want baseline approvals be captured like
+      // who approved baseline"): project_baselines.captured_by is exactly
+      // that -- decide_baseline_request stamps it with the approver's own
+      // id (my_person_id()) the moment they approve a Start Project
+      // request, same table WbsPlanning.tsx already reads captured_at
+      // from for its own "Baseline V1" banner. is_active filters to
+      // whichever single baseline row is the current one per project (a
+      // project only ever has one is_active baseline at a time, even
+      // though re-baselining -- which would have produced more than one
+      // -- was removed).
+      supabase.from("project_baselines").select("project_id,captured_by,captured_at").eq("is_active", true),
+      // 2026-09-08 (Sandra: WBS status when declined) -- see
+      // declinedBaselineByProjectId above. order+the client-side reduce
+      // below is what picks "most recent per project" out of this.
+      supabase.from("project_baseline_requests").select("project_id,decline_reason,requested_at").eq("status", "rejected").order("requested_at", { ascending: false }),
     ]);
     const nextProjects = (projectData as ProjectRow[]) ?? [];
     const nextTasks = (taskData as TaskRow[]) ?? [];
@@ -1206,6 +1237,19 @@ export default function Projects() {
       nextClosedAt[row.project_id] = row.closed_at;
     }
     setClosedAtByProjectId(nextClosedAt);
+    const nextBaselineApproval: Record<string, { approvedBy: string | null; approvedAt: string | null }> = {};
+    for (const row of (baselineApprovalData as { project_id: string; captured_by: string | null; captured_at: string }[]) ?? []) {
+      nextBaselineApproval[row.project_id] = { approvedBy: row.captured_by, approvedAt: row.captured_at };
+    }
+    setBaselineApprovalByProjectId(nextBaselineApproval);
+    const nextDeclinedBaseline: Record<string, string | null> = {};
+    for (const row of (declinedBaselineData as { project_id: string; decline_reason: string | null; requested_at: string }[]) ?? []) {
+      // Already ordered by requested_at desc (see the fetch above), so
+      // the first row seen per project_id is the newest -- never
+      // overwrite once a project_id has been set.
+      if (!(row.project_id in nextDeclinedBaseline)) nextDeclinedBaseline[row.project_id] = row.decline_reason;
+    }
+    setDeclinedBaselineByProjectId(nextDeclinedBaseline);
     const nextNoteCounts: Record<string, number> = {};
     for (const row of (noteData as { project_id: string }[]) ?? []) {
       nextNoteCounts[row.project_id] = (nextNoteCounts[row.project_id] ?? 0) + 1;
@@ -1363,7 +1407,15 @@ export default function Projects() {
   // otherwise-legitimate role.
   function canValidateTask(t: TaskRow): boolean {
     if (isProjectClosed(t.project_id)) return false;
-    if (t.assignee_id && t.assignee_id === me?.id) return false;
+    if (t.assignee_id && t.assignee_id === me?.id) {
+      // 2026-09-08 (Sandra: "allow me to validate my own [tasks] since I
+      // have no one up"): NOT a blanket Full-Access exemption -- narrower,
+      // matches the rule's own spirit ("only the one up should validate")
+      // by only firing when there's genuinely nobody active anywhere
+      // above this person to defer to. See validate_task_completion
+      // (phase48_migration.sql) for the authoritative server-side twin.
+      return nearestActiveManagerClient(t.assignee_id) === null;
+    }
     if (canManageTasksIn(t.project_id)) return true;
     if (!t.assignee_id || !me?.id) return false;
     const immediateManager = chainPeople.find((p) => p.id === t.assignee_id)?.reports_to ?? null;
@@ -2038,7 +2090,7 @@ export default function Projects() {
     // column inserted after Created -- same reasoning as every prior bump
     // here, a stale saved column order otherwise never picks up new
     // columns.
-    columnOrderVersion: 4,
+    columnOrderVersion: 5,
     hiddenColumns: [],
     columnWidths: {},
     groupBy: null,
@@ -2172,6 +2224,35 @@ export default function Projects() {
         render: (p) => {
           const closedAt = closedAtByProjectId[p.id];
           return <span>{closedAt ? formatDate(closedAt.slice(0, 10)) : "—"}</span>;
+        },
+      },
+      {
+        // 2026-09-08 (Sandra: "I want baseline approvals be captured
+        // like who approved baseline"): sourced from
+        // baselineApprovalByProjectId (project_baselines.captured_by,
+        // see loadAll) -- who actually clicked Approve on the Start
+        // Project request, not the project owner/requester. Blank for
+        // any project still in Draft (no baseline locked yet).
+        key: "baseline_approved_by",
+        label: "Baseline Approved By",
+        defaultWidth: 150,
+        maxWidth: 180,
+        render: (p) => {
+          const approvedBy = baselineApprovalByProjectId[p.id]?.approvedBy;
+          return <span>{approvedBy ? ownerName(approvedBy) : "—"}</span>;
+        },
+      },
+      {
+        // Same source as above -- kept as its own column (rather than
+        // folded into the name, e.g. "Jane (09/07/2026)") so it can be
+        // sorted/grouped on its own like every other date column here.
+        key: "baseline_approved_at",
+        label: "Baseline Approved On",
+        defaultWidth: 150,
+        maxWidth: 170,
+        render: (p) => {
+          const approvedAt = baselineApprovalByProjectId[p.id]?.approvedAt;
+          return <span>{approvedAt ? formatDate(approvedAt.slice(0, 10)) : "—"}</span>;
         },
       },
       {
@@ -2557,7 +2638,7 @@ export default function Projects() {
         defaultWidth: 210,
         maxWidth: 260,
         render: (p) => {
-          const meta = wbsStatusMetaFor(p.wbs_status, pendingBaselineProjectIds.has(p.id));
+          const meta = wbsStatusMetaFor(p.wbs_status, pendingBaselineProjectIds.has(p.id), !pendingBaselineProjectIds.has(p.id) && p.id in declinedBaselineByProjectId, declinedBaselineByProjectId[p.id]);
           return (
             <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <span
@@ -2628,7 +2709,7 @@ export default function Projects() {
         },
       },
     ],
-    [people, projects, me, tasks, holidayDates, projectViews.activeView.progressDisplay, projectViews.activeView.priorityDisplay, projectViews.activeView.complexityDisplay, noteCounts, timeEntries, deletedSpentHours, projectCategoryOptions, categoryIconMap, categoryToneMap, projectPhases, phaseStatusMapping, activePhaseNames, projectPlanningTypes, closedAtByProjectId]
+    [people, projects, me, tasks, holidayDates, projectViews.activeView.progressDisplay, projectViews.activeView.priorityDisplay, projectViews.activeView.complexityDisplay, noteCounts, timeEntries, deletedSpentHours, projectCategoryOptions, categoryIconMap, categoryToneMap, projectPhases, phaseStatusMapping, activePhaseNames, projectPlanningTypes, closedAtByProjectId, baselineApprovalByProjectId]
   );
 
   // Board-view card body. Name always renders first/bold as the card's
@@ -2778,8 +2859,15 @@ export default function Projects() {
       // group. Not pre-seeded in allGroups (so it only appears when a
       // project actually has one pending), same as any other
       // encountered-but-not-canonical value elsewhere in this file.
-      getGroup: (p) => wbsStatusMetaFor(p.wbs_status, pendingBaselineProjectIds.has(p.id)).label,
-      getTone: (p) => (p.wbs_status === "draft" && pendingBaselineProjectIds.has(p.id) ? "warning" : WBS_STATUS_TONES[p.wbs_status] ?? "neutral"),
+      getGroup: (p) =>
+        wbsStatusMetaFor(p.wbs_status, pendingBaselineProjectIds.has(p.id), !pendingBaselineProjectIds.has(p.id) && p.id in declinedBaselineByProjectId, declinedBaselineByProjectId[p.id])
+          .label,
+      getTone: (p) =>
+        p.wbs_status === "draft" && pendingBaselineProjectIds.has(p.id)
+          ? "warning"
+          : p.wbs_status === "draft" && p.id in declinedBaselineByProjectId
+          ? "danger"
+          : WBS_STATUS_TONES[p.wbs_status] ?? "neutral",
       allGroups: () => (Object.keys(WBS_STATUS_META) as WbsStatus[]).map((s) => WBS_STATUS_META[s].label),
     },
   ];
@@ -2972,6 +3060,16 @@ export default function Projects() {
     { key: "project_number", label: "Project ID", getValue: (p) => p.project_number },
     { key: "created_at", label: "Created", getValue: (p) => new Date(p.created_at).getTime() },
     { key: "closed_at", label: "Closed", getValue: (p) => (closedAtByProjectId[p.id] ? new Date(closedAtByProjectId[p.id]).getTime() : -1) },
+    {
+      key: "baseline_approved_by",
+      label: "Baseline Approved By",
+      getValue: (p) => (baselineApprovalByProjectId[p.id]?.approvedBy ? ownerName(baselineApprovalByProjectId[p.id]!.approvedBy!) : ""),
+    },
+    {
+      key: "baseline_approved_at",
+      label: "Baseline Approved On",
+      getValue: (p) => (baselineApprovalByProjectId[p.id]?.approvedAt ? new Date(baselineApprovalByProjectId[p.id]!.approvedAt!).getTime() : -1),
+    },
     { key: "owner", label: "Owner", getValue: (p) => ownerName(p.owner_id) },
     { key: "priority", label: "Priority", getValue: (p) => PROJECT_PRIORITY_OPTIONS.indexOf(p.priority ?? "") },
     { key: "status", label: "Status", getValue: (p) => PROJECT_STATUS_OPTIONS.indexOf(projectStatusOf(p) ?? "") },

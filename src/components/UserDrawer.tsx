@@ -314,13 +314,13 @@ export default function UserDrawer({
           <Section title="Approval rights">
             {isEdit ? (
               <>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }} title="Decide WBS Closed-project decisions (in addition to Full Access and the project owner)">
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }} title="Decide Project Close decisions (in addition to Full Access and the project owner)">
                   <input
                     type="checkbox"
                     checked={person.can_approve_closures}
                     onChange={(e) => onToggleApprovalFlag("can_approve_closures", e.target.checked)}
                   />
-                  Closures
+                  Project Close
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
                   <input
@@ -333,7 +333,7 @@ export default function UserDrawer({
               </>
             ) : (
               <>
-                <Field label="Closures">{person.can_approve_closures ? "Yes" : "No"}</Field>
+                <Field label="Project Close">{person.can_approve_closures ? "Yes" : "No"}</Field>
                 <Field label="Re-baseline">{person.can_approve_rebaseline ? "Yes" : "No"}</Field>
                 {approvalCount === 0 && <div style={{ fontSize: 11, color: "var(--muted)" }}>No approval permissions granted.</div>}
               </>

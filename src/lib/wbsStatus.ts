@@ -72,7 +72,19 @@ export const WBS_STATUS_META: Record<WbsStatus, { label: string; hint: string; c
 // badge is shown, whenever a project both IS draft and has a pending
 // request -- callers pass that one boolean in, they don't need to know
 // anything about baseline requests themselves.
-export function wbsStatusMetaFor(status: WbsStatus, hasPendingBaselineRequest: boolean) {
+// 2026-09-08 (Sandra: "add a WBS status if the start project request was
+// declined -- so the user sees if the request has been rejected or
+// returned for review"): same display-only overlay pattern as the
+// Awaiting Baseline Approval one above -- still literally wbs_status
+// 'draft' in the DB, no new enum value. `declineReason` is only used to
+// build the hint text (kept optional so any older/degenerate call site
+// without it still gets a sensible generic hint rather than a crash).
+export function wbsStatusMetaFor(
+  status: WbsStatus,
+  hasPendingBaselineRequest: boolean,
+  hasDeclinedBaselineRequest?: boolean,
+  declineReason?: string | null
+) {
   if (status === "draft" && hasPendingBaselineRequest) {
     return {
       label: "Awaiting Baseline Approval",
@@ -80,6 +92,15 @@ export function wbsStatusMetaFor(status: WbsStatus, hasPendingBaselineRequest: b
       color: "var(--warning-text, #b45309)",
       bg: "var(--warning-bg, #fff7ed)",
       border: "#f3dfb8",
+    };
+  }
+  if (status === "draft" && hasDeclinedBaselineRequest) {
+    return {
+      label: "Start Project Declined",
+      hint: declineReason ? `Declined: ${declineReason} -- fix this and resubmit.` : "The last Start Project request was declined -- see the note below and resubmit when ready.",
+      color: "var(--danger-text)",
+      bg: "var(--danger-bg)",
+      border: "#f0c9c5",
     };
   }
   return WBS_STATUS_META[status];

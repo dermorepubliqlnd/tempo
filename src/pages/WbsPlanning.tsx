@@ -236,6 +236,17 @@ interface BaselineRequestRow {
   requested_at: string;
   requested_by: string | null;
 }
+// 2026-09-08: only the rejected-request fetch needs the decision fields
+// (who declined it, when, and why) -- kept as a separate wider type
+// rather than adding these to BaselineRequestRow itself, since the
+// pending-request fetch above deliberately doesn't select them (nothing
+// reads them on a still-pending row).
+interface DeclinedBaselineRequestRow extends BaselineRequestRow {
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_reason: string | null;
+  decline_reason: string | null;
+}
 
 interface ActiveBaselineRow {
   version_number: number;
@@ -872,6 +883,32 @@ export default function WbsPlanning() {
   // both the first-ever Lock Baseline (from Draft) and any later
   // re-baseline (from Baseline Locked / Changed After Baseline).
   const [pendingBaselineRequest, setPendingBaselineRequest] = useState<BaselineRequestRow | null>(null);
+  // 2026-09-08 (Sandra: WBS status + reason when a Start Project request
+  // is declined) -- see the fetch's own comment in loadAll for why this
+  // is a separate query/state from pendingBaselineRequest rather than
+  // just widening that one's select.
+  const [declinedBaselineRequest, setDeclinedBaselineRequest] = useState<DeclinedBaselineRequestRow | null>(null);
+  // Predefined decline-reason list (Site Settings-managed, mirrors
+  // Time Logging Reasons) -- active names only, in display order.
+  // Site-wide, not project-scoped, so fetched once on mount rather than
+  // as part of loadAll's per-project Promise.all.
+  const [declineReasonOptions, setDeclineReasonOptions] = useState<string[]>([]);
+  useEffect(() => {
+    supabase
+      .from("baseline_decline_reasons")
+      .select("name")
+      .eq("is_active", true)
+      .order("sort_order")
+      .then(({ data }) => setDeclineReasonOptions(((data as { name: string }[]) ?? []).map((r) => r.name)));
+  }, []);
+  // Reject-dialog state (Sandra: "always put notes as optional then
+  // require if others is selected") -- a small custom modal instead of
+  // the plain ConfirmDialog since this needs real form fields, not just
+  // a yes/no. Opened by the Reject button below instead of immediately
+  // calling handleDecideBaselineRequest(false).
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectNotes, setRejectNotes] = useState("");
   // Session-staged edits (Phase 6): every field commit now merges into
   // these maps instead of writing to Supabase immediately -- Save (below)
   // is what actually flushes them. `hasUnsavedChanges` drives both the
@@ -1004,7 +1041,7 @@ export default function WbsPlanning() {
       setTimeEntries([]);
     }
 
-    const [{ data: revRow }, { data: closureRow }, { data: baselineRow }, { data: baselineReqRow }, { data: closeoutRow }] = await Promise.all([
+    const [{ data: revRow }, { data: closureRow }, { data: baselineRow }, { data: baselineReqRow }, { data: closeoutRow }, { data: declinedReqRow }] = await Promise.all([
       supabase
         .from("project_revisions")
         .select("id,revision_number,reason,status,started_at")
@@ -1037,11 +1074,29 @@ export default function WbsPlanning() {
       // tagged closed" date. Only exists once wbs_status has actually
       // reached 'closed'; harmless maybeSingle() no-op before that.
       supabase.from("project_closeouts").select("closed_at").eq("project_id", projectId).maybeSingle(),
+      // 2026-09-08 (Sandra: "add a WBS status if the start project
+      // request was declined -- so the user sees if the request has
+      // been rejected"): most recent REJECTED request, regardless of
+      // whether it's still the latest one overall (a fresh pending
+      // request, fetched separately above, takes display priority --
+      // see the badge/banner render sites below, both gated on
+      // `!pendingBaselineRequest`). order+limit(1) rather than a second
+      // maybeSingle-with-filter so a project with more than one past
+      // decline still only surfaces the newest.
+      supabase
+        .from("project_baseline_requests")
+        .select("id,status,requested_at,requested_by,decided_by,decided_at,decision_reason,decline_reason")
+        .eq("project_id", projectId)
+        .eq("status", "rejected")
+        .order("requested_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
     setActiveRevision((revRow as RevisionRow) ?? null);
     setPendingClosure((closureRow as ClosureRequestRow) ?? null);
     setActiveBaseline((baselineRow as ActiveBaselineRow) ?? null);
     setPendingBaselineRequest((baselineReqRow as BaselineRequestRow) ?? null);
+    setDeclinedBaselineRequest((declinedReqRow as DeclinedBaselineRequestRow) ?? null);
     setCloseoutClosedAt((closeoutRow as { closed_at: string } | null)?.closed_at ?? null);
     if (baselineRow) {
       loadLatestRevisionChanges();
@@ -2189,37 +2244,45 @@ export default function WbsPlanning() {
 
   async function handleDecideBaselineRequest(approve: boolean) {
     if (!project || !pendingBaselineRequest) return;
-    if (approve) {
-      // Same gate as handleRequestBaseline above -- an approver shouldn't
-      // be able to wave through a Start Project request that's missing
-      // Category/Source/Complexity just because the request itself
-      // slipped through before this gate existed (mirrors the same
-      // belt-and-suspenders pattern used for Closure's request+decide).
-      // 2026-09-07 (Sandra: "make sure the description is required from
-      // the project owner or whoever is creating the WBS or requesting
-      // for baseline lock, not the approver of baseline") -- Description
-      // is the one exception to that belt-and-suspenders pattern: it's
-      // only ever enforced on the requester's own action
-      // (handleRequestBaseline above), never re-checked here on approval.
-      const missingSetupFields: string[] = [];
-      if (!project.category) missingSetupFields.push("Category");
-      if (!project.source_id) missingSetupFields.push("Source");
-      if (!project.effort_level) missingSetupFields.push("Complexity");
-      if (missingSetupFields.length) {
-        await alert(
-          `Can't approve yet -- this project is still missing: ${missingSetupFields.join(", ")}. Set these above (Project Details) or on the Projects & Tasks list first.`
-        );
-        return;
-      }
+    if (!approve) {
+      // 2026-09-08 (Sandra: predefined decline reasons + optional notes,
+      // required only when "Other" is picked) -- a plain confirm() can't
+      // hold form fields, so Reject now opens rejectDialogOpen's own
+      // small modal instead of going straight to the RPC. That modal's
+      // own submit button (submitRejectBaselineRequest below) is what
+      // actually calls decide_baseline_request.
+      setRejectReason("");
+      setRejectNotes("");
+      setRejectDialogOpen(true);
+      return;
+    }
+    // Same gate as handleRequestBaseline above -- an approver shouldn't
+    // be able to wave through a Start Project request that's missing
+    // Category/Source/Complexity just because the request itself
+    // slipped through before this gate existed (mirrors the same
+    // belt-and-suspenders pattern used for Closure's request+decide).
+    // 2026-09-07 (Sandra: "make sure the description is required from
+    // the project owner or whoever is creating the WBS or requesting
+    // for baseline lock, not the approver of baseline") -- Description
+    // is the one exception to that belt-and-suspenders pattern: it's
+    // only ever enforced on the requester's own action
+    // (handleRequestBaseline above), never re-checked here on approval.
+    const missingSetupFields: string[] = [];
+    if (!project.category) missingSetupFields.push("Category");
+    if (!project.source_id) missingSetupFields.push("Source");
+    if (!project.effort_level) missingSetupFields.push("Complexity");
+    if (missingSetupFields.length) {
+      await alert(
+        `Can't approve yet -- this project is still missing: ${missingSetupFields.join(", ")}. Set these above (Project Details) or on the Projects & Tasks list first.`
+      );
+      return;
     }
     if (
       !(await confirm({
-        title: approve ? "Start Project" : "Reject Start Project Request",
-        message: approve
-          ? `Confirm this baseline request? This captures the current plan as the official Baseline, marking the project as started.`
-          : "Reject this Start Project request?",
-        confirmLabel: approve ? "Approve" : "Reject",
-        danger: !approve,
+        title: "Start Project",
+        message: `Confirm this baseline request? This captures the current plan as the official Baseline, marking the project as started.`,
+        confirmLabel: "Approve",
+        danger: false,
       }))
     )
       return;
@@ -2231,7 +2294,7 @@ export default function WbsPlanning() {
     setWorkflowBusy(true);
     const { error } = await supabase.rpc("decide_baseline_request", {
       p_request_id: pendingBaselineRequest.id,
-      p_approve: approve,
+      p_approve: true,
       p_reason: null,
       p_mode: activeMode,
       p_tasks: buildTaskSnapshotPayload(),
@@ -2241,6 +2304,44 @@ export default function WbsPlanning() {
       await alert(`Couldn't decide baseline request: ${error.message}`);
       return;
     }
+    await loadAll();
+  }
+
+  // 2026-09-08: the Reject-dialog's own submit -- see handleDecideBaselineRequest
+  // above for why this is separate from the approve path. rejectReason is
+  // required (one of declineReasonOptions); rejectNotes is optional
+  // EXCEPT when rejectReason is exactly "Other", where it's required
+  // (Sandra: "always put notes as optional then require if others is
+  // selected").
+  async function submitRejectBaselineRequest() {
+    if (!project || !pendingBaselineRequest) return;
+    if (!rejectReason) {
+      await alert("Pick a reason before rejecting.");
+      return;
+    }
+    if (rejectReason === "Other" && !rejectNotes.trim()) {
+      await alert(`Notes are required when "Other" is selected.`);
+      return;
+    }
+    const flushedBeforeDecide = await flushPendingEdits();
+    if (!flushedBeforeDecide) return;
+    setWorkflowBusy(true);
+    const { error } = await supabase.rpc("decide_baseline_request", {
+      p_request_id: pendingBaselineRequest.id,
+      p_approve: false,
+      p_reason: rejectNotes.trim() || null,
+      p_mode: activeMode,
+      p_tasks: buildTaskSnapshotPayload(),
+      p_decline_reason: rejectReason,
+    });
+    setWorkflowBusy(false);
+    if (error) {
+      await alert(`Couldn't reject baseline request: ${error.message}`);
+      return;
+    }
+    setRejectDialogOpen(false);
+    setRejectReason("");
+    setRejectNotes("");
     await loadAll();
   }
 
@@ -3144,6 +3245,16 @@ export default function WbsPlanning() {
 
   if (loading) return <div style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>;
   if (!project) return <div style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>Project not found.</div>;
+
+  // Computed once here (rather than re-called with the same args at every
+  // banner/JSX read site below) -- see wbsStatusMetaFor's own doc comment
+  // for the Awaiting Approval / Declined overlay rules this drives.
+  const wbsMeta = wbsStatusMetaFor(
+    project.wbs_status,
+    !!pendingBaselineRequest,
+    !pendingBaselineRequest && !!declinedBaselineRequest,
+    declinedBaselineRequest?.decline_reason
+  );
 
   // Phase 2/3 authorization -- mirrors can_manage_wbs()/can_decide_closure()
   // on the DB side (flat tiering, Sandra 2026-07-28): Full Access or the
@@ -4067,6 +4178,64 @@ export default function WbsPlanning() {
   return (
     <div>
       {dialog}
+      {rejectDialogOpen && (
+        <div
+          onClick={() => setRejectDialogOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(15,41,66,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: "var(--surface)", borderRadius: "var(--radius-md)", boxShadow: "0 12px 32px rgba(15,41,66,0.24)", padding: 20, width: 380, maxWidth: "calc(100vw - 32px)" }}
+          >
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--navy)", marginBottom: 4 }}>Reject Start Project Request</div>
+            <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 14 }}>
+              The requester will see this on the WBS page so they know what to fix before resubmitting.
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>Reason</div>
+              <select
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                style={{ width: "100%", padding: "7px 8px", fontSize: 12.5, borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", background: "var(--surface)" }}
+              >
+                <option value="">Select a reason...</option>
+                {declineReasonOptions.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>
+                Notes {rejectReason === "Other" ? "(required)" : "(optional)"}
+              </div>
+              <textarea
+                value={rejectNotes}
+                onChange={(e) => setRejectNotes(e.target.value)}
+                rows={3}
+                placeholder={rejectReason === "Other" ? "What's missing or needs to change?" : "Any extra detail for the requester..."}
+                style={{ width: "100%", padding: "7px 8px", fontSize: 12.5, borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", resize: "vertical", fontFamily: "inherit" }}
+              />
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                onClick={() => setRejectDialogOpen(false)}
+                style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 12px", cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitRejectBaselineRequest}
+                disabled={workflowBusy || !rejectReason || (rejectReason === "Other" && !rejectNotes.trim())}
+                style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: "var(--danger-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 12px", cursor: "pointer", opacity: workflowBusy || !rejectReason || (rejectReason === "Other" && !rejectNotes.trim()) ? 0.6 : 1 }}
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <Link to={`/projects/${projectId}`} className="back-link" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
         <ArrowLeft size={13} /> Back to {project.name}
       </Link>
@@ -4084,17 +4253,22 @@ export default function WbsPlanning() {
           alignItems: "center",
           gap: 10,
           flexWrap: "wrap",
-          background: wbsStatusMetaFor(project.wbs_status, !!pendingBaselineRequest).bg,
-          borderColor: wbsStatusMetaFor(project.wbs_status, !!pendingBaselineRequest).border,
+          background: wbsMeta.bg,
+          borderColor: wbsMeta.border,
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 700, color: wbsStatusMetaFor(project.wbs_status, !!pendingBaselineRequest).color }}>
-          {wbsStatusMetaFor(project.wbs_status, !!pendingBaselineRequest).label}
-        </span>
-        <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{wbsStatusMetaFor(project.wbs_status, !!pendingBaselineRequest).hint}</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: wbsMeta.color }}>{wbsMeta.label}</span>
+        <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{wbsMeta.hint}</span>
         {activeBaseline && (
           <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
             Baseline V{activeBaseline.version_number} (locked {formatDate(activeBaseline.captured_at.slice(0, 10))})
+          </span>
+        )}
+        {project.wbs_status === "draft" && !pendingBaselineRequest && declinedBaselineRequest && (
+          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
+            Declined by {people.find((p) => p.id === declinedBaselineRequest.decided_by)?.name ?? "someone"} on{" "}
+            {declinedBaselineRequest.decided_at ? formatDate(declinedBaselineRequest.decided_at.slice(0, 10)) : "—"}
+            {declinedBaselineRequest.decision_reason ? ` -- "${declinedBaselineRequest.decision_reason}"` : ""}
           </span>
         )}
         {/* 2026-09-07 (Sandra: "capture sign off date -- that's when the
@@ -5907,16 +6081,15 @@ export default function WbsPlanning() {
           alignItems: "center",
           gap: 12,
           flexWrap: "wrap",
-          background: wbsStatusMetaFor(project.wbs_status, !!pendingBaselineRequest).bg,
-          borderColor: wbsStatusMetaFor(project.wbs_status, !!pendingBaselineRequest).border,
+          background: wbsMeta.bg,
+          borderColor: wbsMeta.border,
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 700, color: wbsStatusMetaFor(project.wbs_status, !!pendingBaselineRequest).color }}>
-          {wbsStatusMetaFor(project.wbs_status, !!pendingBaselineRequest).label}
-        </span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: wbsMeta.color }}>{wbsMeta.label}</span>
         <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
-          {project.wbs_status === "draft" && !pendingBaselineRequest && "Start Project once scoping is final to start tracking against it."}
+          {project.wbs_status === "draft" && !pendingBaselineRequest && !declinedBaselineRequest && "Start Project once scoping is final to start tracking against it."}
           {project.wbs_status === "draft" && !!pendingBaselineRequest && "Waiting on an approver to lock this in as the Baseline."}
+          {project.wbs_status === "draft" && !pendingBaselineRequest && !!declinedBaselineRequest && wbsMeta.hint}
           {project.wbs_status === "baseline_locked" && "This is the official commitment. You can keep editing -- close the project once work is complete."}
           {project.wbs_status === "changed_after_baseline" &&
             "This plan differs from the original baseline. Baselines are locked once by design -- variance tracking measures against the original. Close the project once work is complete."}

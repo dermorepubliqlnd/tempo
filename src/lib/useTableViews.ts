@@ -28,7 +28,24 @@ function makeDefault(defaultView: DefaultView): TableView {
 function backfillView(v: TableView, defaultView: DefaultView): TableView {
   const merged = { ...defaultView, ...v };
   if (v.id === "default" && (v.columnOrderVersion ?? 0) < (defaultView.columnOrderVersion ?? 0)) {
-    merged.columnOrder = defaultView.columnOrder;
+    // 2026-09-08 (Sandra: "when refreshing columns can you not reset the
+    // user's arrangement back to default -- just add it at the last
+    // column"): this used to fully overwrite columnOrder with the new
+    // code default on every version bump, which meant any drag-reorder
+    // she'd done on her OWN "All" view (id "default") got silently wiped
+    // out the next time a new column shipped -- not just the new column
+    // showing up, her whole custom order reset. Now it only APPENDS
+    // whatever key(s) the new default introduces that her saved order
+    // doesn't have yet, in whatever order those new keys appear in the
+    // new default -- every column she already had keeps its exact
+    // existing position. (visibleOrderedColumns in tableTypes.ts already
+    // has its own belt-and-suspenders append-unknown-keys-at-the-end
+    // fallback for a saved order that predates this function ever
+    // running again, e.g. before the next columnOrderVersion bump -- this
+    // just makes the version-bump path do the same non-destructive thing
+    // instead of a wholesale replace.)
+    const newKeys = defaultView.columnOrder.filter((k) => !v.columnOrder.includes(k));
+    merged.columnOrder = [...v.columnOrder, ...newKeys];
     merged.columnOrderVersion = defaultView.columnOrderVersion;
   }
   return merged;

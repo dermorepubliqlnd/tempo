@@ -113,6 +113,19 @@ interface TimeEntryReasonRow {
   is_active: boolean;
 }
 
+// Start Project Decline Reason -- admin-configurable lookup (Phase 46,
+// 2026-09-08). Sandra: "we can add predefined reasons too, can add in
+// the list settings" -- same plain-text-tag pattern as Time Logging
+// Reason above (project_baseline_requests.decline_reason is plain text,
+// not an FK), so rename cascades the same way via
+// confirmPlainTextRename/cascadePlainTextRename.
+interface BaselineDeclineReasonRow {
+  id: string;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+}
+
 // Project Category -- admin-configurable lookup (2026-09-03). Mirrors
 // Project Sources' own table/RLS/UI shape exactly. Unlike Source,
 // projects.category stays plain text (no category_id FK) -- see the
@@ -256,7 +269,7 @@ export default function SiteSettings() {
   // matrix directly ("add by row or by column then just check"), so
   // Output Type rename/activate/delete/add all happen from inside that
   // matrix's column headers instead of a separate list.
-  const [manageDrawer, setManageDrawer] = useState<"sources" | "categories" | "phases" | "phase_mapping" | "work_types" | "reasons" | "planning_types" | null>(null);
+  const [manageDrawer, setManageDrawer] = useState<"sources" | "categories" | "phases" | "phase_mapping" | "work_types" | "reasons" | "planning_types" | "decline_reasons" | null>(null);
   const [draggedWorkTypeId, setDraggedWorkTypeId] = useState<string | null>(null);
   const [draggedOutputTypeId, setDraggedOutputTypeId] = useState<string | null>(null);
   const [draggedProjectSourceId, setDraggedProjectSourceId] = useState<string | null>(null);
@@ -271,6 +284,16 @@ export default function SiteSettings() {
   const [editTimeEntryReasonName, setEditTimeEntryReasonName] = useState("");
   const [draggedTimeEntryReasonId, setDraggedTimeEntryReasonId] = useState<string | null>(null);
   const [draggedProjectCategoryId, setDraggedProjectCategoryId] = useState<string | null>(null);
+
+  // Start Project Decline Reasons (2026-09-08) -- same list-management
+  // state shape as Time Logging Reasons above.
+  const [baselineDeclineReasons, setBaselineDeclineReasons] = useState<BaselineDeclineReasonRow[]>([]);
+  const [baselineDeclineReasonsLoading, setBaselineDeclineReasonsLoading] = useState(true);
+  const [newBaselineDeclineReasonName, setNewBaselineDeclineReasonName] = useState("");
+  const [baselineDeclineReasonBusy, setBaselineDeclineReasonBusy] = useState(false);
+  const [editingBaselineDeclineReasonId, setEditingBaselineDeclineReasonId] = useState<string | null>(null);
+  const [editBaselineDeclineReasonName, setEditBaselineDeclineReasonName] = useState("");
+  const [draggedBaselineDeclineReasonId, setDraggedBaselineDeclineReasonId] = useState<string | null>(null);
 
   // Global historical-locking switch (Sandra, 2026-08-14): "we're still
   // playing around with the system" -- while off, Utilization/Day Planner
@@ -1210,6 +1233,123 @@ export default function SiteSettings() {
     loadTimeEntryReasons();
   }
 
+  // Start Project Decline Reasons (Phase 46, 2026-09-08) -- full CRUD
+  // set, same shape as Time Logging Reasons above, except rename
+  // cascades into project_baseline_requests.decline_reason (plain text,
+  // not an FK -- see BaselineDeclineReasonRow's comment).
+  async function loadBaselineDeclineReasons() {
+    setBaselineDeclineReasonsLoading(true);
+    const { data } = await supabase.from("baseline_decline_reasons").select("id,name,sort_order,is_active").order("sort_order");
+    setBaselineDeclineReasons((data as BaselineDeclineReasonRow[]) ?? []);
+    setBaselineDeclineReasonsLoading(false);
+  }
+
+  async function addBaselineDeclineReason() {
+    const name = newBaselineDeclineReasonName.trim();
+    if (!name) return;
+    setBaselineDeclineReasonBusy(true);
+    const nextSortOrder = baselineDeclineReasons.length > 0 ? Math.max(...baselineDeclineReasons.map((r) => r.sort_order)) + 1 : 1;
+    const { error } = await supabase.from("baseline_decline_reasons").insert({ name, sort_order: nextSortOrder });
+    setBaselineDeclineReasonBusy(false);
+    if (error) {
+      window.alert(`Couldn't add: ${error.message}`);
+      return;
+    }
+    setNewBaselineDeclineReasonName("");
+    loadBaselineDeclineReasons();
+  }
+
+  function startEditBaselineDeclineReason(r: BaselineDeclineReasonRow) {
+    setEditingBaselineDeclineReasonId(r.id);
+    setEditBaselineDeclineReasonName(r.name);
+  }
+
+  async function saveBaselineDeclineReasonRename(id: string) {
+    const name = editBaselineDeclineReasonName.trim();
+    if (!name) return;
+    const current = baselineDeclineReasons.find((r) => r.id === id);
+    if (current && current.name !== name) {
+      const ok = await confirmPlainTextRename("project_baseline_requests", "decline_reason", current.name, name, "Start Project request");
+      if (!ok) {
+        setEditingBaselineDeclineReasonId(null);
+        return;
+      }
+    }
+    setBaselineDeclineReasonBusy(true);
+    const { error } = await supabase.from("baseline_decline_reasons").update({ name }).eq("id", id);
+    if (error) {
+      setBaselineDeclineReasonBusy(false);
+      window.alert(`Couldn't rename: ${error.message}`);
+      return;
+    }
+    if (current && current.name !== name) {
+      const cascadeError = await cascadePlainTextRename("project_baseline_requests", "decline_reason", current.name, name);
+      if (cascadeError) window.alert(`Reason renamed, but couldn't update past declined requests: ${cascadeError}. Please check manually.`);
+    }
+    setBaselineDeclineReasonBusy(false);
+    setEditingBaselineDeclineReasonId(null);
+    loadBaselineDeclineReasons();
+  }
+
+  async function toggleBaselineDeclineReasonActive(r: BaselineDeclineReasonRow) {
+    setBaselineDeclineReasonBusy(true);
+    const { error } = await supabase.from("baseline_decline_reasons").update({ is_active: !r.is_active }).eq("id", r.id);
+    setBaselineDeclineReasonBusy(false);
+    if (error) {
+      window.alert(`Couldn't update: ${error.message}`);
+      return;
+    }
+    loadBaselineDeclineReasons();
+  }
+
+  // Delete: only allowed when no past declined request currently
+  // references this Reason by name (plain text, same convention as
+  // Time Logging Reason).
+  async function deleteBaselineDeclineReason(r: BaselineDeclineReasonRow) {
+    setBaselineDeclineReasonBusy(true);
+    const { count, error: countError } = await supabase
+      .from("project_baseline_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("decline_reason", r.name);
+    if (countError) {
+      setBaselineDeclineReasonBusy(false);
+      window.alert(`Couldn't check usage: ${countError.message}`);
+      return;
+    }
+    if ((count ?? 0) > 0) {
+      setBaselineDeclineReasonBusy(false);
+      window.alert(
+        `Can't delete -- ${count} past declined request${count === 1 ? "" : "s"} still use this Reason. Deactivate it instead.`
+      );
+      return;
+    }
+    if (!window.confirm(`Delete "${r.name}"? This can't be undone. (Only possible because no declined request currently uses it -- Reasons in use can't be deleted.)`)) {
+      setBaselineDeclineReasonBusy(false);
+      return;
+    }
+    const { error } = await supabase.from("baseline_decline_reasons").delete().eq("id", r.id);
+    setBaselineDeclineReasonBusy(false);
+    if (error) {
+      window.alert(`Couldn't delete: ${error.message}`);
+      return;
+    }
+    loadBaselineDeclineReasons();
+  }
+
+  async function reorderBaselineDeclineReasons(orderedIds: string[]) {
+    setBaselineDeclineReasonBusy(true);
+    const results = await Promise.all(
+      orderedIds.map((id, idx) => supabase.from("baseline_decline_reasons").update({ sort_order: idx + 1 }).eq("id", id))
+    );
+    setBaselineDeclineReasonBusy(false);
+    const err = results.find((r) => r.error)?.error;
+    if (err) {
+      window.alert(`Couldn't reorder: ${err.message}`);
+      return;
+    }
+    loadBaselineDeclineReasons();
+  }
+
   // Same drag-handle reorder as Project Sources above.
   async function reorderProjectCategories(orderedIds: string[]) {
     setProjectCategoryBusy(true);
@@ -1243,6 +1383,7 @@ export default function SiteSettings() {
       loadHistoricalLocking();
       loadTimeEntryReasons();
       loadProjectPlanningTypes();
+      loadBaselineDeclineReasons();
     }
   }, [me?.access_level]);
 
@@ -1373,6 +1514,21 @@ export default function SiteSettings() {
               <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>{timeEntryReasonsLoading ? "…" : listSummary(timeEntryReasons)}</td>
               <td>
                 <button onClick={() => setManageDrawer("reasons")} style={manageButtonStyle}>
+                  Manage List
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>Start Project Decline Reasons</div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                  Offered to an approver when they reject a Start Project request. "Other" always requires a note;
+                  every other reason's note stays optional.
+                </div>
+              </td>
+              <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>{baselineDeclineReasonsLoading ? "…" : listSummary(baselineDeclineReasons)}</td>
+              <td>
+                <button onClick={() => setManageDrawer("decline_reasons")} style={manageButtonStyle}>
                   Manage List
                 </button>
               </td>
@@ -2034,6 +2190,118 @@ export default function SiteSettings() {
                           {r.is_active ? <ShieldOff size={13} /> : <ShieldCheck size={13} />}
                         </button>
                         <button onClick={() => deleteTimeEntryReason(r)} disabled={timeEntryReasonBusy} title="Delete (only if unused)" style={iconBtnStyle("var(--danger-text)")}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : manageDrawer === "decline_reasons" ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>Manage Start Project Decline Reasons</div>
+                  <button onClick={() => setManageDrawer(null)} style={{ display: "flex", background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+                    <X size={16} />
+                  </button>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 14 }}>
+                  Drag the grip handle to reorder. Renaming updates every past declined request already tagged with
+                  the old name. Deactivating keeps a reason's label on any request that already has it set -- it
+                  just disappears from the picker on new rejections. Keep an "Other" entry -- the Reject dialog
+                  requires a note whenever it's picked.
+                </div>
+
+                <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                  <input
+                    value={newBaselineDeclineReasonName}
+                    onChange={(e) => setNewBaselineDeclineReasonName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addBaselineDeclineReason();
+                    }}
+                    placeholder="New reason name"
+                    spellCheck={false}
+                    autoComplete="off"
+                    style={{ ...inputStyle, marginTop: 0, flex: 1 }}
+                  />
+                  <button onClick={addBaselineDeclineReason} disabled={baselineDeclineReasonBusy || !newBaselineDeclineReasonName.trim()} style={addButtonStyle(!newBaselineDeclineReasonName.trim())}>
+                    <Plus size={14} />
+                    Add
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+                  {baselineDeclineReasonsLoading && <div style={{ padding: 10, fontSize: 11.5, color: "var(--muted)" }}>Loading…</div>}
+                  {!baselineDeclineReasonsLoading && baselineDeclineReasons.length === 0 && (
+                    <div style={{ padding: 10, fontSize: 11.5, color: "var(--muted)" }}>None yet.</div>
+                  )}
+                  {baselineDeclineReasons.map((r) => {
+                    const isEditing = editingBaselineDeclineReasonId === r.id;
+                    const isDragging = draggedBaselineDeclineReasonId === r.id;
+                    return (
+                      <div
+                        key={r.id}
+                        onDragOver={(e) => {
+                          if (!draggedBaselineDeclineReasonId || draggedBaselineDeclineReasonId === r.id) return;
+                          e.preventDefault();
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (!draggedBaselineDeclineReasonId) return;
+                          const ids = baselineDeclineReasons.map((x) => x.id);
+                          const without = ids.filter((id) => id !== draggedBaselineDeclineReasonId);
+                          without.splice(without.indexOf(r.id), 0, draggedBaselineDeclineReasonId);
+                          setDraggedBaselineDeclineReasonId(null);
+                          reorderBaselineDeclineReasons(without);
+                        }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          padding: "7px 10px",
+                          borderBottom: "1px solid var(--border)",
+                          opacity: isDragging ? 0.4 : r.is_active ? 1 : 0.55,
+                        }}
+                      >
+                        <span
+                          draggable
+                          onDragStart={() => setDraggedBaselineDeclineReasonId(r.id)}
+                          onDragEnd={() => setDraggedBaselineDeclineReasonId(null)}
+                          title="Drag to reorder"
+                          style={{ display: "flex", cursor: "grab", color: "var(--text-secondary)", flexShrink: 0 }}
+                        >
+                          <GripVertical size={14} />
+                        </span>
+                        {isEditing ? (
+                          <input
+                            value={editBaselineDeclineReasonName}
+                            onChange={(e) => setEditBaselineDeclineReasonName(e.target.value)}
+                            onBlur={() => saveBaselineDeclineReasonRename(r.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveBaselineDeclineReasonRename(r.id);
+                              if (e.key === "Escape") setEditingBaselineDeclineReasonId(null);
+                            }}
+                            autoFocus
+                            spellCheck={false}
+                            autoComplete="off"
+                            style={{ ...inputStyle, marginTop: 0, flex: 1, fontWeight: 600 }}
+                          />
+                        ) : (
+                          <span
+                            onClick={() => startEditBaselineDeclineReason(r)}
+                            title="Click to rename"
+                            style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: "var(--navy)", cursor: "pointer" }}
+                          >
+                            {r.name}
+                          </span>
+                        )}
+                        <span className={`status-pill ${r.is_active ? "success" : "neutral"}`} style={{ fontSize: 10 }}>
+                          {r.is_active ? "Active" : "Off"}
+                        </span>
+                        <button onClick={() => toggleBaselineDeclineReasonActive(r)} disabled={baselineDeclineReasonBusy} title={r.is_active ? "Deactivate" : "Reactivate"} style={iconBtnStyle(r.is_active ? "var(--danger-text)" : "var(--success-text)")}>
+                          {r.is_active ? <ShieldOff size={13} /> : <ShieldCheck size={13} />}
+                        </button>
+                        <button onClick={() => deleteBaselineDeclineReason(r)} disabled={baselineDeclineReasonBusy} title="Delete (only if unused)" style={iconBtnStyle("var(--danger-text)")}>
                           <Trash2 size={13} />
                         </button>
                       </div>
