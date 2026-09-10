@@ -2171,6 +2171,7 @@ export default function WbsPlanning() {
         end_date_full: fullEntry?.end ?? null,
         start_date_standard: modeEntry?.start ?? null,
         end_date_standard: modeEntry?.end ?? null,
+        status: t.status,
       };
     });
   }
@@ -6267,6 +6268,7 @@ interface LiveTaskSnapshot {
   name: string;
   estimated_hours: number | null;
   parent_task_id: string | null;
+  status?: string | null;
 }
 function CompareWithBaselinePanel({ projectId, liveTasks }: { projectId: string; liveTasks: LiveTaskSnapshot[] }) {
   const [baseline, setBaseline] = useState<{ version_number: number; total_est_hours: number; task_count: number; captured_at: string } | null>(null);
@@ -6320,8 +6322,17 @@ function CompareWithBaselinePanel({ projectId, liveTasks }: { projectId: string;
     };
   }, [projectId]);
 
-  const liveTotalHours = liveTasks.filter((t) => !t.parent_task_id).reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
-  const liveTaskCount = liveTasks.length;
+  // Cancelled tasks are excluded from both totals below -- Sandra, 2026-09-10:
+  // cancelling is meant to read exactly like the task was removed from scope
+  // for baseline-comparison purposes (same net effect as deleting it would
+  // have), even though the row itself stays visible elsewhere in the WBS for
+  // audit/history. Without this exclusion, a cancelled task's frozen
+  // estimated_hours kept counting toward "Current Plan" hours/task-count
+  // forever, so cancelling a task never moved either variance number --
+  // silently hiding real descoping from the Overall Variance panel.
+  const activeLiveTasks = liveTasks.filter((t) => t.status !== "Cancelled");
+  const liveTotalHours = activeLiveTasks.filter((t) => !t.parent_task_id).reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
+  const liveTaskCount = activeLiveTasks.length;
 
   const baselineIds = new Set(baselineTasks.map((t) => t.task_id));
   const liveIds = new Set(liveTasks.map((t) => t.task_id));
