@@ -18,6 +18,7 @@ import { useConfirm } from "../lib/useConfirm";
 import { InlineText, InlineSelect, InlineDate, InlineNumber } from "../components/InlineCell";
 import ProgressCell, { ProgressDisplayToggle } from "../components/ProgressCell";
 import SymbolTextBadge, { SymbolTextDisplayToggle } from "../components/SymbolTextBadge";
+import { CancelTaskDialog } from "../components/CancelTaskDialog";
 import { PROJECT_PRIORITY_SYMBOLS, PROJECT_EFFORT_LEVEL_SYMBOLS } from "../lib/notionOptions";
 import type { ColumnDef, GroupOption, SortOption } from "../lib/tableTypes";
 import { sortRows, sortRowsHierarchical, visibleOrderedColumns, resolveFilterPersonIds, GROUP_EXCLUDE } from "../lib/tableTypes";
@@ -224,6 +225,15 @@ export interface TaskRow {
   // Materials Output card + breakdown chart.
   output_type_id: string | null;
   output_count: number | null;
+  // Revived 2026-09-10 alongside the Cancelled status -- required
+  // whenever status = 'Cancelled' (enforced client-side by the cancel
+  // dialog, same optional-notes-except-"Other" pattern as the Start
+  // Project decline reasons -- see task_cancellation_reasons /
+  // CancelTaskDialog). Left populated even after an uncancel/reopen is
+  // NOT the convention here: reopen_task clears it, same as it clears
+  // validated_completion_date, so a re-cancel later isn't confused with
+  // stale history.
+  cancellation_reason: string | null;
   is_archived: boolean;
   archived_at: string | null;
   sort_order: number | null;
@@ -571,9 +581,10 @@ function planningTypeTone(name: string | null): "success" | "warning" | "neutral
   return "neutral";
 }
 
-function statusTone(group: "to_do" | "in_progress" | "complete" | null): "success" | "warning" | "danger" | "neutral" {
+function statusTone(group: "to_do" | "in_progress" | "complete" | "cancelled" | null): "success" | "warning" | "danger" | "neutral" {
   if (group === "complete") return "success";
   if (group === "in_progress") return "warning";
+  if (group === "cancelled") return "danger";
   return "neutral";
 }
 
@@ -682,6 +693,11 @@ function actualCompletionDateOf(t: TaskRow): string | null {
 
 function timingOf(t: TaskRow): { label: string; tone: "success" | "warning" | "danger" | "neutral" } {
   const group = statusGroupOf(TASK_STATUS_GROUPED, t.status);
+  // 2026-09-10: a cancelled task was never actually finished (on time or
+  // otherwise) -- Timing is meaningless for it, same "N/A" treatment a
+  // parent row's own Timing already gets (see TASK_TIMING_BOARD_COLUMNS'
+  // N/A column above).
+  if (group === "cancelled") return { label: "N/A", tone: "neutral" };
   const due = parseLocalDate(t.current_due_date);
   if (group === "complete") {
     const actualDateStr = actualCompletionDateOf(t);
@@ -704,7 +720,7 @@ function timingOf(t: TaskRow): { label: string; tone: "success" | "warning" | "d
 // practice since submitted_on is stamped automatically).
 function timingVarianceDays(t: TaskRow): number | null {
   const group = statusGroupOf(TASK_STATUS_GROUPED, t.status);
-  if (group !== "complete") return null;
+  if (group !== "complete") return null; // includes "cancelled" -- see timingOf above
   const actualDateStr = actualCompletionDateOf(t);
   if (!actualDateStr) return null;
   const due = parseLocalDate(t.current_due_date);
@@ -967,6 +983,46 @@ export default function Projects() {
   // wbsStatusMetaFor). Not the same thing as the request itself (no
   // reason/decision data needed here, just "is one pending right now").
   const [pendingBaselineProjectIds, setPendingBaselineProjectIds] = useState<Set<string>>(new Set());
+  // 2026-09-10 (Cancelled task status revived) -- predefined cancellation-
+  // reason list (Site Settings-managed, task_cancellation_reasons), same
+  // "active names only, in display order, fetched once on mount" pattern
+  // as WbsPlanning.tsx's declineReasonOptions.
+  const [cancellationReasonOptions, setCancellationReasonOptions] = useState<string[]>([]);
+  useEffect(() => {
+    supabase
+      .from("task_cancellation_reasons")
+      .select("name")
+      .eq("is_active", true)
+      .order("sort_order")
+      .then(({ data }) => setCancellationReasonOptions(((data as { name: string }[]) ?? []).map((r) => r.name)));
+  }, []);
+  // Cancel-task dialog state -- shared CancelTaskDialog component, opened
+  // either from a single row's Status dropdown (cancelTaskDialog.taskIds
+  // has one id) or the bulk-edit toolbar's Status action (many ids).
+  const [cancelTaskDialog, setCancelTaskDialog] = useState<{ taskIds: string[]; label: string } | null>(null);
+  const [cancelTaskBusy, setCancelTaskBusy] = useState(false);
+
+  async function confirmCancelTasks(reason: string) {
+    if (!cancelTaskDialog) return;
+    const ids = cancelTaskDialog.taskIds;
+    setCancelTaskBusy(true);
+    const patch: Partial<TaskRow> = { status: "Cancelled", cancellation_reason: reason, submitted_on: null, submitted_by: null };
+    setTasks((prev) => prev.map((t) => (ids.includes(t.id) ? { ...t, ...patch } : t)));
+    const { error } = await supabase.from("tasks").update(patch).in("id", ids);
+    setCancelTaskBusy(false);
+    if (error) {
+      alert(`Couldn't cancel: ${error.message}`);
+      loadAll();
+      setCancelTaskDialog(null);
+      return;
+    }
+    const snapshot = tasks.map((t) => (ids.includes(t.id) ? { ...t, ...patch } : t));
+    for (const id of ids) {
+      await recomputeAncestorStatus(id, snapshot);
+    }
+    setCancelTaskDialog(null);
+    setSelectedTaskIds([]);
+  }
   // 2026-09-08 (Sandra: WBS status when a Start Project request is
   // declined) -- project_id -> most recent decline_reason, built
   // client-side from every rejected request (a project can have more
@@ -1371,7 +1427,12 @@ export default function Projects() {
   // validation and unlocking these fields again) is a deliberate, visible
   // action restricted to Full Access only -- see the Reopen button in the
   // validated_completion_date column.
-  const isTaskLocked = (t: TaskRow) => Boolean(t.validated_completion_date);
+  // 2026-09-10: a Cancelled task freezes its scoping fields exactly like a
+  // validated Done task does (see enforce_done_task_lock, extended
+  // server-side to cover Cancelled too) -- so the client-side gate has to
+  // agree, or every field editor here would let someone try an edit the
+  // DB trigger then rejects with a raw Postgres error.
+  const isTaskLocked = (t: TaskRow) => Boolean(t.validated_completion_date) || t.status === "Cancelled";
 
   // Manager-chain fallback (2026-08-20, mirrors nearest_active_manager()
   // in phase10_migration.sql, best-effort client-side approximation only
@@ -1727,9 +1788,21 @@ export default function Projects() {
   // and the parent's Status becomes fully computed/read-only, same
   // treatment as Work Type ("N/A") and Dates/Scoped Hours (mirrored from
   // sub-tasks) already get on parent rows on this page).
+  // 2026-09-10 (Cancelled revived): a cancelled sub-task isn't "still to
+  // do" or "done" -- it's out of the equation entirely, same as it's
+  // excluded from the scheduler. Judgment call (not explicitly spec'd):
+  // Cancelled children are filtered out before applying the original
+  // every-Done/every-Not-Started rule, so one cancelled sibling doesn't
+  // stop the rest from correctly computing Done, and doesn't stop a
+  // still-all-Not-Started set from reading Not Started either. If EVERY
+  // child ends up cancelled, the parent falls back to Not Started (there's
+  // nothing left driving it toward Done) -- an edge case with no real
+  // data yet, flagged for Sandra to confirm if it comes up.
   function deriveParentStatus(childStatuses: (string | null)[]): "Not Started" | "In Progress" | "Done" {
-    if (childStatuses.every((s) => s === "Done")) return "Done";
-    if (childStatuses.every((s) => !s || s === "Not Started")) return "Not Started";
+    const relevant = childStatuses.filter((s) => s !== "Cancelled");
+    if (relevant.length === 0) return "Not Started";
+    if (relevant.every((s) => s === "Done")) return "Done";
+    if (relevant.every((s) => !s || s === "Not Started")) return "Not Started";
     return "In Progress";
   }
 
@@ -3261,6 +3334,45 @@ export default function Projects() {
               "—"
             );
           }
+          // 2026-09-10 (Cancelled revived): a Cancelled task is locked
+          // (see isTaskLocked above) the same way a validated Done task
+          // is -- so its Status cell is no longer a plain dropdown. It's
+          // a clickable pill (when the viewer is authorized) that opens
+          // the SAME reopen_task RPC path Done's Validated column already
+          // uses, just relabeled "Uncancel" -- mirrors that flow rather
+          // than building a separate one, per the spec.
+          if (t.status === "Cancelled") {
+            const canUncancel = canReopenTask(t);
+            const pill = (
+              <span className={`status-pill ${statusTone(statusGroupOf(TASK_STATUS_GROUPED, t.status))}`} title={t.cancellation_reason ?? undefined}>
+                Cancelled
+              </span>
+            );
+            if (!canUncancel) return pill;
+            return (
+              <button
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: "Uncancel task",
+                    message: `Restore "${t.name}" to In Progress? This clears its cancellation reason and puts it back into scheduling.`,
+                    confirmLabel: "Uncancel",
+                  });
+                  if (!ok) return;
+                  const { error } = await supabase.rpc("reopen_task", { p_task_id: t.id });
+                  if (error) {
+                    alert(`Couldn't uncancel: ${error.message}`);
+                    return;
+                  }
+                  await recomputeAncestorStatus(t.id, tasks.map((row) => (row.id === t.id ? { ...row, status: "In Progress", cancellation_reason: null } : row)));
+                  loadAll();
+                }}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
+                title="Click to uncancel"
+              >
+                {pill}
+              </button>
+            );
+          }
           return (
             <InlineSelect
               value={t.status ?? ""}
@@ -3274,9 +3386,10 @@ export default function Projects() {
               editable={canEditTask(t) && !isTaskLocked(t) && isProjectLocked(t.project_id)}
               allowEmpty
               // Flat list, not TASK_STATUS_GROUPED -- the grouped <optgroup>
-              // headers ("To-do"/"In Progress"/"Complete") each wrapped
-              // exactly one identical-named option, so the dropdown showed
-              // redundant parent labels. Sandra: just the 3 plain options.
+              // headers ("To-do"/"In Progress"/"Complete"/"Cancelled") each
+              // wrapped exactly one identical-named option, so the dropdown
+              // showed redundant parent labels. Sandra: just the plain
+              // options.
               options={TASK_STATUS_OPTIONS}
               renderReadOnly={() =>
                 t.status ? <span className={`status-pill ${statusTone(statusGroupOf(TASK_STATUS_GROUPED, t.status))}`}>{t.status}</span> : "—"
@@ -3288,6 +3401,17 @@ export default function Projects() {
                 // the Validated column below). Moving *off* Done clears the
                 // stamp so a task that's reopened doesn't keep a stale
                 // "submitted" record.
+                if (v === "Cancelled") {
+                  // Cancelling always requires a reason -- opens the shared
+                  // CancelTaskDialog instead of committing straight away;
+                  // confirmCancelTasks does the actual write once a reason
+                  // is picked. The dropdown itself visually reverts to the
+                  // old value in the meantime since we don't touch `tasks`
+                  // state here (same "no patch, no visible change" pattern
+                  // the Done logged-hours gate below uses).
+                  setCancelTaskDialog({ taskIds: [t.id], label: `"${t.name}"` });
+                  return;
+                }
                 let patch: Partial<TaskRow>;
                 if (v === "Done") {
                   // Sandra, 2026-08-26: don't allow tagging a task Done
@@ -4431,6 +4555,14 @@ export default function Projects() {
   return (
     <div>
       {confirmDialog}
+      <CancelTaskDialog
+        open={Boolean(cancelTaskDialog)}
+        taskLabel={cancelTaskDialog?.label ?? ""}
+        reasons={cancellationReasonOptions}
+        busy={cancelTaskBusy}
+        onClose={() => setCancelTaskDialog(null)}
+        onConfirm={(reason) => confirmCancelTasks(reason)}
+      />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <h1>Projects</h1>
@@ -4835,7 +4967,25 @@ export default function Projects() {
                   Delete are structural edits, same reasoning as the
                   per-row changes above -- only Status stays as a bulk
                   action on this page now. */}
-              <FieldPickerButton label="Status" options={TASK_STATUS_OPTIONS} onPick={(v) => bulkUpdateTasks({ status: v || null })} />
+              <FieldPickerButton
+                label="Status"
+                options={TASK_STATUS_OPTIONS}
+                onPick={(v) => {
+                  // Bulk Cancel goes through the same reason dialog as a
+                  // single-row cancel (confirmCancelTasks), rather than
+                  // bulkUpdateTasks -- it needs one shared reason applied
+                  // to every selected task and, per spec, cancelling must
+                  // never be silently gated the way bulkUpdateTasks
+                  // silently drops parent rows from a plain Status patch.
+                  if (v === "Cancelled") {
+                    const ids = selectedTaskIds.filter((id) => !(!tasks.find((t) => t.id === id)?.parent_task_id && hasChildren(id)));
+                    if (ids.length === 0) return;
+                    setCancelTaskDialog({ taskIds: ids, label: `${ids.length} task${ids.length > 1 ? "s" : ""}` });
+                    return;
+                  }
+                  bulkUpdateTasks({ status: v || null });
+                }}
+              />
             </div>
           </div>
         )}

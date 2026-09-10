@@ -126,6 +126,18 @@ interface BaselineDeclineReasonRow {
   is_active: boolean;
 }
 
+// Task Cancellation Reason -- admin-configurable lookup (Phase 49,
+// 2026-09-10), revived alongside the Cancelled task status. Same
+// plain-text-tag pattern as Start Project Decline Reason above
+// (tasks.cancellation_reason is plain text, not an FK), so rename
+// cascades the same way via confirmPlainTextRename/cascadePlainTextRename.
+interface TaskCancellationReasonRow {
+  id: string;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+}
+
 // Project Category -- admin-configurable lookup (2026-09-03). Mirrors
 // Project Sources' own table/RLS/UI shape exactly. Unlike Source,
 // projects.category stays plain text (no category_id FK) -- see the
@@ -269,7 +281,7 @@ export default function SiteSettings() {
   // matrix directly ("add by row or by column then just check"), so
   // Output Type rename/activate/delete/add all happen from inside that
   // matrix's column headers instead of a separate list.
-  const [manageDrawer, setManageDrawer] = useState<"sources" | "categories" | "phases" | "phase_mapping" | "work_types" | "reasons" | "planning_types" | "decline_reasons" | null>(null);
+  const [manageDrawer, setManageDrawer] = useState<"sources" | "categories" | "phases" | "phase_mapping" | "work_types" | "reasons" | "planning_types" | "decline_reasons" | "cancellation_reasons" | null>(null);
   const [draggedWorkTypeId, setDraggedWorkTypeId] = useState<string | null>(null);
   const [draggedOutputTypeId, setDraggedOutputTypeId] = useState<string | null>(null);
   const [draggedProjectSourceId, setDraggedProjectSourceId] = useState<string | null>(null);
@@ -294,6 +306,16 @@ export default function SiteSettings() {
   const [editingBaselineDeclineReasonId, setEditingBaselineDeclineReasonId] = useState<string | null>(null);
   const [editBaselineDeclineReasonName, setEditBaselineDeclineReasonName] = useState("");
   const [draggedBaselineDeclineReasonId, setDraggedBaselineDeclineReasonId] = useState<string | null>(null);
+
+  // Task Cancellation Reasons (2026-09-10) -- same list-management state
+  // shape as Start Project Decline Reasons above.
+  const [taskCancellationReasons, setTaskCancellationReasons] = useState<TaskCancellationReasonRow[]>([]);
+  const [taskCancellationReasonsLoading, setTaskCancellationReasonsLoading] = useState(true);
+  const [newTaskCancellationReasonName, setNewTaskCancellationReasonName] = useState("");
+  const [taskCancellationReasonBusy, setTaskCancellationReasonBusy] = useState(false);
+  const [editingTaskCancellationReasonId, setEditingTaskCancellationReasonId] = useState<string | null>(null);
+  const [editTaskCancellationReasonName, setEditTaskCancellationReasonName] = useState("");
+  const [draggedTaskCancellationReasonId, setDraggedTaskCancellationReasonId] = useState<string | null>(null);
 
   // Global historical-locking switch (Sandra, 2026-08-14): "we're still
   // playing around with the system" -- while off, Utilization/Day Planner
@@ -1350,6 +1372,123 @@ export default function SiteSettings() {
     loadBaselineDeclineReasons();
   }
 
+  // Task Cancellation Reasons (Phase 49, 2026-09-10) -- full CRUD set,
+  // same shape as Start Project Decline Reasons above, except rename
+  // cascades into tasks.cancellation_reason (plain text, not an FK --
+  // see TaskCancellationReasonRow's comment).
+  async function loadTaskCancellationReasons() {
+    setTaskCancellationReasonsLoading(true);
+    const { data } = await supabase.from("task_cancellation_reasons").select("id,name,sort_order,is_active").order("sort_order");
+    setTaskCancellationReasons((data as TaskCancellationReasonRow[]) ?? []);
+    setTaskCancellationReasonsLoading(false);
+  }
+
+  async function addTaskCancellationReason() {
+    const name = newTaskCancellationReasonName.trim();
+    if (!name) return;
+    setTaskCancellationReasonBusy(true);
+    const nextSortOrder = taskCancellationReasons.length > 0 ? Math.max(...taskCancellationReasons.map((r) => r.sort_order)) + 1 : 1;
+    const { error } = await supabase.from("task_cancellation_reasons").insert({ name, sort_order: nextSortOrder });
+    setTaskCancellationReasonBusy(false);
+    if (error) {
+      window.alert(`Couldn't add: ${error.message}`);
+      return;
+    }
+    setNewTaskCancellationReasonName("");
+    loadTaskCancellationReasons();
+  }
+
+  function startEditTaskCancellationReason(r: TaskCancellationReasonRow) {
+    setEditingTaskCancellationReasonId(r.id);
+    setEditTaskCancellationReasonName(r.name);
+  }
+
+  async function saveTaskCancellationReasonRename(id: string) {
+    const name = editTaskCancellationReasonName.trim();
+    if (!name) return;
+    const current = taskCancellationReasons.find((r) => r.id === id);
+    if (current && current.name !== name) {
+      const ok = await confirmPlainTextRename("tasks", "cancellation_reason", current.name, name, "cancelled task");
+      if (!ok) {
+        setEditingTaskCancellationReasonId(null);
+        return;
+      }
+    }
+    setTaskCancellationReasonBusy(true);
+    const { error } = await supabase.from("task_cancellation_reasons").update({ name }).eq("id", id);
+    if (error) {
+      setTaskCancellationReasonBusy(false);
+      window.alert(`Couldn't rename: ${error.message}`);
+      return;
+    }
+    if (current && current.name !== name) {
+      const cascadeError = await cascadePlainTextRename("tasks", "cancellation_reason", current.name, name);
+      if (cascadeError) window.alert(`Reason renamed, but couldn't update past cancelled tasks: ${cascadeError}. Please check manually.`);
+    }
+    setTaskCancellationReasonBusy(false);
+    setEditingTaskCancellationReasonId(null);
+    loadTaskCancellationReasons();
+  }
+
+  async function toggleTaskCancellationReasonActive(r: TaskCancellationReasonRow) {
+    setTaskCancellationReasonBusy(true);
+    const { error } = await supabase.from("task_cancellation_reasons").update({ is_active: !r.is_active }).eq("id", r.id);
+    setTaskCancellationReasonBusy(false);
+    if (error) {
+      window.alert(`Couldn't update: ${error.message}`);
+      return;
+    }
+    loadTaskCancellationReasons();
+  }
+
+  // Delete: only allowed when no task currently uses this Reason by
+  // name (plain text, same convention as Time Logging Reason).
+  async function deleteTaskCancellationReason(r: TaskCancellationReasonRow) {
+    setTaskCancellationReasonBusy(true);
+    const { count, error: countError } = await supabase
+      .from("tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("cancellation_reason", r.name);
+    if (countError) {
+      setTaskCancellationReasonBusy(false);
+      window.alert(`Couldn't check usage: ${countError.message}`);
+      return;
+    }
+    if ((count ?? 0) > 0) {
+      setTaskCancellationReasonBusy(false);
+      window.alert(
+        `Can't delete -- ${count} task${count === 1 ? "" : "s"} cancelled with this reason still exist. Deactivate it instead.`
+      );
+      return;
+    }
+    if (!window.confirm(`Delete "${r.name}"? This can't be undone. (Only possible because no task currently uses it -- Reasons in use can't be deleted.)`)) {
+      setTaskCancellationReasonBusy(false);
+      return;
+    }
+    const { error } = await supabase.from("task_cancellation_reasons").delete().eq("id", r.id);
+    setTaskCancellationReasonBusy(false);
+    if (error) {
+      window.alert(`Couldn't delete: ${error.message}`);
+      return;
+    }
+    loadTaskCancellationReasons();
+  }
+
+  async function reorderTaskCancellationReasons(orderedIds: string[]) {
+    setTaskCancellationReasonBusy(true);
+    const results = await Promise.all(
+      orderedIds.map((id, idx) => supabase.from("task_cancellation_reasons").update({ sort_order: idx + 1 }).eq("id", id))
+    );
+    setTaskCancellationReasonBusy(false);
+    const err = results.find((r) => r.error)?.error;
+    if (err) {
+      window.alert(`Couldn't reorder: ${err.message}`);
+      return;
+    }
+    loadTaskCancellationReasons();
+  }
+
+
   // Same drag-handle reorder as Project Sources above.
   async function reorderProjectCategories(orderedIds: string[]) {
     setProjectCategoryBusy(true);
@@ -1384,6 +1523,7 @@ export default function SiteSettings() {
       loadTimeEntryReasons();
       loadProjectPlanningTypes();
       loadBaselineDeclineReasons();
+      loadTaskCancellationReasons();
     }
   }, [me?.access_level]);
 
@@ -1529,6 +1669,21 @@ export default function SiteSettings() {
               <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>{baselineDeclineReasonsLoading ? "…" : listSummary(baselineDeclineReasons)}</td>
               <td>
                 <button onClick={() => setManageDrawer("decline_reasons")} style={manageButtonStyle}>
+                  Manage List
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>Task Cancellation Reasons</div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                  Required whenever a task is set to Cancelled (Tasks page, bulk edit, or WBS Planning). "Other" always
+                  requires a note; every other reason's note stays optional.
+                </div>
+              </td>
+              <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>{taskCancellationReasonsLoading ? "…" : listSummary(taskCancellationReasons)}</td>
+              <td>
+                <button onClick={() => setManageDrawer("cancellation_reasons")} style={manageButtonStyle}>
                   Manage List
                 </button>
               </td>
@@ -2302,6 +2457,118 @@ export default function SiteSettings() {
                           {r.is_active ? <ShieldOff size={13} /> : <ShieldCheck size={13} />}
                         </button>
                         <button onClick={() => deleteBaselineDeclineReason(r)} disabled={baselineDeclineReasonBusy} title="Delete (only if unused)" style={iconBtnStyle("var(--danger-text)")}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : manageDrawer === "cancellation_reasons" ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>Manage Task Cancellation Reasons</div>
+                  <button onClick={() => setManageDrawer(null)} style={{ display: "flex", background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+                    <X size={16} />
+                  </button>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 14 }}>
+                  Drag the grip handle to reorder. Renaming updates every task already cancelled with the old name.
+                  Deactivating keeps a reason's label on any task that already has it set -- it just disappears from
+                  the picker on new cancellations. Keep an "Other" entry -- the Cancel dialog requires a note
+                  whenever it's picked.
+                </div>
+
+                <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                  <input
+                    value={newTaskCancellationReasonName}
+                    onChange={(e) => setNewTaskCancellationReasonName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addTaskCancellationReason();
+                    }}
+                    placeholder="New reason name"
+                    spellCheck={false}
+                    autoComplete="off"
+                    style={{ ...inputStyle, marginTop: 0, flex: 1 }}
+                  />
+                  <button onClick={addTaskCancellationReason} disabled={taskCancellationReasonBusy || !newTaskCancellationReasonName.trim()} style={addButtonStyle(!newTaskCancellationReasonName.trim())}>
+                    <Plus size={14} />
+                    Add
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+                  {taskCancellationReasonsLoading && <div style={{ padding: 10, fontSize: 11.5, color: "var(--muted)" }}>Loading…</div>}
+                  {!taskCancellationReasonsLoading && taskCancellationReasons.length === 0 && (
+                    <div style={{ padding: 10, fontSize: 11.5, color: "var(--muted)" }}>None yet.</div>
+                  )}
+                  {taskCancellationReasons.map((r) => {
+                    const isEditing = editingTaskCancellationReasonId === r.id;
+                    const isDragging = draggedTaskCancellationReasonId === r.id;
+                    return (
+                      <div
+                        key={r.id}
+                        onDragOver={(e) => {
+                          if (!draggedTaskCancellationReasonId || draggedTaskCancellationReasonId === r.id) return;
+                          e.preventDefault();
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (!draggedTaskCancellationReasonId) return;
+                          const ids = taskCancellationReasons.map((x) => x.id);
+                          const without = ids.filter((id) => id !== draggedTaskCancellationReasonId);
+                          without.splice(without.indexOf(r.id), 0, draggedTaskCancellationReasonId);
+                          setDraggedTaskCancellationReasonId(null);
+                          reorderTaskCancellationReasons(without);
+                        }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          padding: "7px 10px",
+                          borderBottom: "1px solid var(--border)",
+                          opacity: isDragging ? 0.4 : r.is_active ? 1 : 0.55,
+                        }}
+                      >
+                        <span
+                          draggable
+                          onDragStart={() => setDraggedTaskCancellationReasonId(r.id)}
+                          onDragEnd={() => setDraggedTaskCancellationReasonId(null)}
+                          title="Drag to reorder"
+                          style={{ display: "flex", cursor: "grab", color: "var(--text-secondary)", flexShrink: 0 }}
+                        >
+                          <GripVertical size={14} />
+                        </span>
+                        {isEditing ? (
+                          <input
+                            value={editTaskCancellationReasonName}
+                            onChange={(e) => setEditTaskCancellationReasonName(e.target.value)}
+                            onBlur={() => saveTaskCancellationReasonRename(r.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveTaskCancellationReasonRename(r.id);
+                              if (e.key === "Escape") setEditingTaskCancellationReasonId(null);
+                            }}
+                            autoFocus
+                            spellCheck={false}
+                            autoComplete="off"
+                            style={{ ...inputStyle, marginTop: 0, flex: 1, fontWeight: 600 }}
+                          />
+                        ) : (
+                          <span
+                            onClick={() => startEditTaskCancellationReason(r)}
+                            title="Click to rename"
+                            style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: "var(--navy)", cursor: "pointer" }}
+                          >
+                            {r.name}
+                          </span>
+                        )}
+                        <span className={`status-pill ${r.is_active ? "success" : "neutral"}`} style={{ fontSize: 10 }}>
+                          {r.is_active ? "Active" : "Off"}
+                        </span>
+                        <button onClick={() => toggleTaskCancellationReasonActive(r)} disabled={taskCancellationReasonBusy} title={r.is_active ? "Deactivate" : "Reactivate"} style={iconBtnStyle(r.is_active ? "var(--danger-text)" : "var(--success-text)")}>
+                          {r.is_active ? <ShieldOff size={13} /> : <ShieldCheck size={13} />}
+                        </button>
+                        <button onClick={() => deleteTaskCancellationReason(r)} disabled={taskCancellationReasonBusy} title="Delete (only if unused)" style={iconBtnStyle("var(--danger-text)")}>
                           <Trash2 size={13} />
                         </button>
                       </div>

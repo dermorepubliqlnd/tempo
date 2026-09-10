@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef, Fragment, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, Pin } from "lucide-react";
+import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { InlineText, InlineNumber, InlineSelect, InlineDate, InlineTextArea } from "../components/InlineCell";
+import { CancelTaskDialog } from "../components/CancelTaskDialog";
 import { formatDate } from "../lib/formatDate";
 import { rollupHoursFor, formatHours, type TimeEntryRow } from "../lib/timeTracking";
 import { addDays, buildHolidaySet, isWorkingDay, parseLocalDate, toISO, workingDaysBetween, type HolidaySet } from "../lib/workingDays";
@@ -131,6 +132,10 @@ interface TaskRow {
   // Portfolio Dashboard's Materials Output card + breakdown chart.
   output_type_id: string | null;
   output_count: number | null;
+  // Revived 2026-09-10 alongside the Cancelled status -- see the
+  // TaskRow comment in Projects.tsx for the full rationale; same column,
+  // same reopen_task-clears-it convention.
+  cancellation_reason: string | null;
   is_archived: boolean;
   sort_order: number | null;
 }
@@ -901,6 +906,18 @@ export default function WbsPlanning() {
       .order("sort_order")
       .then(({ data }) => setDeclineReasonOptions(((data as { name: string }[]) ?? []).map((r) => r.name)));
   }, []);
+  // 2026-09-10 (Cancelled task status revived) -- same site-wide,
+  // fetched-once-on-mount pattern as declineReasonOptions above.
+  const [cancellationReasonOptions, setCancellationReasonOptions] = useState<string[]>([]);
+  useEffect(() => {
+    supabase
+      .from("task_cancellation_reasons")
+      .select("name")
+      .eq("is_active", true)
+      .order("sort_order")
+      .then(({ data }) => setCancellationReasonOptions(((data as { name: string }[]) ?? []).map((r) => r.name)));
+  }, []);
+  const [cancelTaskDialogOpen, setCancelTaskDialogOpen] = useState<{ taskId: string; label: string } | null>(null);
   // Reject-dialog state (Sandra: "always put notes as optional then
   // require if others is selected") -- a small custom modal instead of
   // the plain ConfirmDialog since this needs real form fields, not just
@@ -983,7 +1000,7 @@ export default function WbsPlanning() {
       supabase
         .from("tasks")
         .select(
-          "id,project_id,parent_task_id,name,assignee_id,status,start_date,start_date_full,start_date_standard,start_full_auto,start_standard_auto,manual_end_date,current_due_date,estimated_hours,effort,work_type_id,output_type_id,output_count,is_archived,sort_order"
+          "id,project_id,parent_task_id,name,assignee_id,status,start_date,start_date_full,start_date_standard,start_full_auto,start_standard_auto,manual_end_date,current_due_date,estimated_hours,effort,work_type_id,output_type_id,output_count,cancellation_reason,is_archived,sort_order"
         )
         .eq("project_id", projectId)
         .eq("is_archived", false)
@@ -1545,8 +1562,19 @@ export default function WbsPlanning() {
   // in progress yellow arrow, green check if done."
   function statusGlyph(status: string | null) {
     if (status === "Done") return { Icon: CheckCircle2, color: "var(--success-text)", title: "Done" };
+    if (status === "Cancelled") return { Icon: XCircle, color: "var(--danger-text)", title: "Cancelled" };
     if (status === "In Progress") return { Icon: Clock, color: "var(--warning-text)", title: "In Progress" };
     return { Icon: Circle, color: "var(--muted)", title: "Not Started" };
+  }
+
+  // Done AND Cancelled both freeze a task's schedule -- see the scheduler
+  // exclusion + "read-only once stopped" requirement that came with
+  // Cancelled's revival (2026-09-10). Every place that used to special-
+  // case `status === "Done"` for "this task is frozen/out of the
+  // scheduling walk" now goes through this helper instead, so Cancelled
+  // gets identical treatment without hunting down each call site again.
+  function isLockedStatus(status: string | null): boolean {
+    return status === "Done" || status === "Cancelled";
   }
 
   // Same rollup rule as the Projects & Tasks page -- a parent task's own
@@ -1616,7 +1644,7 @@ export default function WbsPlanning() {
       // parents here stops the patch from ever being staged in the first
       // place; this does not affect the normal Done-task edit lock UI,
       // which is enforced separately.
-      if (t.status === "Done") continue;
+      if (isLockedStatus(t.status)) continue;
       const sum = subtaskHoursSum(t.id);
       const minLegacy = subtaskStartMinField(t.id, "start_date");
       const minFull = subtaskStartMinField(t.id, "start_date_full");
@@ -1680,7 +1708,7 @@ export default function WbsPlanning() {
       // Done task's Start is locked server-side, so this dependency
       // auto-pilot effect must never stage a patch for one, even if its
       // live-computed suggested Start still drifts from what's stored.
-      if (t.status === "Done") continue;
+      if (isLockedStatus(t.status)) continue;
       // Scheduling-engine audit (2026-08-31), Fix 2: a PARENT's
       // start_date_full/start_date_standard are owned exclusively by the
       // rollup effect above (min of its children). If this effect ever
@@ -1751,7 +1779,11 @@ export default function WbsPlanning() {
     },
   ];
   const schedAvailability: SchedAvailabilityRow[] = availability.map((a) => ({ person_id: a.person_id, date: a.date, status: a.status }));
-  const isCompleteStatusForSched = (status: string | null) => status === "Done";
+  // Cancelled behaves exactly like Done for scheduling purposes -- dropped
+  // from the forward walk so dependents reflow around it (see the
+  // isLockedStatus helper above for the read-only/frozen-date side of the
+  // same equivalence).
+  const isCompleteStatusForSched = (status: string | null) => status === "Done" || status === "Cancelled";
 
   function buildEffectiveTasksForSched(overrides: StartOverrides): SchedTaskRow[] {
     return [
@@ -1818,7 +1850,7 @@ export default function WbsPlanning() {
     for (const t of tasks) {
       if (hasChildren(t.id)) continue; // parents are derived from children, never queued
       if (!t.assignee_id) continue;
-      if (t.status === "Done") continue;
+      if (isLockedStatus(t.status)) continue;
       if ((t.estimated_hours ?? 0) <= 0) continue;
       const raw = overrides?.get(t.id) ?? (t.start_date_full ? t.start_date_full.slice(0, 10) : null);
       if (!raw) continue;
@@ -1929,7 +1961,7 @@ export default function WbsPlanning() {
     // have, so repurposing it here is zero-migration.
     if (mode === "manual") {
       // Done tasks: dates are historical fact, same as every mode.
-      if (t.status === "Done" && t.current_due_date) {
+      if (isLockedStatus(t.status) && t.current_due_date) {
         const start = (t.start_date_standard ?? t.current_due_date).slice(0, 10);
         const end = t.current_due_date.slice(0, 10);
         const durationDays = workingDaysBetween(parseLocalDate(start), parseLocalDate(end), holidaySet).length;
@@ -1998,7 +2030,7 @@ export default function WbsPlanning() {
       // Capacity-Based: ALWAYS this assignee's whole-queue forward walk
       // (memoized per person) -- read-only, never overridable. Manual
       // (above) is the only mode where a human date can win now.
-      if (t.status === "Done" && t.current_due_date) {
+      if (isLockedStatus(t.status) && t.current_due_date) {
         const end = t.current_due_date.slice(0, 10);
         const start = (t.start_date_standard ?? end).slice(0, 10);
         const durationDays = workingDaysBetween(parseLocalDate(start), parseLocalDate(end), holidaySet).length;
@@ -2722,6 +2754,40 @@ export default function WbsPlanning() {
     loadAll(true);
   }
 
+  // 2026-09-10 (Cancelled task status revived): a non-destructive
+  // alternative to Delete, reachable right next to it -- same "flush
+  // staged edits, then a direct immediate write" pattern as deleteTask
+  // above (a status/lock change is out-of-band, not a field edit staged
+  // for the next Save). Opens the shared reason dialog rather than
+  // writing straight away, same as the Tasks page's cancel action.
+  async function cancelTask(taskId: string, reason: string) {
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    const { error } = await supabase.from("tasks").update({ status: "Cancelled", cancellation_reason: reason, submitted_on: null, submitted_by: null }).eq("id", taskId);
+    if (error) {
+      await alert(`Couldn't cancel: ${error.message}`);
+      return;
+    }
+    setCancelTaskDialogOpen(null);
+    loadAll(true);
+  }
+
+  // Uncancel: exactly reopen_task -- the same RPC Done tasks already use
+  // to reopen, per the spec ("mirror that flow rather than building a
+  // separate one"). It resets status to In Progress and clears
+  // cancellation_reason regardless of whether the task was Done or
+  // Cancelled going in.
+  async function uncancelTask(taskId: string) {
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    const { error } = await supabase.rpc("reopen_task", { p_task_id: taskId });
+    if (error) {
+      await alert(`Couldn't uncancel: ${error.message}`);
+      return;
+    }
+    loadAll(true);
+  }
+
   // Drag-reorder within siblings only -- see draggedTaskId comment above.
   // Purely reassigns sort_order (evenly spaced so future inserts/drags
   // have room); never touches any date field.
@@ -2822,7 +2888,7 @@ export default function WbsPlanning() {
         // Done tasks are historical fact -- Refresh never pushes their
         // Start to follow a predecessor's new End, same reasoning as the
         // Done-lock in computeEntry.
-        if (t.status === "Done") {
+        if (isLockedStatus(t.status)) {
           prevEntry = chain.get(t.id) ?? prevEntry;
           continue;
         }
@@ -3129,7 +3195,7 @@ export default function WbsPlanning() {
         // still computed `chosen` from their (frozen) dates for any
         // downstream dependency math, we just don't write it back; the
         // snapshot/Audit Trail recording below is unaffected either way.
-        if (t.status !== "Done") {
+        if (!isLockedStatus(t.status)) {
           const patch: Partial<TaskRow> = { start_date: chosen.start, current_due_date: chosen.end };
           // Bugfix (2026-08-28, Phase 26): on a STARTED project this
           // write used to fail outright with "current_due_date can only
@@ -4178,6 +4244,13 @@ export default function WbsPlanning() {
   return (
     <div>
       {dialog}
+      <CancelTaskDialog
+        open={Boolean(cancelTaskDialogOpen)}
+        taskLabel={cancelTaskDialogOpen?.label ?? ""}
+        reasons={cancellationReasonOptions}
+        onClose={() => setCancelTaskDialogOpen(null)}
+        onConfirm={(reason) => cancelTaskDialogOpen && cancelTask(cancelTaskDialogOpen.taskId, reason)}
+      />
       {rejectDialogOpen && (
         <div
           onClick={() => setRejectDialogOpen(false)}
@@ -5489,7 +5562,7 @@ export default function WbsPlanning() {
                   // every editable control in this row; the row itself
                   // gets a light gray fill so it visually reads as
                   // locked even while the rest of the table is open.
-                  const rowLocked = t.status === "Done";
+                  const rowLocked = isLockedStatus(t.status);
                   const rowEditable = canEditWbs && !rowLocked;
                   const glyph = statusGlyph(t.status);
                   return (
@@ -5562,6 +5635,29 @@ export default function WbsPlanning() {
                               <Trash2 size={14} />
                             </button>
                           )}
+                          {/* 2026-09-10: Cancel/Uncancel reachable from WBS
+                              too, per spec ("do NOT restrict Cancel to WBS
+                              only" -- the reverse also holds: WBS needs it
+                              as well, not just the Tasks page). Not a full
+                              Status dropdown -- WBS deliberately doesn't
+                              have one (see the Phase 24/governance-
+                              lockdown note elsewhere: Status editing lives
+                              on the Tasks page) -- just this one action,
+                              same "button next to Delete" affordance. */}
+                          {rowEditable && !isParent && (
+                            <button
+                              className="add-subtask-btn"
+                              onClick={() => setCancelTaskDialogOpen({ taskId: t.id, label: `"${t.name}"` })}
+                              title="Cancel task"
+                            >
+                              <XCircle size={14} />
+                            </button>
+                          )}
+                          {canEditWbs && t.status === "Cancelled" && (
+                            <button className="add-subtask-btn" onClick={() => uncancelTask(t.id)} title="Uncancel -- restore to In Progress">
+                              <RefreshCw size={14} />
+                            </button>
+                          )}
                         </div>
                       </td>
                       <td style={{ position: "relative", ...(wbsColStickyStyle("depends_on", true, rowLocked) ?? {}) }}>
@@ -5576,6 +5672,22 @@ export default function WbsPlanning() {
                           onAdd={(depId) => addDependency(t.id, depId)}
                           onRemove={(depId) => removeDependency(t.id, depId)}
                         />
+                        {/* 2026-09-10: non-blocking dependency warning --
+                            cancelling a task never blocks the cancel or
+                            the tasks that depend on it, but a PM should
+                            see at a glance that a dependency now points at
+                            a dead end and probably needs re-linking. Same
+                            small-icon-with-title convention as the rest of
+                            this row (e.g. the status glyph) rather than a
+                            new banner/toast pattern. */}
+                        {dependsOnIds.some((depId) => tasks.find((x) => x.id === depId)?.status === "Cancelled") && (
+                          <span
+                            title="Depends on a cancelled task -- consider re-linking this dependency."
+                            style={{ position: "absolute", top: 2, right: 2, display: "inline-flex", color: "var(--danger-text)" }}
+                          >
+                            <AlertTriangle size={12} />
+                          </span>
+                        )}
                       </td>
                       <td style={wbsColStickyStyle("assignee", true, rowLocked)}>
                         {isParent ? (

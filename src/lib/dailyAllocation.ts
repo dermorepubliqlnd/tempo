@@ -87,7 +87,12 @@ export function parentTaskIdsOf(tasks: { id: string; parent_task_id?: string | n
 }
 
 export function isOpenTask(t: { status: string | null }): boolean {
-  return statusGroupOf(TASK_STATUS_GROUPED, t.status) !== "complete";
+  // A Cancelled task is, from the scheduling engine's point of view,
+  // exactly as "closed" as a Done one -- both stop consuming/blocking
+  // future capacity (see taskHoursOnDateFn's historical-visibility
+  // handling below, which treats the two identically for past days too).
+  const group = statusGroupOf(TASK_STATUS_GROUPED, t.status);
+  return group !== "complete" && group !== "cancelled";
 }
 
 /** Per-person "Off" dates (half-days deliberately excluded: a half-day is a

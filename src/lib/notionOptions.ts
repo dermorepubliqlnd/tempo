@@ -94,10 +94,22 @@ export const PROJECT_STATUS_OPTIONS = ["Not Started", "In Progress", "Completed"
 // Archived/Cancelled as separate "Complete" values, but with the app's own
 // archive/restore system now covering that, a task's own status only needs
 // to track its actual progress).
+//
+// REVIVED 2026-09-10: Cancelled is back as its own 4th group, distinct from
+// "Complete"/Done -- deleting a task (the app's other non-Done-but-stopped
+// option) destroys logged-hours history and breaks dependency references,
+// which turned out to be a real cost once teams started actually cancelling
+// scoped-but-abandoned work. Cancelled is a genuine dead-end, not a
+// completion, so it gets its own bucket rather than being folded into
+// Complete -- statusGroupOf below returns a distinct "cancelled" tag so
+// every caller that branches on "complete" (Timing, Days +/-, the
+// scheduler's isOpenTask, etc.) can tell the two apart instead of treating
+// a cancelled task as if it had actually finished.
 export const TASK_STATUS_GROUPED: OptionGroup[] = [
   { label: "To-do", options: ["Not Started"] },
   { label: "In Progress", options: ["In Progress"] },
   { label: "Complete", options: ["Done"] },
+  { label: "Cancelled", options: ["Cancelled"] },
 ];
 
 function flatten(groups: OptionGroup[]): string[] {
@@ -185,12 +197,13 @@ export const PROJECT_PHASE_TONES: Record<string, string> = {
   Done: "success",
 };
 
-export function statusGroupOf(groups: OptionGroup[], value: string | null): "to_do" | "in_progress" | "complete" | null {
+export function statusGroupOf(groups: OptionGroup[], value: string | null): "to_do" | "in_progress" | "complete" | "cancelled" | null {
   if (!value) return null;
   const idx = groups.findIndex((g) => g.options.includes(value));
   if (idx === 0) return "to_do";
   if (idx === 1) return "in_progress";
   if (idx === 2) return "complete";
+  if (idx === 3) return "cancelled";
   return null;
 }
 

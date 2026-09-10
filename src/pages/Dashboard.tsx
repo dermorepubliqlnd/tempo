@@ -843,6 +843,13 @@ export default function Dashboard() {
     let untypedTentative = 0;
     for (const t of tasks) {
       if (!filteredProjectIds.has(t.project_id)) continue;
+      // 2026-09-10 (Cancelled task status revived): a cancelled task's
+      // Output Count shouldn't count toward Materials Output -- it never
+      // actually produced that material, or its production no longer
+      // matters. Same exemption shape as the parent-row Output
+      // Type/Count gates in WBS Planning (excluded before the rollup
+      // rather than special-cased inside it).
+      if (t.status === "Cancelled") continue;
       const n = t.output_count ?? 0;
       if (n <= 0) continue;
       const isClosed = projectClosedById.get(t.project_id) ?? false;
