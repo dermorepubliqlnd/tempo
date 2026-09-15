@@ -632,7 +632,7 @@ export default function DataTable<T>({
                   style={{
                     fontWeight: 600,
                     color: resolvedTone?.text ?? "var(--navy)",
-                    background: "var(--bg)",
+                    background: "var(--surface)",
                     cursor: "pointer",
                   }}
                 >
@@ -700,7 +700,7 @@ export default function DataTable<T>({
                             fontWeight: 500,
                             fontSize: "0.93em",
                             color: resolvedSubTone?.text ?? "var(--muted)",
-                            background: "var(--hover-bg)",
+                            background: "var(--surface)",
                             cursor: "pointer",
                           }}
                         >
