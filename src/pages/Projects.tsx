@@ -2519,7 +2519,18 @@ export default function Projects() {
         maxWidth: 130,
         render: (p) => {
           const total = projectSpentHoursTotal(p.id, tasks, timeEntries, deletedSpentHours);
-          return <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatHours(total)}</span>;
+          return (
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/time-tracking?project=${p.id}`);
+              }}
+              title="View time log entries for this project"
+              style={{ fontVariantNumeric: "tabular-nums", color: "var(--accent)", cursor: "pointer" }}
+            >
+              {formatHours(total)}
+            </span>
+          );
         },
       },
       {
