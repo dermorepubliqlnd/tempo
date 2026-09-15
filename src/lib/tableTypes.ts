@@ -53,6 +53,14 @@ export interface GroupOption<T> {
   // group's header row so it visually matches the pill color it's grouped
   // by (e.g. grouping by Status colors each header like its status pill).
   getTone?: (row: T) => string;
+  // 2026-09-15 (Sandra: hyperlink the Tasks table's "Project" group
+  // header/sub-header to that project's WBS page, same as the
+  // Projects list already does for a project name): optional so
+  // most groupings (Status, Owner, Phase, ...) render as plain text
+  // headers exactly as before -- only a GroupOption that supplies
+  // this (currently just Tasks' "Project" option) gets a clickable
+  // label in DataTable's group/sub-group header row.
+  getLink?: (row: T) => string | null | undefined;
   // False for properties that can't sensibly become Kanban columns (free
   // text, dates, computed percentages) -- shown in the Group-by dropdown
   // but disabled/greyed rather than omitted, so users can see *why* a
