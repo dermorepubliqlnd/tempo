@@ -4429,6 +4429,13 @@ export default function Projects() {
       : projectViews.activeView.groupBy;
   const projectTimelineGroupOption =
     projectGroupMode === "timeline" ? projectBoardGroupOptions.find((g) => g.key === projectResolvedGroupBy) : undefined;
+  // Sandra, 2026-09-15 ("2-tier grouping ... group by project owner and
+  // by project at the same time in the task view"): second-level
+  // grouping, Table view only -- Board/Calendar/Timeline structurally
+  // can't nest two facets, so this resolves to null outside Table the
+  // same way projectResolvedGroupBy resolves to null on Calendar above.
+  const projectResolvedGroupBy2 =
+    projectGroupMode || projectViews.activeView.viewType === "calendar" ? null : projectViews.activeView.groupBy2 ?? null;
 
   const taskGroupMode: "board" | "timeline" | undefined =
     taskViews.activeView.viewType === "board" ? "board" : taskViews.activeView.viewType === "timeline" ? "timeline" : undefined;
@@ -4443,6 +4450,12 @@ export default function Projects() {
       : taskViews.activeView.groupBy;
   const taskTimelineGroupOption =
     taskGroupMode === "timeline" ? taskBoardGroupOptions.find((g) => g.key === taskResolvedGroupBy) : undefined;
+  // Sandra, 2026-09-15 ("2-tier grouping ... group by project owner and
+  // by project at the same time in the task view"): second-level
+  // grouping, Table view only, same rationale as projectResolvedGroupBy2
+  // above.
+  const taskResolvedGroupBy2 =
+    taskGroupMode || taskViews.activeView.viewType === "calendar" ? null : taskViews.activeView.groupBy2 ?? null;
 
   // Timeline chips: curated per Sandra's Projects-Timeline spec. Name is
   // never a chip (it's the label itself); Actual Progress is never a chip
@@ -4609,8 +4622,10 @@ export default function Projects() {
               onColumnOrderChange={(columnOrder) => projectViews.updateActiveView({ columnOrder })}
               groupOptions={projectGroupModeOptions}
               groupBy={projectResolvedGroupBy}
+              groupBy2={projectResolvedGroupBy2}
               hiddenGroups={projectViews.activeView.hiddenGroups}
               onGroupByChange={(groupBy) => projectViews.updateActiveView({ groupBy, hiddenGroups: [] })}
+              onGroupBy2Change={(groupBy2) => projectViews.updateActiveView({ groupBy2 })}
               onHiddenGroupsChange={(hiddenGroups) => projectViews.updateActiveView({ hiddenGroups })}
               showCount={projectViews.activeView.showCount}
               onShowCountChange={(showCount) => projectViews.updateActiveView({ showCount })}
@@ -4651,6 +4666,8 @@ export default function Projects() {
         <ViewFilterPills
           groupOptions={projectGroupModeOptions}
           groupBy={projectResolvedGroupBy}
+          groupBy2={projectResolvedGroupBy2}
+          onGroupBy2Change={(groupBy2) => projectViews.updateActiveView({ groupBy2 })}
           hiddenGroups={projectViews.activeView.hiddenGroups}
           onGroupByChange={(groupBy) => projectViews.updateActiveView({ groupBy, hiddenGroups: [] })}
           onHiddenGroupsChange={(hiddenGroups) => projectViews.updateActiveView({ hiddenGroups })}
@@ -4901,8 +4918,10 @@ export default function Projects() {
               onColumnOrderChange={(columnOrder) => taskViews.updateActiveView({ columnOrder })}
               groupOptions={taskGroupModeOptions}
               groupBy={taskResolvedGroupBy}
+              groupBy2={taskResolvedGroupBy2}
               hiddenGroups={taskViews.activeView.hiddenGroups}
               onGroupByChange={(groupBy) => taskViews.updateActiveView({ groupBy, hiddenGroups: [] })}
+              onGroupBy2Change={(groupBy2) => taskViews.updateActiveView({ groupBy2 })}
               onHiddenGroupsChange={(hiddenGroups) => taskViews.updateActiveView({ hiddenGroups })}
               showCount={taskViews.activeView.showCount}
               onShowCountChange={(showCount) => taskViews.updateActiveView({ showCount })}
@@ -4943,6 +4962,8 @@ export default function Projects() {
         <ViewFilterPills
           groupOptions={taskGroupModeOptions}
           groupBy={taskResolvedGroupBy}
+          groupBy2={taskResolvedGroupBy2}
+          onGroupBy2Change={(groupBy2) => taskViews.updateActiveView({ groupBy2 })}
           hiddenGroups={taskViews.activeView.hiddenGroups}
           onGroupByChange={(groupBy) => taskViews.updateActiveView({ groupBy, hiddenGroups: [] })}
           onHiddenGroupsChange={(hiddenGroups) => taskViews.updateActiveView({ hiddenGroups })}
