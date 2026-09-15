@@ -293,6 +293,17 @@ export default function DataTable<T>({
   }
 
   const activeGroupOption = groupOptions?.find((g) => g.key === view.groupBy);
+  // Sandra, 2026-09-15 ("2-tier grouping"): an optional second-level
+  // grouping, nested inside each top-level group's section as its own
+  // set of sub-headers. Only meaningful once a primary grouping is
+  // active, and only when it names a different field than the primary
+  // (grouping twice by the same property would just produce one
+  // subgroup per group containing everything -- not useful, and cheap
+  // to guard against here).
+  const activeGroupOption2 =
+    activeGroupOption && view.groupBy2 && view.groupBy2 !== activeGroupOption.key
+      ? groupOptions?.find((g) => g.key === view.groupBy2)
+      : undefined;
   const sortedRows = useMemo(() => {
     if (!sortOptions || !view.sorts?.length) return rows;
     return getParentId
@@ -587,6 +598,24 @@ export default function DataTable<T>({
           // actually has a row to derive it from.
           const groupTone = groupRows.length > 0 ? activeGroupOption?.getTone?.(groupRows[0]) : undefined;
           const resolvedTone = resolveTone(groupTone);
+          // Sandra, 2026-09-15 ("2-tier grouping"): partition this
+          // group's own rows into sub-groups the same way the top level
+          // was partitioned, using the same GROUP_EXCLUDE/"—" fallback
+          // conventions. null (not an empty array) means "no second
+          // level active", so the render below can tell "grouped into
+          // one sub-section" apart from "not sub-grouped at all".
+          let subgroups: [string, T[]][] | null = null;
+          if (activeGroupOption2) {
+            const subMap = new Map<string, T[]>();
+            groupRows.forEach((row) => {
+              const rawSub = activeGroupOption2!.getGroup(row);
+              if (rawSub === GROUP_EXCLUDE) return;
+              const sg = rawSub || "—";
+              if (!subMap.has(sg)) subMap.set(sg, []);
+              subMap.get(sg)!.push(row);
+            });
+            subgroups = Array.from(subMap.entries());
+          }
           return (
             <Fragment key={`group_${groupName}`}>
               <tr className="data-table-group-row" onClick={() => toggleGroup(groupName)}>
@@ -630,7 +659,46 @@ export default function DataTable<T>({
                   </span>
                 </td>
               </tr>
-              {!collapsed && groupRows.map((row) => renderRow(row))}
+              {!collapsed && !subgroups && groupRows.map((row) => renderRow(row))}
+              {!collapsed &&
+                subgroups &&
+                subgroups.map(([subName, subRows]) => {
+                  const subKey = `${groupName}::${subName}`;
+                  const subCollapsed = collapsedGroups.includes(subKey);
+                  const subTone = subRows.length > 0 ? activeGroupOption2!.getTone?.(subRows[0]) : undefined;
+                  const resolvedSubTone = resolveTone(subTone);
+                  return (
+                    <Fragment key={`subgroup_${subKey}`}>
+                      <tr className="data-table-group-row data-table-subgroup-row" onClick={() => toggleGroup(subKey)}>
+                        <td
+                          colSpan={colSpanTotal}
+                          style={{
+                            fontWeight: 500,
+                            fontSize: "0.93em",
+                            color: resolvedSubTone?.text ?? "var(--muted)",
+                            background: resolvedSubTone?.bg ?? "var(--hover-bg)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              position: "sticky",
+                              left: (hasGutter ? gutterWidth : 0) + 10 + 18,
+                            }}
+                          >
+                            {subCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                            {subName}
+                            <span style={{ opacity: 0.7, fontWeight: 400 }}>({subRows.length})</span>
+                          </span>
+                        </td>
+                      </tr>
+                      {!subCollapsed && subRows.map((row) => renderRow(row))}
+                    </Fragment>
+                  );
+                })}
               {!collapsed && groupFooterRow && (
                 <tr>{groupFooterRow(colSpanTotal, { key: groupName, rows: groupRows })}</tr>
               )}
