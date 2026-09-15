@@ -52,6 +52,7 @@ interface DataTableProps<T> {
   // the Grouped by/Sorted by pills. Falls back to the old standalone row
   // when omitted -- no caller is forced to wire this up.
   collapseAllContainer?: HTMLElement | null;
+  maxBodyHeight?: string;
 }
 
 // ~1.3cm at 96dpi -- narrow enough for icon-only columns, but still a
@@ -92,6 +93,7 @@ export default function DataTable<T>({
   compactGutter,
   onReorder,
   collapseAllContainer,
+  maxBodyHeight,
 }: DataTableProps<T>) {
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dragRowKey, setDragRowKey] = useState<string | null>(null);
@@ -360,9 +362,11 @@ export default function DataTable<T>({
               minWidth: gutterWidth,
               maxWidth: gutterWidth,
               padding: 0,
-              position: frozenUpToIndex >= 0 ? "sticky" : undefined,
+              position: maxBodyHeight || frozenUpToIndex >= 0 ? "sticky" : undefined,
+              top: maxBodyHeight ? 0 : undefined,
               left: frozenUpToIndex >= 0 ? 0 : undefined,
-              zIndex: frozenUpToIndex >= 0 ? 3 : undefined,
+              zIndex: maxBodyHeight ? 5 : frozenUpToIndex >= 0 ? 3 : undefined,
+              background: maxBodyHeight && frozenUpToIndex < 0 ? "var(--surface)" : undefined,
             }}
           />
         )}
@@ -389,9 +393,11 @@ export default function DataTable<T>({
             }}
             className={isFrozen ? "data-table-frozen-cell" : undefined}
             style={{
-              position: isFrozen ? "sticky" : "relative",
+              position: maxBodyHeight || isFrozen ? "sticky" : "relative",
+              top: maxBodyHeight ? 0 : undefined,
               left: isFrozen ? frozenLeft : undefined,
-              zIndex: isFrozen ? 2 : undefined,
+              zIndex: maxBodyHeight ? (isFrozen ? 4 : 3) : isFrozen ? 2 : undefined,
+              background: maxBodyHeight && !isFrozen ? "var(--surface)" : undefined,
               boxShadow: isLastFrozen ? "2px 0 6px -2px rgba(0,0,0,0.18)" : undefined,
               width: displayWidth(c.key),
               maxWidth: displayWidth(c.key),
@@ -740,7 +746,7 @@ export default function DataTable<T>({
         ) : (
           <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 2px 4px" }}>{collapseAllButton}</div>
         ))}
-      <div style={{ width: "100%", overflowX: "auto", overflowY: "visible" }}>
+      <div style={{ width: "100%", overflowX: "auto", overflowY: maxBodyHeight ? "auto" : "visible", maxHeight: maxBodyHeight }}>
         <table className="data-table" style={{ tableLayout: "fixed", width: totalWidth }}>
           {header}
           {body}
