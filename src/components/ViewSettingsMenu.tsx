@@ -19,6 +19,14 @@ interface ViewControlsProps<T> {
   groupBy: string | null;
   hiddenGroups: string[];
   onGroupByChange: (key: string | null) => void;
+  // Sandra, 2026-09-15 ("2-tier grouping ... group by project owner and
+  // by project at the same time in the task view"): an optional second
+  // grouping level, Table-view only (Board/Calendar/Timeline
+  // structurally can't nest two facets -- see the `!groupMode` guard
+  // where this renders below). Both optional so a caller that hasn't
+  // been updated yet just doesn't get the "Then by" control.
+  groupBy2?: string | null;
+  onGroupBy2Change?: (key: string | null) => void;
   onHiddenGroupsChange: (hidden: string[]) => void;
   showCount: boolean;
   onShowCountChange: (value: boolean) => void;
@@ -229,8 +237,10 @@ export default function ViewSettingsMenu<T>({
   onColumnOrderChange,
   groupOptions,
   groupBy,
+  groupBy2,
   hiddenGroups,
   onGroupByChange,
+  onGroupBy2Change,
   onHiddenGroupsChange,
   showCount,
   onShowCountChange,
@@ -487,6 +497,34 @@ export default function ViewSettingsMenu<T>({
               })}
             </select>
 
+            {!groupMode && activeOption && (
+              <>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3, color: "var(--muted)", marginBottom: 4 }}>
+                  Then by
+                </div>
+                <select
+                  value={groupBy2 ?? ""}
+                  onChange={(e) => onGroupBy2Change?.(e.target.value || null)}
+                  style={{
+                    width: "100%",
+                    fontSize: 11.5,
+                    padding: "5px 6px",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-sm)",
+                    marginBottom: 8,
+                  }}
+                >
+                  <option value="">No sub-grouping</option>
+                  {groupOptions
+                    .filter((g) => g.key !== groupBy)
+                    .map((g) => (
+                      <option key={g.key} value={g.key}>
+                        {g.label}
+                      </option>
+                    ))}
+                </select>
+              </>
+            )}
             {activeOption && groupValues.length > 0 && (
               <>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
@@ -743,6 +781,8 @@ export default function ViewSettingsMenu<T>({
 export function ViewFilterPills<T>({
   groupOptions,
   groupBy,
+  groupBy2,
+  onGroupBy2Change,
   hiddenGroups,
   onGroupByChange,
   onHiddenGroupsChange,
@@ -758,6 +798,8 @@ export function ViewFilterPills<T>({
 }: {
   groupOptions: GroupOption<T>[];
   groupBy: string | null;
+  groupBy2?: string | null;
+  onGroupBy2Change?: (key: string | null) => void;
   hiddenGroups: string[];
   onGroupByChange: (key: string | null) => void;
   onHiddenGroupsChange: (hidden: string[]) => void;
@@ -815,6 +857,16 @@ export function ViewFilterPills<T>({
                 onHiddenGroupsChange([]);
               }}
             >
+              <X size={11} />
+            </button>
+          )}
+        </span>
+      )}
+      {activeOption && groupBy2 && (
+        <span className="filter-pill">
+          Then by {groupOptions.find((g) => g.key === groupBy2)?.label ?? groupBy2}
+          {onGroupBy2Change && (
+            <button title="Clear sub-grouping" onClick={() => onGroupBy2Change(null)}>
               <X size={11} />
             </button>
           )}
