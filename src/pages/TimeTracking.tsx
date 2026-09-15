@@ -5,6 +5,7 @@ import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
 import { formatDuration, submitManualTimeEntry, decideTimeEntry, correctTimeEntry } from "../lib/timeTracking";
+import { useSearchParams } from "react-router-dom";
 
 interface PersonLite {
   id: string;
@@ -76,6 +77,25 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 const SOURCE_LABEL: Record<string, string> = { timer: "Timer", manual: "Manual", legacy: "Legacy" };
+
+// 2026-09-15 (Sandra: "I want to see the date and time when logs were
+// logged especially for the manual time entries") -- formatDate() only
+// ever renders the date part (see formatDate.ts), so a separate
+// date+time formatter is needed for created_at (when the ROW was
+// inserted -- i.e. when the person actually made the log entry) as
+// distinct from started_at/ended_at (the WORK period the entry covers).
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return value;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 // Small searchable combobox (Sandra, 2026-08-26: "allow project selection
 // in the time tracker then next will be task... allow search too for both
@@ -184,6 +204,8 @@ function toTimeInputValue(d = new Date()): string {
 
 export default function TimeTracking() {
   const { person: me } = useSession();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filterProjectId = searchParams.get("project") || "";
   const { confirm, alert, dialog: confirmDialog } = useConfirm();
   const [entries, setEntries] = useState<EntryRow[]>([]);
   const [people, setPeople] = useState<PersonLite[]>([]);
@@ -368,9 +390,27 @@ export default function TimeTracking() {
 
   const personName = (id: string | null) => people.find((p) => p.id === id)?.name ?? "—";
 
-  const pendingForMe = entries.filter((e) => e.status === "pending_approval" && canDecide(e));
-  const mine = entries.filter((e) => e.person_id === me?.id && !pendingForMe.includes(e));
-  const rest = entries.filter((e) => !pendingForMe.includes(e) && e.person_id !== me?.id);
+  // 2026-09-15 (Sandra: "add a filter by project in time tracking") --
+  // narrows all three sections (Needs your decision / My entries / Team)
+  // down to one project at a time. Reads/writes the ?project= URL param
+  // so a link from elsewhere (e.g. Projects table's Spent Hrs cell) can
+  // land here pre-filtered, and the filter stays bookmarkable/shareable.
+  const entryProjectOptions = (() => {
+    const seen = new Map<string, string>();
+    for (const e of entries) {
+      const proj = e.task?.project;
+      if (proj && !seen.has(proj.id)) seen.set(proj.id, proj.name);
+    }
+    return Array.from(seen.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  })();
+  const filteredEntries = filterProjectId
+    ? entries.filter((e) => e.task?.project?.id === filterProjectId)
+    : entries;
+  const pendingForMe = filteredEntries.filter((e) => e.status === "pending_approval" && canDecide(e));
+  const mine = filteredEntries.filter((e) => e.person_id === me?.id && !pendingForMe.includes(e));
+  const rest = filteredEntries.filter((e) => !pendingForMe.includes(e) && e.person_id !== me?.id);
 
   function EntriesTable({ rows, showDecideActions }: { rows: EntryRow[]; showDecideActions: boolean }) {
     if (rows.length === 0) return null;
@@ -445,6 +485,11 @@ export default function TimeTracking() {
                         {formatDate(row.started_at)} -- {row.ended_at ? formatDate(row.ended_at) : "in progress"}
                         {row.auto_stopped && " (auto-stopped after being idle)"}
                       </div>
+                      {row.source === "manual" && (
+                        <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
+                          Logged on {formatDateTime(row.created_at)}
+                        </div>
+                      )}
                       {row.status !== "pending_approval" && row.status !== "running" && row.status !== "pending_confirm" && row.decided_by && (
                         <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 4 }}>
                           {STATUS_LABEL[row.status]} by {personName(row.decided_by)} on {formatDate(row.decided_at)}
@@ -763,7 +808,28 @@ export default function TimeTracking() {
         <div style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>
       ) : (
         <>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>Filter by project</span>
+            <div style={{ width: 220 }}>
+              <SearchSelect
+                placeholder="All projects"
+                value={filterProjectId}
+                onChange={(id) => setSearchParams(id ? { project: id } : {})}
+                options={entryProjectOptions}
+              />
+            </div>
+            {filterProjectId && (
+              <button
+                onClick={() => setSearchParams({})}
+                title="Clear project filter"
+                style={{ fontSize: 11, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, marginBottom: 8 }}>
             <Clock size={14} color="var(--warning-text)" />
             <h2 style={{ margin: 0, fontSize: 13 }}>Needs your decision ({pendingForMe.length})</h2>
           </div>
