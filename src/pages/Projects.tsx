@@ -182,6 +182,12 @@ export interface ProjectRow {
   wbs_status: WbsStatus;
   project_number: number;
   created_at: string;
+  // 2026-09-15 (Sandra: "on hover on project name can we show the
+  // project description please"): WbsPlanning.tsx's own ProjectRow
+  // already has this column; this file keeps a separate/narrower local
+  // ProjectRow interface, so it needs the field added here too for the
+  // project-name button's title={p.description || ...} to type-check.
+  description: string | null;
 }
 
 export interface TaskRow {
