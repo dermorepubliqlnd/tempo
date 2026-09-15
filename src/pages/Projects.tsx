@@ -4861,6 +4861,7 @@ export default function Projects() {
               groupOptions={projectGroupOptions}
               sortOptions={projectSortOptions}
               collapseAllContainer={projectPillsRowEl}
+              maxBodyHeight={`max(300px, calc(100vh - ${Math.round(projectClusterHeight)}px - 260px))`}
               emptyLabel="No projects yet. Add one below."
               selectable
               selectedKeys={selectedProjectIds}
@@ -5083,6 +5084,7 @@ export default function Projects() {
               groupOptions={taskGroupOptions}
               sortOptions={taskSortOptions}
               collapseAllContainer={taskPillsRowEl}
+              maxBodyHeight={`max(300px, calc(100vh - ${Math.round(taskClusterHeight)}px - 260px))`}
               emptyLabel="No tasks yet. Add tasks from WBS Planning."
               compactGutter
               selectable
