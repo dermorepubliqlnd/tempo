@@ -663,7 +663,7 @@ export default function DataTable<T>({
                   >
                     {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                     {(() => {
-                      const groupLink = activeGroupOption?.getLink?.(groupRows[0]);
+                      const groupLink = groupRows[0] ? activeGroupOption?.getLink?.(groupRows[0]) : null;
                       return groupLink ? (
                         <span
                           onClick={(e) => {
@@ -715,7 +715,7 @@ export default function DataTable<T>({
                           >
                             {subCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
                             {(() => {
-                              const subLink = activeGroupOption2?.getLink?.(subRows[0]);
+                              const subLink = subRows[0] ? activeGroupOption2?.getLink?.(subRows[0]) : null;
                               return subLink ? (
                                 <span
                                   onClick={(e) => {
