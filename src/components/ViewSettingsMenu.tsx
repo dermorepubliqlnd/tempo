@@ -849,24 +849,20 @@ export function ViewFilterPills<T>({
       {activeOption && (
         <span className="filter-pill">
           Grouped by {activeOption.label}
+          {groupBy2 && (
+            <>
+              {" "}› Then by {groupOptions.find((g) => g.key === groupBy2)?.label ?? groupBy2}
+            </>
+          )}
           {groupMode !== "board" && (
             <button
               title="Clear grouping"
               onClick={() => {
                 onGroupByChange(null);
                 onHiddenGroupsChange([]);
+                if (onGroupBy2Change) onGroupBy2Change(null);
               }}
             >
-              <X size={11} />
-            </button>
-          )}
-        </span>
-      )}
-      {activeOption && groupBy2 && (
-        <span className="filter-pill">
-          Then by {groupOptions.find((g) => g.key === groupBy2)?.label ?? groupBy2}
-          {onGroupBy2Change && (
-            <button title="Clear sub-grouping" onClick={() => onGroupBy2Change(null)}>
               <X size={11} />
             </button>
           )}
