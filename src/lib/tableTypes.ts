@@ -214,6 +214,16 @@ export interface TableView {
   hiddenColumns: string[];
   columnWidths: Record<string, number>;
   groupBy: string | null;
+  // Sandra, 2026-09-15 ("2-tier grouping ... group by project owner and
+  // by project at the same time in the task view"): an optional second
+  // grouping level. Applied only within Table view (Board/Calendar/
+  // Timeline structurally can't nest two facets) and only once a
+  // primary groupBy is set -- see the ViewSettingsMenu "Then by" picker
+  // and DataTable's nested sub-group render. Optional/fallback-safe like
+  // every other field added after initial ship: undefined/null both
+  // mean "no sub-grouping", so every already-saved view keeps rendering
+  // exactly as before.
+  groupBy2?: string | null;
   hiddenGroups: string[];
   color: string;
   showCount: boolean;
