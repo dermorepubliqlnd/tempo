@@ -2223,7 +2223,7 @@ export default function Projects() {
                   e.stopPropagation();
                   navigate(`/projects/${p.id}/wbs`);
                 }}
-                title="Open this project's WBS page (name and owner are edited there)"
+                title={p.description || "Open this project's WBS page (name and owner are edited there)"}
                 style={{
                   flex: 1,
                   minWidth: 0,
@@ -4081,6 +4081,11 @@ export default function Projects() {
       key: "project",
       label: "Project",
       getGroup: (t) => projectName(t.project_id),
+      // 2026-09-15 (Sandra: "when grouped in the task list can it be
+      // hyperlinked to the WBS too, same function as how it is now in
+      // the projects list"): lets DataTable's group/sub-group header
+      // render the project name as a clickable link to its WBS page.
+      getLink: (t) => `/projects/${t.project_id}/wbs`,
       // 2026-09-03 (Sandra: "when grouping by project can the header
       // follow the same colors assigned to the project... base it from
       // the category colors, light version not the text color" -- there's
