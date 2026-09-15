@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronRight, GripVertical, Pin, PinOff } from "lucide-react";
 import type { ColumnDef, GroupOption, SortOption, TableView } from "../lib/tableTypes";
 import { GROUP_EXCLUDE } from "../lib/tableTypes";
@@ -95,6 +96,7 @@ export default function DataTable<T>({
   collapseAllContainer,
   maxBodyHeight,
 }: DataTableProps<T>) {
+  const navigate = useNavigate();
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dragRowKey, setDragRowKey] = useState<string | null>(null);
   const lastSelectedKeyRef = useRef<string | null>(null);
@@ -630,7 +632,7 @@ export default function DataTable<T>({
                   style={{
                     fontWeight: 600,
                     color: resolvedTone?.text ?? "var(--navy)",
-                    background: resolvedTone?.bg ?? "var(--bg)",
+                    background: "var(--bg)",
                     cursor: "pointer",
                   }}
                 >
@@ -660,7 +662,23 @@ export default function DataTable<T>({
                     }}
                   >
                     {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-                    {groupName}
+                    {(() => {
+                      const groupLink = activeGroupOption?.getLink?.(groupRows[0]);
+                      return groupLink ? (
+                        <span
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(groupLink);
+                          }}
+                          style={{ color: "var(--accent)", cursor: "pointer" }}
+                          title="Open this project's WBS page"
+                        >
+                          {groupName}
+                        </span>
+                      ) : (
+                        groupName
+                      );
+                    })()}
                     <span style={{ opacity: 0.7, fontWeight: 400 }}>({groupRows.length})</span>
                   </span>
                 </td>
@@ -682,7 +700,7 @@ export default function DataTable<T>({
                             fontWeight: 500,
                             fontSize: "0.93em",
                             color: resolvedSubTone?.text ?? "var(--muted)",
-                            background: resolvedSubTone?.bg ?? "var(--hover-bg)",
+                            background: "var(--hover-bg)",
                             cursor: "pointer",
                           }}
                         >
@@ -696,7 +714,23 @@ export default function DataTable<T>({
                             }}
                           >
                             {subCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-                            {subName}
+                            {(() => {
+                              const subLink = activeGroupOption2?.getLink?.(subRows[0]);
+                              return subLink ? (
+                                <span
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(subLink);
+                                  }}
+                                  style={{ color: "var(--accent)", cursor: "pointer" }}
+                                  title="Open this project's WBS page"
+                                >
+                                  {subName}
+                                </span>
+                              ) : (
+                                subName
+                              );
+                            })()}
                             <span style={{ opacity: 0.7, fontWeight: 400 }}>({subRows.length})</span>
                           </span>
                         </td>
