@@ -14,6 +14,7 @@ interface PersonRow {
   name: string;
   daily_capacity_hours: number;
   is_active: boolean;
+  job_title?: string | null;
 }
 interface ProjectRow {
   id: string;
@@ -234,8 +235,8 @@ export default function Utilization() {
   async function loadAll() {
     setLoading(true);
     const [{ data: p }, { data: ap }, { data: pr }, { data: tk }, { data: av }, { data: hol }, { data: wts }, { data: ownHist }, { data: assHist }, { data: delHrs }, { data: settings }] = await Promise.all([
-      supabase.from("people").select("id,name,daily_capacity_hours,is_active").eq("is_active", true).order("name"),
-      supabase.from("people").select("id,name,daily_capacity_hours,is_active").order("name"),
+      supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").eq("is_active", true).order("name"),
+      supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").order("name"),
       supabase.from("projects").select("id,name,owner_id,start_date,end_date,wbs_status").eq("is_archived", false),
       supabase.from("tasks").select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,sort_order,work_type_id").eq("is_archived", false),
       supabase.from("person_availability").select("*"),
@@ -814,7 +815,15 @@ export default function Utilization() {
                         >
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                             {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                            {person.name}
+                            <span>
+                              {person.name}
+                              {person.job_title && (
+                                <>
+                                  <br />
+                                  <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 11 }}>{person.job_title}</span>
+                                </>
+                              )}
+                            </span>
                           </span>
                         </td>
                         {viewMode === "daily"
