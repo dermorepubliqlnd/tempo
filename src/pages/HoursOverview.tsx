@@ -42,6 +42,7 @@ interface PersonRow {
   name: string;
   daily_capacity_hours: number;
   is_active: boolean;
+  job_title?: string | null;
 }
 interface ProjectRow {
   id: string;
@@ -115,6 +116,21 @@ function toneColors(tone: "neutral" | "success" | "warning" | "danger"): { bg?: 
   return { fg: "var(--muted)" };
 }
 
+// Daily Activity color coding (2026-09-18, Sandra: "just show the actual
+// hours logged daily... color code based on a 7.5 shift, lower be green
+// higher be red") -- replaces the scoped-vs-logged coverage ratio for this
+// view only (Scope Fulfillment keeps coverageTone/toneColors above, since
+// it's still comparing logged against scoped). A standard 7.5h shift is
+// the reference point: at/under a full shift is green, moderately over is
+// amber, well over is red.
+function hoursShiftTone(hours: number): "neutral" | "success" | "warning" | "danger" {
+  if (hours <= 0) return "neutral";
+  const ratio = hours / 7.5;
+  if (ratio <= 1) return "success";
+  if (ratio <= 1.33) return "warning";
+  return "danger";
+}
+
 export default function HoursOverview() {
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -151,6 +167,10 @@ export default function HoursOverview() {
   const [personFilter, setPersonFilter] = useState<Set<string> | null>(null);
   const [personFilterOpen, setPersonFilterOpen] = useState(false);
   const [personFilterSearch, setPersonFilterSearch] = useState("");
+  // Role filter (2026-09-18, Sandra: "add role at the bottom of the name
+  // and filter by roles also same as utilization") -- same job_title field
+  // and pattern as Utilization.tsx's role filter.
+  const [roleFilter, setRoleFilter] = useState<string | null>(null);
   // 2026-09-03 (Sandra: retain deactivated people's data, but let me
   // choose active-only vs show-all in the view). Deactivated people's
   // logged/scoped hours were never deleted -- this only controls
@@ -163,8 +183,8 @@ export default function HoursOverview() {
     setLoading(true);
     const [{ data: p }, { data: ap }, { data: pr }, { data: tk }, { data: te }, { data: hol }, { data: av }, { data: ownHist }, { data: assHist }, { data: delHrs }, { data: settings }] =
       await Promise.all([
-        supabase.from("people").select("id,name,daily_capacity_hours,is_active").eq("is_active", true).order("name"),
-        supabase.from("people").select("id,name,daily_capacity_hours,is_active").order("name"),
+        supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").eq("is_active", true).order("name"),
+        supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").order("name"),
         supabase.from("projects").select("id,name,is_archived,owner_id,start_date,end_date,wbs_status").eq("is_archived", false),
         supabase
           .from("tasks")
@@ -280,7 +300,13 @@ export default function HoursOverview() {
   }, [days]);
 
   const scopedPeople = showAllPeople ? allPeople : people;
-  const visiblePeople = personFilter ? scopedPeople.filter((p) => personFilter.has(p.id)) : scopedPeople;
+  const roleOptions = useMemo(
+    () => Array.from(new Set(allPeople.map((p) => p.job_title).filter((r): r is string => !!r))).sort((a, b) => a.localeCompare(b)),
+    [allPeople]
+  );
+  const visiblePeople = scopedPeople
+    .filter((p) => !personFilter || personFilter.has(p.id))
+    .filter((p) => !roleFilter || p.job_title === roleFilter);
 
   const holidayByDate = useMemo(() => {
     const m = new Map<string, HolidayRow>();
@@ -635,6 +661,21 @@ export default function HoursOverview() {
               <option value="active">Active team members only</option>
               <option value="all">Show all (incl. deactivated)</option>
             </select>
+            {roleOptions.length > 0 && (
+              <select
+                value={roleFilter ?? "__all__"}
+                onChange={(e) => setRoleFilter(e.target.value === "__all__" ? null : e.target.value)}
+                title="Filter by role"
+                style={{ fontSize: 12, padding: "4px 6px" }}
+              >
+                <option value="__all__">All roles</option>
+                {roleOptions.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div ref={gridScrollRef} style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
@@ -707,7 +748,13 @@ export default function HoursOverview() {
                 {visiblePeople.length === 0 ? (
                   <tr>
                     <td colSpan={1 + days.length} style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>
-                      {showAllPeople ? "No team members found." : "No active team members found."}
+                      {personFilter && personFilter.size === 0
+                        ? "No team members selected."
+                        : roleFilter
+                        ? `No team members with the role "${roleFilter}".`
+                        : showAllPeople
+                        ? "No team members found."
+                        : "No active team members found."}
                     </td>
                   </tr>
                 ) : (
@@ -736,7 +783,15 @@ export default function HoursOverview() {
                             >
                               <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                                 {isExpanded ? <ChevronDown size={12} /> : <ChevronRightIcon size={12} />}
-                                {person.name}
+                                <span>
+                                  {person.name}
+                                  {person.job_title && (
+                                    <>
+                                      <br />
+                                      <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 11 }}>{person.job_title}</span>
+                                    </>
+                                  )}
+                                </span>
                               </span>
                             </td>
                             {days.map((d, i) => {
@@ -766,12 +821,19 @@ export default function HoursOverview() {
                                   </td>
                                 );
                               }
-                              const tone = coverageTone(scoped, logged);
+                              // Daily Activity (2026-09-18, Sandra): show
+                              // only the actual logged hours here, color
+                              // coded against a 7.5h shift -- not the
+                              // scoped-vs-logged coverage ratio. Scope
+                              // Fulfillment is untouched and still compares
+                              // logged against scoped.
+                              const tone = view === "grid" ? hoursShiftTone(logged) : coverageTone(scoped, logged);
                               const colors = toneColors(tone);
-                              const bg = scoped === 0 && logged === 0 ? (weekend || isHoliday ? "var(--hover-bg)" : undefined) : colors.bg;
+                              const hasValue = view === "grid" ? logged > 0 : scoped > 0 || logged > 0;
+                              const bg = !hasValue ? (weekend || isHoliday ? "var(--hover-bg)" : undefined) : colors.bg;
                               return (
                                 <td key={i} style={{ ...rollupCellStyle(i), background: bg, color: colors.fg, fontSize: 11.5, fontWeight: 600 }}>
-                                  {scoped > 0 || logged > 0 ? `${scoped.toFixed(1)} / ${logged.toFixed(1)}h` : "–"}
+                                  {view === "grid" ? (hasValue ? `${logged.toFixed(1)}h` : "–") : hasValue ? `${scoped.toFixed(1)} / ${logged.toFixed(1)}h` : "–"}
                                 </td>
                               );
                             })}
@@ -787,6 +849,7 @@ export default function HoursOverview() {
                               is logged against tasks, never against PM
                               overhead. */}
                           {isExpanded &&
+                            view !== "grid" &&
                             ownedProjectsFor(person.id).map((proj) => {
                               const pmDays = engine.pmDays(person.id, proj as UtilProjectRow);
                               if (pmDays.size === 0) return null;
@@ -829,7 +892,7 @@ export default function HoursOverview() {
                                 </tr>
                               );
                             })}
-                          {isExpanded && engine.hasDeletedHistory(person.id) && (
+                          {isExpanded && view !== "grid" && engine.hasDeletedHistory(person.id) && (
                             <tr>
                               <td
                                 title="Hours from tasks/projects that have since been permanently deleted — numbers only, no name retained"
@@ -870,7 +933,7 @@ export default function HoursOverview() {
                                   colSpan={1 + days.length}
                                   style={{ padding: "5px 13px 5px 35px", fontSize: 11, color: "var(--muted)", fontStyle: "italic", borderBottom: "1px solid var(--border)" }}
                                 >
-                                  No scoped tasks or logged hours yet.
+                                  {view === "grid" ? "No logged hours yet." : "No scoped tasks or logged hours yet."}
                                 </td>
                               </tr>
                             ) : (
@@ -900,6 +963,13 @@ export default function HoursOverview() {
                                     const dateStr = toISO(d);
                                     const scoped = scopedHoursFor(person.id, item.taskId, dateStr);
                                     const logged = view === "fulfillment" ? fulfillmentLoggedHoursFor(person.id, item.taskId, dateStr) : loggedHoursFor(person.id, item.taskId, dateStr);
+                                    if (view === "grid") {
+                                      return (
+                                        <td key={i} style={subCellStyle(i)}>
+                                          {logged > 0 ? <span style={{ fontSize: 10.5, color: "var(--navy)" }}>{logged.toFixed(1)}h</span> : null}
+                                        </td>
+                                      );
+                                    }
                                     return (
                                       <td key={i} style={subCellStyle(i)}>
                                         {scoped > 0 || logged > 0 ? (
@@ -941,7 +1011,7 @@ export default function HoursOverview() {
                         const logged = visiblePeople.reduce((sum, p) => sum + (view === "fulfillment" ? fulfillmentPersonTotalFor(p.id, dateStr) : loggedPersonTotalFor(p.id, dateStr)), 0);
                         return (
                           <td key={i} style={{ ...rollupCellStyle(i), borderTop: "1px solid var(--border)", fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>
-                            {scoped > 0 || logged > 0 ? `${scoped.toFixed(1)}/${logged.toFixed(1)}h` : "–"}
+                            {view === "grid" ? (logged > 0 ? `${logged.toFixed(1)}h` : "–") : scoped > 0 || logged > 0 ? `${scoped.toFixed(1)}/${logged.toFixed(1)}h` : "–"}
                           </td>
                         );
                       })}
@@ -956,13 +1026,19 @@ export default function HoursOverview() {
               actual swatches matching coverageTone/toneColors' real
               colors, instead of naming them in prose. */}
           <div style={{ marginTop: 10, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 14, fontSize: 11.5, color: "var(--muted)" }}>
-            {(
-              [
-                { tone: "success" as const, label: "Logged covers ≥90% of scoped" },
-                { tone: "warning" as const, label: "50–89%" },
-                { tone: "danger" as const, label: "Under 50%" },
-                { tone: "neutral" as const, label: '"–" = nothing scoped or logged' },
-              ]
+            {(view === "grid"
+              ? [
+                  { tone: "success" as const, label: "At/under a 7.5h shift" },
+                  { tone: "warning" as const, label: "Up to ~33% over (≤10h)" },
+                  { tone: "danger" as const, label: "Well over a shift (>10h)" },
+                  { tone: "neutral" as const, label: '"–" = nothing logged' },
+                ]
+              : [
+                  { tone: "success" as const, label: "Logged covers ≥90% of scoped" },
+                  { tone: "warning" as const, label: "50–89%" },
+                  { tone: "danger" as const, label: "Under 50%" },
+                  { tone: "neutral" as const, label: '"–" = nothing scoped or logged' },
+                ]
             ).map(({ tone, label }) => {
               const colors = toneColors(tone);
               return (
