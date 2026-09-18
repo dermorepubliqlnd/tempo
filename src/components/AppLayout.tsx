@@ -14,6 +14,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
   type LucideIcon,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -25,6 +26,7 @@ type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
 const mainItems: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
+  { to: "/approval-center", label: "Approval Center", icon: ClipboardCheck },
   { to: "/projects", label: "Projects & Tasks", icon: FolderKanban },
   { to: "/extension-requests", label: "Extension Requests", icon: CalendarClock },
   { to: "/time-tracking", label: "Time Tracking", icon: Timer },

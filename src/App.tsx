@@ -5,6 +5,7 @@ import RequireAuth from "./components/RequireAuth";
 import Dashboard from "./pages/Dashboard";
 import Projects from "./pages/Projects";
 import ExtensionRequests from "./pages/ExtensionRequests";
+import ApprovalCenter from "./pages/ApprovalCenter";
 import TimeTracking from "./pages/TimeTracking";
 import Utilization from "./pages/Utilization";
 import Admin from "./pages/Admin";
@@ -56,6 +57,7 @@ export default function App() {
           <Route path="/projects/:projectId/audit-trail" element={<AuditTrail />} />
           <Route path="/tasks" element={<Navigate to="/projects" replace />} />
           <Route path="/tasks/:taskId" element={<Navigate to="/projects" replace />} />
+          <Route path="/approval-center" element={<ApprovalCenter />} />
           <Route path="/extension-requests" element={<ExtensionRequests />} />
           <Route path="/time-tracking" element={<TimeTracking />} />
           <Route path="/utilization" element={<Utilization />} />
