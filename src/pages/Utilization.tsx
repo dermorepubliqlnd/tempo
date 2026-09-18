@@ -227,6 +227,9 @@ export default function Utilization() {
   const [personFilter, setPersonFilter] = useState<Set<string> | null>(null);
   const [personFilterOpen, setPersonFilterOpen] = useState(false);
   const [personFilterSearch, setPersonFilterSearch] = useState("");
+  // Role filter (2026-09-18, Sandra: "add option to filter by role") --
+  // filters by the same job_title field shown under each name.
+  const [roleFilter, setRoleFilter] = useState<string | null>(null);
   // Hours toggle (2026-09-03, Sandra: "allow toggle to view hours too or
   // hide it" in both Daily and Weekly) -- same pattern/default (on) as the
   // WBS snapshot's own Hours toggle (WbsPlanning.tsx utilShowHours).
@@ -475,7 +478,13 @@ export default function Utilization() {
   // the shared engine, so no separate archived-hours handling is needed
   // here anymore either.
   const scopedPeople = showAllPeople ? allPeople : people;
-  const visiblePeople = personFilter ? scopedPeople.filter((p) => personFilter.has(p.id)) : scopedPeople;
+  const roleOptions = useMemo(
+    () => Array.from(new Set(allPeople.map((p) => p.job_title).filter((r): r is string => !!r))).sort((a, b) => a.localeCompare(b)),
+    [allPeople]
+  );
+  const visiblePeople = scopedPeople
+    .filter((p) => !personFilter || personFilter.has(p.id))
+    .filter((p) => !roleFilter || p.job_title === roleFilter);
 
   // Single source of truth for a rollup cell's numeric hours value, for
   // BOTH the daily grid and the weekly aggregation below.
@@ -611,6 +620,27 @@ export default function Utilization() {
             <option value="all">Show all (incl. deactivated)</option>
           </select>
         </label>
+
+        {roleOptions.length > 0 && (
+          <>
+            <div style={{ width: 1, height: 18, background: "var(--border)" }} />
+            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
+              <select
+                value={roleFilter ?? "__all__"}
+                onChange={(e) => setRoleFilter(e.target.value === "__all__" ? null : e.target.value)}
+                title="Filter by role"
+                style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "3px 6px" }}
+              >
+                <option value="__all__">All roles</option>
+                {roleOptions.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
 
         <div style={{ width: 1, height: 18, background: "var(--border)" }} />
 
@@ -786,7 +816,13 @@ export default function Utilization() {
               {visiblePeople.length === 0 ? (
                 <tr>
                   <td colSpan={1 + columnCount} style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>
-                    {personFilter && personFilter.size === 0 ? "No team members selected." : showAllPeople ? "No team members found." : "No active team members found."}
+                    {personFilter && personFilter.size === 0
+                      ? "No team members selected."
+                      : roleFilter && visiblePeople.length === 0
+                      ? `No team members with the role "${roleFilter}".`
+                      : showAllPeople
+                      ? "No team members found."
+                      : "No active team members found."}
                   </td>
                 </tr>
               ) : (
