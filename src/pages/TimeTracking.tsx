@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, ChevronDown, Plus, Pencil } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, Plus, Pencil, Timer, Folder, User, Calendar } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
@@ -213,9 +213,12 @@ export default function TimeTracking() {
   const [loading, setLoading] = useState(true);
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [correctingId, setCorrectingId] = useState<string | null>(null);
   const [correctDraft, setCorrectDraft] = useState<{ hours: string; notes: string; reasonCategory: string }>({ hours: "", notes: "", reasonCategory: "" });
+  // Status filter (2026-09-19, Sandra: "fix the time tracking page to not
+  // make it boring") -- same clickable metric-card filter as the
+  // Extension Requests and Approval Center pages.
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending_approval" | "approved" | "rejected">("all");
 
   const [showLogForm, setShowLogForm] = useState(false);
   const [logProjectId, setLogProjectId] = useState("");
@@ -405,219 +408,221 @@ export default function TimeTracking() {
       .map(([id, label]) => ({ id, label }))
       .sort((a, b) => a.label.localeCompare(b.label));
   })();
-  const filteredEntries = filterProjectId
+  const projectFilteredEntries = filterProjectId
     ? entries.filter((e) => e.task?.project?.id === filterProjectId)
     : entries;
+  const statusCounts = {
+    all: projectFilteredEntries.length,
+    pending_approval: projectFilteredEntries.filter((e) => e.status === "pending_approval").length,
+    approved: projectFilteredEntries.filter((e) => e.status === "approved").length,
+    rejected: projectFilteredEntries.filter((e) => e.status === "rejected").length,
+  };
+  const filteredEntries = statusFilter === "all" ? projectFilteredEntries : projectFilteredEntries.filter((e) => e.status === statusFilter);
   const pendingForMe = filteredEntries.filter((e) => e.status === "pending_approval" && canDecide(e));
   const mine = filteredEntries.filter((e) => e.person_id === me?.id && !pendingForMe.includes(e));
   const rest = filteredEntries.filter((e) => !pendingForMe.includes(e) && e.person_id !== me?.id);
 
   function EntriesTable({ rows, showDecideActions }: { rows: EntryRow[]; showDecideActions: boolean }) {
     if (rows.length === 0) return null;
+    const isFullAccess = me?.access_level === "full";
     return (
-      <table className="data-table" style={{ width: "100%", marginBottom: 8 }}>
-        <thead>
-          <tr>
-            <th style={{ width: 22 }}></th>
-            <th>Task</th>
-            <th>Team Member</th>
-            <th>Project</th>
-            <th>Source</th>
-            <th>Reason</th>
-            <th>Start</th>
-            <th>Duration</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => {
-            const expanded = expandedId === row.id;
-            const isFullAccess = me?.access_level === "full";
-            const canCorrect = isFullAccess && (row.status === "confirmed" || row.status === "approved");
-            return (
-              <Fragment key={row.id}>
-                <tr onClick={() => setExpandedId(expanded ? null : row.id)} style={{ cursor: "pointer" }}>
-                  <td style={{ color: "var(--muted)" }}>{expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
-                  <td style={{ fontWeight: 600, color: "var(--navy)" }}>{row.task?.name ?? "Untitled task"}</td>
-                  <td>{row.person?.name ?? personName(row.person_id)}</td>
-                  <td>{row.task?.project?.name ?? "—"}</td>
-                  <td>
-                    <span className="status-pill neutral" style={{ fontSize: 10 }}>
-                      {SOURCE_LABEL[row.source]}
+      <div>
+        {rows.map((row) => {
+          const canCorrect = isFullAccess && (row.status === "confirmed" || row.status === "approved");
+          const busy = decidingId === row.id;
+          const correcting = correctingId === row.id;
+          return (
+            <div
+              key={row.id}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                flexWrap: "wrap",
+                gap: 16,
+                padding: 16,
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                background: "var(--surface)",
+                marginBottom: 10,
+              }}
+            >
+              <span className="status-pill accent" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 10, flexShrink: 0 }}>
+                <Timer size={15} />
+              </span>
+
+              <div style={{ minWidth: 190, flex: "1 1 190px" }}>
+                <span className="status-pill neutral" style={{ fontSize: 9.5, marginBottom: 4, display: "inline-block" }}>
+                  {SOURCE_LABEL[row.source]}
+                </span>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>{row.task?.name ?? "Untitled task"}</div>
+              </div>
+
+              <div style={{ minWidth: 170, flex: "1 1 170px", display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-secondary)" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <Folder size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                  {row.task?.project?.name ?? "—"}
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <User size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                  {row.person?.name ?? personName(row.person_id)}
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <Calendar size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                  {formatDate(row.started_at)}
+                </span>
+              </div>
+
+              <div style={{ minWidth: 220, flex: "1 1 220px", fontSize: 11 }}>
+                {row.reason_category && (
+                  <>
+                    <span style={{ fontSize: 9.5, color: "var(--muted)", marginRight: 5 }}>Reason</span>
+                    <span className="status-pill neutral" style={{ fontSize: 9.5 }}>
+                      {row.reason_category}
                     </span>
-                  </td>
-                  <td>
-                    {row.reason_category ? (
-                      <span className="status-pill neutral" style={{ fontSize: 10 }}>
-                        {row.reason_category}
-                      </span>
-                    ) : (
-                      <span style={{ color: "var(--muted)" }}>—</span>
-                    )}
-                  </td>
-                  <td>{formatDate(row.started_at)}</td>
-                  <td style={{ fontWeight: 600 }}>
-                    {formatDuration(row.duration_minutes)}
-                    {row.corrected_at && row.original_duration_minutes !== row.duration_minutes && (
-                      <span title={`Originally ${formatDuration(row.original_duration_minutes)}`} style={{ marginLeft: 5, fontSize: 9.5, color: "var(--muted)" }}>
-                        (corrected)
-                      </span>
-                    )}
-                  </td>
-                  <td>
-                    <span className={`status-pill ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
-                  </td>
-                </tr>
-                {expanded && (
-                  <tr>
-                    <td></td>
-                    {/* colSpan bumped 7->8 for the new Reason column (2026-09-03) --
-                        the Reason pill itself is no longer repeated here since it
-                        already has its own column in the row above; only its
-                        free-text notes (not shown elsewhere) still belong here. */}
-                    <td colSpan={8} style={{ background: "var(--bg)", padding: "10px 14px" }}>
-                      {row.reason_notes && (
-                        <div style={{ fontSize: 11.5, marginBottom: 6 }}>
-                          <span style={{ color: "var(--muted)" }}>Notes:</span> {row.reason_notes}
-                        </div>
-                      )}
-                      <div style={{ fontSize: 10.5, color: "var(--muted)" }}>
-                        {formatDate(row.started_at)} -- {row.ended_at ? formatDate(row.ended_at) : "in progress"}
-                        {row.auto_stopped && " (auto-stopped after being idle)"}
-                      </div>
-                      {row.source === "manual" && (
-                        <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
-                          Logged on {formatDateTime(row.created_at)}
-                        </div>
-                      )}
-                      {row.status !== "pending_approval" && row.status !== "running" && row.status !== "pending_confirm" && row.decided_by && (
-                        <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 4 }}>
-                          {STATUS_LABEL[row.status]} by {personName(row.decided_by)} on {formatDate(row.decided_at)}
-                          {row.decision_notes && <> — "{row.decision_notes}"</>}
-                        </div>
-                      )}
-                      {row.corrected_at && (
-                        <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 4 }}>
-                          {row.original_duration_minutes !== row.duration_minutes
-                            ? <>Corrected from {formatDuration(row.original_duration_minutes)} to {formatDuration(row.duration_minutes)} by{" "}</>
-                            : <>Reason corrected by{" "}</>}
-                          {personName(row.corrected_by)} on {formatDate(row.corrected_at)}
-                          {row.correction_notes && <> — "{row.correction_notes}"</>}
-                        </div>
-                      )}
-
-                      {showDecideActions && (
-                        <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10 }} onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="text"
-                            placeholder="Optional decision note"
-                            value={notesDraft[row.id] ?? ""}
-                            onChange={(e) => setNotesDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                            style={{ width: "100%", fontSize: 11.5, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", marginBottom: 8, boxSizing: "border-box" }}
-                          />
-                          <div style={{ display: "flex", gap: 8 }}>
-                            <button
-                              onClick={() => decide(row, "approved")}
-                              disabled={decidingId === row.id}
-                              style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer" }}
-                            >
-                              <CheckCircle2 size={13} />
-                              Approve
-                            </button>
-                            <button
-                              onClick={() => decide(row, "rejected")}
-                              disabled={decidingId === row.id}
-                              style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--danger-text)", background: "none", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer" }}
-                            >
-                              <XCircle size={13} />
-                              Reject
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {canCorrect && (
-                        <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10 }} onClick={(e) => e.stopPropagation()}>
-                          {correctingId === row.id ? (
-                            <>
-                              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                                <input
-                                  type="number"
-                                  step="0.25"
-                                  placeholder="Corrected hours"
-                                  value={correctDraft.hours}
-                                  onChange={(e) => setCorrectDraft((d) => ({ ...d, hours: e.target.value }))}
-                                  style={{ width: 110, fontSize: 11.5, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                                />
-                                {/* Sandra, 2026-09-03 ("allow correction on reason... for
-                                    full access only"): same reasonOptions list the manual-
-                                    log form uses, defaulted to the entry's current reason
-                                    when the form opens. Includes the entry's own current
-                                    value even if it's since been deactivated, same pattern
-                                    as the manual-log form's own reason <select>. */}
-                                <select
-                                  value={correctDraft.reasonCategory}
-                                  onChange={(e) => setCorrectDraft((d) => ({ ...d, reasonCategory: e.target.value }))}
-                                  style={{ width: 150, fontSize: 11.5, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                                >
-                                  <option value="">No reason</option>
-                                  {reasonOptions
-                                    .filter((r) => r.is_active || r.name === correctDraft.reasonCategory)
-                                    .map((r) => (
-                                      <option key={r.id} value={r.name}>
-                                        {r.name}
-                                      </option>
-                                    ))}
-                                </select>
-                                <input
-                                  type="text"
-                                  placeholder="Correction notes"
-                                  value={correctDraft.notes}
-                                  onChange={(e) => setCorrectDraft((d) => ({ ...d, notes: e.target.value }))}
-                                  style={{ flex: 1, fontSize: 11.5, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                                />
-                              </div>
-                              <div style={{ display: "flex", gap: 8 }}>
-                                <button
-                                  onClick={() => submitCorrection(row)}
-                                  style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer" }}
-                                >
-                                  Save correction
-                                </button>
-                                <button
-                                  onClick={() => setCorrectingId(null)}
-                                  style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer" }}
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </>
-                          ) : (
-                            <button
-                              onClick={() => {
-                                setCorrectingId(row.id);
-                                setCorrectDraft({
-                                  hours: String(Math.round(((row.duration_minutes ?? 0) / 60) * 100) / 100),
-                                  notes: "",
-                                  reasonCategory: row.reason_category ?? "",
-                                });
-                              }}
-                              style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer" }}
-                            >
-                              <Pencil size={12} />
-                              Correct (Full Access)
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
+                  </>
                 )}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
+                {row.reason_notes && <div style={{ color: "var(--text-secondary)", marginTop: 3 }}>{row.reason_notes}</div>}
+                <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>
+                  {formatDuration(row.duration_minutes)}
+                  {row.corrected_at && row.original_duration_minutes !== row.duration_minutes && (
+                    <span title={`Originally ${formatDuration(row.original_duration_minutes)}`} style={{ marginLeft: 5, fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>
+                      (corrected)
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>
+                  {formatDate(row.started_at)} -- {row.ended_at ? formatDate(row.ended_at) : "in progress"}
+                  {row.auto_stopped && " (auto-stopped after being idle)"}
+                  {row.source === "manual" && <> · Logged on {formatDateTime(row.created_at)}</>}
+                </div>
+                {row.corrected_at && (
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>
+                    {row.original_duration_minutes !== row.duration_minutes ? (
+                      <>Corrected from {formatDuration(row.original_duration_minutes)} to {formatDuration(row.duration_minutes)} by </>
+                    ) : (
+                      <>Reason corrected by </>
+                    )}
+                    {personName(row.corrected_by)} on {formatDate(row.corrected_at)}
+                    {row.correction_notes && <> — "{row.correction_notes}"</>}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ minWidth: 90, flex: "0 0 auto" }}>
+                <span className={`status-pill ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
+                {row.status !== "pending_approval" && row.status !== "running" && row.status !== "pending_confirm" && row.decided_by && (
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 5 }}>
+                    by {personName(row.decided_by)} on {formatDate(row.decided_at)}
+                    {row.decision_notes && <> — "{row.decision_notes}"</>}
+                  </div>
+                )}
+              </div>
+
+              {showDecideActions && (
+                <div style={{ minWidth: 160, flex: "1 1 160px" }}>
+                  <input
+                    type="text"
+                    placeholder="Add an optional note..."
+                    value={notesDraft[row.id] ?? ""}
+                    onChange={(e) => setNotesDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                    style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", width: "100%", boxSizing: "border-box" }}
+                  />
+                </div>
+              )}
+
+              {showDecideActions && (
+                <div style={{ marginLeft: "auto", flexShrink: 0, display: "flex", gap: 6 }}>
+                  <button
+                    onClick={() => decide(row, "rejected")}
+                    disabled={busy}
+                    style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                  >
+                    <XCircle size={13} />
+                    Reject
+                  </button>
+                  <button
+                    onClick={() => decide(row, "approved")}
+                    disabled={busy}
+                    style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                  >
+                    <CheckCircle2 size={13} />
+                    Approve
+                  </button>
+                </div>
+              )}
+
+              {/* 2026-09-19 (Sandra: "bring out the correction option
+                  instead of having to click on the expand button") --
+                  always visible for a correctable entry now, not tucked
+                  behind a row-expand click. */}
+              {canCorrect && !correcting && (
+                <div style={{ marginLeft: showDecideActions ? 0 : "auto", flexShrink: 0 }}>
+                  <button
+                    onClick={() => {
+                      setCorrectingId(row.id);
+                      setCorrectDraft({
+                        hours: String(Math.round(((row.duration_minutes ?? 0) / 60) * 100) / 100),
+                        notes: "",
+                        reasonCategory: row.reason_category ?? "",
+                      });
+                    }}
+                    style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                  >
+                    <Pencil size={12} />
+                    Correct
+                  </button>
+                </div>
+              )}
+
+              {canCorrect && correcting && (
+                <div style={{ width: "100%", marginTop: 4, borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <input
+                    type="number"
+                    step="0.25"
+                    placeholder="Corrected hours"
+                    value={correctDraft.hours}
+                    onChange={(e) => setCorrectDraft((d) => ({ ...d, hours: e.target.value }))}
+                    style={{ width: 110, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                  />
+                  <select
+                    value={correctDraft.reasonCategory}
+                    onChange={(e) => setCorrectDraft((d) => ({ ...d, reasonCategory: e.target.value }))}
+                    style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                  >
+                    <option value="">No reason</option>
+                    {reasonOptions
+                      .filter((r) => r.is_active || r.name === correctDraft.reasonCategory)
+                      .map((r) => (
+                        <option key={r.id} value={r.name}>
+                          {r.name}
+                        </option>
+                      ))}
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Correction notes"
+                    value={correctDraft.notes}
+                    onChange={(e) => setCorrectDraft((d) => ({ ...d, notes: e.target.value }))}
+                    style={{ flex: "1 1 160px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                  />
+                  <button
+                    onClick={() => submitCorrection(row)}
+                    style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                  >
+                    Save correction
+                  </button>
+                  <button
+                    onClick={() => setCorrectingId(null)}
+                    style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     );
   }
 
@@ -829,7 +834,48 @@ export default function TimeTracking() {
             )}
           </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, marginBottom: 8 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12, marginBottom: 8 }}>
+            {(
+              [
+                { key: "all" as const, label: "All Entries", tone: "slate", value: statusCounts.all },
+                { key: "pending_approval" as const, label: "Pending", tone: "warning", value: statusCounts.pending_approval },
+                { key: "approved" as const, label: "Approved", tone: "success", value: statusCounts.approved },
+                { key: "rejected" as const, label: "Rejected", tone: "danger", value: statusCounts.rejected },
+              ]
+            ).map((card) => {
+              const active = statusFilter === card.key;
+              return (
+                <button
+                  key={card.key}
+                  onClick={() => setStatusFilter((prev) => (prev === card.key ? "all" : card.key))}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    flex: "1 1 200px",
+                    minWidth: 180,
+                    textAlign: "left",
+                    padding: "12px 14px",
+                    borderRadius: "var(--radius)",
+                    border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
+                    background: "var(--surface)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span className={`status-pill ${card.tone}`} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: 10, flexShrink: 0 }}>
+                    <Timer size={14} />
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--navy)" }}>{card.label}</div>
+                    <div style={{ fontSize: 19, fontWeight: 700, color: "var(--navy)", lineHeight: 1.15 }}>{card.value}</div>
+                  </div>
+                  <ChevronRight size={15} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, marginBottom: 8 }}>
             <Clock size={14} color="var(--warning-text)" />
             <h2 style={{ margin: 0, fontSize: 13 }}>Needs your decision ({pendingForMe.length})</h2>
           </div>
