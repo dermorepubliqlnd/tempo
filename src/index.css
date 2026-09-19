@@ -34,6 +34,20 @@
      per the same spec ("6-10px corner radius") -- those are all
      card/panel-sized containers, safe to modernize app-wide. */
   --radius-btn: 7px;
+  /* 2026-09-19 (fix): several pages (Approval Center, Extension Requests,
+     Time Tracking cards, My Dashboard) were written against a --radius
+     token that was never actually defined here, so every borderRadius:
+     "var(--radius)" in those pages silently resolved to nothing --
+     square corners everywhere instead of the intended rounded cards.
+     Defining it here fixes all of them at once (and a pre-existing same
+     bug in HoursOverview.tsx's two scroll-wrapper divs). Deliberately a
+     bit more rounded than --radius-md (8px) -- these are page-level
+     elevated card containers, one size up from --radius-md's panels. */
+  --radius: 12px;
+  /* Soft elevation for a card floating on the page's --bg, instead of
+     just a 1px --border line (which reads as flat/gray against --bg's
+     own light gray). */
+  --shadow-card: 0 1px 2px rgba(15, 41, 66, 0.04), 0 6px 16px rgba(15, 41, 66, 0.06);
 
   /* Typography: Figtree is the workhorse font for body/UI text (nav,
      buttons, inputs, tables). Sora is scoped only to titles/emphasis
@@ -148,6 +162,13 @@ tr.row-selected td.data-table-frozen-cell { background: var(--hover-bg); }
 .data-table-context-menu-item:hover { background: var(--hover-bg); }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 16px; }
+/* Elevated section container for My Dashboard (2026-09-19) -- a floating
+   white card with real shadow, distinct from .card's flatter
+   border-only look used for smaller inline panels elsewhere. */
+.dash-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-card); padding: 18px 20px; margin-bottom: 20px; }
+.dash-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 4px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.dash-row:last-child { border-bottom: none; }
+.dash-row:hover { background: var(--hover-bg); }
 
 .metric-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
 /* Icon + label/value text stack sit side by side in one row (Sandra:

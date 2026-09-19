@@ -493,7 +493,7 @@ export default function MyDashboard() {
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 4, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 10px", background: "var(--surface)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, border: "1px solid var(--border)", borderRadius: "var(--radius-md)", padding: "7px 12px", background: "var(--surface)", boxShadow: "var(--shadow-card)" }}>
             <button onClick={() => setWeekOffset((v) => v - 1)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex" }}>
               <ChevronLeft size={14} style={{ color: "var(--muted)" }} />
             </button>
@@ -508,15 +508,15 @@ export default function MyDashboard() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span
               style={{
-                width: 36,
-                height: 36,
+                width: 38,
+                height: 38,
                 borderRadius: "50%",
                 background: colorForPerson(me),
                 color: "#fff",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: 12.5,
+                fontSize: 13,
                 fontWeight: 700,
                 flexShrink: 0,
               }}
@@ -531,18 +531,18 @@ export default function MyDashboard() {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
-        <MetricCard icon={<Folder size={15} />} tone="accent" label="My Active Projects" value={myProjects.length} sub={`of ${projects.length} total projects`} />
-        <MetricCard icon={<CheckCircle2 size={15} />} tone="success" label="Tasks Due This Week" value={tasksThisWeek.length} sub={`${tasksDueToday.length} due today`} />
-        <MetricCard icon={<ShieldQuestion size={15} />} tone="purple" label="Pending Approvals" value={needsMyDecisionCount} sub="Requires your review" />
-        <MetricCard icon={<BarChart3 size={15} />} tone="accent" label="Utilization This Week" value={`${Math.round(weekUtilPct)}%`} sub={`of ${weekCapacityTotal.toFixed(1)}h capacity`} />
-        <MetricCard icon={<Clock3 size={15} />} tone="accent" label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={`of ${weekCapacityTotal.toFixed(1)}h expected`} />
-        <MetricCard icon={<AlertTriangle size={15} />} tone="danger" label="Overdue Items" value={overdueTasks.length} sub="Needs attention" />
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
+        <MetricCard icon={<Folder size={16} />} colors={METRIC_COLORS.blue} label="My Active Projects" value={myProjects.length} sub={`of ${projects.length} total projects`} />
+        <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Tasks Due This Week" value={tasksThisWeek.length} sub={`${tasksDueToday.length} due today`} />
+        <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="Pending Approvals" value={needsMyDecisionCount} sub="Requires your review" />
+        <MetricCard icon={<BarChart3 size={16} />} colors={METRIC_COLORS.teal} label="Utilization This Week" value={`${Math.round(weekUtilPct)}%`} sub={`of ${weekCapacityTotal.toFixed(1)}h capacity`} />
+        <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={`of ${weekCapacityTotal.toFixed(1)}h expected`} />
+        <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Items" value={overdueTasks.length} sub="Needs attention" />
       </div>
 
       {(tasksDueToday.length > 0 || needsMyDecisionCount > 0 || overdueTasks.length > 0 || daysOverCapacity > 0 || missingLogHours > 0.1) && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 14px", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)", marginBottom: 20 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
+        <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
           {tasksDueToday.length > 0 && <AttentionPill tone="danger" icon={<Calendar size={12} />} value={tasksDueToday.length} label="Tasks due today" to="/projects" />}
           {needsMyDecisionCount > 0 && <AttentionPill tone="purple" icon={<ShieldQuestion size={12} />} value={needsMyDecisionCount} label="Approvals waiting" to="/approval-center" />}
           {overdueTasks.length > 0 && <AttentionPill tone="danger" icon={<AlertTriangle size={12} />} value={overdueTasks.length} label={overdueTasks.length === 1 ? "Overdue task" : "Overdue tasks"} to="/projects" />}
@@ -551,106 +551,100 @@ export default function MyDashboard() {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20, alignItems: "start" }}>
         <div>
-          <SectionHeader title={`My Projects (${myProjects.length})`} to="/projects" />
-          {myProjects.length === 0 ? (
-            <p style={{ fontSize: 12, color: "var(--muted)" }}>You don't own any active projects.</p>
-          ) : (
-            <table className="data-table" style={{ width: "100%", marginBottom: 20 }}>
-              <thead>
-                <tr>
-                  <th>Project</th>
-                  <th>Health</th>
-                  <th>Progress</th>
-                  <th>End Date</th>
-                </tr>
-              </thead>
-              <tbody>
+          <div className="dash-card">
+            <SectionHeader title={`My Projects (${myProjects.length})`} to="/projects" />
+            {myProjects.length === 0 ? (
+              <p style={{ fontSize: 12, color: "var(--muted)" }}>You don't own any active projects.</p>
+            ) : (
+              <>
+                <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
+                  <span style={{ flex: "1 1 40%" }}>Project</span>
+                  <span style={{ flex: "0 0 110px" }}>Health</span>
+                  <span style={{ flex: "1 1 30%" }}>Progress</span>
+                  <span style={{ flex: "0 0 90px", textAlign: "right" }}>End Date</span>
+                </div>
                 {myProjects.slice(0, 6).map((p) => {
                   const health = healthOf(p, tasks, holidayDateStrings);
                   const progress = actualProgress(p.id, tasks);
                   return (
-                    <tr key={p.id} onClick={() => navigate(`/projects/${p.id}/wbs`)} style={{ cursor: "pointer" }}>
-                      <td style={{ fontWeight: 600, color: "var(--navy)" }}>{p.name}</td>
-                      <td>
+                    <div key={p.id} className="dash-row" onClick={() => navigate(`/projects/${p.id}/wbs`)}>
+                      <span style={{ flex: "1 1 40%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>{p.name}</span>
+                      <span style={{ flex: "0 0 110px" }}>
                         <span className={`status-pill ${health.tone}`} style={{ fontSize: 9.5 }}>
                           {health.label.toUpperCase()}
                         </span>
-                      </td>
-                      <td style={{ minWidth: 140 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
-                            <div style={{ width: `${progress ?? 0}%`, height: "100%", background: "var(--accent)" }} />
-                          </div>
-                          <span style={{ fontSize: 11, color: "var(--muted)", flexShrink: 0 }}>{progress === null ? "—" : `${Math.round(progress)}%`}</span>
+                      </span>
+                      <span style={{ flex: "1 1 30%", display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
+                          <div style={{ width: `${progress ?? 0}%`, height: "100%", background: "var(--accent)", borderRadius: 3 }} />
                         </div>
-                      </td>
-                      <td>{formatDate(p.end_date)}</td>
-                    </tr>
+                        <span style={{ fontSize: 11, color: "var(--muted)", flexShrink: 0 }}>{progress === null ? "—" : `${Math.round(progress)}%`}</span>
+                      </span>
+                      <span style={{ flex: "0 0 90px", textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(p.end_date)}</span>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-          )}
+              </>
+            )}
+          </div>
 
-          <SectionHeader title={`My Tasks This Week (${tasksThisWeek.length})`} to="/projects" />
-          {tasksThisWeek.length === 0 ? (
-            <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing due this week.</p>
-          ) : (
-            <table className="data-table" style={{ width: "100%", marginBottom: 20 }}>
-              <thead>
-                <tr>
-                  <th style={{ width: 22 }}></th>
-                  <th>Task</th>
-                  <th>Project</th>
-                  <th>Due Date</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
+          <div className="dash-card">
+            <SectionHeader title={`My Tasks This Week (${tasksThisWeek.length})`} to="/projects" />
+            {tasksThisWeek.length === 0 ? (
+              <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing due this week.</p>
+            ) : (
+              <>
+                <div style={{ display: "flex", alignItems: "center", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
+                  <span style={{ flex: "0 0 24px" }} />
+                  <span style={{ flex: "1 1 35%" }}>Task</span>
+                  <span style={{ flex: "1 1 25%" }}>Project</span>
+                  <span style={{ flex: "0 0 90px" }}>Due Date</span>
+                  <span style={{ flex: "0 0 110px", textAlign: "right" }}>Status</span>
+                </div>
                 {tasksThisWeek.slice(0, 8).map((t) => {
                   const overdue = t.current_due_date && t.current_due_date.slice(0, 10) < todayIso;
                   return (
-                    <tr key={t.id} onClick={() => navigate(`/projects/${t.project_id}`)} style={{ cursor: "pointer" }}>
-                      <td>
+                    <div key={t.id} className="dash-row" onClick={() => navigate(`/projects/${t.project_id}`)}>
+                      <span style={{ flex: "0 0 24px" }}>
                         <input type="checkbox" disabled title="Update status from the task's own page" style={{ cursor: "not-allowed" }} />
-                      </td>
-                      <td style={{ fontWeight: 600, color: "var(--navy)" }}>{t.name}</td>
-                      <td>{t.project?.name ?? "—"}</td>
-                      <td style={{ color: overdue ? "var(--danger-text)" : undefined, fontWeight: overdue ? 600 : 400 }}>{overdue ? "Overdue" : t.current_due_date?.slice(0, 10) === todayIso ? "Today" : formatDate(t.current_due_date)}</td>
-                      <td>
+                      </span>
+                      <span style={{ flex: "1 1 35%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>{t.name}</span>
+                      <span style={{ flex: "1 1 25%", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.project?.name ?? "—"}</span>
+                      <span style={{ flex: "0 0 90px", fontSize: 11.5, color: overdue ? "var(--danger-text)" : "var(--text-secondary)", fontWeight: overdue ? 700 : 400 }}>
+                        {overdue ? "Overdue" : t.current_due_date?.slice(0, 10) === todayIso ? "Today" : formatDate(t.current_due_date)}
+                      </span>
+                      <span style={{ flex: "0 0 110px", textAlign: "right" }}>
                         <span className={`status-pill ${t.status === "In Progress" ? "accent" : "neutral"}`} style={{ fontSize: 9.5 }}>
                           {(t.status ?? "Not Started").toUpperCase()}
                         </span>
-                      </td>
-                    </tr>
+                      </span>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-          )}
+              </>
+            )}
+          </div>
 
-          <SectionHeader title="Pending Approvals" to="/approval-center" />
-          {approvalItems.length === 0 ? (
-            <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing waiting on you right now.</p>
-          ) : (
-            <table className="data-table" style={{ width: "100%" }}>
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th>Project</th>
-                  <th>Submitted</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
+          <div className="dash-card" style={{ marginBottom: 0 }}>
+            <SectionHeader title="Pending Approvals" to="/approval-center" />
+            {approvalItems.length === 0 ? (
+              <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing waiting on you right now.</p>
+            ) : (
+              <>
+                <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
+                  <span style={{ flex: "1 1 40%" }}>Item</span>
+                  <span style={{ flex: "1 1 25%" }}>Project</span>
+                  <span style={{ flex: "0 0 90px" }}>Submitted</span>
+                  <span style={{ flex: "0 0 90px", textAlign: "right" }}>Action</span>
+                </div>
                 {approvalItems.slice(0, 5).map((item) => (
-                  <tr key={item.key}>
-                    <td style={{ fontWeight: 600, color: "var(--navy)" }}>{item.label}</td>
-                    <td>{item.project}</td>
-                    <td>{formatDate(item.date)}</td>
-                    <td>
+                  <div key={item.key} className="dash-row" style={{ cursor: "default" }}>
+                    <span style={{ flex: "1 1 40%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>{item.label}</span>
+                    <span style={{ flex: "1 1 25%", fontSize: 11.5, color: "var(--text-secondary)" }}>{item.project}</span>
+                    <span style={{ flex: "0 0 90px", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(item.date)}</span>
+                    <span style={{ flex: "0 0 90px", textAlign: "right" }}>
                       {item.kind === "extension" || item.kind === "time" ? (
                         <button
                           onClick={async () => {
@@ -658,154 +652,147 @@ export default function MyDashboard() {
                             if (ok) quickApprove(item);
                           }}
                           disabled={decidingKey === item.key}
-                          style={{ fontSize: 11, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "5px 12px", cursor: "pointer" }}
+                          style={{ fontSize: 11, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 14px", cursor: "pointer" }}
                         >
                           Approve
                         </button>
                       ) : (
                         <Link
                           to="/approval-center"
-                          style={{ display: "inline-block", fontSize: 11, fontWeight: 600, color: "#fff", background: "var(--accent)", borderRadius: "var(--radius-sm)", padding: "5px 12px", textDecoration: "none" }}
+                          style={{ display: "inline-block", fontSize: 11, fontWeight: 600, color: "#fff", background: "var(--accent)", borderRadius: "var(--radius-sm)", padding: "6px 14px", textDecoration: "none" }}
                         >
                           Review
                         </Link>
                       )}
-                    </td>
-                  </tr>
+                    </span>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          )}
+              </>
+            )}
+          </div>
         </div>
 
         <div>
-          <SectionHeader title="My Utilization This Week" to="/utilization" small="Based on assigned work vs available capacity" />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 20 }}>
-            {dailyStats.map((d) => {
-              const over = d.capacity > 0 && d.pct > 100;
-              const colors = d.off ? { fg: "var(--muted)" } : over ? toneColors("danger") : toneColors("success");
-              return (
-                <div key={d.dateStr} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textAlign: "center", padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
-                    {WEEKDAY_LABEL[d.date.getDay()]}
-                    <div style={{ fontSize: 9, fontWeight: 400 }}>{d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+          <div className="dash-card">
+            <SectionHeader title="My Utilization This Week" to="/utilization" small="Based on assigned work vs available capacity" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+              {dailyStats.map((d) => {
+                const over = d.capacity > 0 && d.pct > 100;
+                const colors = d.off ? { bg: "var(--hover-bg)", fg: "var(--muted)" } : over ? toneColors("danger") : toneColors("success");
+                return (
+                  <div key={d.dateStr} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textAlign: "center", padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
+                      {WEEKDAY_LABEL[d.date.getDay()]}
+                      <div style={{ fontSize: 9, fontWeight: 400 }}>{d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                    </div>
+                    <div style={{ padding: "10px 4px", textAlign: "center", background: colors.bg }}>
+                      {d.off ? (
+                        <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Off</div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: colors.fg }}>{Math.round(d.pct)}%</div>
+                          <div style={{ fontSize: 9, color: colors.fg }}>
+                            {d.scoped.toFixed(1)}h / {d.capacity.toFixed(1)}h
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ padding: "8px 4px", textAlign: "center", background: colors.bg }}>
-                    {d.off ? (
-                      <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Off</div>
-                    ) : (
-                      <>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: colors.fg }}>{Math.round(d.pct)}%</div>
-                        <div style={{ fontSize: 9, color: colors.fg }}>
-                          {d.scoped.toFixed(1)}h / {d.capacity.toFixed(1)}h
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <SectionHeader title="My Logged Hours This Week" to="/hours-overview" small="Based on your actual submitted time entries" />
-          <table className="data-table" style={{ width: "100%", marginBottom: 8 }}>
-            <thead>
-              <tr>
-                <th>Team Member</th>
-                {dailyStats.map((d) => (
-                  <th key={d.dateStr} style={{ textAlign: "center" }}>
-                    {WEEKDAY_LABEL[d.date.getDay()]}
-                    <div style={{ fontSize: 9, fontWeight: 400 }}>{d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>
-                  <div style={{ fontWeight: 600, color: "var(--navy)" }}>{me.name}</div>
-                  <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{me.job_title || "Team Member"}</div>
-                </td>
-                {dailyStats.map((d) => {
-                  const tone = hoursShiftTone(d.logged);
-                  const colors = toneColors(tone);
-                  return (
-                    <td key={d.dateStr} style={{ textAlign: "center", background: colors.bg, color: colors.fg, fontWeight: 600 }}>
-                      {d.logged > 0 ? `${d.logged.toFixed(1)}h` : "—"}
-                    </td>
-                  );
-                })}
-              </tr>
-            </tbody>
-          </table>
-          <div style={{ display: "flex", gap: 16, fontSize: 11, color: "var(--text-secondary)", marginBottom: 20 }}>
-            <span>
-              Expected Hours <strong style={{ color: "var(--navy)" }}>{weekCapacityTotal.toFixed(1)}h</strong>
-            </span>
-            <span>
-              Logged Hours <strong style={{ color: "var(--navy)" }}>{weekLoggedTotal.toFixed(1)}h</strong>
-            </span>
-            <span>
-              Variance{" "}
-              <strong style={{ color: weekLoggedTotal - weekCapacityTotal >= 0 ? "var(--success-text)" : "var(--danger-text)" }}>
-                {weekLoggedTotal - weekCapacityTotal >= 0 ? "+" : ""}
-                {(weekLoggedTotal - weekCapacityTotal).toFixed(1)}h
-              </strong>
-            </span>
-          </div>
-
-          <SectionHeader title="Scoped vs Logged (This Month)" to="/hours-overview" />
-          {scopedVsLoggedByProject.length === 0 ? (
-            <p style={{ fontSize: 12, color: "var(--muted)" }}>No scoped or logged hours yet this month.</p>
-          ) : (
-            <table className="data-table" style={{ width: "100%", marginBottom: 20 }}>
-              <thead>
-                <tr>
-                  <th>Project</th>
-                  <th>Scoped</th>
-                  <th>Logged</th>
-                  <th>Variance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scopedVsLoggedByProject.map((r) => {
-                  const variance = r.logged - r.scoped;
-                  return (
-                    <tr key={r.projectId}>
-                      <td style={{ fontWeight: 600, color: "var(--navy)" }}>{r.name}</td>
-                      <td>{r.scoped.toFixed(1)}h</td>
-                      <td>{r.logged.toFixed(1)}h</td>
-                      <td style={{ color: variance >= 0 ? "var(--danger-text)" : "var(--success-text)", fontWeight: 600 }}>
-                        {variance >= 0 ? "+" : ""}
-                        {variance.toFixed(1)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-
-          <SectionHeader title="My Deliverables (This Month)" to="/projects" />
-          {deliverables.length === 0 ? (
-            <p style={{ fontSize: 12, color: "var(--muted)" }}>No deliverables due this month.</p>
-          ) : (
-            <div>
-              {deliverables.map((d) => (
-                <div key={d.name} style={{ marginBottom: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, marginBottom: 3 }}>
-                    <span style={{ color: "var(--text-secondary)" }}>{d.name}</span>
-                    <span style={{ fontWeight: 600, color: "var(--navy)" }}>
-                      {d.done}/{d.total}
-                    </span>
-                  </div>
-                  <div style={{ height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
-                    <div style={{ width: `${d.total > 0 ? (d.done / d.total) * 100 : 0}%`, height: "100%", background: "var(--accent)" }} />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
-          )}
+          </div>
+
+          <div className="dash-card">
+            <SectionHeader title="My Logged Hours This Week" to="/hours-overview" small="Based on your actual submitted time entries" />
+            <div style={{ display: "grid", gridTemplateColumns: "1.4fr repeat(5, 1fr)", gap: 6, alignItems: "center" }}>
+              <span />
+              {dailyStats.map((d) => (
+                <span key={d.dateStr} style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>
+                  {WEEKDAY_LABEL[d.date.getDay()]}
+                  <div style={{ fontSize: 9, fontWeight: 400 }}>{d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                </span>
+              ))}
+              <div>
+                <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12 }}>{me.name}</div>
+                <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{me.job_title || "Team Member"}</div>
+              </div>
+              {dailyStats.map((d) => {
+                const tone = hoursShiftTone(d.logged);
+                const colors = toneColors(tone);
+                return (
+                  <div key={d.dateStr} style={{ textAlign: "center", background: colors.bg, color: colors.fg, fontWeight: 700, fontSize: 12, padding: "8px 0", borderRadius: "var(--radius-sm)" }}>
+                    {d.logged > 0 ? `${d.logged.toFixed(1)}h` : "—"}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 18, fontSize: 11, color: "var(--text-secondary)", marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+              <span>
+                Expected Hours <strong style={{ color: "var(--navy)" }}>{weekCapacityTotal.toFixed(1)}h</strong>
+              </span>
+              <span>
+                Logged Hours <strong style={{ color: "var(--navy)" }}>{weekLoggedTotal.toFixed(1)}h</strong>
+              </span>
+              <span>
+                Variance{" "}
+                <strong style={{ color: weekLoggedTotal - weekCapacityTotal >= 0 ? "var(--success-text)" : "var(--danger-text)" }}>
+                  {weekLoggedTotal - weekCapacityTotal >= 0 ? "+" : ""}
+                  {(weekLoggedTotal - weekCapacityTotal).toFixed(1)}h
+                </strong>
+              </span>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            <div className="dash-card" style={{ marginBottom: 0 }}>
+              <SectionHeader title="Scoped vs Logged" small="This Month" to="/hours-overview" />
+              {scopedVsLoggedByProject.length === 0 ? (
+                <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing yet this month.</p>
+              ) : (
+                <div>
+                  {scopedVsLoggedByProject.map((r, i) => {
+                    const variance = r.logged - r.scoped;
+                    const dotColor = DOT_PALETTE[i % DOT_PALETTE.length];
+                    return (
+                      <div key={r.projectId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 2px", borderBottom: "1px solid var(--border)", fontSize: 11.5 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
+                        <span style={{ flex: 1, fontWeight: 600, color: "var(--navy)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+                        <span style={{ color: "var(--text-secondary)", flexShrink: 0 }}>{r.logged.toFixed(1)}h</span>
+                        <span style={{ color: variance >= 0 ? "var(--danger-text)" : "var(--success-text)", fontWeight: 700, flexShrink: 0, minWidth: 36, textAlign: "right" }}>
+                          {variance >= 0 ? "+" : ""}
+                          {variance.toFixed(1)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="dash-card" style={{ marginBottom: 0 }}>
+              <SectionHeader title="Deliverables" small="This Month" to="/projects" />
+              {deliverables.length === 0 ? (
+                <p style={{ fontSize: 12, color: "var(--muted)" }}>None due this month.</p>
+              ) : (
+                <div>
+                  {deliverables.map((d) => (
+                    <div key={d.name} style={{ marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
+                        <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
+                        <span style={{ fontWeight: 700, color: "var(--navy)", flexShrink: 0, marginLeft: 6 }}>
+                          {d.done}/{d.total}
+                        </span>
+                      </div>
+                      <div style={{ height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
+                        <div style={{ width: `${d.total > 0 ? (d.done / d.total) * 100 : 0}%`, height: "100%", background: "var(--accent)", borderRadius: 3 }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -814,29 +801,39 @@ export default function MyDashboard() {
   );
 }
 
+const METRIC_COLORS: Record<string, { bg: string; fg: string }> = {
+  blue: { bg: "#e5f0fe", fg: "#2f6fed" },
+  green: { bg: "#e2f8ea", fg: "#16a34a" },
+  purple: { bg: "#f0e8fd", fg: "#8b5cf6" },
+  teal: { bg: "#dcf7f2", fg: "#0d9488" },
+  red: { bg: "#fde4e2", fg: "#dc2626" },
+};
+
+const DOT_PALETTE = ["#f59e0b", "#2f6fed", "#16a34a", "#8b5cf6", "#0d9488", "#ec4899"];
+
 function SectionHeader({ title, to, small }: { title: string; to: string; small?: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
+    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 }}>
       <div>
-        <h2 style={{ fontSize: 13, margin: 0 }}>{title}</h2>
-        {small && <div style={{ fontSize: 10.5, color: "var(--muted)" }}>{small}</div>}
+        <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>{title}</h2>
+        {small && <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>{small}</div>}
       </div>
-      <Link to={to} style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+      <Link to={to} style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none", flexShrink: 0 }}>
         View All
       </Link>
     </div>
   );
 }
 
-function MetricCard({ icon, tone, label, value, sub }: { icon: JSX.Element; tone: string; label: string; value: number | string; sub: string }) {
+function MetricCard({ icon, colors, label, value, sub }: { icon: JSX.Element; colors: { bg: string; fg: string }; label: string; value: number | string; sub: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flex: "1 1 175px", minWidth: 160, padding: "12px 14px", borderRadius: "var(--radius)", border: "1px solid var(--border)", background: "var(--surface)" }}>
-      <span className={`status-pill ${tone}`} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 9, flexShrink: 0 }}>
+    <div className="dash-card" style={{ display: "flex", alignItems: "flex-start", gap: 12, flex: "1 1 180px", minWidth: 165, marginBottom: 0, padding: "16px" }}>
+      <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: "50%", background: colors.bg, color: colors.fg, flexShrink: 0 }}>
         {icon}
       </span>
       <div>
-        <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)" }}>{label}</div>
-        <div style={{ fontSize: 19, fontWeight: 700, color: "var(--navy)", lineHeight: 1.2 }}>{value}</div>
+        <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)" }}>{label}</div>
+        <div style={{ fontSize: 21, fontWeight: 700, color: "var(--navy)", lineHeight: 1.25 }}>{value}</div>
         <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{sub}</div>
       </div>
     </div>
@@ -848,7 +845,7 @@ function AttentionPill({ tone, icon, value, label, to }: { tone: string; icon: J
     <Link
       to={to}
       className={`status-pill ${tone}`}
-      style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, padding: "6px 10px", textDecoration: "none" }}
+      style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, padding: "7px 12px", textDecoration: "none" }}
     >
       {icon}
       <strong>{value}</strong> {label}
