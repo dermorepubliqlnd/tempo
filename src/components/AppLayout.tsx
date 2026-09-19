@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LogOut,
   LayoutDashboard,
+  BarChart3,
   FolderKanban,
   CalendarClock,
   Timer,
@@ -25,7 +26,12 @@ import TempoMark from "./TempoMark";
 type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
 const mainItems: NavItem[] = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
+  // 2026-09-19 (Sandra: everyone gets a personal dashboard by default,
+  // with the former team-wide one still reachable as its own view) --
+  // "/" is now the personal snapshot; the original Dashboard.tsx moved to
+  // "/team-dashboard" and kept its own nav entry right below.
+  { to: "/", label: "My Dashboard", icon: LayoutDashboard, end: true },
+  { to: "/team-dashboard", label: "Team Dashboard", icon: BarChart3 },
   { to: "/approval-center", label: "Approval Center", icon: ClipboardCheck },
   { to: "/projects", label: "Projects & Tasks", icon: FolderKanban },
   { to: "/extension-requests", label: "Extension Requests", icon: CalendarClock },
