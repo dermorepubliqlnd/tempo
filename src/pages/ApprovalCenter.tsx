@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { CheckCircle2, XCircle, CalendarClock, Timer, ShieldCheck, FolderCheck, ClipboardCheck } from "lucide-react";
+import {
+  CheckCircle2,
+  XCircle,
+  CalendarClock,
+  Timer,
+  ShieldCheck,
+  FolderCheck,
+  Clock,
+  ChevronRight,
+  Search,
+  ArrowUpDown,
+  Folder,
+  User,
+  Calendar,
+  RefreshCw,
+} from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
@@ -25,6 +40,11 @@ import { decideTimeEntry } from "../lib/timeTracking";
 // sensitive logic outside the one place it's kept consistent -- so those
 // two rows deep-link to the project's WBS Planning page (where the real
 // Approve/Reject buttons already live) instead of deciding inline.
+//
+// 2026-09-19 (Sandra: card-layout mockup) -- redesigned from a plain
+// table into the summary-card + request-card layout shown in her
+// reference screenshot. Clicking a summary card IS the type filter (no
+// separate pill row) -- click again to clear back to "All".
 
 interface PersonLite {
   id: string;
@@ -93,33 +113,36 @@ function hours(minutes: number | null): string {
   return `${(minutes / 60).toFixed(1)}h`;
 }
 
-// Request type (2026-09-19, Sandra: "add filters and use colors for
-// request types") -- a stable discriminator used both for the type
-// filter and the color-coded pill, kept separate from typeLabel so the
-// two extension sub-labels ("Task extension" / "Project timeline
-// extension") still filter and color together as one "Extension" type.
+// Request type -- a stable discriminator used both for the type filter
+// (the summary cards) and the color-coded pill/icon, kept separate from
+// typeLabel so the two extension sub-labels ("Task extension" / "Project
+// timeline extension") still filter and color together as one type.
 type ApprovalKind = "extension" | "time" | "baseline" | "closure";
 
-const KIND_META: Record<ApprovalKind, { label: string; tone: string }> = {
-  extension: { label: "Extension request", tone: "accent" },
-  time: { label: "Time entry", tone: "purple" },
-  baseline: { label: "Baseline approval", tone: "mint" },
-  closure: { label: "Close request", tone: "pink" },
+// Same tone names index.css already defines for .status-pill.<tone> --
+// reused here for the summary-card icon squares too, so a request's
+// color means the same thing everywhere on this page.
+const KIND_META: Record<ApprovalKind, { label: string; pluralLabel: string; tone: string; icon: JSX.Element }> = {
+  extension: { label: "Task Extension", pluralLabel: "Extension Requests", tone: "gold", icon: <CalendarClock size={13} /> },
+  time: { label: "Time Entry", pluralLabel: "Time Entries", tone: "accent", icon: <Timer size={13} /> },
+  baseline: { label: "Baseline Approval", pluralLabel: "Baselines", tone: "purple", icon: <ShieldCheck size={13} /> },
+  closure: { label: "Close Request", pluralLabel: "Close Requests", tone: "mint", icon: <FolderCheck size={13} /> },
 };
 
 // Shared row chrome for every approval type -- kept as one generic shape
-// so the two tables below (Needs your decision / Other pending) don't
-// need four separate render paths.
+// so the request-card list below doesn't need four separate render
+// paths.
 interface Row {
   key: string;
   kind: ApprovalKind;
   typeLabel: string;
-  typeIcon: JSX.Element;
   subject: string;
   context: string;
   requestedByName: string;
   requestedAt: string;
-  detail: string;
+  reasonCategory: string | null;
+  reasonNotes: string | null;
+  extraLine: string | null;
   canDecide: boolean;
   action: JSX.Element | null;
 }
@@ -137,10 +160,12 @@ export default function ApprovalCenter() {
   const [closureRequests, setClosureRequests] = useState<ClosureRow[]>([]);
   const [decidingKey, setDecidingKey] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
-  // Type filter (2026-09-19, Sandra: "add filters... for request types")
-  // -- a Set of the kinds currently shown; empty means "show all" so a
-  // freshly loaded page isn't accidentally filtered to nothing.
-  const [kindFilter, setKindFilter] = useState<Set<ApprovalKind>>(new Set());
+  // Type filter -- clicking a summary card sets this to that kind; click
+  // the same card again (or there's nothing else to clear to) resets it
+  // to null, meaning "All".
+  const [kindFilter, setKindFilter] = useState<ApprovalKind | null>(null);
+  const [search, setSearch] = useState("");
+  const [sortNewestFirst, setSortNewestFirst] = useState(true);
 
   async function loadAll() {
     setLoading(true);
@@ -283,10 +308,10 @@ export default function ApprovalCenter() {
     return (
       <input
         type="text"
-        placeholder="Optional note"
+        placeholder="Add an optional note..."
         value={notesDraft[rowKey] ?? ""}
         onChange={(e) => setNotesDraft((prev) => ({ ...prev, [rowKey]: e.target.value }))}
-        style={{ fontSize: 11, padding: "4px 6px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", width: 130 }}
+        style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", width: "100%", boxSizing: "border-box" }}
       />
     );
   }
@@ -295,24 +320,23 @@ export default function ApprovalCenter() {
     const busy = decidingKey === rowKey;
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <NotesField rowKey={rowKey} />
-        <button
-          onClick={onApprove}
-          disabled={busy}
-          title="Approve"
-          style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "5px 8px", cursor: "pointer" }}
-        >
-          <CheckCircle2 size={12} />
-          Approve
-        </button>
         <button
           onClick={onReject}
           disabled={busy}
           title="Reject"
-          style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, fontWeight: 600, color: "var(--danger-text)", background: "none", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", padding: "5px 8px", cursor: "pointer" }}
+          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
         >
-          <XCircle size={12} />
+          <XCircle size={13} />
           Reject
+        </button>
+        <button
+          onClick={onApprove}
+          disabled={busy}
+          title="Approve"
+          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          <CheckCircle2 size={13} />
+          Approve
         </button>
       </div>
     );
@@ -322,9 +346,10 @@ export default function ApprovalCenter() {
     return (
       <Link
         to={`/projects/${projectId}/wbs`}
-        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: "var(--accent)", textDecoration: "none", whiteSpace: "nowrap" }}
       >
-        Review in WBS Planning &rarr;
+        Review in WBS Planning
+        <ChevronRight size={13} />
       </Link>
     );
   }
@@ -337,13 +362,14 @@ export default function ApprovalCenter() {
       rows.push({
         key,
         kind: "extension",
-        typeLabel: row.project ? "Project timeline extension" : "Task extension",
-        typeIcon: <CalendarClock size={13} />,
+        typeLabel: row.project ? "Project Timeline Extension" : "Task Extension",
         subject: row.project ? row.project.name : row.task?.name ?? "Untitled task",
         context: row.project ? "Whole project" : row.task?.project?.name ?? "—",
         requestedByName: row.requester?.name ?? "—",
         requestedAt: row.created_at,
-        detail: `${row.reason_category}${row.reason_notes ? ` — ${row.reason_notes}` : ""} · new date ${formatDate(row.requested_new_due_date)}`,
+        reasonCategory: row.reason_category,
+        reasonNotes: row.reason_notes,
+        extraLine: `New date: ${formatDate(row.requested_new_due_date)}`,
         canDecide: canDecideExtension(row),
         action: canDecideExtension(row) ? (
           <DecideButtons rowKey={key} onApprove={() => decideExtension(row, "Approved")} onReject={() => decideExtension(row, "Rejected")} />
@@ -356,13 +382,14 @@ export default function ApprovalCenter() {
       rows.push({
         key,
         kind: "time",
-        typeLabel: "Time entry",
-        typeIcon: <Timer size={13} />,
+        typeLabel: "Time Entry",
         subject: row.task?.name ?? "Untitled task",
         context: row.task?.project?.name ?? "—",
         requestedByName: row.person?.name ?? "—",
         requestedAt: row.started_at,
-        detail: `${hours(row.duration_minutes)}${row.reason_category ? ` · ${row.reason_category}` : ""}${row.reason_notes ? ` — ${row.reason_notes}` : ""}`,
+        reasonCategory: row.reason_category,
+        reasonNotes: row.reason_notes,
+        extraLine: `Logged: ${hours(row.duration_minutes)}`,
         canDecide: canDecideTimeEntry(row),
         action: canDecideTimeEntry(row) ? (
           <DecideButtons rowKey={key} onApprove={() => decideTime(row, "approved")} onReject={() => decideTime(row, "rejected")} />
@@ -376,13 +403,14 @@ export default function ApprovalCenter() {
       rows.push({
         key,
         kind: "baseline",
-        typeLabel: "Start Project (Baseline)",
-        typeIcon: <ShieldCheck size={13} />,
+        typeLabel: "Baseline Approval",
         subject: proj?.name ?? "Untitled project",
         context: "Baseline approval",
         requestedByName: personName(row.requested_by),
         requestedAt: row.requested_at,
-        detail: "Captures the current plan as the official Baseline and marks the project as started.",
+        reasonCategory: null,
+        reasonNotes: "Captures the current plan as the official Baseline and marks the project as started.",
+        extraLine: null,
         canDecide: canDecideBaseline,
         action: canDecideBaseline ? <ReviewLink projectId={row.project_id} /> : null,
       });
@@ -394,25 +422,22 @@ export default function ApprovalCenter() {
       rows.push({
         key,
         kind: "closure",
-        typeLabel: "Project close request",
-        typeIcon: <FolderCheck size={13} />,
+        typeLabel: "Close Request",
         subject: proj?.name ?? "Untitled project",
         context: "Closure approval",
         requestedByName: personName(row.requested_by),
         requestedAt: row.requested_at,
-        detail: "Locks in the current plan as Final Scope — final, no re-opening.",
+        reasonCategory: null,
+        reasonNotes: "Locks in the current plan as Final Scope — final, no re-opening.",
+        extraLine: null,
         canDecide: canDecideClosure(row),
         action: canDecideClosure(row) ? <ReviewLink projectId={row.project_id} /> : null,
       });
     });
 
-    return rows.sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
+    return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extensions, timeEntries, baselineRequests, closureRequests, people, projects, me]);
-
-  const visibleRows = kindFilter.size === 0 ? allRows : allRows.filter((r) => kindFilter.has(r.kind));
-  const needsDecision = visibleRows.filter((r) => r.canDecide);
-  const otherPending = visibleRows.filter((r) => !r.canDecide);
 
   const counts = {
     extension: extensions.length,
@@ -420,91 +445,135 @@ export default function ApprovalCenter() {
     baseline: baselineRequests.length,
     closure: closureRequests.length,
   };
+  const totalPending = counts.extension + counts.time + counts.baseline + counts.closure;
 
-  function toggleKind(kind: ApprovalKind) {
-    setKindFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(kind)) next.delete(kind);
-      else next.add(kind);
-      return next;
-    });
+  const visibleRows = useMemo(() => {
+    let rows = kindFilter ? allRows.filter((r) => r.kind === kindFilter) : allRows;
+    const q = search.trim().toLowerCase();
+    if (q) {
+      rows = rows.filter(
+        (r) => r.subject.toLowerCase().includes(q) || r.context.toLowerCase().includes(q) || r.requestedByName.toLowerCase().includes(q) || r.typeLabel.toLowerCase().includes(q)
+      );
+    }
+    return [...rows].sort((a, b) => (sortNewestFirst ? 1 : -1) * (new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime()));
+  }, [allRows, kindFilter, search, sortNewestFirst]);
+
+  const needsDecision = visibleRows.filter((r) => r.canDecide);
+  const otherPending = visibleRows.filter((r) => !r.canDecide);
+
+  function SummaryCard({ kind }: { kind: ApprovalKind }) {
+    const meta = KIND_META[kind];
+    const active = kindFilter === kind;
+    return (
+      <button
+        onClick={() => setKindFilter((prev) => (prev === kind ? null : kind))}
+        className={`status-pill ${meta.tone}`}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flex: "1 1 220px",
+          minWidth: 220,
+          textAlign: "left",
+          padding: "14px 16px",
+          borderRadius: "var(--radius)",
+          border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
+          background: "var(--surface)",
+          cursor: "pointer",
+          textTransform: "none",
+          letterSpacing: "normal",
+          fontWeight: 400,
+        }}
+      >
+        <span className={`status-pill ${meta.tone}`} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 10, flexShrink: 0 }}>
+          {meta.icon}
+        </span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>{meta.pluralLabel}</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "var(--navy)", lineHeight: 1.15 }}>{counts[kind]}</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Awaiting your approval</div>
+        </div>
+        <ChevronRight size={16} style={{ color: "var(--muted)", flexShrink: 0 }} />
+      </button>
+    );
   }
 
-  function TypeFilterBar() {
+  function RequestCard({ row }: { row: Row }) {
+    const meta = KIND_META[row.kind];
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        <span style={{ fontSize: 11.5, color: "var(--muted)", marginRight: 2 }}>Filter by type:</span>
-        {(Object.keys(KIND_META) as ApprovalKind[]).map((kind) => {
-          const meta = KIND_META[kind];
-          const active = kindFilter.size === 0 || kindFilter.has(kind);
-          return (
-            <button
-              key={kind}
-              onClick={() => toggleKind(kind)}
-              className={`status-pill ${meta.tone}`}
-              style={{
-                cursor: "pointer",
-                border: "1px solid transparent",
-                opacity: active ? 1 : 0.4,
-                fontSize: 10.5,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-              }}
-              title={active ? `Hide ${meta.label} rows` : `Show ${meta.label} rows`}
-            >
-              {meta.label} ({counts[kind]})
-            </button>
-          );
-        })}
-        {kindFilter.size > 0 && (
-          <button
-            onClick={() => setKindFilter(new Set())}
-            style={{ fontSize: 10.5, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}
-          >
-            Clear filter
-          </button>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 16,
+          padding: 16,
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+          background: "var(--surface)",
+          marginBottom: 10,
+        }}
+      >
+        <span className={`status-pill ${meta.tone}`} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 10, flexShrink: 0 }}>
+          {meta.icon}
+        </span>
+
+        <div style={{ minWidth: 190, flex: "1 1 190px" }}>
+          <span className={`status-pill ${meta.tone}`} style={{ fontSize: 9.5, marginBottom: 4, display: "inline-block" }}>
+            {row.typeLabel}
+          </span>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>{row.subject}</div>
+        </div>
+
+        <div style={{ minWidth: 170, flex: "1 1 170px", display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-secondary)" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <Folder size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
+            {row.context}
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <User size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
+            {row.requestedByName}
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <Calendar size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
+            {formatDate(row.requestedAt)}
+          </span>
+        </div>
+
+        <div style={{ minWidth: 220, flex: "1 1 220px", fontSize: 11 }}>
+          {row.reasonCategory && (
+            <>
+              <span style={{ fontSize: 9.5, color: "var(--muted)", marginRight: 5 }}>Reason</span>
+              <span className="status-pill neutral" style={{ fontSize: 9.5 }}>
+                {row.reasonCategory}
+              </span>
+            </>
+          )}
+          {row.reasonNotes && <div style={{ color: "var(--text-secondary)", marginTop: 3 }}>{row.reasonNotes}</div>}
+          {row.extraLine && <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>{row.extraLine}</div>}
+        </div>
+
+        {row.action && row.kind !== "baseline" && row.kind !== "closure" && (
+          <div style={{ minWidth: 160, flex: "1 1 160px" }}>
+            <NotesField rowKey={row.key} />
+          </div>
         )}
+
+        <div style={{ marginLeft: "auto", flexShrink: 0 }}>{row.action ?? <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>}</div>
       </div>
     );
   }
 
-  function ApprovalsTable({ rows, emptyLabel }: { rows: Row[]; emptyLabel: string }) {
+  function RequestList({ rows, emptyLabel }: { rows: Row[]; emptyLabel: string }) {
     if (rows.length === 0) {
       return <p style={{ fontSize: 12, color: "var(--muted)", padding: "10px 0" }}>{emptyLabel}</p>;
     }
     return (
-      <table className="data-table" style={{ width: "100%", marginBottom: 8 }}>
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Subject</th>
-            <th>Project</th>
-            <th>Requested by</th>
-            <th>Requested on</th>
-            <th>Details</th>
-            <th style={{ minWidth: 150 }}>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.key}>
-              <td>
-                <span className={`status-pill ${KIND_META[row.kind].tone}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10 }}>
-                  {row.typeIcon}
-                  {row.typeLabel}
-                </span>
-              </td>
-              <td style={{ fontWeight: 600, color: "var(--navy)" }}>{row.subject}</td>
-              <td>{row.context}</td>
-              <td>{row.requestedByName}</td>
-              <td>{formatDate(row.requestedAt)}</td>
-              <td style={{ fontSize: 11, color: "var(--text-secondary)", maxWidth: 320 }}>{row.detail}</td>
-              <td>{row.action ?? <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div>
+        {rows.map((row) => (
+          <RequestCard key={row.key} row={row} />
+        ))}
+      </div>
     );
   }
 
@@ -512,21 +581,56 @@ export default function ApprovalCenter() {
 
   return (
     <div>
-      <h1>Approval Center</h1>
-      <p style={{ fontSize: 12.5, color: "var(--text-secondary)", marginTop: -6, marginBottom: 16 }}>
-        Everything currently awaiting a decision, in one place — extension requests, time entries, Start Project (baseline) requests, and project close requests.
-      </p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+        <div>
+          <h1 style={{ marginBottom: 2 }}>Approval Center</h1>
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: 0 }}>Review requests requiring your decision.</p>
+        </div>
+        <span className="status-pill warning" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, padding: "6px 12px" }}>
+          <Clock size={13} />
+          {totalPending} Pending
+        </span>
+      </div>
 
-      <TypeFilterBar />
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+        <SummaryCard kind="extension" />
+        <SummaryCard kind="time" />
+        <SummaryCard kind="baseline" />
+        <SummaryCard kind="closure" />
+      </div>
 
-      <h2 style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
-        <ClipboardCheck size={15} />
-        Needs your decision ({needsDecision.length})
-      </h2>
-      <ApprovalsTable rows={needsDecision} emptyLabel="Nothing needs your decision right now." />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+        <div style={{ position: "relative", flex: "1 1 220px", minWidth: 200 }}>
+          <Search size={14} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", pointerEvents: "none" }} />
+          <input
+            type="text"
+            placeholder="Search requests..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ width: "100%", boxSizing: "border-box", fontSize: 12, padding: "7px 10px 7px 28px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+          />
+        </div>
+        <button
+          onClick={() => setSortNewestFirst((v) => !v)}
+          style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-secondary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 10px", cursor: "pointer" }}
+        >
+          <ArrowUpDown size={13} />
+          Sort: {sortNewestFirst ? "Newest first" : "Oldest first"}
+        </button>
+        <button
+          onClick={() => loadAll()}
+          title="Refresh"
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, color: "var(--text-secondary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+        >
+          <RefreshCw size={13} />
+        </button>
+      </div>
+
+      <h2 style={{ fontSize: 13 }}>Needs your decision ({needsDecision.length})</h2>
+      <RequestList rows={needsDecision} emptyLabel="Nothing needs your decision right now." />
 
       <h2 style={{ fontSize: 13, marginTop: 24 }}>Other pending approvals ({otherPending.length})</h2>
-      <ApprovalsTable rows={otherPending} emptyLabel="No other pending approvals." />
+      <RequestList rows={otherPending} emptyLabel="No other pending approvals." />
 
       {confirmDialog}
     </div>
