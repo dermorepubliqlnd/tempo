@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, ChevronDown, BarChart3, ListChecks } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, XCircle, Clock, ShieldCheck, BarChart3, ListChecks, Folder, User, Calendar, CalendarClock, ChevronRight } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
@@ -66,7 +66,10 @@ export default function ExtensionRequests() {
   const [loading, setLoading] = useState(true);
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Status filter (2026-09-19, Sandra: card-layout mockup + "add metric
+  // cards like All request | Pending | approved") -- the metric cards
+  // double as the filter, same convention as the Approval Center page.
+  const [statusFilter, setStatusFilter] = useState<"all" | "Pending" | "Approved" | "Rejected">("all");
 
   async function loadAll() {
     setLoading(true);
@@ -151,127 +154,146 @@ export default function ExtensionRequests() {
     loadAll();
   }
 
-  const pendingForMe = requests.filter((r) => r.status === "Pending" && canDecide(r));
-  const mine = requests.filter((r) => r.requester?.id === me?.id);
-  const rest = requests.filter((r) => !pendingForMe.includes(r) && r.requester?.id !== me?.id);
+  const statusCounts = {
+    all: requests.length,
+    Pending: requests.filter((r) => r.status === "Pending").length,
+    Approved: requests.filter((r) => r.status === "Approved").length,
+    Rejected: requests.filter((r) => r.status === "Rejected").length,
+  };
+  // Metric cards double as the status filter (2026-09-19, Sandra:
+  // card-layout mockup) -- applied before the three groupings below, same
+  // convention as the Approval Center page.
+  const filteredRequests = statusFilter === "all" ? requests : requests.filter((r) => r.status === statusFilter);
+  const pendingForMe = filteredRequests.filter((r) => r.status === "Pending" && canDecide(r));
+  const mine = filteredRequests.filter((r) => r.requester?.id === me?.id);
+  const rest = filteredRequests.filter((r) => !pendingForMe.includes(r) && r.requester?.id !== me?.id);
 
-  // Table format, click a row to expand full reason/decision detail --
-  // replaces the earlier stacked-card layout per Sandra's request
-  // (2026-07-17). Each section (Needs your decision / My requests / Other
-  // visible) is its own compact table so the grouping from the card
-  // version is preserved.
+  // Card format (2026-09-19, Sandra: match the Approval Center's card
+  // layout) -- each section (Needs your decision / My requests / Other
+  // visible) renders its own card list instead of a table now; the
+  // grouping itself is unchanged.
   function RequestsTable({ rows, showDecideActions }: { rows: ExtensionRequestRow[]; showDecideActions: boolean }) {
     if (rows.length === 0) return null;
     return (
-      <table className="data-table" style={{ width: "100%", marginBottom: 8 }}>
-        <thead>
-          <tr>
-            <th style={{ width: 22 }}></th>
-            <th>Task</th>
-            <th>Assignee</th>
-            <th>Project</th>
-            <th>Requested by</th>
-            <th>Current</th>
-            <th>Requested</th>
-            <th>Reason</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => {
-            const expanded = expandedId === row.id;
-            return (
-              <Fragment key={row.id}>
-                <tr
-                  onClick={() => setExpandedId(expanded ? null : row.id)}
-                  style={{ cursor: "pointer" }}
-                >
-                  <td style={{ color: "var(--muted)" }}>{expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
-                  <td style={{ fontWeight: 600, color: "var(--navy)" }}>
-                    {row.project && (
-                      <span className="status-pill accent" style={{ fontSize: 9.5, marginRight: 6 }}>
-                        Project timeline
-                      </span>
-                    )}
-                    {row.project ? row.project.name : row.task?.name ?? "Untitled task"}
-                    {row.is_manager_initiated && (
-                      <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: "var(--muted)" }}>(manager-initiated)</span>
-                    )}
-                  </td>
-                  <td>{row.project ? "—" : assigneeName(row.task?.assignee_id ?? null)}</td>
-                  <td>{row.project ? row.project.name : row.task?.project?.name ?? "—"}</td>
-                  <td style={{ fontWeight: !row.project && row.task?.assignee_id !== row.requester?.id ? 600 : 400 }}>
-                    {row.requester?.name ?? "—"}
-                    {row.task && row.requester && row.task.assignee_id !== row.requester.id && (
-                      <span style={{ marginLeft: 5, fontSize: 9, fontWeight: 600, color: "var(--muted)" }} title="Requested on behalf of the assignee">
-                        (on behalf)
-                      </span>
-                    )}
-                  </td>
-                  <td>{formatDate(row.project ? row.project.end_date : row.task?.current_due_date)}</td>
-                  <td style={{ fontWeight: 600 }}>{formatDate(row.requested_new_due_date)}</td>
-                  <td>
-                    <span className="status-pill neutral" style={{ fontSize: 10 }}>
-                      {row.reason_category}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={`status-pill ${STATUS_TONE[row.status]}`}>{row.status}</span>
-                  </td>
-                </tr>
-                {expanded && (
-                  <tr>
-                    <td></td>
-                    <td colSpan={8} style={{ background: "var(--bg)", padding: "10px 14px" }}>
-                      <div style={{ fontSize: 11.5, marginBottom: 6 }}>
-                        <span style={{ color: "var(--muted)" }}>Reason notes:</span> {row.reason_notes}
-                      </div>
-                      <div style={{ fontSize: 10.5, color: "var(--muted)" }}>
-                        Requested on {formatDate(row.created_at)}
-                      </div>
-                      {row.status !== "Pending" && (
-                        <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 4 }}>
-                          {row.status} by {row.decider?.name ?? "—"} on {formatDate(row.decided_at)}
-                          {row.decision_notes && <> — "{row.decision_notes}"</>}
-                        </div>
-                      )}
-                      {showDecideActions && (
-                        <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10 }} onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="text"
-                            placeholder="Optional decision note"
-                            value={notesDraft[row.id] ?? ""}
-                            onChange={(e) => setNotesDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                            style={{ width: "100%", fontSize: 11.5, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", marginBottom: 8, boxSizing: "border-box" }}
-                          />
-                          <div style={{ display: "flex", gap: 8 }}>
-                            <button
-                              onClick={() => decide(row, "Approved")}
-                              disabled={decidingId === row.id}
-                              style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer" }}
-                            >
-                              <CheckCircle2 size={13} />
-                              Approve
-                            </button>
-                            <button
-                              onClick={() => decide(row, "Rejected")}
-                              disabled={decidingId === row.id}
-                              style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--danger-text)", background: "none", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer" }}
-                            >
-                              <XCircle size={13} />
-                              Reject
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
+      <div>
+        {rows.map((row) => {
+          const busy = decidingId === row.id;
+          const isProjectLevel = !!row.project;
+          return (
+            <div
+              key={row.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 16,
+                padding: 16,
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                background: "var(--surface)",
+                marginBottom: 10,
+              }}
+            >
+              <span
+                className={`status-pill ${isProjectLevel ? "accent" : "gold"}`}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 10, flexShrink: 0 }}
+              >
+                <CalendarClock size={15} />
+              </span>
+
+              <div style={{ minWidth: 190, flex: "1 1 190px" }}>
+                <span className={`status-pill ${isProjectLevel ? "accent" : "gold"}`} style={{ fontSize: 9.5, marginBottom: 4, display: "inline-block" }}>
+                  {isProjectLevel ? "Project Timeline Extension" : "Task Extension"}
+                </span>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>
+                  {isProjectLevel ? row.project?.name : row.task?.name ?? "Untitled task"}
+                  {row.is_manager_initiated && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: "var(--muted)" }}>(manager-initiated)</span>}
+                </div>
+              </div>
+
+              <div style={{ minWidth: 190, flex: "1 1 190px", display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-secondary)" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <Folder size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                  {isProjectLevel ? row.project?.name : row.task?.project?.name ?? "—"}
+                </span>
+                {!isProjectLevel && (
+                  <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <User size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                    {assigneeName(row.task?.assignee_id ?? null)} <span style={{ color: "var(--muted)" }}>(assignee)</span>
+                  </span>
                 )}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <User size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                  {row.requester?.name ?? "—"}
+                  {row.task && row.requester && row.task.assignee_id !== row.requester.id && (
+                    <span style={{ fontSize: 9, fontWeight: 600, color: "var(--muted)" }} title="Requested on behalf of the assignee">
+                      (on behalf)
+                    </span>
+                  )}
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <Calendar size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                  {formatDate(row.created_at)}
+                </span>
+              </div>
+
+              <div style={{ minWidth: 220, flex: "1 1 220px", fontSize: 11 }}>
+                <span style={{ fontSize: 9.5, color: "var(--muted)", marginRight: 5 }}>Reason</span>
+                <span className="status-pill neutral" style={{ fontSize: 9.5 }}>
+                  {row.reason_category}
+                </span>
+                {row.reason_notes && <div style={{ color: "var(--text-secondary)", marginTop: 3 }}>{row.reason_notes}</div>}
+                <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>
+                  {formatDate(row.project ? row.project.end_date : row.task?.current_due_date)} &rarr; {formatDate(row.requested_new_due_date)}
+                </div>
+              </div>
+
+              <div style={{ minWidth: 90, flex: "0 0 auto" }}>
+                <span className={`status-pill ${STATUS_TONE[row.status]}`}>{row.status}</span>
+                {row.status !== "Pending" && (
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 5 }}>
+                    by {row.decider?.name ?? "—"} on {formatDate(row.decided_at)}
+                    {row.decision_notes && <> — "{row.decision_notes}"</>}
+                  </div>
+                )}
+              </div>
+
+              {showDecideActions && row.status === "Pending" && (
+                <div style={{ minWidth: 160, flex: "1 1 160px" }}>
+                  <input
+                    type="text"
+                    placeholder="Add an optional note..."
+                    value={notesDraft[row.id] ?? ""}
+                    onChange={(e) => setNotesDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                    style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", width: "100%", boxSizing: "border-box" }}
+                  />
+                </div>
+              )}
+
+              {showDecideActions && row.status === "Pending" && (
+                <div style={{ marginLeft: "auto", flexShrink: 0, display: "flex", gap: 6 }}>
+                  <button
+                    onClick={() => decide(row, "Rejected")}
+                    disabled={busy}
+                    style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                  >
+                    <XCircle size={13} />
+                    Reject
+                  </button>
+                  <button
+                    onClick={() => decide(row, "Approved")}
+                    disabled={busy}
+                    style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                  >
+                    <CheckCircle2 size={13} />
+                    Approve
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     );
   }
 
@@ -559,6 +581,47 @@ export default function ExtensionRequests() {
         <ReportTab />
       ) : (
         <>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 16, marginBottom: 8 }}>
+            {(
+              [
+                { key: "all" as const, label: "All Requests", tone: "slate", value: statusCounts.all },
+                { key: "Pending" as const, label: "Pending", tone: "warning", value: statusCounts.Pending },
+                { key: "Approved" as const, label: "Approved", tone: "success", value: statusCounts.Approved },
+                { key: "Rejected" as const, label: "Rejected", tone: "danger", value: statusCounts.Rejected },
+              ]
+            ).map((card) => {
+              const active = statusFilter === card.key;
+              return (
+                <button
+                  key={card.key}
+                  onClick={() => setStatusFilter((prev) => (prev === card.key ? "all" : card.key))}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    flex: "1 1 200px",
+                    minWidth: 180,
+                    textAlign: "left",
+                    padding: "12px 14px",
+                    borderRadius: "var(--radius)",
+                    border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
+                    background: "var(--surface)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span className={`status-pill ${card.tone}`} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: 10, flexShrink: 0 }}>
+                    <Clock size={14} />
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--navy)" }}>{card.label}</div>
+                    <div style={{ fontSize: 19, fontWeight: 700, color: "var(--navy)", lineHeight: 1.15 }}>{card.value}</div>
+                  </div>
+                  <ChevronRight size={15} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                </button>
+              );
+            })}
+          </div>
+
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 20, marginBottom: 8 }}>
             <Clock size={14} color="var(--warning-text)" />
             <h2 style={{ margin: 0, fontSize: 13 }}>Needs your decision ({pendingForMe.length})</h2>
