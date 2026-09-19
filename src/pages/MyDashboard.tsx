@@ -18,7 +18,6 @@ import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
 import { buildHolidaySet } from "../lib/workingDays";
 import { colorForPerson } from "../lib/personColors";
-import { decideTimeEntry } from "../lib/timeTracking";
 // Reuses Health/Progress straight from Projects.tsx (same convention
 // Dashboard.tsx already follows) so this page's numbers can never drift
 // out of sync with what the Projects table itself shows for a project.
@@ -136,7 +135,7 @@ const WEEKDAY_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function MyDashboard() {
   const { person: me } = useSession();
-  const { alert, confirm, dialog: confirmDialog } = useConfirm();
+  const { dialog: confirmDialog } = useConfirm();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
 
@@ -155,7 +154,6 @@ export default function MyDashboard() {
   const [pendingTimeEntries, setPendingTimeEntries] = useState<PendingTimeEntryRow[]>([]);
   const [baselineRequests, setBaselineRequests] = useState<BaselineRow[]>([]);
   const [closureRequests, setClosureRequests] = useState<ClosureRow[]>([]);
-  const [decidingKey, setDecidingKey] = useState<string | null>(null);
 
   // Week picker (2026-09-19, mockup's top-right date range) -- Monday-
   // start work week, navigable, drives every "This Week" card/widget.
@@ -364,119 +362,55 @@ export default function MyDashboard() {
     return Array.from(map.values()).sort((a, b) => a.sort - b.sort);
   }, [tasks, me, outputTypes, todayIso]);
 
-  // ---- Approvals -------------------------------------------------------
-  function canDecideExtension(row: ExtensionRow): boolean {
-    if (!me) return false;
-    if (isFullAccess) return true;
-    if (row.project) {
-      const ownerId = row.project.owner_id;
-      if (!ownerId) return false;
-      const owner = people.find((p) => p.id === ownerId);
-      return owner?.reports_to === me.id;
-    }
-    const ownerId = row.task?.project?.owner_id ?? null;
-    if (!ownerId) return false;
-    const requesterId = row.requester?.id ?? null;
-    if (ownerId === me.id && requesterId !== ownerId) return true;
-    if (requesterId === ownerId) {
-      const owner = people.find((p) => p.id === ownerId);
-      return owner?.reports_to === me.id;
-    }
-    return false;
-  }
-  function canDecideTimeEntry(row: PendingTimeEntryRow): boolean {
-    if (!me) return false;
-    if (isFullAccess) return true;
-    const ownerId = row.task?.project?.owner_id ?? null;
-    if (!ownerId) return false;
-    const requesterId = row.requested_by;
-    if (ownerId === me.id && requesterId !== ownerId) return true;
-    if (requesterId === ownerId) {
-      const owner = people.find((p) => p.id === ownerId);
-      return owner?.reports_to === me.id;
-    }
-    return false;
-  }
-  const canDecideBaseline = !!me?.can_approve_rebaseline;
-  function canDecideClosure(row: ClosureRow): boolean {
-    if (!me) return false;
-    if (isFullAccess || me.can_approve_closures) return true;
-    const proj = projectById.get(row.project_id);
-    return !!proj && proj.owner_id === me.id;
-  }
+  // ---- Approvals ---------------------------------------------------------
+  // This card is informational only: it tells ME whether things I SUBMITTED
+  // (extension requests, time entries, baseline/closure requests) are still
+  // waiting on someone else's decision. It intentionally does NOT show
+  // items I need to approve/reject myself -- that decision workflow lives
+  // on the Approval Center page, which has the full reviewer-eligibility
+  // logic. Duplicating an Approve button here would let people action their
+  // own submissions with none of that context.
+  const myPendingExtensions = extensions.filter((r) => r.requester?.id === me?.id);
+  const myPendingTimeEntries = pendingTimeEntries.filter((r) => r.person_id === me?.id);
+  const myPendingBaseline = baselineRequests.filter((r) => r.requested_by === me?.id);
+  const myPendingClosure = closureRequests.filter((r) => r.requested_by === me?.id);
+  const myPendingApprovalsCount = myPendingExtensions.length + myPendingTimeEntries.length + myPendingBaseline.length + myPendingClosure.length;
 
-  const decidableExtensions = extensions.filter(canDecideExtension);
-  const decidableTimeEntries = pendingTimeEntries.filter(canDecideTimeEntry);
-  const decidableBaseline = canDecideBaseline ? baselineRequests : [];
-  const decidableClosure = closureRequests.filter(canDecideClosure);
-  const needsMyDecisionCount = decidableExtensions.length + decidableTimeEntries.length + decidableBaseline.length + decidableClosure.length;
-
-  type ApprovalItem = { key: string; label: string; project: string; date: string; kind: "extension" | "time" | "baseline" | "closure"; refId: string };
-  const approvalItems: ApprovalItem[] = [
-    ...decidableExtensions.map((r) => ({
+  type SubmittedItem = { key: string; label: string; project: string; date: string; kind: "extension" | "time" | "baseline" | "closure"; to: string };
+  const mySubmittedItems: SubmittedItem[] = [
+    ...myPendingExtensions.map((r) => ({
       key: `ext-${r.id}`,
       label: r.project ? r.project.name : r.task?.name ?? "Untitled task",
       project: r.project ? "Whole project" : r.task?.project?.name ?? "—",
       date: r.created_at,
       kind: "extension" as const,
-      refId: r.id,
+      to: "/extension-requests",
     })),
-    ...decidableTimeEntries.map((r) => ({
+    ...myPendingTimeEntries.map((r) => ({
       key: `time-${r.id}`,
       label: r.task?.name ?? "Untitled task",
       project: r.task?.project?.name ?? "—",
       date: r.started_at,
       kind: "time" as const,
-      refId: r.id,
+      to: "/time-tracking",
     })),
-    ...decidableBaseline.map((r) => ({
+    ...myPendingBaseline.map((r) => ({
       key: `bl-${r.id}`,
       label: projectById.get(r.project_id)?.name ?? "Untitled project",
       project: "Baseline approval",
       date: r.requested_at,
       kind: "baseline" as const,
-      refId: r.id,
+      to: `/projects/${r.project_id}/wbs`,
     })),
-    ...decidableClosure.map((r) => ({
+    ...myPendingClosure.map((r) => ({
       key: `cl-${r.id}`,
       label: projectById.get(r.project_id)?.name ?? "Untitled project",
       project: "Project close request",
       date: r.requested_at,
       kind: "closure" as const,
-      refId: r.id,
+      to: `/projects/${r.project_id}/wbs`,
     })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-  async function quickApprove(item: ApprovalItem) {
-    const key = item.key;
-    setDecidingKey(key);
-    if (item.kind === "extension") {
-      const row = decidableExtensions.find((r) => r.id === item.refId);
-      const { error } = await supabase.rpc(row?.project ? "decide_project_extension_request" : "decide_extension_request", {
-        p_request_id: item.refId,
-        p_status: "Approved",
-        p_decision_notes: null,
-      });
-      setDecidingKey(null);
-      if (error) {
-        await alert(`Couldn't approve: ${error.message}`);
-        return;
-      }
-      loadAll();
-      return;
-    }
-    if (item.kind === "time") {
-      const res = await decideTimeEntry(item.refId, "approved", null);
-      setDecidingKey(null);
-      if (res.error) {
-        await alert(`Couldn't approve: ${res.error}`);
-        return;
-      }
-      loadAll();
-      return;
-    }
-    setDecidingKey(null);
-  }
 
   if (loading || !me) return <p style={{ padding: 20, color: "var(--muted)" }}>Loading…</p>;
 
@@ -534,17 +468,17 @@ export default function MyDashboard() {
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
         <MetricCard icon={<Folder size={16} />} colors={METRIC_COLORS.blue} label="My Active Projects" value={myProjects.length} sub={`of ${projects.length} total projects`} />
         <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Tasks Due This Week" value={tasksThisWeek.length} sub={`${tasksDueToday.length} due today`} />
-        <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="Pending Approvals" value={needsMyDecisionCount} sub="Requires your review" />
+        <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="Pending Approvals" value={myPendingApprovalsCount} sub="Sent by you, awaiting decision" />
         <MetricCard icon={<BarChart3 size={16} />} colors={METRIC_COLORS.teal} label="Utilization This Week" value={`${Math.round(weekUtilPct)}%`} sub={`of ${weekCapacityTotal.toFixed(1)}h capacity`} />
         <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={`of ${weekCapacityTotal.toFixed(1)}h expected`} />
         <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Items" value={overdueTasks.length} sub="Needs attention" />
       </div>
 
-      {(tasksDueToday.length > 0 || needsMyDecisionCount > 0 || overdueTasks.length > 0 || daysOverCapacity > 0 || missingLogHours > 0.1) && (
+      {(tasksDueToday.length > 0 || myPendingApprovalsCount > 0 || overdueTasks.length > 0 || daysOverCapacity > 0 || missingLogHours > 0.1) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
           {tasksDueToday.length > 0 && <AttentionPill tone="danger" icon={<Calendar size={12} />} value={tasksDueToday.length} label="Tasks due today" to="/projects" />}
-          {needsMyDecisionCount > 0 && <AttentionPill tone="purple" icon={<ShieldQuestion size={12} />} value={needsMyDecisionCount} label="Approvals waiting" to="/approval-center" />}
+          {myPendingApprovalsCount > 0 && <AttentionPill tone="purple" icon={<ShieldQuestion size={12} />} value={myPendingApprovalsCount} label="Pending approvals" to="/approval-center" />}
           {overdueTasks.length > 0 && <AttentionPill tone="danger" icon={<AlertTriangle size={12} />} value={overdueTasks.length} label={overdueTasks.length === 1 ? "Overdue task" : "Overdue tasks"} to="/projects" />}
           {daysOverCapacity > 0 && <AttentionPill tone="gold" icon={<Gauge size={12} />} value={daysOverCapacity} label={daysOverCapacity === 1 ? "Day over capacity" : "Days over capacity"} to="/utilization" />}
           {missingLogHours > 0.1 && <AttentionPill tone="accent" icon={<Clock3 size={12} />} value={`${missingLogHours.toFixed(1)}h`} label="Missing logs" to="/time-tracking" />}
@@ -628,44 +562,26 @@ export default function MyDashboard() {
           </div>
 
           <div className="dash-card" style={{ marginBottom: 0 }}>
-            <SectionHeader title="Pending Approvals" to="/approval-center" />
-            {approvalItems.length === 0 ? (
-              <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing waiting on you right now.</p>
+            <SectionHeader title="Pending Approvals" to="/approval-center" small="Requests you've sent that are still awaiting a decision" />
+            {mySubmittedItems.length === 0 ? (
+              <p style={{ fontSize: 12, color: "var(--muted)" }}>You have no pending requests right now.</p>
             ) : (
               <>
                 <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
                   <span style={{ flex: "1 1 40%" }}>Item</span>
                   <span style={{ flex: "1 1 25%" }}>Project</span>
                   <span style={{ flex: "0 0 90px" }}>Submitted</span>
-                  <span style={{ flex: "0 0 90px", textAlign: "right" }}>Action</span>
+                  <span style={{ flex: "0 0 90px", textAlign: "right" }}>Status</span>
                 </div>
-                {approvalItems.slice(0, 5).map((item) => (
-                  <div key={item.key} className="dash-row" style={{ cursor: "default" }}>
+                {mySubmittedItems.slice(0, 5).map((item) => (
+                  <Link key={item.key} to={item.to} className="dash-row" style={{ textDecoration: "none", color: "inherit" }}>
                     <span style={{ flex: "1 1 40%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>{item.label}</span>
                     <span style={{ flex: "1 1 25%", fontSize: 11.5, color: "var(--text-secondary)" }}>{item.project}</span>
                     <span style={{ flex: "0 0 90px", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(item.date)}</span>
                     <span style={{ flex: "0 0 90px", textAlign: "right" }}>
-                      {item.kind === "extension" || item.kind === "time" ? (
-                        <button
-                          onClick={async () => {
-                            const ok = await confirm({ message: `Approve "${item.label}"?`, confirmLabel: "Approve" });
-                            if (ok) quickApprove(item);
-                          }}
-                          disabled={decidingKey === item.key}
-                          style={{ fontSize: 11, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 14px", cursor: "pointer" }}
-                        >
-                          Approve
-                        </button>
-                      ) : (
-                        <Link
-                          to="/approval-center"
-                          style={{ display: "inline-block", fontSize: 11, fontWeight: 600, color: "#fff", background: "var(--accent)", borderRadius: "var(--radius-sm)", padding: "6px 14px", textDecoration: "none" }}
-                        >
-                          Review
-                        </Link>
-                      )}
+                      <span className="status-pill warning" style={{ fontSize: 9.5 }}>PENDING</span>
                     </span>
-                  </div>
+                  </Link>
                 ))}
               </>
             )}
