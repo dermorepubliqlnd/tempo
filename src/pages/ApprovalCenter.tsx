@@ -369,7 +369,7 @@ export default function ApprovalCenter() {
         requestedAt: row.created_at,
         reasonCategory: row.reason_category,
         reasonNotes: row.reason_notes,
-        extraLine: `New date: ${formatDate(row.requested_new_due_date)}`,
+        extraLine: `${formatDate(row.project ? row.project.end_date : row.task?.current_due_date)} → ${formatDate(row.requested_new_due_date)}`,
         canDecide: canDecideExtension(row),
         action: canDecideExtension(row) ? (
           <DecideButtons rowKey={key} onApprove={() => decideExtension(row, "Approved")} onReject={() => decideExtension(row, "Rejected")} />
