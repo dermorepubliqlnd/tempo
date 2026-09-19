@@ -93,11 +93,26 @@ function hours(minutes: number | null): string {
   return `${(minutes / 60).toFixed(1)}h`;
 }
 
+// Request type (2026-09-19, Sandra: "add filters and use colors for
+// request types") -- a stable discriminator used both for the type
+// filter and the color-coded pill, kept separate from typeLabel so the
+// two extension sub-labels ("Task extension" / "Project timeline
+// extension") still filter and color together as one "Extension" type.
+type ApprovalKind = "extension" | "time" | "baseline" | "closure";
+
+const KIND_META: Record<ApprovalKind, { label: string; tone: string }> = {
+  extension: { label: "Extension request", tone: "accent" },
+  time: { label: "Time entry", tone: "purple" },
+  baseline: { label: "Baseline approval", tone: "mint" },
+  closure: { label: "Close request", tone: "pink" },
+};
+
 // Shared row chrome for every approval type -- kept as one generic shape
 // so the two tables below (Needs your decision / Other pending) don't
 // need four separate render paths.
 interface Row {
   key: string;
+  kind: ApprovalKind;
   typeLabel: string;
   typeIcon: JSX.Element;
   subject: string;
@@ -122,6 +137,10 @@ export default function ApprovalCenter() {
   const [closureRequests, setClosureRequests] = useState<ClosureRow[]>([]);
   const [decidingKey, setDecidingKey] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
+  // Type filter (2026-09-19, Sandra: "add filters... for request types")
+  // -- a Set of the kinds currently shown; empty means "show all" so a
+  // freshly loaded page isn't accidentally filtered to nothing.
+  const [kindFilter, setKindFilter] = useState<Set<ApprovalKind>>(new Set());
 
   async function loadAll() {
     setLoading(true);
@@ -317,6 +336,7 @@ export default function ApprovalCenter() {
       const key = `ext-${row.id}`;
       rows.push({
         key,
+        kind: "extension",
         typeLabel: row.project ? "Project timeline extension" : "Task extension",
         typeIcon: <CalendarClock size={13} />,
         subject: row.project ? row.project.name : row.task?.name ?? "Untitled task",
@@ -335,6 +355,7 @@ export default function ApprovalCenter() {
       const key = `time-${row.id}`;
       rows.push({
         key,
+        kind: "time",
         typeLabel: "Time entry",
         typeIcon: <Timer size={13} />,
         subject: row.task?.name ?? "Untitled task",
@@ -354,6 +375,7 @@ export default function ApprovalCenter() {
       const proj = projectById.get(row.project_id);
       rows.push({
         key,
+        kind: "baseline",
         typeLabel: "Start Project (Baseline)",
         typeIcon: <ShieldCheck size={13} />,
         subject: proj?.name ?? "Untitled project",
@@ -371,6 +393,7 @@ export default function ApprovalCenter() {
       const proj = projectById.get(row.project_id);
       rows.push({
         key,
+        kind: "closure",
         typeLabel: "Project close request",
         typeIcon: <FolderCheck size={13} />,
         subject: proj?.name ?? "Untitled project",
@@ -387,15 +410,64 @@ export default function ApprovalCenter() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extensions, timeEntries, baselineRequests, closureRequests, people, projects, me]);
 
-  const needsDecision = allRows.filter((r) => r.canDecide);
-  const otherPending = allRows.filter((r) => !r.canDecide);
+  const visibleRows = kindFilter.size === 0 ? allRows : allRows.filter((r) => kindFilter.has(r.kind));
+  const needsDecision = visibleRows.filter((r) => r.canDecide);
+  const otherPending = visibleRows.filter((r) => !r.canDecide);
 
   const counts = {
-    extensions: extensions.length,
-    timeEntries: timeEntries.length,
+    extension: extensions.length,
+    time: timeEntries.length,
     baseline: baselineRequests.length,
     closure: closureRequests.length,
   };
+
+  function toggleKind(kind: ApprovalKind) {
+    setKindFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return next;
+    });
+  }
+
+  function TypeFilterBar() {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        <span style={{ fontSize: 11.5, color: "var(--muted)", marginRight: 2 }}>Filter by type:</span>
+        {(Object.keys(KIND_META) as ApprovalKind[]).map((kind) => {
+          const meta = KIND_META[kind];
+          const active = kindFilter.size === 0 || kindFilter.has(kind);
+          return (
+            <button
+              key={kind}
+              onClick={() => toggleKind(kind)}
+              className={`status-pill ${meta.tone}`}
+              style={{
+                cursor: "pointer",
+                border: "1px solid transparent",
+                opacity: active ? 1 : 0.4,
+                fontSize: 10.5,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+              title={active ? `Hide ${meta.label} rows` : `Show ${meta.label} rows`}
+            >
+              {meta.label} ({counts[kind]})
+            </button>
+          );
+        })}
+        {kindFilter.size > 0 && (
+          <button
+            onClick={() => setKindFilter(new Set())}
+            style={{ fontSize: 10.5, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}
+          >
+            Clear filter
+          </button>
+        )}
+      </div>
+    );
+  }
 
   function ApprovalsTable({ rows, emptyLabel }: { rows: Row[]; emptyLabel: string }) {
     if (rows.length === 0) {
@@ -418,7 +490,7 @@ export default function ApprovalCenter() {
           {rows.map((row) => (
             <tr key={row.key}>
               <td>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: "var(--navy)" }}>
+                <span className={`status-pill ${KIND_META[row.kind].tone}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10 }}>
                   {row.typeIcon}
                   {row.typeLabel}
                 </span>
@@ -445,12 +517,7 @@ export default function ApprovalCenter() {
         Everything currently awaiting a decision, in one place — extension requests, time entries, Start Project (baseline) requests, and project close requests.
       </p>
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
-        <SummaryCard icon={<CalendarClock size={16} />} label="Extension requests" value={counts.extensions} />
-        <SummaryCard icon={<Timer size={16} />} label="Time entries" value={counts.timeEntries} />
-        <SummaryCard icon={<ShieldCheck size={16} />} label="Baseline approvals" value={counts.baseline} />
-        <SummaryCard icon={<FolderCheck size={16} />} label="Close requests" value={counts.closure} />
-      </div>
+      <TypeFilterBar />
 
       <h2 style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
         <ClipboardCheck size={15} />
@@ -462,18 +529,6 @@ export default function ApprovalCenter() {
       <ApprovalsTable rows={otherPending} emptyLabel="No other pending approvals." />
 
       {confirmDialog}
-    </div>
-  );
-}
-
-function SummaryCard({ icon, label, value }: { icon: JSX.Element; label: string; value: number }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "10px 16px", background: "var(--surface)", minWidth: 150 }}>
-      <span style={{ color: "var(--accent)" }}>{icon}</span>
-      <div>
-        <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)", lineHeight: 1.1 }}>{value}</div>
-        <div style={{ fontSize: 10.5, color: "var(--muted)" }}>{label}</div>
-      </div>
     </div>
   );
 }
