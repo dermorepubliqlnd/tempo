@@ -126,7 +126,7 @@ const KIND_META: Record<ApprovalKind, { label: string; pluralLabel: string; tone
   extension: { label: "Task Extension", pluralLabel: "Extension Requests", tone: "gold", icon: <CalendarClock size={13} /> },
   time: { label: "Time Entry", pluralLabel: "Time Entries", tone: "accent", icon: <Timer size={13} /> },
   baseline: { label: "Baseline Approval", pluralLabel: "Baselines", tone: "purple", icon: <ShieldCheck size={13} /> },
-  closure: { label: "Close Request", pluralLabel: "Close Requests", tone: "mint", icon: <FolderCheck size={13} /> },
+  closure: { label: "Project Close Request", pluralLabel: "Project Close Requests", tone: "mint", icon: <FolderCheck size={13} /> },
 };
 
 // Shared row chrome for every approval type -- kept as one generic shape
@@ -461,6 +461,38 @@ export default function ApprovalCenter() {
   const needsDecision = visibleRows.filter((r) => r.canDecide);
   const otherPending = visibleRows.filter((r) => !r.canDecide);
 
+  function AllRequestsSummaryCard() {
+    const active = kindFilter === null;
+    return (
+      <button
+        onClick={() => setKindFilter(null)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flex: "1 1 220px",
+          minWidth: 220,
+          textAlign: "left",
+          padding: "14px 16px",
+          borderRadius: "var(--radius)",
+          border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
+          background: "var(--surface)",
+          cursor: "pointer",
+        }}
+      >
+        <span className="status-pill slate" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 10, flexShrink: 0 }}>
+          <Clock size={15} />
+        </span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>All Requests</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "var(--navy)", lineHeight: 1.15 }}>{totalPending}</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Awaiting your approval</div>
+        </div>
+        <ChevronRight size={16} style={{ color: "var(--muted)", flexShrink: 0 }} />
+      </button>
+    );
+  }
+
   function SummaryCard({ kind }: { kind: ApprovalKind }) {
     const meta = KIND_META[kind];
     const active = kindFilter === kind;
@@ -581,18 +613,13 @@ export default function ApprovalCenter() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
-        <div>
-          <h1 style={{ marginBottom: 2 }}>Approval Center</h1>
-          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: 0 }}>Review requests requiring your decision.</p>
-        </div>
-        <span className="status-pill warning" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, padding: "6px 12px" }}>
-          <Clock size={13} />
-          {totalPending} Pending
-        </span>
+      <div style={{ marginBottom: 16 }}>
+        <h1 style={{ marginBottom: 2 }}>Approval Center</h1>
+        <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: 0 }}>Review requests requiring your decision.</p>
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+        <AllRequestsSummaryCard />
         <SummaryCard kind="extension" />
         <SummaryCard kind="time" />
         <SummaryCard kind="baseline" />
