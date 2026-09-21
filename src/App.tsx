@@ -3,6 +3,7 @@ import AppLayout from "./components/AppLayout";
 import { TimeTrackingProvider } from "./lib/TimeTrackingContext";
 import RequireAuth from "./components/RequireAuth";
 import Dashboard from "./pages/Dashboard";
+import MaterialsOutput from "./pages/MaterialsOutput";
 import MyDashboard from "./pages/MyDashboard";
 import Projects from "./pages/Projects";
 import ExtensionRequests from "./pages/ExtensionRequests";
@@ -56,6 +57,7 @@ export default function App() {
         >
           <Route path="/" element={<MyDashboard />} />
           <Route path="/team-dashboard" element={<Dashboard />} />
+          <Route path="/materials-output" element={<MaterialsOutput />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:projectId" element={<Projects />} />
           <Route path="/projects/:projectId/wbs" element={<WbsPlanning />} />

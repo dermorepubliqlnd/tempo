@@ -88,7 +88,7 @@ interface CategoryRow {
   sort_order: number;
   color: string;
 }
-interface OutputTypeRow {
+export interface OutputTypeRow {
   id: string;
   name: string;
   is_active: boolean;
@@ -437,7 +437,7 @@ function CategoryBarList({ rows, total }: { rows: { label: string; value: number
 // available on hover without permanently taking up label-row space.
 // Showing the FULL list on its own page is a separate ask Sandra flagged
 // as a probable follow-up, not built yet.
-function MaterialsOutputBarList({ rows, total, hiddenCount }: { rows: { label: string; closed: number; tentative: number }[]; total: number; hiddenCount: number }) {
+export function MaterialsOutputBarList({ rows, total, hiddenCount }: { rows: { label: string; closed: number; tentative: number }[]; total: number; hiddenCount: number }) {
   if (total === 0) return <div style={{ fontSize: 11, color: "var(--muted)" }}>No output logged yet -- set Output Type + Output Count on tasks in WBS Planning.</div>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1251,7 +1251,16 @@ export default function Dashboard() {
           slot) + Portfolio Movement */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
         <div className="card">
-          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>Materials Output</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600 }}>Materials Output</div>
+            {/* 2026-09-21 (Sandra: "how do we see the remainder of the
+                materials output" -- once this card was capped to the top
+                5 types): links to the new full-list report page, same
+                "View All" pattern as the Active Projects table below. */}
+            <Link to="/materials-output" style={{ fontSize: 11.5, color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>
+              View All
+            </Link>
+          </div>
           <MaterialsOutputBarList
             rows={materialsOutputRows.slice(0, 5)}
             total={materialsOutputGrandTotal}
