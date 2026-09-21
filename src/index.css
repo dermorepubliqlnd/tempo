@@ -460,6 +460,10 @@ input, select { font-family: var(--font); }
   background: var(--hover-bg);
 }
 .view-tab-icon { flex-shrink: 0; opacity: 0.8; }
+/* 2026-09-21 (Sandra: drag-to-reorder view tabs) -- faint feedback on the
+   tab actually being dragged, matching the subtlety of the rest of the
+   tab bar rather than a heavy drag-ghost outline. */
+.view-tab.dragging { opacity: 0.45; }
 .view-tab-dropdown {
   position: absolute;
   top: calc(100% + 4px);

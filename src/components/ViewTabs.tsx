@@ -34,6 +34,11 @@ interface ViewTabsProps<T> {
   onIconChange: (id: string, icon: string | null) => void;
   onDuplicate: (id: string) => void;
   confirm: (options: { title?: string; message: string; confirmLabel?: string; danger?: boolean }) => Promise<boolean>;
+  // 2026-09-21 (Sandra): lets the person drag tabs into their own order.
+  // Optional so any other ViewTabs caller that hasn't wired up a reorder
+  // function yet just renders without drag affordances, same fallback-safe
+  // pattern as the other optional callbacks above.
+  onReorder?: (draggedId: string, targetId: string) => void;
 }
 
 const MAX_VISIBLE = 6;
@@ -97,6 +102,7 @@ export default function ViewTabs<T>({
   onIconChange,
   onDuplicate,
   confirm,
+  onReorder,
 }: ViewTabsProps<T>) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -111,6 +117,8 @@ export default function ViewTabs<T>({
   const [addOpen, setAddOpen] = useState(false);
   const [addSearch, setAddSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  // Drag-to-reorder state for the tab bar (see onReorder prop doc).
+  const [dragViewId, setDragViewId] = useState<string | null>(null);
 
   // These three dropdowns (per-tab "..." menu, "N more" overflow, and
   // Add-view) all used to render in-place with `position:absolute` inside
@@ -210,9 +218,24 @@ export default function ViewTabs<T>({
     return (
       <div
         key={v.id}
-        className={`view-tab${active ? " active" : ""}`}
+        className={`view-tab${active ? " active" : ""}${dragViewId === v.id ? " dragging" : ""}`}
         style={{ color: active ? color : undefined }}
         title={active ? "Click again for view options" : undefined}
+        draggable={!!onReorder && editingId !== v.id}
+        onDragStart={(e) => {
+          e.stopPropagation();
+          setDragViewId(v.id);
+        }}
+        onDragOver={(e) => {
+          if (dragViewId) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (dragViewId && dragViewId !== v.id) onReorder?.(dragViewId, v.id);
+          setDragViewId(null);
+        }}
+        onDragEnd={() => setDragViewId(null)}
         onClick={(e) => {
           // Sandra, 2026-09-03 ("remove the ellipsis... highlight the
           // active view... 1st click displays the view, 2nd click on the

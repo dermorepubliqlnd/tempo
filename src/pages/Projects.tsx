@@ -4684,6 +4684,7 @@ export default function Projects() {
             onColorChange={projectViews.setViewColor}
             onIconChange={projectViews.setViewIcon}
             onDuplicate={projectViews.duplicateView}
+            onReorder={projectViews.reorderViews}
             confirm={confirm}
           />
           <div className="toolbar-actions">
@@ -4981,6 +4982,7 @@ export default function Projects() {
             onColorChange={taskViews.setViewColor}
             onIconChange={taskViews.setViewIcon}
             onDuplicate={taskViews.duplicateView}
+            onReorder={taskViews.reorderViews}
             confirm={confirm}
           />
           <div className="toolbar-actions">

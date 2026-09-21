@@ -288,6 +288,28 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     setViews((vs) => vs.map((v) => (v.id === id ? { ...v, icon } : v)));
   }
 
+  // Notion-style drag-to-reorder for the view tab bar itself (2026-09-21,
+  // Sandra: "the user should be able to re-arrange the order of their
+  // Projects and Task view tabs -- right now there is no way"). Moves the
+  // dragged view to sit immediately before the drop target, same
+  // before-target semantics as the row-drag reorder elsewhere in the app
+  // (reorderedSortValue in Projects.tsx) -- just operating on array
+  // position here instead of a numeric sort_order column, since views
+  // don't have one.
+  function reorderViews(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return;
+    setViews((vs) => {
+      const dragged = vs.find((v) => v.id === draggedId);
+      if (!dragged) return vs;
+      const withoutDragged = vs.filter((v) => v.id !== draggedId);
+      const targetIdx = withoutDragged.findIndex((v) => v.id === targetId);
+      if (targetIdx === -1) return vs;
+      const next = [...withoutDragged];
+      next.splice(targetIdx, 0, dragged);
+      return next;
+    });
+  }
+
   function deleteView(id: string) {
     setViews((vs) => {
       const remaining = vs.filter((v) => v.id !== id);
@@ -300,5 +322,5 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     });
   }
 
-  return { views, activeView, activeViewId, setActiveViewId, updateActiveView, createView, renameView, duplicateView, setViewColor, setViewIcon, deleteView, loaded };
+  return { views, activeView, activeViewId, setActiveViewId, updateActiveView, createView, renameView, duplicateView, setViewColor, setViewIcon, deleteView, reorderViews, loaded };
 }
