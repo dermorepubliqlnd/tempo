@@ -1050,9 +1050,12 @@ export default function Dashboard() {
           Period dropdown. */}
       <SectionHeader>Year-to-Date</SectionHeader>
 
-      {/* Row 2: 4 donuts -- Active Project Health moved out to Row 3
+      {/* Row 2: 5 donuts -- Active Project Health moved out to Row 3
           (2026-09-04) alongside the other three new "Active only" donuts,
-          so this row is now Status/Source/Category/Planning Type only. */}
+          so this row is Status/Source/Category/Planning Type/Project Type.
+          Project Type added 2026-09-21 as its own 5th card, not nested
+          inside Planning Type's -- the grid's auto-fit columns handle a
+          5th tile fine. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 10, marginBottom: 16 }}>
         <div className="card">
           <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>Project Status</div>
@@ -1080,14 +1083,14 @@ export default function Dashboard() {
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <Donut segments={planningTypeDonut} centerLabel="Total" centerValue={stats.total} />
             <DonutLegend segments={planningTypeDonut} total={stats.total} />
-            <div className="card">
+          </div>
+        </div>
+        <div className="card">
           <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>Project Type</div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <Donut segments={projectTypeDonut} centerLabel="Total" centerValue={stats.total} />
             <DonutLegend segments={projectTypeDonut} total={stats.total} />
           </div>
-        </div>
-      </div>
         </div>
       </div>
 
