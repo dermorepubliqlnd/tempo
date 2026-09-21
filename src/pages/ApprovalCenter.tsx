@@ -122,6 +122,7 @@ interface TaskCompletionRow {
   name: string;
   assignee_id: string | null;
   project_id: string;
+  parent_task_id: string | null;
   current_due_date: string | null;
   actual_completion_date: string | null;
   submitted_on: string | null;
@@ -186,6 +187,9 @@ export default function ApprovalCenter() {
   // above them, same reason Projects.tsx keeps its own `chainPeople`
   // alongside its active-only `people`.
   const [chainPeople, setChainPeople] = useState<{ id: string; reports_to: string | null; is_active: boolean }[]>([]);
+  // Task ids that are a parent of at least one other task -- see the
+  // parent_task_id fetch above for why Task Completion excludes these.
+  const [parentTaskIds, setParentTaskIds] = useState<Set<string>>(new Set());
   const [decidingKey, setDecidingKey] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
   // Type filter -- clicking a summary card sets this to that kind; click
@@ -197,7 +201,7 @@ export default function ApprovalCenter() {
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: peopleData }, { data: chainPeopleData }, { data: projectData }, { data: extData }, { data: teData }, { data: blData }, { data: clData }, { data: tcData }] = await Promise.all([
+    const [{ data: peopleData }, { data: chainPeopleData }, { data: projectData }, { data: extData }, { data: teData }, { data: blData }, { data: clData }, { data: tcData }, { data: parentIdData }] = await Promise.all([
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
       supabase.from("people").select("id,reports_to,is_active"),
       supabase.from("projects").select("id,name,owner_id,wbs_status"),
@@ -225,13 +229,25 @@ export default function ApprovalCenter() {
       supabase
         .from("tasks")
         .select(
-          `id, name, assignee_id, project_id, current_due_date, actual_completion_date, submitted_on,
+          `id, name, assignee_id, project_id, parent_task_id, current_due_date, actual_completion_date, submitted_on,
            project:projects ( id, name, owner_id, wbs_status )`
         )
         .eq("status", "Done")
         .is("validated_completion_date", null)
         .eq("is_archived", false)
         .order("submitted_on", { ascending: false }),
+      // 2026-09-21 bugfix (Sandra, spotting "Revise deck" -- a parent
+      // task -- sitting in "Other pending approvals" with no assignee):
+      // a parent task's completion is fully computed from its children
+      // and is NEVER independently validated (see Projects.tsx's own
+      // Validated Date column, which renders "N/A" for any parent with
+      // children -- same reasoning as Work Type's N/A treatment). This
+      // query never excluded parents, so any Done-but-unvalidated parent
+      // (reachable from the old pre-N/A era, or a parent whose children
+      // are all Done/Cancelled) leaked into the Task Completion list.
+      // Fetching every distinct parent_task_id lets the row-builder
+      // below skip any task that IS a parent.
+      supabase.from("tasks").select("parent_task_id").eq("is_archived", false).not("parent_task_id", "is", null),
     ]);
     setPeople((peopleData as PersonLite[]) ?? []);
     setProjects((projectData as ProjectLite[]) ?? []);
@@ -245,6 +261,7 @@ export default function ApprovalCenter() {
     setClosureRequests((clData as ClosureRow[]) ?? []);
     setTaskCompletions((tcData as unknown as TaskCompletionRow[]) ?? []);
     setChainPeople((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []);
+    setParentTaskIds(new Set(((parentIdData as { parent_task_id: string }[]) ?? []).map((r) => r.parent_task_id)));
     setLoading(false);
   }
 
@@ -583,6 +600,11 @@ export default function ApprovalCenter() {
     });
 
     taskCompletions.forEach((row) => {
+      // Parent task -- its completion is fully computed from its
+      // children and is never independently validated (see the comment
+      // on the parent_task_id fetch above). Skip it entirely rather than
+      // show a row nobody can ever act on.
+      if (parentTaskIds.has(row.id)) return;
       const key = `taskval-${row.id}`;
       const canDecide = canDecideTaskCompletion(row);
       // 2026-09-21 (Sandra: "show in the validation list the Due Date,
@@ -613,14 +635,14 @@ export default function ApprovalCenter() {
 
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensions, timeEntries, baselineRequests, closureRequests, taskCompletions, chainPeople, people, projects, me]);
+  }, [extensions, timeEntries, baselineRequests, closureRequests, taskCompletions, parentTaskIds, chainPeople, people, projects, me]);
 
   const counts = {
     extension: extensions.length,
     time: timeEntries.length,
     baseline: baselineRequests.length,
     closure: closureRequests.length,
-    task_completion: taskCompletions.length,
+    task_completion: taskCompletions.filter((t) => !parentTaskIds.has(t.id)).length,
   };
   const totalPending = counts.extension + counts.time + counts.baseline + counts.closure + counts.task_completion;
 
@@ -743,10 +765,19 @@ export default function ApprovalCenter() {
             <User size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
             {row.requestedByName}
           </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <Calendar size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
-            {formatDate(row.requestedAt)}
-          </span>
+          {/* 2026-09-21 (Sandra: "remove that date"): the requestedAt line
+              is redundant for Task Completion rows specifically -- it
+              just repeats Actual Completion Date (or falls back to
+              Submitted On/today), which is already shown, labeled, in
+              the Due Date/Actual Completion block below. Kept for every
+              other kind, where it's the one and only "when was this
+              requested" signal. */}
+          {row.kind !== "task_completion" && (
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <Calendar size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
+              {formatDate(row.requestedAt)}
+            </span>
+          )}
         </div>
 
         <div style={{ minWidth: 220, flex: "1 1 220px", fontSize: 11 }}>
