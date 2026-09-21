@@ -4406,7 +4406,16 @@ export default function Projects() {
     if (existing) {
       if (taskViews.activeViewId !== existing.id) taskViews.setActiveViewId(existing.id);
     } else {
-      taskViews.createView("My Tasks", "table", undefined, undefined, { filterPersonIds: ["me"] });
+      // "Due this week" isn't baked in as a hard filter -- a fixed date
+      // range saved into a view would just go stale the following week
+      // (the view has no notion of "this week" that refreshes itself).
+      // Sorting by due date ascending instead means whatever's due
+      // soonest -- this week's items -- always floats to the top, every
+      // time this view is opened, without ever going stale.
+      taskViews.createView("My Tasks", "table", undefined, undefined, {
+        filterPersonIds: ["me"],
+        sorts: [{ key: "current_due_date", direction: "asc" }],
+      });
     }
     document.getElementById("tasks-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
     navigate("/projects", { replace: true });
