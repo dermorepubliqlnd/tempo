@@ -1,132 +1,90 @@
--- ---------------------------------------------------------------------
--- Phase 49 migration (2026-09-10): Cancelled task status revived.
+-- Phase 49 (2026-09-21): default the Validated Date to the assignee's own
+-- actual completion date instead of "today" (Sandra: "can it by default
+-- capture the actual task completion date, the user or validator can just
+-- adjust if ever the actual completion is not correct").
 --
--- Cancelled was deliberately removed as a task status (see notionOptions.ts's
--- TASK_STATUS_GROUPED comment) in favor of the app's own Archive/Delete
--- system -- but deleting a task destroys logged-hours history and breaks
--- dependency references, which turned out to be a real cost once teams
--- started actually needing to cancel scoped-but-abandoned work. Cancelled
--- comes back as a first-class, non-destructive status: distinct from
--- Done/Complete, excluded from scheduling exactly like Done, and locked +
--- reversible exactly like Done (reopen_task now un-cancels too).
+-- Previously, clicking the plain "Validate" button (Projects.tsx) calls
+-- this RPC with no p_validated_date at all, and the function fell back to
+-- now()::date -- i.e. whatever day the validator happened to click the
+-- button, which is very often NOT the day the work actually finished.
+-- The validator could always fix it afterward via the editable date field
+-- (InlineDate, only once already validated) -- but the common case (the
+-- self-reported actual_completion_date is correct) meant re-typing a date
+-- that was already sitting right there on the row.
 --
--- No CHECK constraint added to tasks.status -- it was already free text
--- pre-existing (see schema.sql), so "Cancelled" needs no schema change
--- there; this migration only adds the reason column + lookup table and
--- extends the two existing Done-only triggers/RPC.
--- ---------------------------------------------------------------------
+-- New default order when no explicit p_validated_date is passed:
+--   1. actual_completion_date (assignee's own self-reported completion date)
+--   2. submitted_on (auto-stamped the instant Status flipped to Done)
+--   3. now() (last resort -- neither of the above exists)
+-- An explicit p_validated_date (still how the editable Validated Date
+-- field itself calls this RPC) always wins over all three, so a validator
+-- adjusting the date because the self-reported one was wrong is untouched
+-- by this change.
+--
+-- Also folds the "can't validate earlier than actual completion" check and
+-- the actual write onto the SAME resolved date (v_new_date) -- previously
+-- the earlier-than-completion check computed its own default and the final
+-- UPDATE recomputed coalesce(p_validated_date, now()) separately; they
+-- happened to agree before this change only because both defaulted to
+-- now(), and would have silently diverged the moment one of them changed
+-- without the other.
+--
+-- Identical to phase48_migration.sql's validate_task_completion otherwise
+-- (self-validation exemption for "no manager above me" is unchanged).
 
--- 1. Task Cancellation Reasons -- admin-configurable lookup, same
---    name/sort_order/is_active CRUD shape as baseline_decline_reasons
---    (phase46_migration.sql) and Time Logging Reasons (phase37).
---    Free text, not an FK: cancellation_reason on tasks stores the
---    picked reason's NAME directly (or the typed note when "Other" is
---    picked), same convention baseline_decline_reasons' sibling columns
---    use -- so a reason can be renamed/deactivated later without
---    rewriting historical tasks.
-
-create table if not exists task_cancellation_reasons (
-  id uuid primary key default gen_random_uuid(),
-  name text not null unique,
-  sort_order int not null default 0,
-  is_active boolean not null default true,
-  created_at timestamptz not null default now()
-);
-
-alter table task_cancellation_reasons enable row level security;
-
-drop policy if exists task_cancellation_reasons_select on task_cancellation_reasons;
-create policy task_cancellation_reasons_select on task_cancellation_reasons for select using (true);
-
-drop policy if exists task_cancellation_reasons_insert on task_cancellation_reasons;
-create policy task_cancellation_reasons_insert on task_cancellation_reasons for insert with check (my_access_level() = 'full');
-
-drop policy if exists task_cancellation_reasons_update on task_cancellation_reasons;
-create policy task_cancellation_reasons_update on task_cancellation_reasons for update using (my_access_level() = 'full') with check (my_access_level() = 'full');
-
-drop policy if exists task_cancellation_reasons_delete on task_cancellation_reasons;
-create policy task_cancellation_reasons_delete on task_cancellation_reasons for delete using (my_access_level() = 'full');
-
-insert into task_cancellation_reasons (name, sort_order) values
-  ('No longer needed / scope changed', 1),
-  ('Duplicate task', 2),
-  ('Superseded by other work', 3),
-  ('Project cancelled or paused', 4),
-  ('Created in error', 5),
-  ('Other', 6)
-on conflict (name) do nothing;
-
--- 2. tasks.cancellation_reason -- required (enforced client-side via the
---    cancel dialog, same optional-notes-except-Other pattern as the
---    Start Project decline dialog) whenever status = 'Cancelled'.
-alter table tasks add column if not exists cancellation_reason text;
-
--- 3. Done-task DB lock (enforce_done_task_lock, phase9/phase12) now also
---    covers Cancelled -- re-created here with the one added condition,
---    everything else byte-identical to phase12's version. A cancelled
---    task's scoping fields freeze exactly the way a Done task's do.
-create or replace function enforce_done_task_lock() returns trigger
-language plpgsql as $$
-begin
-  if TG_OP = 'UPDATE' and OLD.status in ('Done', 'Cancelled') and NEW.status = OLD.status then
-    if coalesce(current_setting('app.bypass_done_task_lock', true), '') <> 'on' then
-      if NEW.name is distinct from OLD.name
-         or NEW.estimated_hours is distinct from OLD.estimated_hours
-         or NEW.effort is distinct from OLD.effort
-         or NEW.work_type_id is distinct from OLD.work_type_id
-         or NEW.assignee_id is distinct from OLD.assignee_id
-         or NEW.start_date is distinct from OLD.start_date
-         or NEW.start_date_full is distinct from OLD.start_date_full
-         or NEW.start_date_standard is distinct from OLD.start_date_standard
-         or NEW.start_full_auto is distinct from OLD.start_full_auto
-         or NEW.start_standard_auto is distinct from OLD.start_standard_auto
-      then
-        raise exception 'this task is % -- its scoping fields (name, estimated hours, effort, work type, assignee, start date) are locked. Reopen it first (Full Access, from the Status column on the main Tasks page, or the row action in WBS Planning) to make changes.', OLD.status;
-      end if;
-    end if;
-  end if;
-  return NEW;
-end;
-$$;
--- (trigger tasks_done_lock itself is unchanged and already bound to this
--- function -- create or replace is enough, no drop/create needed.)
-
--- 4. reopen_task now un-cancels too, not just un-Dones -- same RPC, same
---    authorization rule, same field resets, plus clearing
---    cancellation_reason (harmless no-op when the task was never
---    Cancelled in the first place). Byte-identical to phase22's version
---    otherwise.
-create or replace function reopen_task(p_task_id uuid) returns void
+create or replace function validate_task_completion(p_task_id uuid, p_validated_date timestamptz default null) returns void
 language plpgsql security definer as $$
 declare
   v_assignee_id uuid;
+  v_project_id uuid;
+  v_status text;
   v_authorized boolean;
+  v_actual_completion date;
+  v_submitted_on timestamptz;
+  v_completion_ref date;
+  v_new_date date;
 begin
-  select assignee_id into v_assignee_id from tasks where id = p_task_id;
-  if not found then
+  select assignee_id, project_id, status, actual_completion_date, submitted_on
+    into v_assignee_id, v_project_id, v_status, v_actual_completion, v_submitted_on
+    from tasks where id = p_task_id;
+  if v_project_id is null then
     raise exception 'task not found';
   end if;
+  if v_status <> 'Done' then
+    raise exception 'only a Done task can be validated';
+  end if;
 
-  select
-    my_access_level() = 'full'
-    or (v_assignee_id is not null and exists (select 1 from people where id = v_assignee_id and reports_to = my_person_id()))
-    or (v_assignee_id is not null and nearest_active_manager(v_assignee_id) = my_person_id())
-  into v_authorized;
+  if v_assignee_id is not null and v_assignee_id = my_person_id() then
+    if nearest_active_manager(v_assignee_id) is not null then
+      raise exception 'you can''t validate your own work -- ask your manager to validate this task';
+    end if;
+    -- No active manager anywhere above this person -- "ask your manager"
+    -- literally doesn't apply, so self-validation is the one exception.
+    v_authorized := true;
+  else
+    select
+      my_access_level() = 'full'
+      or exists (select 1 from projects where id = v_project_id and owner_id = my_person_id())
+      or (v_assignee_id is not null and exists (select 1 from people where id = v_assignee_id and reports_to = my_person_id()))
+      or (v_assignee_id is not null and nearest_active_manager(v_assignee_id) = my_person_id())
+    into v_authorized;
+  end if;
 
   if not coalesce(v_authorized, false) then
-    raise exception 'not authorized to reopen this task';
+    raise exception 'not authorized to validate this task';
+  end if;
+
+  -- Default order when no explicit date is given: actual_completion_date,
+  -- then submitted_on, then (only if neither exists) today.
+  v_new_date := coalesce(p_validated_date::date, v_actual_completion, v_submitted_on::date, now()::date);
+  v_completion_ref := coalesce(v_actual_completion, v_submitted_on::date);
+  if v_completion_ref is not null and v_new_date < v_completion_ref then
+    raise exception 'validation date (%) can''t be earlier than the actual completion date (%)', v_new_date, v_completion_ref;
   end if;
 
   perform set_config('app.bypass_validation_rpc', 'on', true);
-  perform set_config('app.bypass_status_baseline_lock', 'on', true);
-  perform set_config('app.bypass_done_task_lock', 'on', true);
-  update tasks set
-    validated_completion_date = null,
-    validated_by = null,
-    status = 'In Progress',
-    submitted_on = null,
-    submitted_by = null,
-    cancellation_reason = null
-  where id = p_task_id;
+  update tasks set validated_completion_date = v_new_date::timestamptz, validated_by = my_person_id() where id = p_task_id;
 end;
 $$;
+
+grant execute on function validate_task_completion(uuid, timestamptz) to authenticated;
