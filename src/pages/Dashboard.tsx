@@ -64,6 +64,12 @@ interface PlanningTypeRow {
   is_active: boolean;
   sort_order: number;
 }
+interface ProjectTypeRow {
+  id: string;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+}
 // Project Phase (admin-configurable lookup, project_phases table) --
 // mirrors SourceRow/PlanningTypeRow. Unlike Source/Planning Type, a
 // project's `phase` column stores the phase NAME directly (same
@@ -523,6 +529,7 @@ export default function Dashboard() {
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [planningTypes, setPlanningTypes] = useState<PlanningTypeRow[]>([]);
+  const [projectTypes, setProjectTypes] = useState<ProjectTypeRow[]>([]);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [phases, setPhases] = useState<PhaseRow[]>([]);
   const [outputTypes, setOutputTypes] = useState<OutputTypeRow[]>([]);
@@ -552,6 +559,7 @@ export default function Dashboard() {
         { data: closeoutData },
         { data: allStartsData },
         { data: planningTypeData },
+        { data: projectTypeData },
         { data: phaseData },
       ] = await Promise.all([
         supabase.from("projects").select("*").eq("is_archived", false),
@@ -566,6 +574,7 @@ export default function Dashboard() {
         supabase.from("project_closeouts").select("closed_at"),
         supabase.from("projects").select("start_date"),
         supabase.from("project_planning_types").select("id,name,is_active,sort_order").order("sort_order"),
+        supabase.from("project_types").select("id,name,is_active,sort_order").order("sort_order"),
         supabase.from("project_phases").select("id,name,is_active,sort_order").order("sort_order"),
       ]);
       setProjects((projectData as ProjectRow[]) ?? []);
@@ -580,6 +589,7 @@ export default function Dashboard() {
       setCloseouts((closeoutData as CloseoutLite[]) ?? []);
       setAllProjectStarts((allStartsData as ProjectStartLite[]) ?? []);
       setPlanningTypes((planningTypeData as PlanningTypeRow[]) ?? []);
+      setProjectTypes((projectTypeData as ProjectTypeRow[]) ?? []);
       setPhases((phaseData as PhaseRow[]) ?? []);
       setLoading(false);
     })();
@@ -715,6 +725,23 @@ export default function Dashboard() {
     if (unset) segs.push({ label: "Not set", value: unset, color: "#c7cdd6" });
     return segs;
   }, [filteredProjects, planningTypes]);
+
+  const projectTypeDonut = useMemo(() => {
+    const counts: Record<string, number> = {};
+    let unset = 0;
+    for (const p of filteredProjects) {
+      if (!p.project_type_id) {
+        unset++;
+        continue;
+      }
+      counts[p.project_type_id] = (counts[p.project_type_id] ?? 0) + 1;
+    }
+    const segs = projectTypes
+      .filter((t) => counts[t.id])
+      .map((t, i) => ({ label: t.name, value: counts[t.id] ?? 0, color: SOURCE_PALETTE[i % SOURCE_PALETTE.length] }));
+    if (unset) segs.push({ label: "Not set", value: unset, color: "#c7cdd6" });
+    return segs;
+  }, [filteredProjects, projectTypes]);
 
   const categoryRows = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -1053,7 +1080,14 @@ export default function Dashboard() {
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <Donut segments={planningTypeDonut} centerLabel="Total" centerValue={stats.total} />
             <DonutLegend segments={planningTypeDonut} total={stats.total} />
+            <div className="card">
+          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>Project Type</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <Donut segments={projectTypeDonut} centerLabel="Total" centerValue={stats.total} />
+            <DonutLegend segments={projectTypeDonut} total={stats.total} />
           </div>
+        </div>
+      </div>
         </div>
       </div>
 
