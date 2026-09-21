@@ -844,6 +844,44 @@ export default function Dashboard() {
     return segs;
   }, [filteredProjects]);
 
+  // Active Planning Type / Active Project Type (2026-09-21, Sandra: "align
+  // with the overall" -- same shape as planningTypeDonut/projectTypeDonut
+  // in Row 2, just scoped to isActiveProject so these two match the
+  // Active KPI + Health/Phase/Complexity cards alongside them.
+  const activePlanningTypeDonut = useMemo(() => {
+    const counts: Record<string, number> = {};
+    let unset = 0;
+    for (const p of filteredProjects.filter(isActiveProject)) {
+      if (!p.planning_type_id) {
+        unset++;
+        continue;
+      }
+      counts[p.planning_type_id] = (counts[p.planning_type_id] ?? 0) + 1;
+    }
+    const segs = planningTypes
+      .filter((t) => counts[t.id])
+      .map((t, i) => ({ label: t.name, value: counts[t.id] ?? 0, color: SOURCE_PALETTE[i % SOURCE_PALETTE.length] }));
+    if (unset) segs.push({ label: "Not set", value: unset, color: "#c7cdd6" });
+    return segs;
+  }, [filteredProjects, planningTypes]);
+
+  const activeProjectTypeDonut = useMemo(() => {
+    const counts: Record<string, number> = {};
+    let unset = 0;
+    for (const p of filteredProjects.filter(isActiveProject)) {
+      if (!p.project_type_id) {
+        unset++;
+        continue;
+      }
+      counts[p.project_type_id] = (counts[p.project_type_id] ?? 0) + 1;
+    }
+    const segs = projectTypes
+      .filter((t) => counts[t.id])
+      .map((t, i) => ({ label: t.name, value: counts[t.id] ?? 0, color: SOURCE_PALETTE[i % SOURCE_PALETTE.length] }));
+    if (unset) segs.push({ label: "Not set", value: unset, color: "#c7cdd6" });
+    return segs;
+  }, [filteredProjects, projectTypes]);
+
   // Materials Output (Phase 21, 2026-08-24; stacked-bar redesign
   // 2026-08-24): takes over By Category's old row-3 slot. Sums
   // tasks.output_count grouped by Output Type, scoped to tasks belonging
@@ -1101,7 +1139,10 @@ export default function Dashboard() {
           Progress", a Status breakdown of only-In-Progress projects
           would always be a single, trivial 100% slice. Health/Phase/
           Complexity stay, since those are independent dimensions a
-          Status-based Active count still usefully breaks down. */}
+          Status-based Active count still usefully breaks down.
+          Same day, Sandra: "align with the overall" -- Planning Type and
+          Project Type (Row 2's last two cards) added here too as
+          Active-only versions, same pattern as Health/Phase/Complexity. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 10, marginBottom: 16 }}>
         <div className="card">
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>Active Project Health</div>
@@ -1128,6 +1169,22 @@ export default function Dashboard() {
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <Donut segments={activeComplexityDonut} centerLabel="Active" centerValue={stats.active} />
             <DonutLegend segments={activeComplexityDonut} total={stats.active} />
+          </div>
+        </div>
+        <div className="card">
+          <div style={{ fontSize: 12.5, fontWeight: 600 }}>Active Planning Type</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 10 }}>In Progress projects only</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <Donut segments={activePlanningTypeDonut} centerLabel="Active" centerValue={stats.active} />
+            <DonutLegend segments={activePlanningTypeDonut} total={stats.active} />
+          </div>
+        </div>
+        <div className="card">
+          <div style={{ fontSize: 12.5, fontWeight: 600 }}>Active Project Type</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 10 }}>In Progress projects only</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <Donut segments={activeProjectTypeDonut} centerLabel="Active" centerValue={stats.active} />
+            <DonutLegend segments={activeProjectTypeDonut} total={stats.active} />
           </div>
         </div>
       </div>
