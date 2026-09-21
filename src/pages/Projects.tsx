@@ -119,6 +119,19 @@ interface ProjectPlanningTypeOption {
   sort_order: number;
 }
 
+// Project Type (Phase 50, 2026-09-21) -- admin-configurable lookup for
+// "is this project BAU (operational -- sessions of already-built
+// training, or a program deployment) or Development (building new
+// content)" (Sandra: "I want to add another project type or tagging if
+// it's BAU or Development"). Same FK-lookup shape as
+// ProjectPlanningTypeOption -- see supabase/phase50_migration.sql.
+interface ProjectTypeOption {
+  id: string;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+}
+
 // Project Category (2026-09-03) -- admin-configurable lookup, mirrors
 // ProjectSourceOption exactly. Unlike Source, projects.category stays a
 // plain text column (not a category_id FK) -- Category has far more code
@@ -167,6 +180,7 @@ export interface ProjectRow {
   category: string | null;
   source_id: string | null;
   planning_type_id: string | null;
+  project_type_id: string | null;
   priority: "Low" | "Medium" | "High" | null;
   status: string | null;
   phase: string | null;
@@ -279,14 +293,14 @@ function CategoryIcon({ iconName, tone, size = 13 }: { iconName?: string; tone?:
   return <Icon size={size} color={color} style={{ flexShrink: 0 }} />;
 }
 
-const PROJECT_COLUMN_ORDER = ["name", "project_number", "created_at", "closed_at", "owner", "category", "source", "planning_type", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at"];
+const PROJECT_COLUMN_ORDER = ["name", "project_number", "created_at", "closed_at", "owner", "category", "source", "planning_type", "project_type", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at"];
 
 // Default hidden-columns set for a brand-new Projects Timeline view (see
 // timelineDefaultHiddenColumns on ViewTabs / initialHiddenColumns on
 // createView) -- per Sandra's curated Timeline-chip spec, Category/Effort/
 // Timelines(lock state)/Days Extended start hidden but stay available to
 // turn on via Properties; Status/Owner/Priority/Health start visible.
-const PROJECT_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["category", "source", "planning_type", "effort_level", "days_extended", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct"];
+const PROJECT_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["category", "source", "planning_type", "project_type", "effort_level", "days_extended", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct"];
 // Same idea for Tasks Timeline: "Days +/-" (Sandra: a signed day-count is
 // redundant once you can already see a bar's length/position on the
 // chart), Hrs Variance/%/Est./Spent (effort-tracking detail, not
@@ -587,6 +601,17 @@ function planningTypeTone(name: string | null): "success" | "warning" | "neutral
   return "neutral";
 }
 
+// Project Type's option LIST is fully admin-driven (see
+// ProjectTypeOption/Site Settings) -- this is just a soft color
+// convenience for the 2 default names Sandra seeded (BAU/Development),
+// same convention as planningTypeTone above. Any other name just falls
+// back to neutral rather than erroring.
+function projectTypeTone(name: string | null): "success" | "accent" | "neutral" {
+  if (name === "BAU") return "success";
+  if (name === "Development") return "accent";
+  return "neutral";
+}
+
 function statusTone(group: "to_do" | "in_progress" | "complete" | "cancelled" | null): "success" | "warning" | "danger" | "neutral" {
   if (group === "complete") return "success";
   if (group === "in_progress") return "warning";
@@ -645,7 +670,7 @@ const TASK_TIMING_BOARD_COLUMNS: BoardColumnDef[] = [
 // enumerable set of Kanban columns); anything else (free text, dates,
 // computed percentages) is marked boardGroupable: false on the relevant
 // GroupOption instead and falls back to this list's first/default entry.
-const PROJECT_BOARD_GROUPABLE_KEYS = ["status", "phase", "priority", "category", "source", "planning_type", "effort_level", "owner", "wbs_status"];
+const PROJECT_BOARD_GROUPABLE_KEYS = ["status", "phase", "priority", "category", "source", "planning_type", "project_type", "effort_level", "owner", "wbs_status"];
 const TASK_BOARD_GROUPABLE_KEYS = ["status", "assignee", "effort", "work_type", "project", "timing", "due_date_ext"];
 
 function resolveBoardGroupBy(groupBy: string | null, groupableKeys: string[], fallback: string): string {
@@ -971,6 +996,7 @@ export default function Projects() {
   const [workTypes, setWorkTypes] = useState<WorkTypeOption[]>([]);
   const [projectSources, setProjectSources] = useState<ProjectSourceOption[]>([]);
   const [projectPlanningTypes, setProjectPlanningTypes] = useState<ProjectPlanningTypeOption[]>([]);
+  const [projectTypes, setProjectTypes] = useState<ProjectTypeOption[]>([]);
   const [projectCategories, setProjectCategories] = useState<ProjectCategoryOption[]>([]);
   // Active category names, in sort order -- replaces the old hardcoded
   // PROJECT_CATEGORY_OPTIONS wherever the Category picker/grouping/board
@@ -1237,7 +1263,7 @@ export default function Projects() {
   async function loadAll() {
     setLoading(true);
     purgeExpiredArchives();
-    const [{ data: projectData }, { data: taskData }, { data: peopleData }, { data: chainPeopleData }, { data: holidayData }, { data: extReqData }, { data: timeEntryData }, { data: noteData }, { data: delSpentData }, { data: workTypeData }, { data: projectSourceData }, { data: projectCategoryData }, { data: projectPhaseData }, { data: phaseMappingData }, { data: pendingBaselineData }, { data: projectPlanningTypeData }, { data: closeoutData }, { data: baselineApprovalData }, { data: declinedBaselineData }] = await Promise.all([
+    const [{ data: projectData }, { data: taskData }, { data: peopleData }, { data: chainPeopleData }, { data: holidayData }, { data: extReqData }, { data: timeEntryData }, { data: noteData }, { data: delSpentData }, { data: workTypeData }, { data: projectSourceData }, { data: projectCategoryData }, { data: projectPhaseData }, { data: phaseMappingData }, { data: pendingBaselineData }, { data: projectPlanningTypeData }, { data: projectTypeData }, { data: closeoutData }, { data: baselineApprovalData }, { data: declinedBaselineData }] = await Promise.all([
       supabase.from("projects").select("*").eq("is_archived", false).order("sort_order"),
       supabase.from("tasks").select("*").eq("is_archived", false).order("sort_order"),
       supabase.from("people").select("id,name,color").eq("is_active", true).order("name"),
@@ -1272,6 +1298,7 @@ export default function Projects() {
       // immediately flips it to approved/rejected).
       supabase.from("project_baseline_requests").select("project_id").eq("status", "pending"),
       supabase.from("project_planning_types").select("id,name,is_active,sort_order").order("sort_order"),
+      supabase.from("project_types").select("id,name,is_active,sort_order").order("sort_order"),
       // 2026-09-07 (Sandra: Sign Off Date) -- see closedAtByProjectId above.
       supabase.from("project_closeouts").select("project_id,closed_at"),
       // 2026-09-08 (Sandra: "I want baseline approvals be captured like
@@ -1307,6 +1334,7 @@ export default function Projects() {
     setPhaseStatusMapping((phaseMappingData as { status: string; phase_id: string }[]) ?? []);
     setPendingBaselineProjectIds(new Set(((pendingBaselineData as { project_id: string }[]) ?? []).map((r) => r.project_id)));
     setProjectPlanningTypes((projectPlanningTypeData as ProjectPlanningTypeOption[]) ?? []);
+    setProjectTypes((projectTypeData as ProjectTypeOption[]) ?? []);
     // 2026-09-07 (Sandra: Sign Off Date).
     const nextClosedAt: Record<string, string> = {};
     for (const row of (closeoutData as { project_id: string; closed_at: string }[]) ?? []) {
@@ -2183,7 +2211,9 @@ export default function Projects() {
     // column inserted after Created -- same reasoning as every prior bump
     // here, a stale saved column order otherwise never picks up new
     // columns.
-    columnOrderVersion: 5,
+    // 2026-09-21: bumped again for the new "project_type" column inserted
+    // after Planning Type -- same reasoning.
+    columnOrderVersion: 6,
     hiddenColumns: [],
     columnWidths: {},
     groupBy: null,
@@ -2656,6 +2686,34 @@ export default function Projects() {
         },
       },
       {
+        // Phase 50 (2026-09-21): Project Type -- admin-configurable via
+        // Site Settings (projectTypes), same FK-keyed InlineSelect shape
+        // as Planning Type above. Freely editable at any wbs_status, same
+        // reasoning as Planning Type -- a lightweight workload-tracking
+        // tag, not part of the pre-baseline setup gate.
+        key: "project_type",
+        label: "Project Type",
+        defaultWidth: 130,
+        maxWidth: 160,
+        render: (p) => {
+          const activeProjectTypeOptions = projectTypes.filter((t) => t.is_active || t.id === p.project_type_id).map((t) => t.name);
+          const currentName = projectTypes.find((t) => t.id === p.project_type_id)?.name ?? "";
+          return (
+            <InlineSelect
+              value={currentName}
+              editable={canEditProject(p)}
+              allowEmpty
+              options={activeProjectTypeOptions}
+              renderReadOnly={() => (currentName ? <span className={`status-pill ${projectTypeTone(currentName)}`}>{currentName}</span> : "—")}
+              onCommit={(v) => {
+                const match = projectTypes.find((t) => t.name === v);
+                updateProject(p.id, { project_type_id: match?.id ?? null });
+              }}
+            />
+          );
+        },
+      },
+      {
         key: "effort_level",
         label: (
           <span style={{ display: "inline-flex", alignItems: "center" }}>
@@ -2813,7 +2871,7 @@ export default function Projects() {
         },
       },
     ],
-    [people, projects, me, tasks, holidayDates, projectViews.activeView.progressDisplay, projectViews.activeView.priorityDisplay, projectViews.activeView.complexityDisplay, noteCounts, timeEntries, deletedSpentHours, projectCategoryOptions, categoryIconMap, categoryToneMap, projectPhases, phaseStatusMapping, activePhaseNames, projectPlanningTypes, closedAtByProjectId, baselineApprovalByProjectId]
+    [people, projects, me, tasks, holidayDates, projectViews.activeView.progressDisplay, projectViews.activeView.priorityDisplay, projectViews.activeView.complexityDisplay, noteCounts, timeEntries, deletedSpentHours, projectCategoryOptions, categoryIconMap, categoryToneMap, projectPhases, phaseStatusMapping, activePhaseNames, projectPlanningTypes, projectTypes, closedAtByProjectId, baselineApprovalByProjectId]
   );
 
   // Board-view card body. Name always renders first/bold as the card's
@@ -2938,6 +2996,13 @@ export default function Projects() {
       allGroups: () => [...projectPlanningTypes.filter((t) => t.is_active).map((t) => t.name), "Not set"],
     },
     {
+      key: "project_type",
+      label: "Project Type",
+      getGroup: (p) => projectTypes.find((t) => t.id === p.project_type_id)?.name ?? "Not set",
+      getTone: (p) => projectTypeTone(projectTypes.find((t) => t.id === p.project_type_id)?.name ?? null),
+      allGroups: () => [...projectTypes.filter((t) => t.is_active).map((t) => t.name), "Not set"],
+    },
+    {
       key: "effort_level",
       label: "Complexity",
       getGroup: (p) => p.effort_level ?? "No complexity set",
@@ -3036,6 +3101,13 @@ export default function Projects() {
       boardGroupable: true,
     },
     {
+      key: "project_type",
+      label: "Project Type",
+      getGroup: (p) => projectTypes.find((t) => t.id === p.project_type_id)?.name ?? "Not set",
+      getTone: (p) => projectTypeTone(projectTypes.find((t) => t.id === p.project_type_id)?.name ?? null),
+      boardGroupable: true,
+    },
+    {
       key: "effort_level",
       label: "Complexity",
       getGroup: (p) => p.effort_level ?? "No complexity set",
@@ -3073,6 +3145,8 @@ export default function Projects() {
       return projectSources.filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name, tone: "neutral" }));
     if (groupBy === "planning_type")
       return projectPlanningTypes.filter((t) => t.is_active).map((t) => ({ value: t.id, label: t.name, tone: planningTypeTone(t.name) }));
+    if (groupBy === "project_type")
+      return projectTypes.filter((t) => t.is_active).map((t) => ({ value: t.id, label: t.name, tone: projectTypeTone(t.name) }));
     if (groupBy === "effort_level")
       return PROJECT_EFFORT_LEVEL_OPTIONS.map((v) => ({ value: v, label: v, tone: PROJECT_EFFORT_LEVEL_TONES[v] ?? "neutral" }));
     if (groupBy === "owner") return people.map((person) => ({ value: person.id, label: person.name, tone: "neutral" }));
@@ -3099,6 +3173,7 @@ export default function Projects() {
     if (groupBy === "category") return p.category;
     if (groupBy === "source") return p.source_id;
     if (groupBy === "planning_type") return p.planning_type_id;
+    if (groupBy === "project_type") return p.project_type_id;
     if (groupBy === "effort_level") return p.effort_level;
     if (groupBy === "owner") return p.owner_id;
     if (groupBy === "wbs_status") return p.wbs_status;
@@ -3129,6 +3204,7 @@ export default function Projects() {
         updateProject(p.id, { source_id: v || null });
       };
     if (groupBy === "planning_type") return (p, v) => updateProject(p.id, { planning_type_id: v || null });
+    if (groupBy === "project_type") return (p, v) => updateProject(p.id, { project_type_id: v || null });
     if (groupBy === "effort_level")
       return (p, v) => {
         if (p.wbs_status !== "draft") {
@@ -3181,6 +3257,7 @@ export default function Projects() {
     { key: "category", label: "Category", getValue: (p) => p.category ?? "" },
     { key: "source", label: "Source", getValue: (p) => projectSources.find((s) => s.id === p.source_id)?.name ?? "" },
     { key: "planning_type", label: "Planning Type", getValue: (p) => projectPlanningTypes.find((t) => t.id === p.planning_type_id)?.name ?? "" },
+    { key: "project_type", label: "Project Type", getValue: (p) => projectTypes.find((t) => t.id === p.project_type_id)?.name ?? "" },
     { key: "effort_level", label: "Complexity", getValue: (p) => PROJECT_EFFORT_LEVEL_OPTIONS.indexOf(p.effort_level ?? "") },
     { key: "start_date", label: "Start", getValue: (p) => (p.start_date ? new Date(p.start_date).getTime() : null) },
     { key: "end_date", label: "Due", getValue: (p) => (p.end_date ? new Date(p.end_date).getTime() : null) },
@@ -4550,7 +4627,7 @@ export default function Projects() {
   // NOT the same left-to-right order as PROJECT_COLUMN_ORDER (which drives
   // Table view and lists Owner before Status), so Table's own column order
   // is untouched by this Timeline-only preference.
-  const PROJECT_TIMELINE_CHIP_ORDER = ["status", "phase", "owner", "priority", "health", "category", "source", "planning_type", "effort_level", "wbs_status", "days_extended", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct"];
+  const PROJECT_TIMELINE_CHIP_ORDER = ["status", "phase", "owner", "priority", "health", "category", "source", "planning_type", "project_type", "effort_level", "wbs_status", "days_extended", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct"];
   const projectTimelinePropertyColumns = visibleOrderedColumns(projectColumns, projectViews.activeView)
     .filter((c) => !PROJECT_TIMELINE_EXCLUDED_KEYS.includes(c.key))
     .slice()
@@ -4775,6 +4852,14 @@ export default function Projects() {
                 onPick={(v) => {
                   const match = projectPlanningTypes.find((t) => t.name === v);
                   bulkUpdateProjects({ planning_type_id: match?.id ?? null });
+                }}
+              />
+              <FieldPickerButton
+                label="Project Type"
+                options={projectTypes.filter((t) => t.is_active).map((t) => t.name)}
+                onPick={(v) => {
+                  const match = projectTypes.find((t) => t.name === v);
+                  bulkUpdateProjects({ project_type_id: match?.id ?? null });
                 }}
               />
               <FieldPickerButton

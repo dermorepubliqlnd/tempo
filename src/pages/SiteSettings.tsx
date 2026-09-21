@@ -98,6 +98,23 @@ interface ProjectPlanningTypeRow {
   is_active: boolean;
 }
 
+// Project Type -- admin-configurable lookup (Phase 50, 2026-09-21).
+// Sandra: "I want to add another project type or tagging if it's BAU or
+// Development -- BAU can be Operational, say these are already-developed
+// training but sessions only, or program deployment. I also want to tag
+// which ones are development." Same FK-lookup shape as Project Planning
+// Type/Project Sources above (not a plain-text tag like Category/Phase)
+// -- a rename here never needs the cascade-rename machinery those two
+// required, since projects.project_type_id resolves the current name
+// live via join. Seeded with BAU/Development; admin can add more later
+// (e.g. splitting BAU into its own sub-tiers) without any code change.
+interface ProjectTypeRow {
+  id: string;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+}
+
 // Time Logging Reason -- admin-configurable lookup (Phase 37,
 // 2026-09-03). Was a fixed array in code (TIME_ENTRY_REASON_OPTIONS in
 // timeTracking.ts); Sandra: "add in list settings the reasons for
@@ -218,6 +235,16 @@ export default function SiteSettings() {
   const [editProjectPlanningTypeName, setEditProjectPlanningTypeName] = useState("");
   const [draggedProjectPlanningTypeId, setDraggedProjectPlanningTypeId] = useState<string | null>(null);
 
+  // Project Types (Phase 50, 2026-09-21) -- same list-management state
+  // shape as Project Planning Types above.
+  const [projectTypes, setProjectTypes] = useState<ProjectTypeRow[]>([]);
+  const [projectTypesLoading, setProjectTypesLoading] = useState(true);
+  const [newProjectTypeName, setNewProjectTypeName] = useState("");
+  const [projectTypeBusy, setProjectTypeBusy] = useState(false);
+  const [editingProjectTypeId, setEditingProjectTypeId] = useState<string | null>(null);
+  const [editProjectTypeName, setEditProjectTypeName] = useState("");
+  const [draggedProjectTypeId, setDraggedProjectTypeId] = useState<string | null>(null);
+
   // Project Categories (2026-09-03) -- same list-management state shape as
   // Project Sources above.
   const [projectCategories, setProjectCategories] = useState<ProjectCategoryRow[]>([]);
@@ -281,7 +308,7 @@ export default function SiteSettings() {
   // matrix directly ("add by row or by column then just check"), so
   // Output Type rename/activate/delete/add all happen from inside that
   // matrix's column headers instead of a separate list.
-  const [manageDrawer, setManageDrawer] = useState<"sources" | "categories" | "phases" | "phase_mapping" | "work_types" | "reasons" | "planning_types" | "decline_reasons" | "cancellation_reasons" | null>(null);
+  const [manageDrawer, setManageDrawer] = useState<"sources" | "categories" | "phases" | "phase_mapping" | "work_types" | "reasons" | "planning_types" | "project_types" | "decline_reasons" | "cancellation_reasons" | null>(null);
   const [draggedWorkTypeId, setDraggedWorkTypeId] = useState<string | null>(null);
   const [draggedOutputTypeId, setDraggedOutputTypeId] = useState<string | null>(null);
   const [draggedProjectSourceId, setDraggedProjectSourceId] = useState<string | null>(null);
@@ -695,6 +722,110 @@ export default function SiteSettings() {
       return;
     }
     loadProjectPlanningTypes();
+  }
+
+  async function loadProjectTypes() {
+    setProjectTypesLoading(true);
+    const { data } = await supabase.from("project_types").select("id,name,sort_order,is_active").order("sort_order");
+    setProjectTypes((data as ProjectTypeRow[]) ?? []);
+    setProjectTypesLoading(false);
+  }
+
+  async function addProjectType() {
+    const name = newProjectTypeName.trim();
+    if (!name) return;
+    setProjectTypeBusy(true);
+    const nextSortOrder = projectTypes.length > 0 ? Math.max(...projectTypes.map((t) => t.sort_order)) + 1 : 1;
+    const { error } = await supabase.from("project_types").insert({ name, sort_order: nextSortOrder });
+    setProjectTypeBusy(false);
+    if (error) {
+      window.alert(`Couldn't add: ${error.message}`);
+      return;
+    }
+    setNewProjectTypeName("");
+    loadProjectTypes();
+  }
+
+  function startEditProjectType(t: ProjectTypeRow) {
+    setEditingProjectTypeId(t.id);
+    setEditProjectTypeName(t.name);
+  }
+
+  async function saveProjectTypeRename(id: string) {
+    const name = editProjectTypeName.trim();
+    if (!name) return;
+    const current = projectTypes.find((t) => t.id === id);
+    if (current && !confirmFkRename(current.name, name, "project")) {
+      setEditingProjectTypeId(null);
+      return;
+    }
+    setProjectTypeBusy(true);
+    const { error } = await supabase.from("project_types").update({ name }).eq("id", id);
+    setProjectTypeBusy(false);
+    if (error) {
+      window.alert(`Couldn't rename: ${error.message}`);
+      return;
+    }
+    setEditingProjectTypeId(null);
+    loadProjectTypes();
+  }
+
+  async function toggleProjectTypeActive(t: ProjectTypeRow) {
+    setProjectTypeBusy(true);
+    const { error } = await supabase.from("project_types").update({ is_active: !t.is_active }).eq("id", t.id);
+    setProjectTypeBusy(false);
+    if (error) {
+      window.alert(`Couldn't update: ${error.message}`);
+      return;
+    }
+    loadProjectTypes();
+  }
+
+  async function reorderProjectTypes(orderedIds: string[]) {
+    setProjectTypeBusy(true);
+    const results = await Promise.all(
+      orderedIds.map((id, idx) => supabase.from("project_types").update({ sort_order: idx + 1 }).eq("id", id))
+    );
+    setProjectTypeBusy(false);
+    const err = results.find((r) => r.error)?.error;
+    if (err) {
+      window.alert(`Couldn't reorder: ${err.message}`);
+      return;
+    }
+    loadProjectTypes();
+  }
+
+  // Delete: only allowed when no project currently references this
+  // Project Type, same convention/reasoning as deleteProjectPlanningType above.
+  async function deleteProjectType(t: ProjectTypeRow) {
+    setProjectTypeBusy(true);
+    const { count, error: countError } = await supabase
+      .from("projects")
+      .select("id", { count: "exact", head: true })
+      .eq("project_type_id", t.id);
+    if (countError) {
+      setProjectTypeBusy(false);
+      window.alert(`Couldn't check usage: ${countError.message}`);
+      return;
+    }
+    if ((count ?? 0) > 0) {
+      setProjectTypeBusy(false);
+      window.alert(
+        `Can't delete -- ${count} project${count === 1 ? "" : "s"} still use this Project Type. Deactivate it instead, or reassign those projects first.`
+      );
+      return;
+    }
+    if (!window.confirm(`Delete "${t.name}"? This can't be undone. (Only possible because no project currently uses it -- Project Types in use can't be deleted.)`)) {
+      setProjectTypeBusy(false);
+      return;
+    }
+    const { error } = await supabase.from("project_types").delete().eq("id", t.id);
+    setProjectTypeBusy(false);
+    if (error) {
+      window.alert(`Couldn't delete: ${error.message}`);
+      return;
+    }
+    loadProjectTypes();
   }
 
 
@@ -1522,6 +1653,7 @@ export default function SiteSettings() {
       loadHistoricalLocking();
       loadTimeEntryReasons();
       loadProjectPlanningTypes();
+      loadProjectTypes();
       loadBaselineDeclineReasons();
       loadTaskCancellationReasons();
     }
@@ -1577,6 +1709,20 @@ export default function SiteSettings() {
               <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>{projectPlanningTypesLoading ? "…" : listSummary(projectPlanningTypes)}</td>
               <td>
                 <button onClick={() => setManageDrawer("planning_types")} style={manageButtonStyle}>
+                  Manage List
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>Project Types</div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                  Whether a project is BAU (operational -- sessions of already-built training, or a program deployment) or Development (building new content). Offered on every project's Project Type field.
+                </div>
+              </td>
+              <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>{projectTypesLoading ? "…" : listSummary(projectTypes)}</td>
+              <td>
+                <button onClick={() => setManageDrawer("project_types")} style={manageButtonStyle}>
                   Manage List
                 </button>
               </td>
@@ -2576,60 +2722,60 @@ export default function SiteSettings() {
                   })}
                 </div>
               </>
-            ) : manageDrawer === "planning_types" ? (
+            ) : manageDrawer === "project_types" ? (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>Manage Project Planning Types</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>Manage Project Types</div>
                   <button onClick={() => setManageDrawer(null)} style={{ display: "flex", background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
                     <X size={16} />
                   </button>
                 </div>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 14 }}>
-                  Drag the grip handle to reorder. Deactivating keeps a planning type's label on any project that
+                  Drag the grip handle to reorder. Deactivating keeps a project type's label on any project that
                   already has it set -- it just disappears from the picker on new projects.
                 </div>
 
                 <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
                   <input
-                    value={newProjectPlanningTypeName}
-                    onChange={(e) => setNewProjectPlanningTypeName(e.target.value)}
+                    value={newProjectTypeName}
+                    onChange={(e) => setNewProjectTypeName(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") addProjectPlanningType();
+                      if (e.key === "Enter") addProjectType();
                     }}
-                    placeholder="New planning type name"
+                    placeholder="New project type name"
                     spellCheck={false}
                     autoComplete="off"
                     style={{ ...inputStyle, marginTop: 0, flex: 1 }}
                   />
-                  <button onClick={addProjectPlanningType} disabled={projectPlanningTypeBusy || !newProjectPlanningTypeName.trim()} style={addButtonStyle(!newProjectPlanningTypeName.trim())}>
+                  <button onClick={addProjectType} disabled={projectTypeBusy || !newProjectTypeName.trim()} style={addButtonStyle(!newProjectTypeName.trim())}>
                     <Plus size={14} />
                     Add
                   </button>
                 </div>
 
                 <div style={{ display: "flex", flexDirection: "column", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
-                  {projectPlanningTypesLoading && <div style={{ padding: 10, fontSize: 11.5, color: "var(--muted)" }}>Loading…</div>}
-                  {!projectPlanningTypesLoading && projectPlanningTypes.length === 0 && (
+                  {projectTypesLoading && <div style={{ padding: 10, fontSize: 11.5, color: "var(--muted)" }}>Loading…</div>}
+                  {!projectTypesLoading && projectTypes.length === 0 && (
                     <div style={{ padding: 10, fontSize: 11.5, color: "var(--muted)" }}>None yet.</div>
                   )}
-                  {projectPlanningTypes.map((t) => {
-                    const isEditing = editingProjectPlanningTypeId === t.id;
-                    const isDragging = draggedProjectPlanningTypeId === t.id;
+                  {projectTypes.map((t) => {
+                    const isEditing = editingProjectTypeId === t.id;
+                    const isDragging = draggedProjectTypeId === t.id;
                     return (
                       <div
                         key={t.id}
                         onDragOver={(e) => {
-                          if (!draggedProjectPlanningTypeId || draggedProjectPlanningTypeId === t.id) return;
+                          if (!draggedProjectTypeId || draggedProjectTypeId === t.id) return;
                           e.preventDefault();
                         }}
                         onDrop={(e) => {
                           e.preventDefault();
-                          if (!draggedProjectPlanningTypeId) return;
-                          const ids = projectPlanningTypes.map((x) => x.id);
-                          const without = ids.filter((id) => id !== draggedProjectPlanningTypeId);
-                          without.splice(without.indexOf(t.id), 0, draggedProjectPlanningTypeId);
-                          setDraggedProjectPlanningTypeId(null);
-                          reorderProjectPlanningTypes(without);
+                          if (!draggedProjectTypeId) return;
+                          const ids = projectTypes.map((x) => x.id);
+                          const without = ids.filter((id) => id !== draggedProjectTypeId);
+                          without.splice(without.indexOf(t.id), 0, draggedProjectTypeId);
+                          setDraggedProjectTypeId(null);
+                          reorderProjectTypes(without);
                         }}
                         style={{
                           display: "flex",
@@ -2642,8 +2788,8 @@ export default function SiteSettings() {
                       >
                         <span
                           draggable
-                          onDragStart={() => setDraggedProjectPlanningTypeId(t.id)}
-                          onDragEnd={() => setDraggedProjectPlanningTypeId(null)}
+                          onDragStart={() => setDraggedProjectTypeId(t.id)}
+                          onDragEnd={() => setDraggedProjectTypeId(null)}
                           title="Drag to reorder"
                           style={{ display: "flex", cursor: "grab", color: "var(--text-secondary)", flexShrink: 0 }}
                         >
@@ -2651,12 +2797,12 @@ export default function SiteSettings() {
                         </span>
                         {isEditing ? (
                           <input
-                            value={editProjectPlanningTypeName}
-                            onChange={(e) => setEditProjectPlanningTypeName(e.target.value)}
-                            onBlur={() => saveProjectPlanningTypeRename(t.id)}
+                            value={editProjectTypeName}
+                            onChange={(e) => setEditProjectTypeName(e.target.value)}
+                            onBlur={() => saveProjectTypeRename(t.id)}
                             onKeyDown={(e) => {
-                              if (e.key === "Enter") saveProjectPlanningTypeRename(t.id);
-                              if (e.key === "Escape") setEditingProjectPlanningTypeId(null);
+                              if (e.key === "Enter") saveProjectTypeRename(t.id);
+                              if (e.key === "Escape") setEditingProjectTypeId(null);
                             }}
                             autoFocus
                             spellCheck={false}
@@ -2665,7 +2811,7 @@ export default function SiteSettings() {
                           />
                         ) : (
                           <span
-                            onClick={() => startEditProjectPlanningType(t)}
+                            onClick={() => startEditProjectType(t)}
                             title="Click to rename"
                             style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: "var(--navy)", cursor: "pointer" }}
                           >
@@ -2675,10 +2821,10 @@ export default function SiteSettings() {
                         <span className={`status-pill ${t.is_active ? "success" : "neutral"}`} style={{ fontSize: 10 }}>
                           {t.is_active ? "Active" : "Off"}
                         </span>
-                        <button onClick={() => toggleProjectPlanningTypeActive(t)} disabled={projectPlanningTypeBusy} title={t.is_active ? "Deactivate" : "Reactivate"} style={iconBtnStyle(t.is_active ? "var(--danger-text)" : "var(--success-text)")}>
+                        <button onClick={() => toggleProjectTypeActive(t)} disabled={projectTypeBusy} title={t.is_active ? "Deactivate" : "Reactivate"} style={iconBtnStyle(t.is_active ? "var(--danger-text)" : "var(--success-text)")}>
                           {t.is_active ? <ShieldOff size={13} /> : <ShieldCheck size={13} />}
                         </button>
-                        <button onClick={() => deleteProjectPlanningType(t)} disabled={projectPlanningTypeBusy} title="Delete (only if unused)" style={iconBtnStyle("var(--danger-text)")}>
+                        <button onClick={() => deleteProjectType(t)} disabled={projectTypeBusy} title="Delete (only if unused)" style={iconBtnStyle("var(--danger-text)")}>
                           <Trash2 size={13} />
                         </button>
                       </div>
