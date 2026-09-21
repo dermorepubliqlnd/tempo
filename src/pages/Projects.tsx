@@ -257,6 +257,17 @@ export interface TaskRow {
   is_archived: boolean;
   archived_at: string | null;
   sort_order: number | null;
+  // Phase 51 (2026-09-21, Sandra): "Created At"/"Created By" -- lets her
+  // tell a task that's been planned for a while apart from one just
+  // added today, which is exactly the signal she needs when an already-
+  // full day's Utilization suddenly reads overloaded because an urgent
+  // task landed on it after the fact. Backfilled for existing tasks from
+  // their sort_order (== Date.now() at creation time, see createBlankTask/
+  // addSubtask) -- see supabase/phase51_migration.sql. created_by has no
+  // historical signal to backfill from, so it's null on anything created
+  // before this phase.
+  created_at: string;
+  created_by: string | null;
 }
 
 // Lightweight projection of extension_requests, fetched alongside
@@ -319,7 +330,7 @@ const TASK_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["project", "timing_variance_days",
 // own Calendar view doesn't support grouping either -- confirmed with
 // Sandra, not building it).
 const TASK_CALENDAR_DEFAULT_HIDDEN_COLUMNS = ["status", "timing", "validated_completion_date", "validated_by", "actual_completion_date", "estimated_hours", "time_spent_hours", "timing_variance_days", "hours_variance", "hours_variance_pct", "work_type"];
-const TASK_COLUMN_ORDER = ["name", "project", "assignee", "status", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "effort", "timing_variance_days", "due_date_ext", "work_type", "hours_variance", "hours_variance_pct"];
+const TASK_COLUMN_ORDER = ["name", "project", "assignee", "status", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "effort", "timing_variance_days", "due_date_ext", "work_type", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
 
 // "Fun, not corporate" icons for Task Effort (Sandra's request) — a light
 // feather for quick work, a weight plate for a moderate lift, and a flexed
@@ -3340,6 +3351,7 @@ export default function Projects() {
       original_due_date: parent.current_due_date,
       current_due_date: parent.current_due_date,
       sort_order: Date.now(),
+      created_by: me?.id ?? null,
     });
     if (error) {
       alert(`Couldn't add subtask: ${error.message}`);
@@ -4144,6 +4156,26 @@ export default function Projects() {
           );
         },
       },
+      {
+        // Phase 51 (2026-09-21, Sandra): "Created At" -- read-only, no
+        // edit path (auto-stamped on insert, see phase51_migration.sql),
+        // same treatment as Projects' own "Created" column.
+        key: "created_at",
+        label: "Created",
+        defaultWidth: 110,
+        maxWidth: 130,
+        render: (t) => <span>{formatDate(t.created_at.slice(0, 10))}</span>,
+      },
+      {
+        // Companion to Created At -- who added the task. Existing tasks
+        // (created before this phase) have no recorded creator, so this
+        // reads "—" for anything older.
+        key: "created_by",
+        label: "Created By",
+        defaultWidth: 130,
+        maxWidth: 150,
+        render: (t) => <span>{ownerName(t.created_by)}</span>,
+      },
     ],
     [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents]
   );
@@ -4454,6 +4486,8 @@ export default function Projects() {
       label: "Due Date Ext.",
       getValue: (t) => ["No Extension", "Requested", "Rejected", "Extended"].indexOf(dueDateExtStatus(t).label),
     },
+    { key: "created_at", label: "Created", getValue: (t) => new Date(t.created_at).getTime() },
+    { key: "created_by", label: "Created By", getValue: (t) => ownerName(t.created_by) },
   ];
 
   const taskViews = useTableViews("tasks", me?.id, {
@@ -4464,7 +4498,10 @@ export default function Projects() {
     // hours -- the daily workspace -- moved right after identity; Timing/
     // Effort as the triage cluster; schedule fields next; Work Type and
     // Hrs Variance/% pushed to the very end as reporting-only).
-    columnOrderVersion: 1,
+    // 2 = 2026-09-21: new Created/Created By columns inserted at the end
+    // -- without this bump, anyone with an already-saved "default" view
+    // never sees them at all.
+    columnOrderVersion: 2,
     hiddenColumns: [],
     columnWidths: {},
     groupBy: "project",
@@ -4559,6 +4596,7 @@ export default function Projects() {
       original_due_date: defaultDue,
       current_due_date: defaultDue,
       sort_order: Date.now(),
+      created_by: me?.id ?? null,
     });
     if (error) {
       alert(`Couldn't create task: ${error.message}`);
