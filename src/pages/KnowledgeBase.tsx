@@ -70,6 +70,7 @@ function renderInline(text: string): string {
     .replace(/>/g, "&gt;");
   out = out.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/(?<!\*)\*(?!\*)(.+?)\*(?!\*)/g, "<em>$1</em>");
+  out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
   return out;
 }
 
@@ -96,7 +97,33 @@ function renderMarkdownLite(source: string): string {
       continue;
     }
 
-    const headerMatch = /^(#{1,3})\s+(.*)$/.exec(trimmed);
+    // "### Title" is special: everything up to the next heading (of any
+    // level) becomes a collapsible <details> section -- this is what lets
+    // an individual property (e.g. "Status", "Hrs Variance %") be written
+    // once with its full definition/options/formula, but read as a short
+    // list that expands on click (Sandra, 2026-09-21: "was hoping ea
+    // property can be expanded especially if there are options... also if
+    // there's computation"). "#"/"##" stay plain (non-collapsible) section
+    // headers, since those are used for the entry's own title/intro, not
+    // individual properties.
+    const detailMatch = /^###\s+(.*)$/.exec(trimmed);
+    if (detailMatch) {
+      closeList();
+      const title = detailMatch[1];
+      i++;
+      const bodyLines: string[] = [];
+      while (i < lines.length && !/^#{1,3}\s+/.test(lines[i].trim())) {
+        bodyLines.push(lines[i]);
+        i++;
+      }
+      const bodyHtml = renderMarkdownLite(bodyLines.join("\n"));
+      html.push(
+        `<details class="kb-detail"><summary>${renderInline(title)}</summary><div class="kb-detail-body">${bodyHtml}</div></details>`
+      );
+      continue;
+    }
+
+    const headerMatch = /^(#{1,2})\s+(.*)$/.exec(trimmed);
     if (headerMatch) {
       closeList();
       const level = headerMatch[1].length;
@@ -112,15 +139,12 @@ function renderMarkdownLite(source: string): string {
         tableLines.push(lines[i].trim());
         i++;
       }
-      const rows = tableLines
-        .filter((l) => !/^\|[\s:-]+\|$/.test(l.replace(/\|/g, "|").replace(/[-: ]/g, (m) => m)))
-        .filter((l) => !/^\|(\s*-{2,}\s*\|)+$/.test(l));
       const cellsOf = (l: string) =>
         l
           .slice(1, -1)
           .split("|")
           .map((c) => c.trim());
-      const dataRows = rows.filter((l) => !/^\|[\s|:-]+\|$/.test(l));
+      const dataRows = tableLines.filter((l) => !/^\|[\s|:-]+\|$/.test(l));
       if (dataRows.length > 0) {
         const headerCells = cellsOf(dataRows[0]);
         html.push('<table class="kb-table"><thead><tr>');

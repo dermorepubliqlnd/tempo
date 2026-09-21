@@ -1808,3 +1808,56 @@ tr.row-drop-target td { box-shadow: inset 0 -2px 0 0 var(--accent); }
   font-weight: 700;
   color: var(--navy);
 }
+
+/* Knowledge Base expandable properties (2026-09-21 follow-up: "was hoping
+   ea property can be expanded especially if there are options... also if
+   there's computation"). Each "### Property" in the markdown-lite source
+   becomes a native <details>/<summary> -- collapsed by default, no JS
+   state needed, keyboard/accessibility come for free from the browser. */
+.kb-content details.kb-detail {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  padding: 0;
+  background: var(--surface);
+}
+.kb-content details.kb-detail summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--navy);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  user-select: none;
+}
+.kb-content details.kb-detail summary::-webkit-details-marker { display: none; }
+.kb-content details.kb-detail summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid var(--muted);
+  margin-right: 8px;
+  flex-shrink: 0;
+  transition: transform 0.12s ease;
+}
+.kb-content details.kb-detail[open] summary::before { transform: rotate(90deg); }
+.kb-content details.kb-detail summary:hover { background: var(--hover-bg); }
+.kb-content .kb-detail-body {
+  padding: 2px 14px 12px 27px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.kb-content .kb-detail-body p:first-child { margin-top: 0; }
+.kb-content .kb-detail-body p:last-child { margin-bottom: 0; }
+.kb-content .kb-detail-body code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
