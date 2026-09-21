@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Lock, Flag, Plus, TrendingUp } from "lucide-react";
+import { ArrowLeft, Lock, Flag, Plus, TrendingUp, Lightbulb } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { formatDate } from "../lib/formatDate";
 import { WBS_STATUS_META, type WbsStatus } from "../lib/wbsStatus";
@@ -58,6 +58,12 @@ interface TaskRow {
   start_date: string | null;
   current_due_date: string | null;
   is_archived: boolean;
+  // Phase 51 (2026-09-21) -- lets the Automated Insight below tell a task
+  // added early (absorbed into the plan with room to spare) from one
+  // added right before the project actually closed (a late-breaking/
+  // urgent addition that's a much more likely culprit for a slipped
+  // close date).
+  created_at: string;
 }
 interface BaselineRow {
   id: string;
@@ -115,7 +121,7 @@ export default function BaselineReport() {
       supabase.from("projects").select("id,name,wbs_status,actual_close_date,lessons_learned_worked,lessons_learned_not_worked").eq("id", projectId).single(),
       supabase
         .from("tasks")
-        .select("id,project_id,parent_task_id,name,estimated_hours,start_date,current_due_date,is_archived")
+        .select("id,project_id,parent_task_id,name,estimated_hours,start_date,current_due_date,is_archived,created_at")
         .eq("project_id", projectId)
         .eq("is_archived", false),
       supabase
@@ -189,6 +195,77 @@ export default function BaselineReport() {
     .filter((t) => baselineHoursById.has(t.task_id) && (t.estimated_hours ?? 0) > (baselineHoursById.get(t.task_id) ?? 0))
     .map((t) => ({ ...t, delta: (t.estimated_hours ?? 0) - (baselineHoursById.get(t.task_id) ?? 0) }));
 
+  // Automated Insight (2026-09-21, Sandra: "is this something that can
+  // also be captured in the report for project close ... something like
+  // an automated insight?" -- e.g. a project that closed a month late
+  // because of late-added urgent work). Built entirely from numbers this
+  // page already computes (endDaysDelta, addedTasks, grownTasks) plus
+  // each added task's own created_at -- no new data model, just a plain-
+  // English read of what's already on the page. "Late-added" is a task
+  // created within 14 days of the compare-end date (closeout end if
+  // closed, else the live end date) -- a task added that close to the
+  // finish line is a much more likely cause of a slip than one added
+  // early and given time to be absorbed into the plan.
+  const createdAtByTaskId = new Map(tasks.map((t) => [t.id, t.created_at]));
+  const LATE_ADDITION_WINDOW_DAYS = 14;
+  const compareEndTime = compareEnd ? new Date(compareEnd).getTime() : null;
+  const addedTasksWithCreated = addedTasks.map((t) => ({ ...t, created_at: createdAtByTaskId.get(t.task_id) ?? null }));
+  const lateAddedTasks = addedTasksWithCreated.filter((t) => {
+    if (!t.created_at || compareEndTime === null) return false;
+    const daysBeforeEnd = (compareEndTime - new Date(t.created_at).getTime()) / 86400000;
+    return daysBeforeEnd >= 0 && daysBeforeEnd <= LATE_ADDITION_WINDOW_DAYS;
+  });
+  const lateAddedHours = lateAddedTasks.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
+  const addedHoursTotal = addedTasks.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
+  const grownHoursTotal = grownTasks.reduce((sum, t) => sum + t.delta, 0);
+
+  function buildInsight(): string {
+    if (!finalTotals || endDaysDelta === null) {
+      // Not closed out yet -- speak in terms of the live preview instead
+      // of a final verdict, same "preview" framing the Final card itself
+      // uses.
+      if (endDaysDelta !== null && endDaysDelta > 0) {
+        return `Based on the live plan, this project is currently tracking ${endDaysDelta} day(s) past its original baseline end date${
+          addedTasks.length > 0 ? `, with ${addedTasks.length} task(s) added since baseline (+${addedHoursTotal}h)` : ""
+        }${grownTasks.length > 0 ? `${addedTasks.length > 0 ? " and" : ","} ${grownTasks.length} task(s) that grew in scope (+${grownHoursTotal}h)` : ""}. Not yet closed out -- this is a preview, not final.`;
+      }
+      return "Not enough signal yet to generate an insight -- close this project out to get a final read on how it tracked against baseline.";
+    }
+    const onTime = endDaysDelta <= 0;
+    if (onTime) {
+      const extra =
+        addedTasks.length > 0 || grownTasks.length > 0
+          ? ` despite ${[
+              addedTasks.length > 0 ? `${addedTasks.length} task(s) added (+${addedHoursTotal}h)` : null,
+              grownTasks.length > 0 ? `${grownTasks.length} task(s) that grew in scope (+${grownHoursTotal}h)` : null,
+            ]
+              .filter(Boolean)
+              .join(" and ")}`
+          : "";
+      return `Closed ${endDaysDelta === 0 ? "exactly on" : `${Math.abs(endDaysDelta)} day(s) ahead of`} its baseline end date${extra}.`;
+    }
+    // Late close -- lead with the causes, most-specific (late-added
+    // tasks) first, since that's the signal Sandra specifically asked
+    // for ("supposed to be closed last month but ... completed just
+    // today").
+    const causes: string[] = [];
+    if (lateAddedTasks.length > 0) {
+      causes.push(
+        `${lateAddedTasks.length} task${lateAddedTasks.length === 1 ? "" : "s"} added within ${LATE_ADDITION_WINDOW_DAYS} days of close (+${lateAddedHours}h) -- late-breaking or urgent work that wasn't part of the original plan`
+      );
+    }
+    const earlyAddedCount = addedTasks.length - lateAddedTasks.length;
+    if (earlyAddedCount > 0) {
+      causes.push(`${earlyAddedCount} more task${earlyAddedCount === 1 ? "" : "s"} added earlier in the project (+${addedHoursTotal - lateAddedHours}h)`);
+    }
+    if (grownTasks.length > 0) {
+      causes.push(`${grownTasks.length} existing task${grownTasks.length === 1 ? "" : "s"} that grew in scope (+${grownHoursTotal}h)`);
+    }
+    const causeText = causes.length > 0 ? ` Likely contributors: ${causes.join("; ")}.` : " No added or grown tasks account for it -- worth a closer look at what else shifted the timeline.";
+    return `Closed ${endDaysDelta} day(s) later than its baseline end date.${causeText}`;
+  }
+  const insightText = buildInsight();
+
   function statCard(label: string, icon: React.ReactNode, tone: string, rows: { label: string; value: string }[]) {
     return (
       <div className="card" style={{ padding: 14, flex: 1, minWidth: 220 }}>
@@ -253,6 +330,29 @@ export default function BaselineReport() {
           { label: "Tasks", value: `${taskDelta >= 0 ? "+" : ""}${taskDelta}` },
           { label: "End date", value: endDaysDelta === null ? "—" : `${endDaysDelta >= 0 ? "+" : ""}${endDaysDelta} day(s)` },
         ])}
+      </div>
+
+      {/* Automated Insight (2026-09-21) -- plain-English read of the
+          stat cards above, done for the user so they don't have to do
+          the "baseline end date vs actual close date, then why" math
+          themselves every time. */}
+      <div
+        className="card"
+        style={{
+          padding: 14,
+          marginBottom: 14,
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 10,
+          background: "#eef2ff",
+          borderColor: "#c7d2fe",
+        }}
+      >
+        <Lightbulb size={15} style={{ color: "#4338ca", flexShrink: 0, marginTop: 1 }} />
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#4338ca", marginBottom: 3 }}>Automated Insight</div>
+          <div style={{ fontSize: 12.5, color: "#312e81", lineHeight: 1.5 }}>{insightText}</div>
+        </div>
       </div>
 
       <div
