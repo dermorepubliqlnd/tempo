@@ -284,46 +284,90 @@ function DonutLegend({ segments, total }: { segments: { label: string; value: nu
 function MonthlyBarChart({ months, series }: { months: { key: string; label: string }[]; series: { name: string; color: string; values: number[] }[] }) {
   const max = Math.max(1, ...series.flatMap((s) => s.values));
   const chartH = 140;
+  // 2026-09-21 (Sandra: "no axis labels for count, can we just add data
+  // labels"): per-bar value labels, computed here (not inside the <svg>
+  // above) for the same reason the month labels already live outside it
+  // -- preserveAspectRatio="none" non-uniformly squashes/stretches SVG
+  // <text> horizontally along with the bars, which is exactly the bug
+  // Sandra hit with the month labels originally. Vertical scale is NOT
+  // stretched (viewBox height === the fixed `height` attribute, 1:1), so
+  // a label's pixel `top` can be computed directly from its bar's real
+  // height; horizontal position uses a percent-of-total-width offset
+  // (matching how the flex month-label row below already lines up),
+  // which stays correct regardless of the SVG's own horizontal squash
+  // since it's plain HTML/CSS, not run through the SVG transform.
+  const totalW = months.length * 40;
+  const labelPadTop = 16;
   return (
     <div>
-      {/* preserveAspectRatio="none" (needed so the bars stretch to fill
-          the card's actual width, since the viewBox is a fixed pixel grid
-          unrelated to the card's real rendered width) applies a NON-
-          uniform x/y scale to everything drawn in the SVG -- including
-          <text>, whose glyphs get horizontally squashed/stretched along
-          with the bars. Sandra: "the month text in the portfolio movement
-          is stretched." Fix: keep the bars in SVG (a plain rect doesn't
-          visibly suffer from non-uniform scaling) but render the month
-          labels as normal HTML text in a flex row below, one per month,
-          so their glyphs are never run through that transform. */}
-      <svg viewBox={`0 0 ${months.length * 40} ${chartH}`} width="100%" height={chartH} preserveAspectRatio="none">
-        {[0, 0.25, 0.5, 0.75, 1].map((f) => (
-          <line key={f} x1={0} x2={months.length * 40} y1={chartH - chartH * f} y2={chartH - chartH * f} stroke="var(--border)" strokeWidth={0.5} />
-        ))}
-        {months.map((m, i) => {
-          const groupX = i * 40 + 6;
-          const barW = 12;
-          return (
-            <g key={m.key}>
-              {series.map((s, si) => {
-                const v = s.values[i] ?? 0;
-                const h = (v / max) * chartH;
-                return (
-                  <rect
-                    key={s.name}
-                    x={groupX + si * (barW + 3)}
-                    y={chartH - h}
-                    width={barW}
-                    height={h}
-                    fill={s.color}
-                    rx={1.5}
-                  />
-                );
-              })}
-            </g>
-          );
-        })}
-      </svg>
+      <div style={{ position: "relative", paddingTop: labelPadTop }}>
+        {months.map((m, i) =>
+          series.map((s, si) => {
+            const v = s.values[i] ?? 0;
+            if (v <= 0) return null;
+            const groupX = i * 40 + 6;
+            const barW = 12;
+            const x = groupX + si * (barW + 3);
+            const h = (v / max) * chartH;
+            return (
+              <div
+                key={`${m.key}-${s.name}`}
+                style={{
+                  position: "absolute",
+                  left: `${(x / totalW) * 100}%`,
+                  width: `${(barW / totalW) * 100}%`,
+                  top: labelPadTop + (chartH - h) - 13,
+                  textAlign: "center",
+                  fontSize: 9.5,
+                  fontWeight: 600,
+                  color: "var(--navy)",
+                  pointerEvents: "none",
+                }}
+              >
+                {v}
+              </div>
+            );
+          })
+        )}
+        {/* preserveAspectRatio="none" (needed so the bars stretch to fill
+            the card's actual width, since the viewBox is a fixed pixel grid
+            unrelated to the card's real rendered width) applies a NON-
+            uniform x/y scale to everything drawn in the SVG -- including
+            <text>, whose glyphs get horizontally squashed/stretched along
+            with the bars. Sandra: "the month text in the portfolio movement
+            is stretched." Fix: keep the bars in SVG (a plain rect doesn't
+            visibly suffer from non-uniform scaling) but render the month
+            labels as normal HTML text in a flex row below, one per month,
+            so their glyphs are never run through that transform. */}
+        <svg viewBox={`0 0 ${totalW} ${chartH}`} width="100%" height={chartH} preserveAspectRatio="none">
+          {[0, 0.25, 0.5, 0.75, 1].map((f) => (
+            <line key={f} x1={0} x2={totalW} y1={chartH - chartH * f} y2={chartH - chartH * f} stroke="var(--border)" strokeWidth={0.5} />
+          ))}
+          {months.map((m, i) => {
+            const groupX = i * 40 + 6;
+            const barW = 12;
+            return (
+              <g key={m.key}>
+                {series.map((s, si) => {
+                  const v = s.values[i] ?? 0;
+                  const h = (v / max) * chartH;
+                  return (
+                    <rect
+                      key={s.name}
+                      x={groupX + si * (barW + 3)}
+                      y={chartH - h}
+                      width={barW}
+                      height={h}
+                      fill={s.color}
+                      rx={1.5}
+                    />
+                  );
+                })}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
       <div style={{ display: "flex", marginTop: 4 }}>
         {months.map((m) => (
           <div key={m.key} style={{ flex: 1, textAlign: "center", fontSize: 10, color: "var(--muted)" }}>
@@ -382,7 +426,18 @@ function CategoryBarList({ rows, total }: { rows: { label: string; value: number
 // logged on a project that hasn't reached Closed yet -- shown for
 // visibility, but deliberately excluded from the authoritative total per
 // Sandra: "only count the output type when the project is tagged closed."
-function MaterialsOutputBarList({ rows, total }: { rows: { label: string; closed: number; tentative: number }[]; total: number }) {
+// 2026-09-21 (Sandra: "show top 5 or anything as long as the max height
+// will align with the portfolio widget height ... remove the tentative
+// and closed gray txt but allow showing of drill down or data count when
+// hovering on the bars"): capped to the top N rows by the caller (so the
+// card's height lines up with Portfolio Movement's fixed chart height
+// instead of growing with however many Output Types have data) and the
+// inline "(X closed, Y tentative)" gray breakdown text is gone --  it's
+// now a native title tooltip on the bar itself, so the split is still
+// available on hover without permanently taking up label-row space.
+// Showing the FULL list on its own page is a separate ask Sandra flagged
+// as a probable follow-up, not built yet.
+function MaterialsOutputBarList({ rows, total, hiddenCount }: { rows: { label: string; closed: number; tentative: number }[]; total: number; hiddenCount: number }) {
   if (total === 0) return <div style={{ fontSize: 11, color: "var(--muted)" }}>No output logged yet -- set Output Type + Output Count on tasks in WBS Planning.</div>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -394,12 +449,12 @@ function MaterialsOutputBarList({ rows, total }: { rows: { label: string; closed
           <div key={r.label}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, marginBottom: 3 }}>
               <span style={{ color: "var(--text-secondary)" }}>{r.label}</span>
-              <span style={{ fontWeight: 600, color: "var(--navy)" }}>
-                {rowTotal}
-                {r.tentative > 0 && <span style={{ fontWeight: 400, color: "var(--muted)" }}> ({r.closed} closed, {r.tentative} tentative)</span>}
-              </span>
+              <span style={{ fontWeight: 600, color: "var(--navy)" }}>{rowTotal}</span>
             </div>
-            <div style={{ height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden", display: "flex" }}>
+            <div
+              title={`${r.closed} closed, ${r.tentative} tentative`}
+              style={{ height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden", display: "flex", cursor: "default" }}
+            >
               <div style={{ height: "100%", width: `${closedPct}%`, background: "var(--success-text)" }} />
               <div style={{ height: "100%", width: `${tentativePct}%`, background: "var(--accent)" }} />
             </div>
@@ -415,6 +470,9 @@ function MaterialsOutputBarList({ rows, total }: { rows: { label: string; closed
           <span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--accent)" }} />
           <span style={{ color: "var(--text-secondary)" }}>Tentative (not yet closed)</span>
         </div>
+        {hiddenCount > 0 && (
+          <span style={{ color: "var(--muted)", marginLeft: "auto" }}>+{hiddenCount} more type{hiddenCount === 1 ? "" : "s"} not shown</span>
+        )}
       </div>
     </div>
   );
@@ -1194,7 +1252,11 @@ export default function Dashboard() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
         <div className="card">
           <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>Materials Output</div>
-          <MaterialsOutputBarList rows={materialsOutputRows} total={materialsOutputGrandTotal} />
+          <MaterialsOutputBarList
+            rows={materialsOutputRows.slice(0, 5)}
+            total={materialsOutputGrandTotal}
+            hiddenCount={Math.max(0, materialsOutputRows.length - 5)}
+          />
         </div>
         <div className="card">
           <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>Portfolio Movement</div>
