@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
 import { TimeTrackingProvider } from "./lib/TimeTrackingContext";
 import RequireAuth from "./components/RequireAuth";
@@ -15,10 +15,14 @@ import HoursOverview from "./pages/HoursOverview";
 import TimeOff from "./pages/TimeOff";
 import HolidayCalendar from "./pages/HolidayCalendar";
 import WbsPlanning from "./pages/WbsPlanning";
-import BaselineReport from "./pages/BaselineReport";
 import AuditTrail from "./pages/AuditTrail";
 import Login from "./pages/Login";
 import SetPassword from "./pages/SetPassword";
+
+function RedirectToWbs() {
+  const { projectId } = useParams<{ projectId: string }>();
+  return <Navigate to={`/projects/${projectId}/wbs`} replace />;
+}
 
 // Real client-side routes (React Router) — each screen has its own URL,
 // so the browser's native Back/Forward buttons work without any custom
@@ -55,7 +59,13 @@ export default function App() {
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:projectId" element={<Projects />} />
           <Route path="/projects/:projectId/wbs" element={<WbsPlanning />} />
-          <Route path="/projects/:projectId/baseline" element={<BaselineReport />} />
+          {/* 2026-09-21 (Sandra: "instead of having a separate page, can
+              we all be routed to the WBS page") -- BaselineReport.tsx is
+              retired as a standalone destination; the WBS page now shows
+              the same content in-place for closed projects
+              (ClosedProjectReportPanel). Old /baseline links/bookmarks
+              redirect straight to /wbs instead of breaking. */}
+          <Route path="/projects/:projectId/baseline" element={<RedirectToWbs />} />
           <Route path="/projects/:projectId/audit-trail" element={<AuditTrail />} />
           <Route path="/tasks" element={<Navigate to="/projects" replace />} />
           <Route path="/tasks/:taskId" element={<Navigate to="/projects" replace />} />

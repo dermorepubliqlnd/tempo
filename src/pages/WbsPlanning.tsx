@@ -7,6 +7,7 @@ import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { InlineText, InlineNumber, InlineSelect, InlineDate, InlineTextArea } from "../components/InlineCell";
 import { CancelTaskDialog } from "../components/CancelTaskDialog";
+import ClosedProjectReportPanel from "../components/ClosedProjectReportPanel";
 import { formatDate } from "../lib/formatDate";
 import { rollupHoursFor, formatHours, type TimeEntryRow } from "../lib/timeTracking";
 import { addDays, buildHolidaySet, isWorkingDay, parseLocalDate, toISO, workingDaysBetween, type HolidaySet } from "../lib/workingDays";
@@ -957,6 +958,13 @@ export default function WbsPlanning() {
   // conditions as before -- placement/consolidation only, not a
   // behavior change.
   const [wbsActionsMenuOpen, setWbsActionsMenuOpen] = useState(false);
+  // 2026-09-21 (Sandra: on the closed-project merged view, "[the WBS
+  // table + Gantt] should be expandable if ever we just want to see
+  // details" -- collapsed by default for closed projects (the Baseline
+  // vs Final report above is the primary thing to look at once a
+  // project is done); irrelevant for non-closed projects, which always
+  // show this section per its own `wbs_status !== "closed"` check below.
+  const [wbsDetailsExpanded, setWbsDetailsExpanded] = useState(false);
   const [revisionHistory, setRevisionHistory] = useState<RevisionRow[]>([]);
   const [revisionChangesById, setRevisionChangesById] = useState<Record<string, RevisionChangeRow[]>>({});
   const [expandedRevisionId, setExpandedRevisionId] = useState<string | null>(null);
@@ -4964,6 +4972,22 @@ export default function WbsPlanning() {
         )}
           </div>
 
+          {/* 2026-09-21 (Sandra: "when a project is closed, instead of
+              having a separate page, can we all be routed to the WBS
+              page ... [Baseline/Final/Variance + Automated Insight]
+              followed by [Lessons Learned + Tasks added/grown]") --
+              BaselineReport.tsx's core content, lifted into a shared
+              component (ClosedProjectReportPanel) and rendered right
+              here instead of on its own /baseline route. */}
+          {project.wbs_status === "closed" && (
+            <ClosedProjectReportPanel
+              projectId={project.id}
+              actualCloseDate={project.actual_close_date}
+              lessonsLearnedWorked={project.lessons_learned_worked}
+              lessonsLearnedNotWorked={project.lessons_learned_not_worked}
+            />
+          )}
+
           {/* Phase 10 (2026-08-21): redesigned per Sandra's spec -- all 4
               scenarios (Committed/Full Effort/Capacity-Based/Manual) now
               render as simultaneous rows per person instead of a tab you
@@ -4972,7 +4996,14 @@ export default function WbsPlanning() {
               same dailyPointsFor/tierOf formula as before and as the
               standalone Utilization page, just called once per scenario
               via effectiveForMode instead of once for a toggled mode. */}
-          <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+          {/* 2026-09-21 (Sandra: "when a project is closed ... the
+              utilization snapshot will no longer be there") -- hidden via
+              display:none rather than not rendering, since finding this
+              card's exact matching close tag safely (it spans hundreds of
+              lines of nested scenario rows/tables below) is riskier than
+              this one-line style change; behavior is identical either
+              way for a closed project. */}
+          <div className="card" style={{ padding: 14, marginBottom: 12, display: project.wbs_status === "closed" ? "none" : undefined }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
               <strong style={{ fontSize: 12.5, color: "var(--navy)" }}>Utilization snapshot</strong>
               <span
@@ -5519,6 +5550,41 @@ export default function WbsPlanning() {
               ))}
             </div>
           </div>
+
+          {/* 2026-09-21 (Sandra): collapsible "Work Breakdown Structure
+              and Gantt" header -- closed projects only. Everything below
+              this point through the end of the Gantt sections is wrapped
+              in a display:none toggle rather than conditionally
+              rendered, so this change doesn't require moving or
+              restructuring any of that existing JSX. */}
+          {project.wbs_status === "closed" && (
+            <button
+              onClick={() => setWbsDetailsExpanded((v) => !v)}
+              className="card"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                width: "100%",
+                padding: "10px 14px",
+                marginBottom: 12,
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                cursor: "pointer",
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "var(--navy)",
+                textAlign: "left",
+              }}
+            >
+              <ChevronDown size={14} style={{ transform: wbsDetailsExpanded ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.15s" }} />
+              Work Breakdown Structure and Gantt
+              <span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 400, color: "var(--muted)" }}>
+                {wbsDetailsExpanded ? "Click to collapse" : "Click to expand"}
+              </span>
+            </button>
+          )}
+          <div style={{ display: project.wbs_status === "closed" && !wbsDetailsExpanded ? "none" : undefined }}>
 
           {/* Sandra, 2026-07-29: "move the refresh dates button a bit
               lower, aligned with the legends" -- was its own right-
@@ -6208,6 +6274,7 @@ export default function WbsPlanning() {
             );
           })}
 
+          </div>
 
       {/* 2026-09-07 (Sandra: "move those fields at the bottom of the WBS
           page"): Actual Project Close Date + Lessons Learned moved down

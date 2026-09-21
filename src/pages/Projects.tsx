@@ -2851,10 +2851,15 @@ export default function Projects() {
                   (was "any non-draft status") -- the redesigned WBS page
                   itself now surfaces baseline/revision/variance info
                   in-place, so this report is reserved for the final,
-                  closed-project performance summary. */}
+                  closed-project performance summary.
+                  2026-09-21 (Sandra: "instead of having a separate page,
+                  can we all be routed to the WBS page") -- this now
+                  points at /wbs instead of the retired /baseline route;
+                  the WBS page itself renders the same report content
+                  for closed projects (see ClosedProjectReportPanel). */}
               {p.wbs_status === "closed" && (
                 <button
-                  onClick={() => navigate(`/projects/${p.id}/baseline`)}
+                  onClick={() => navigate(`/projects/${p.id}/wbs`)}
                   title="View this project's Baseline vs Final performance report"
                   style={{
                     display: "inline-flex",
