@@ -598,9 +598,14 @@ export default function ApprovalCenter() {
         context: row.project?.name ?? "—",
         requestedByName: personName(row.assignee_id),
         requestedAt: row.actual_completion_date ?? row.submitted_on ?? new Date().toISOString(),
+        // 2026-09-21 (Sandra, on a screenshot of the crossed-out sentence):
+        // "remove this" -- the generic "Marked Done -- awaiting..."
+        // sentence was redundant once the Due/Actual Completion dates
+        // were added, so it's dropped; those two now stand alone as
+        // their own lines instead of a single "Due: X · Actual: Y" line.
         reasonCategory: null,
-        reasonNotes: "Marked Done -- awaiting the assignee's manager (or skip-level) to validate the completion.",
-        extraLine: `Due: ${formatDate(row.current_due_date)}  ·  Actual Completion: ${row.actual_completion_date ? formatDate(row.actual_completion_date) : "Not set"}`,
+        reasonNotes: null,
+        extraLine: `Due Date: ${formatDate(row.current_due_date)}\nActual Completion: ${row.actual_completion_date ? formatDate(row.actual_completion_date) : "Not set"}`,
         canDecide,
         action: canDecide ? <ValidateAction row={row} /> : null,
       });
@@ -754,7 +759,7 @@ export default function ApprovalCenter() {
             </>
           )}
           {row.reasonNotes && <div style={{ color: "var(--text-secondary)", marginTop: 3 }}>{row.reasonNotes}</div>}
-          {row.extraLine && <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>{row.extraLine}</div>}
+          {row.extraLine && <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3, whiteSpace: "pre-line" }}>{row.extraLine}</div>}
         </div>
 
         {row.action && row.kind !== "baseline" && row.kind !== "closure" && row.kind !== "task_completion" && (
