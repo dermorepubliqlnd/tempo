@@ -81,6 +81,12 @@ interface ProjectRow {
   // scanned/mined for recurring themes later, not just re-read one by one.
   lessons_learned_worked: string | null;
   lessons_learned_not_worked: string | null;
+  // 2026-09-21 (Sandra: "allow admin permission to re-open projects") --
+  // stamped by reopen_wbs_closure (phase52_migration.sql) so a reopened
+  // project doesn't silently look identical to one that was never
+  // closed -- shown as a small note in the status banner.
+  reopened_at: string | null;
+  reopened_by: string | null;
 }
 interface TaskRow {
   id: string;
@@ -996,7 +1002,7 @@ export default function WbsPlanning() {
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
     const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked").eq("id", projectId).single(),
+      supabase.from("projects").select("id,name,owner_id,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -2493,23 +2499,25 @@ export default function WbsPlanning() {
         await alert(`Can't approve closure yet -- ${missingOutputCount.length} task(s) still need an Output Count.`);
         return;
       }
-      // Same hard gate as handleRequestClosure above -- an approver
-      // shouldn't be able to wave through a closure whose tasks aren't
-      // actually finished just because the request itself slipped
-      // through before this gate existed (or was requested from a stale
-      // tab).
-      const notDoneTasks = orderedTasks.filter((t) => !isCompleteStatusForSched(t.status));
-      if (notDoneTasks.length) {
-        await alert(
-          `Can't approve closure yet -- ${notDoneTasks.length} task(s) are still not Done or Cancelled: ${notDoneTasks
-            .slice(0, 8)
-            .map((t) => t.name)
-            .join(", ")}${notDoneTasks.length > 8 ? ", ..." : ""}. Finish or cancel these first.`
-        );
-        return;
-      }
+      // 2026-09-21 (Sandra): the task-completion gate lives ONLY on the
+      // request side (above, handleRequestClosure) -- "before requesting
+      // for project close, ideally all of these should have been
+      // captured and flagged, so the approver no longer has this gate."
+      // A request can't even be SUBMITTED anymore unless every task is
+      // already Done/Cancelled, so re-checking it here would just be a
+      // redundant blocker on the approver for something the requester
+      // already had to clear.
     }
-    if (!(await confirm(approve ? "Approve this closure? This locks in the current plan as Final Scope -- final, no re-opening." : "Reject this closure request?"))) return;
+    if (
+      !(await confirm(
+        // 2026-09-21: "no re-opening" softened to "not meant to be
+        // reopened" now that Full Access has an actual Reopen path
+        // (handleReopenProject below) -- the old wording was flatly
+        // wrong the moment that shipped.
+        approve ? "Approve this closure? This locks in the current plan as Final Scope -- not meant to be reopened casually." : "Reject this closure request?"
+      ))
+    )
+      return;
     const flushedBeforeClosureDecide = await flushPendingEdits();
     if (!flushedBeforeClosureDecide) return;
     setWorkflowBusy(true);
@@ -2522,6 +2530,31 @@ export default function WbsPlanning() {
     setWorkflowBusy(false);
     if (error) {
       await alert(`Couldn't decide closure: ${error.message}`);
+      return;
+    }
+    await loadAll();
+  }
+
+  // 2026-09-21 (Sandra: "allow admin permission to re-open projects") --
+  // Full Access only (see reopen_wbs_closure's own check, phase52_migration.sql;
+  // deliberately narrower than canDecideClosure, since undoing a signed-off
+  // Final Scope is a bigger deal than deciding a closure the first time).
+  // Sets wbs_status back to baseline_locked server-side; this project's
+  // Baseline/task data is untouched, and the original project_closeouts
+  // row is kept as historical record.
+  async function handleReopenProject() {
+    if (!project) return;
+    if (
+      !(await confirm(
+        `Reopen "${project.name}"? This un-does its Final Scope lock so it can be edited again -- the original closure stays on record, and the project will show as Baseline Locked again.`
+      ))
+    )
+      return;
+    setWorkflowBusy(true);
+    const { error } = await supabase.rpc("reopen_wbs_closure", { p_project_id: project.id });
+    setWorkflowBusy(false);
+    if (error) {
+      await alert(`Couldn't reopen project: ${error.message}`);
       return;
     }
     await loadAll();
@@ -4392,6 +4425,11 @@ export default function WbsPlanning() {
         {project.wbs_status === "closed" && closeoutClosedAt && (
           <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Signed Off Date: {formatDate(closeoutClosedAt.slice(0, 10))}</span>
         )}
+        {project.reopened_at && (
+          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
+            Reopened by {people.find((p) => p.id === project.reopened_by)?.name ?? "someone"} on {formatDate(project.reopened_at.slice(0, 10))}
+          </span>
+        )}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
           {/* 2026-08-27 (Sandra: "can we just add an action button
               instead and from there pick Re-Baseline and Close project")
@@ -4414,7 +4452,10 @@ export default function WbsPlanning() {
             const canRequestBaseline = canManageWbs && project.wbs_status === "draft" && !pendingBaselineRequest;
             const canRequestClosure =
               canManageWbs && (project.wbs_status === "baseline_locked" || project.wbs_status === "changed_after_baseline") && !pendingClosure;
-            if (!canRequestBaseline && !canRequestClosure) return null;
+            // 2026-09-21 (Sandra: "allow admin permission to re-open
+            // projects") -- Full Access only, closed projects only.
+            const canReopenProject = isFullAccess && project.wbs_status === "closed";
+            if (!canRequestBaseline && !canRequestClosure && !canReopenProject) return null;
             return (
               <>
                 <button
@@ -4471,6 +4512,19 @@ export default function WbsPlanning() {
                           style={{ display: "flex", width: "100%", textAlign: "left", background: "none", border: "none", borderRadius: 4, padding: "6px 8px", fontSize: 12.5, cursor: "pointer", color: "var(--text)" }}
                         >
                           Close Project
+                        </button>
+                      )}
+                      {canReopenProject && (
+                        <button
+                          className="row-menu-item"
+                          disabled={workflowBusy}
+                          onClick={() => {
+                            setWbsActionsMenuOpen(false);
+                            handleReopenProject();
+                          }}
+                          style={{ display: "flex", width: "100%", textAlign: "left", background: "none", border: "none", borderRadius: 4, padding: "6px 8px", fontSize: 12.5, cursor: "pointer", color: "var(--text)" }}
+                        >
+                          Reopen Project
                         </button>
                       )}
                     </div>
