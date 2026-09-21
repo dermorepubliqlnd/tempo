@@ -1861,3 +1861,9 @@ tr.row-drop-target td { box-shadow: inset 0 -2px 0 0 var(--accent); }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
 }
+
+/* Inline .status-pill usage inside Knowledge Base prose (via the
+   {tone:Label} markdown-lite syntax) -- nudge baseline so the pill sits
+   evenly with surrounding text instead of looking shoved up a couple of
+   pixels from its line-height. */
+.kb-content .status-pill { vertical-align: -1px; margin: 0 1px; }

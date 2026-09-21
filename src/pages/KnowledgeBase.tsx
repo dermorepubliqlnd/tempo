@@ -71,6 +71,18 @@ function renderInline(text: string): string {
   out = out.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/(?<!\*)\*(?!\*)(.+?)\*(?!\*)/g, "<em>$1</em>");
   out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+  // {tone:Label} -> a colored status pill, reusing the exact same
+  // .status-pill classes/colors the rest of the app already uses for
+  // this value (Status/Health/Priority/Planning Type/Project Type/
+  // Phase/Complexity pills on the Projects table) -- Sandra, 2026-09-21:
+  // "use colors id needed to to create that visual retention and
+  // consistency". Written in the source content itself (not inferred),
+  // so a property's Options list reads with the same color coding a
+  // person would already recognize from the table.
+  out = out.replace(
+    /\{(success|warning|danger|neutral|accent|purple|pink|gold|mint|slate|available):([^}]+)\}/g,
+    '<span class="status-pill $1">$2</span>'
+  );
   return out;
 }
 
