@@ -477,10 +477,10 @@ export default function MyDashboard() {
       {(tasksDueToday.length > 0 || myPendingApprovalsCount > 0 || overdueTasks.length > 0 || daysOverCapacity > 0 || missingLogHours > 0.1) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
-          {tasksDueToday.length > 0 && <AttentionPill tone="danger" icon={<Calendar size={12} />} value={tasksDueToday.length} label="Tasks due today" to="/projects" />}
+          {tasksDueToday.length > 0 && <AttentionPill tone="danger" icon={<Calendar size={12} />} value={tasksDueToday.length} label="Tasks due today" to="/projects?assignee=me" />}
           {myPendingApprovalsCount > 0 && <AttentionPill tone="purple" icon={<ShieldQuestion size={12} />} value={myPendingApprovalsCount} label="Pending approvals" to="/approval-center" />}
-          {overdueTasks.length > 0 && <AttentionPill tone="danger" icon={<AlertTriangle size={12} />} value={overdueTasks.length} label={overdueTasks.length === 1 ? "Overdue task" : "Overdue tasks"} to="/projects" />}
-          {daysOverCapacity > 0 && <AttentionPill tone="gold" icon={<Gauge size={12} />} value={daysOverCapacity} label={daysOverCapacity === 1 ? "Day over capacity" : "Days over capacity"} to="/utilization" />}
+          {overdueTasks.length > 0 && <AttentionPill tone="danger" icon={<AlertTriangle size={12} />} value={overdueTasks.length} label={overdueTasks.length === 1 ? "Overdue task" : "Overdue tasks"} to="/projects?assignee=me" />}
+          {daysOverCapacity > 0 && <AttentionPill tone="gold" icon={<Gauge size={12} />} value={daysOverCapacity} label={daysOverCapacity === 1 ? "Day over capacity" : "Days over capacity"} to="/utilization?person=me" />}
           {missingLogHours > 0.1 && <AttentionPill tone="accent" icon={<Clock3 size={12} />} value={`${missingLogHours.toFixed(1)}h`} label="Missing logs" to="/time-tracking" />}
         </div>
       )}
@@ -488,7 +488,7 @@ export default function MyDashboard() {
       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20, alignItems: "start" }}>
         <div>
           <div className="dash-card">
-            <SectionHeader title={`My Projects (${myProjects.length})`} to="/projects" />
+            <SectionHeader title={`My Projects (${myProjects.length})`} to="/projects?owner=me" />
             {myProjects.length === 0 ? (
               <p style={{ fontSize: 12, color: "var(--muted)" }}>You don't own any active projects.</p>
             ) : (
@@ -525,7 +525,7 @@ export default function MyDashboard() {
           </div>
 
           <div className="dash-card">
-            <SectionHeader title={`My Tasks This Week (${tasksThisWeek.length})`} to="/projects" />
+            <SectionHeader title={`My Tasks This Week (${tasksThisWeek.length})`} to="/projects?assignee=me" />
             {tasksThisWeek.length === 0 ? (
               <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing due this week.</p>
             ) : (
@@ -590,7 +590,7 @@ export default function MyDashboard() {
 
         <div>
           <div className="dash-card">
-            <SectionHeader title="My Utilization This Week" to="/utilization" small="Based on assigned work vs available capacity" />
+            <SectionHeader title="My Utilization This Week" to="/utilization?person=me" small="Based on assigned work vs available capacity" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
               {dailyStats.map((d) => {
                 const over = d.capacity > 0 && d.pct > 100;
@@ -620,7 +620,7 @@ export default function MyDashboard() {
           </div>
 
           <div className="dash-card">
-            <SectionHeader title="My Logged Hours This Week" to="/hours-overview" small="Based on your actual submitted time entries" />
+            <SectionHeader title="My Logged Hours This Week" to="/hours-overview?person=me" small="Based on your actual submitted time entries" />
             <div style={{ display: "grid", gridTemplateColumns: "1.4fr repeat(5, 1fr)", gap: 6, alignItems: "center" }}>
               <span />
               {dailyStats.map((d) => (
@@ -662,7 +662,7 @@ export default function MyDashboard() {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
             <div className="dash-card" style={{ marginBottom: 0 }}>
-              <SectionHeader title="Scoped vs Logged" small="This Month" to="/hours-overview" />
+              <SectionHeader title="Scoped vs Logged" small="This Month" to="/hours-overview?person=me" />
               {scopedVsLoggedByProject.length === 0 ? (
                 <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing yet this month.</p>
               ) : (
@@ -687,7 +687,7 @@ export default function MyDashboard() {
             </div>
 
             <div className="dash-card" style={{ marginBottom: 0 }}>
-              <SectionHeader title="Deliverables" small="This Month" to="/projects" />
+              <SectionHeader title="Deliverables" small="This Month" to="/projects?assignee=me" />
               {deliverables.length === 0 ? (
                 <p style={{ fontSize: 12, color: "var(--muted)" }}>None due this month.</p>
               ) : (

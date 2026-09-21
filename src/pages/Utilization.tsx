@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ChevronLeft, ChevronRight, ChevronDown, Minus, Circle, CheckCircle2, TrendingUp, Gauge, AlertTriangle, Clock } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { useSession } from "../lib/useSession";
+import { useSearchParams } from "react-router-dom";
 import { buildHolidaySet } from "../lib/workingDays";
 // One shared allocation engine for all three utilization surfaces
 // (this page, Scoped vs Logged, and WBS Planning's Utilization snapshot).
@@ -185,6 +187,8 @@ function subWeekCellStyle(wi: number): CSSProperties {
 // snapshot so all three spread the same hours over the same days.
 
 export default function Utilization() {
+  const { person: me } = useSession();
+  const [searchParams] = useSearchParams();
   const [people, setPeople] = useState<PersonRow[]>([]);
   // Every person, active or not (2026-09-03) -- deactivated people's
   // past Utilization data was never deleted, it's just been hidden by
@@ -225,6 +229,16 @@ export default function Utilization() {
   // already shipped on Scoped vs Logged (HoursOverview.tsx) and the WBS
   // snapshot (WbsPlanning.tsx), so all three surfaces behave identically.
   const [personFilter, setPersonFilter] = useState<Set<string> | null>(null);
+  // 2026-09-21 (Sandra): let My Dashboard's "View All" links land here
+  // already scoped to the signed-in person (?person=me), instead of always
+  // showing the full team. One-shot on mount only -- doesn't fight the
+  // person picker below if they then change it themselves.
+  useEffect(() => {
+    if (searchParams.get("person") === "me" && me?.id) {
+      setPersonFilter(new Set([me.id]));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.id]);
   const [personFilterOpen, setPersonFilterOpen] = useState(false);
   const [personFilterSearch, setPersonFilterSearch] = useState("");
   // Role filter (2026-09-18, Sandra: "add option to filter by role") --

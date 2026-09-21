@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { useSession } from "../lib/useSession";
+import { useSearchParams } from "react-router-dom";
 import { buildHolidaySet } from "../lib/workingDays";
 // Same shared allocation engine Utilization.tsx and WbsPlanning.tsx's
 // Utilization snapshot use -- see src/lib/dailyAllocation.ts. Before this,
@@ -132,6 +134,8 @@ function hoursShiftTone(hours: number): "neutral" | "success" | "warning" | "dan
 }
 
 export default function HoursOverview() {
+  const { person: me } = useSession();
+  const [searchParams] = useSearchParams();
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
@@ -165,6 +169,16 @@ export default function HoursOverview() {
   // utilization snap shot") -- same reusable searchable multi-select
   // already used by WbsPlanning.tsx's Utilization snapshot panel.
   const [personFilter, setPersonFilter] = useState<Set<string> | null>(null);
+  // 2026-09-21 (Sandra): let My Dashboard's "View All" links land here
+  // already scoped to the signed-in person (?person=me), instead of always
+  // showing the full team. One-shot on mount only -- doesn't fight the
+  // person picker below if they then change it themselves.
+  useEffect(() => {
+    if (searchParams.get("person") === "me" && me?.id) {
+      setPersonFilter(new Set([me.id]));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.id]);
   const [personFilterOpen, setPersonFilterOpen] = useState(false);
   const [personFilterSearch, setPersonFilterSearch] = useState("");
   // Role filter (2026-09-18, Sandra: "add role at the bottom of the name
