@@ -258,13 +258,15 @@ export default function ApprovalCenter() {
   // Access do NOT auto-qualify).
   const canDecideBaseline = !!me?.can_approve_rebaseline;
 
-  // Closure: Full Access, anyone flagged can_approve_closures, or the
-  // project's own owner -- mirrors WbsPlanning.tsx's canDecideClosure.
+  // Closure: Full Access or anyone flagged can_approve_closures --
+  // mirrors WbsPlanning.tsx's canDecideClosure.
+  // 2026-09-21 (Sandra: "how come Gemma was able to approve project
+  // close when she does not have the permission to do so?") -- dropped
+  // the project-owner auto-qualify branch this used to have; an owner
+  // can request their own project's closure but no longer approve it.
   function canDecideClosure(row: ClosureRow): boolean {
     if (!me) return false;
-    if (isFullAccess || me.can_approve_closures) return true;
-    const proj = projectById.get(row.project_id);
-    return !!proj && proj.owner_id === me.id;
+    return isFullAccess || !!me.can_approve_closures;
   }
 
   async function decideExtension(row: ExtensionRow, status: "Approved" | "Rejected") {

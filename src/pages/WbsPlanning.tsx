@@ -3402,10 +3402,19 @@ export default function WbsPlanning() {
 
   // Phase 2/3 authorization -- mirrors can_manage_wbs()/can_decide_closure()
   // on the DB side (flat tiering, Sandra 2026-07-28): Full Access or the
-  // project's own owner can drive Lock/Revision/Closure-request; closure
-  // DECISIONS additionally open up to anyone flagged can_approve_closures.
+  // project's own owner can drive Lock/Revision/Closure-request.
+  // 2026-09-21 (Sandra, after finding Gemmabelle Aragon -- owner of
+  // P-0028, access_level 'limited', can_approve_closures false --
+  // had approved her own project's closure: "how come Gemma was able to
+  // approve project close when she does not have the permission to do
+  // so?"): closure DECISIONS no longer auto-qualify the project owner --
+  // only Full Access or anyone explicitly flagged can_approve_closures
+  // (phase53_migration.sql updates the matching DB-side
+  // can_decide_closure() the same way). An owner can still REQUEST their
+  // own project's closure (canManageWbs, unchanged) -- just not approve
+  // it themselves.
   const canManageWbs = isFullAccess || me?.id === project.owner_id;
-  const canDecideClosure = isFullAccess || !!me?.can_approve_closures || me?.id === project.owner_id;
+  const canDecideClosure = isFullAccess || !!me?.can_approve_closures;
   // Phase 6 (2026-08-21): deciding a pending Baseline Approval request is
   // STRICTLY gated on can_approve_rebaseline -- Sandra's explicit choice,
   // unlike Close's canDecideClosure above. Owner/Full Access do NOT
