@@ -88,6 +88,15 @@ interface CloseoutRow {
   task_count: number;
   start_date: string | null;
   end_date: string | null;
+  // 2026-09-21 (Sandra: "can we also capture who approved close project
+  // in the report?") -- stamped by decide_wbs_closure the moment an
+  // approver clicks Approve & Close (my_person_id()), same source as
+  // closed_at right above it.
+  closed_by: string | null;
+}
+interface PersonLite {
+  id: string;
+  name: string;
 }
 
 function liveTotals(tasks: TaskRow[]) {
@@ -112,12 +121,13 @@ export default function BaselineReport() {
   const [baselineTasks, setBaselineTasks] = useState<SnapshotTaskRow[]>([]);
   const [closeout, setCloseout] = useState<CloseoutRow | null>(null);
   const [closeoutTasks, setCloseoutTasks] = useState<SnapshotTaskRow[]>([]);
+  const [people, setPeople] = useState<PersonLite[]>([]);
   const [loading, setLoading] = useState(true);
 
   async function loadAll() {
     if (!projectId) return;
     setLoading(true);
-    const [{ data: proj }, { data: tks }, { data: bl }, { data: co }] = await Promise.all([
+    const [{ data: proj }, { data: tks }, { data: bl }, { data: co }, { data: ppl }] = await Promise.all([
       supabase.from("projects").select("id,name,wbs_status,actual_close_date,lessons_learned_worked,lessons_learned_not_worked").eq("id", projectId).single(),
       supabase
         .from("tasks")
@@ -130,9 +140,11 @@ export default function BaselineReport() {
         .eq("project_id", projectId)
         .eq("is_active", true)
         .maybeSingle(),
-      supabase.from("project_closeouts").select("id,closed_at,mode,total_est_hours,task_count,start_date,end_date").eq("project_id", projectId).maybeSingle(),
+      supabase.from("project_closeouts").select("id,closed_at,mode,total_est_hours,task_count,start_date,end_date,closed_by").eq("project_id", projectId).maybeSingle(),
+      supabase.from("people").select("id,name"),
     ]);
     setProject((proj as ProjectRow) ?? null);
+    setPeople((ppl as PersonLite[]) ?? []);
     setTasks((tks as TaskRow[]) ?? []);
     setBaseline((bl as BaselineRow) ?? null);
     setCloseout((co as CloseoutRow) ?? null);
@@ -322,7 +334,16 @@ export default function BaselineReport() {
           { label: "Est. hours", value: `${finalTotals ? finalTotals.totalEstHours : live.totalEstHours}` },
           { label: "Tasks", value: `${finalTotals ? finalTotals.taskCount : live.taskCount}` },
           { label: "End", value: compareEnd ? formatDate(compareEnd) : "—" },
-          ...(closeout ? [{ label: "Signed Off Date", value: formatDate(closeout.closed_at.slice(0, 10)) }] : []),
+          ...(closeout
+            ? [
+                { label: "Signed Off Date", value: formatDate(closeout.closed_at.slice(0, 10)) },
+                // 2026-09-21 (Sandra: "can we also capture who approved
+                // close project in the report?") -- project_closeouts.closed_by,
+                // same field the WBS page's own Signed Off badge is built
+                // from, just also naming who clicked Approve & Close.
+                { label: "Approved By", value: people.find((p) => p.id === closeout.closed_by)?.name ?? "—" },
+              ]
+            : []),
         ])}
 
         {statCard("Variance", <TrendingUp size={13} />, hoursDelta > 0 || taskDelta > 0 ? "#b45309" : "var(--navy)", [
