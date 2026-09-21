@@ -457,6 +457,19 @@ export function healthOf(
   if (status === "Completed" || status === "Cancelled") return { label: status, tone: "neutral" };
   if (status === "Paused") return { label: "Paused", tone: "purple" };
 
+  // 2026-09-21 (Sandra: "why is this tagged as overdue when WBS has not
+  // been finalized yet?"): a Draft project's start/end dates are still
+  // provisional -- nothing has been through Start Project/baseline
+  // approval yet, so comparing "today" against those dates and calling
+  // the result Overdue/Off track/At risk is misleading. This matches the
+  // existing "Active = baseline_locked only" convention already used
+  // elsewhere (isActiveProject in Dashboard.tsx, the Active KPI/donuts,
+  // Status/Phase forced to Not Started while Draft) -- Health now follows
+  // the same rule: a Draft project always reads "Not started", regardless
+  // of what its (still provisional) dates say, until it's actually
+  // kicked off.
+  if (p.wbs_status === "draft") return { label: "Not started", tone: "neutral" };
+
   const actual = actualProgress(p.id, allTasks);
   if (actual === 100) return { label: "Completed", tone: "success" };
 
