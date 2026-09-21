@@ -7,6 +7,7 @@ import {
   Timer,
   ShieldCheck,
   FolderCheck,
+  ListChecks,
   Clock,
   ChevronRight,
   Search,
@@ -55,6 +56,7 @@ interface ProjectLite {
   id: string;
   name: string;
   owner_id: string | null;
+  wbs_status: string | null;
 }
 
 interface ExtensionRow {
@@ -107,6 +109,23 @@ interface ClosureRow {
   requested_by: string | null;
   requested_at: string;
 }
+// 2026-09-21 (Sandra: "in the approval center, can we add task
+// [completion] validation too?") -- surfaces the same Done-but-not-yet-
+// Validated tasks the "Validated Date" column on Projects.tsx/
+// WbsPlanning.tsx already gates behind the Validate button, so a manager
+// doesn't have to go hunting through the Tasks table to find what's
+// waiting on their sign-off. No separate request table backs this --
+// it's just tasks where status = 'Done' and validated_completion_date is
+// still null, same live query the Tasks view itself effectively runs.
+interface TaskCompletionRow {
+  id: string;
+  name: string;
+  assignee_id: string | null;
+  project_id: string;
+  actual_completion_date: string | null;
+  submitted_on: string | null;
+  project: { id: string; name: string; owner_id: string | null; wbs_status: string | null } | null;
+}
 
 function hours(minutes: number | null): string {
   if (!minutes) return "0h";
@@ -117,7 +136,7 @@ function hours(minutes: number | null): string {
 // (the summary cards) and the color-coded pill/icon, kept separate from
 // typeLabel so the two extension sub-labels ("Task extension" / "Project
 // timeline extension") still filter and color together as one type.
-type ApprovalKind = "extension" | "time" | "baseline" | "closure";
+type ApprovalKind = "extension" | "time" | "baseline" | "closure" | "task_completion";
 
 // Same tone names index.css already defines for .status-pill.<tone> --
 // reused here for the summary-card icon squares too, so a request's
@@ -127,6 +146,7 @@ const KIND_META: Record<ApprovalKind, { label: string; pluralLabel: string; tone
   time: { label: "Time Entry", pluralLabel: "Time Entries", tone: "accent", icon: <Timer size={13} /> },
   baseline: { label: "Baseline Approval", pluralLabel: "Baselines", tone: "purple", icon: <ShieldCheck size={13} /> },
   closure: { label: "Project Close Request", pluralLabel: "Project Close Requests", tone: "mint", icon: <FolderCheck size={13} /> },
+  task_completion: { label: "Task Completion", pluralLabel: "Task Validations", tone: "success", icon: <ListChecks size={13} /> },
 };
 
 // Shared row chrome for every approval type -- kept as one generic shape
@@ -158,6 +178,13 @@ export default function ApprovalCenter() {
   const [timeEntries, setTimeEntries] = useState<TimeEntryRowLite[]>([]);
   const [baselineRequests, setBaselineRequests] = useState<BaselineRow[]>([]);
   const [closureRequests, setClosureRequests] = useState<ClosureRow[]>([]);
+  const [taskCompletions, setTaskCompletions] = useState<TaskCompletionRow[]>([]);
+  // Unfiltered (includes inactive) id/reports_to/is_active projection,
+  // separate from the active-only `people` state above -- needed to walk
+  // PAST an inactive immediate manager to find the nearest active one
+  // above them, same reason Projects.tsx keeps its own `chainPeople`
+  // alongside its active-only `people`.
+  const [chainPeople, setChainPeople] = useState<{ id: string; reports_to: string | null; is_active: boolean }[]>([]);
   const [decidingKey, setDecidingKey] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
   // Type filter -- clicking a summary card sets this to that kind; click
@@ -169,9 +196,10 @@ export default function ApprovalCenter() {
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: peopleData }, { data: projectData }, { data: extData }, { data: teData }, { data: blData }, { data: clData }] = await Promise.all([
+    const [{ data: peopleData }, { data: chainPeopleData }, { data: projectData }, { data: extData }, { data: teData }, { data: blData }, { data: clData }, { data: tcData }] = await Promise.all([
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
-      supabase.from("projects").select("id,name,owner_id"),
+      supabase.from("people").select("id,reports_to,is_active"),
+      supabase.from("projects").select("id,name,owner_id,wbs_status"),
       supabase
         .from("extension_requests")
         .select(
@@ -193,6 +221,16 @@ export default function ApprovalCenter() {
         .order("started_at", { ascending: false }),
       supabase.from("project_baseline_requests").select("id,project_id,requested_by,requested_at").eq("status", "pending").order("requested_at", { ascending: false }),
       supabase.from("project_closure_requests").select("id,project_id,requested_by,requested_at").eq("status", "pending").order("requested_at", { ascending: false }),
+      supabase
+        .from("tasks")
+        .select(
+          `id, name, assignee_id, project_id, actual_completion_date, submitted_on,
+           project:projects ( id, name, owner_id, wbs_status )`
+        )
+        .eq("status", "Done")
+        .is("validated_completion_date", null)
+        .eq("is_archived", false)
+        .order("submitted_on", { ascending: false }),
     ]);
     setPeople((peopleData as PersonLite[]) ?? []);
     setProjects((projectData as ProjectLite[]) ?? []);
@@ -204,6 +242,8 @@ export default function ApprovalCenter() {
     setTimeEntries((teData as unknown as TimeEntryRowLite[]) ?? []);
     setBaselineRequests((blData as BaselineRow[]) ?? []);
     setClosureRequests((clData as ClosureRow[]) ?? []);
+    setTaskCompletions((tcData as unknown as TaskCompletionRow[]) ?? []);
+    setChainPeople((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []);
     setLoading(false);
   }
 
@@ -269,6 +309,45 @@ export default function ApprovalCenter() {
     return isFullAccess || !!me.can_approve_closures;
   }
 
+  // Client-side approximation of nearest_active_manager() -- walks
+  // reports_to from personId, skipping anyone inactive. `people` here is
+  // already fetched is_active-only, so any match found this way is
+  // guaranteed active by construction (same shortcut Projects.tsx's own
+  // nearestActiveManagerClient takes). validate_task_completion (SQL) is
+  // the authoritative gate; this only decides whether to show the button.
+  function nearestActiveManager(personId: string | null): string | null {
+    if (!personId) return null;
+    let current = chainPeople.find((p) => p.id === personId)?.reports_to ?? null;
+    let depth = 0;
+    while (current && depth < 20) {
+      const mgr = chainPeople.find((p) => p.id === current);
+      if (mgr?.is_active) return mgr.id;
+      current = mgr?.reports_to ?? null;
+      depth += 1;
+    }
+    return null;
+  }
+
+  // Mirrors canValidateTask() in Projects.tsx / validate_task_completion
+  // (phase48/49_migration.sql): the assignee's immediate manager, a
+  // skip-level fallback if the immediate manager is inactive, Full
+  // Access, or the project owner -- with the same self-validation
+  // exemption (only when there's genuinely no active manager anywhere
+  // above the assignee) and the same project-closed lockout.
+  function canDecideTaskCompletion(row: TaskCompletionRow): boolean {
+    if (!me) return false;
+    if (row.project?.wbs_status === "closed") return false;
+    if (row.assignee_id && row.assignee_id === me.id) {
+      return nearestActiveManager(row.assignee_id) === null;
+    }
+    if (isFullAccess) return true;
+    if (row.project?.owner_id === me.id) return true;
+    if (!row.assignee_id) return false;
+    const immediateManager = chainPeople.find((p) => p.id === row.assignee_id)?.reports_to ?? null;
+    if (immediateManager === me.id) return true;
+    return nearestActiveManager(row.assignee_id) === me.id;
+  }
+
   async function decideExtension(row: ExtensionRow, status: "Approved" | "Rejected") {
     const label = row.project ? `"${row.project.name}"'s timeline` : `the extension request for "${row.task?.name}"`;
     if (status === "Rejected") {
@@ -301,6 +380,25 @@ export default function ApprovalCenter() {
     setDecidingKey(null);
     if (res.error) {
       await alert(`Couldn't ${status === "approved" ? "approve" : "reject"} this entry: ${res.error}`);
+      return;
+    }
+    loadAll();
+  }
+
+  // No "reject" concept for task completion -- validate_task_completion
+  // is the one action (same as the plain "Validate" button on Projects.tsx/
+  // WbsPlanning.tsx's Validated Date column). Uses the RPC's own default
+  // date order (actual_completion_date, then submitted_on, then today --
+  // see phase49_migration.sql) rather than exposing a date picker here;
+  // the Validated Date stays editable from the Tasks table afterward if
+  // it needs adjusting.
+  async function decideTaskCompletion(row: TaskCompletionRow) {
+    const key = `taskval-${row.id}`;
+    setDecidingKey(key);
+    const { error } = await supabase.rpc("validate_task_completion", { p_task_id: row.id });
+    setDecidingKey(null);
+    if (error) {
+      await alert(`Couldn't validate "${row.name}": ${error.message}`);
       return;
     }
     loadAll();
@@ -341,6 +439,21 @@ export default function ApprovalCenter() {
           Approve
         </button>
       </div>
+    );
+  }
+
+  function ValidateButton({ rowKey, onValidate }: { rowKey: string; onValidate: () => void }) {
+    const busy = decidingKey === rowKey;
+    return (
+      <button
+        onClick={onValidate}
+        disabled={busy}
+        title="Validate"
+        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+      >
+        <CheckCircle2 size={13} />
+        Validate
+      </button>
     );
   }
 
@@ -437,17 +550,37 @@ export default function ApprovalCenter() {
       });
     });
 
+    taskCompletions.forEach((row) => {
+      const key = `taskval-${row.id}`;
+      const canDecide = canDecideTaskCompletion(row);
+      rows.push({
+        key,
+        kind: "task_completion",
+        typeLabel: "Task Completion",
+        subject: row.name,
+        context: row.project?.name ?? "—",
+        requestedByName: personName(row.assignee_id),
+        requestedAt: row.actual_completion_date ?? row.submitted_on ?? new Date().toISOString(),
+        reasonCategory: null,
+        reasonNotes: "Marked Done -- awaiting the assignee's manager (or skip-level) to validate the completion.",
+        extraLine: null,
+        canDecide,
+        action: canDecide ? <ValidateButton rowKey={key} onValidate={() => decideTaskCompletion(row)} /> : null,
+      });
+    });
+
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensions, timeEntries, baselineRequests, closureRequests, people, projects, me]);
+  }, [extensions, timeEntries, baselineRequests, closureRequests, taskCompletions, chainPeople, people, projects, me]);
 
   const counts = {
     extension: extensions.length,
     time: timeEntries.length,
     baseline: baselineRequests.length,
     closure: closureRequests.length,
+    task_completion: taskCompletions.length,
   };
-  const totalPending = counts.extension + counts.time + counts.baseline + counts.closure;
+  const totalPending = counts.extension + counts.time + counts.baseline + counts.closure + counts.task_completion;
 
   const visibleRows = useMemo(() => {
     let rows = kindFilter ? allRows.filter((r) => r.kind === kindFilter) : allRows;
@@ -587,7 +720,7 @@ export default function ApprovalCenter() {
           {row.extraLine && <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>{row.extraLine}</div>}
         </div>
 
-        {row.action && row.kind !== "baseline" && row.kind !== "closure" && (
+        {row.action && row.kind !== "baseline" && row.kind !== "closure" && row.kind !== "task_completion" && (
           <div style={{ minWidth: 160, flex: "1 1 160px" }}>
             <NotesField rowKey={row.key} />
           </div>
@@ -626,6 +759,7 @@ export default function ApprovalCenter() {
         <SummaryCard kind="time" />
         <SummaryCard kind="baseline" />
         <SummaryCard kind="closure" />
+        <SummaryCard kind="task_completion" />
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
