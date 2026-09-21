@@ -28,6 +28,13 @@ interface ViewControlsProps<T> {
   groupBy2?: string | null;
   onGroupBy2Change?: (key: string | null) => void;
   onHiddenGroupsChange: (hidden: string[]) => void;
+  // 2026-09-21 (Sandra: "have an option in group to hide zero value ...
+  // this is actually for all grouping globally"): optional, same
+  // fallback-safe pattern as groupBy2 above -- a caller that hasn't been
+  // updated yet just doesn't get the checkbox, and reads as "off"
+  // wherever it's consulted.
+  hideEmptyGroups?: boolean;
+  onHideEmptyGroupsChange?: (value: boolean) => void;
   showCount: boolean;
   onShowCountChange: (value: boolean) => void;
   sortOptions: SortOption<T>[];
@@ -242,6 +249,8 @@ export default function ViewSettingsMenu<T>({
   onGroupByChange,
   onGroupBy2Change,
   onHiddenGroupsChange,
+  hideEmptyGroups,
+  onHideEmptyGroupsChange,
   showCount,
   onShowCountChange,
   sortOptions,
@@ -524,6 +533,16 @@ export default function ViewSettingsMenu<T>({
                     ))}
                 </select>
               </>
+            )}
+            {activeOption && onHideEmptyGroupsChange && (
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 8, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(hideEmptyGroups)}
+                  onChange={(e) => onHideEmptyGroupsChange(e.target.checked)}
+                />
+                Hide groups with 0 items
+              </label>
             )}
             {activeOption && groupValues.length > 0 && (
               <>

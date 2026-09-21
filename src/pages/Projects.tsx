@@ -4812,6 +4812,8 @@ export default function Projects() {
               onGroupByChange={(groupBy) => projectViews.updateActiveView({ groupBy, hiddenGroups: [] })}
               onGroupBy2Change={(groupBy2) => projectViews.updateActiveView({ groupBy2 })}
               onHiddenGroupsChange={(hiddenGroups) => projectViews.updateActiveView({ hiddenGroups })}
+              hideEmptyGroups={projectViews.activeView.hideEmptyGroups}
+              onHideEmptyGroupsChange={(hideEmptyGroups) => projectViews.updateActiveView({ hideEmptyGroups })}
               showCount={projectViews.activeView.showCount}
               onShowCountChange={(showCount) => projectViews.updateActiveView({ showCount })}
               sortOptions={projectSortOptions}
@@ -5118,6 +5120,8 @@ export default function Projects() {
               onGroupByChange={(groupBy) => taskViews.updateActiveView({ groupBy, hiddenGroups: [] })}
               onGroupBy2Change={(groupBy2) => taskViews.updateActiveView({ groupBy2 })}
               onHiddenGroupsChange={(hiddenGroups) => taskViews.updateActiveView({ hiddenGroups })}
+              hideEmptyGroups={taskViews.activeView.hideEmptyGroups}
+              onHideEmptyGroupsChange={(hideEmptyGroups) => taskViews.updateActiveView({ hideEmptyGroups })}
               showCount={taskViews.activeView.showCount}
               onShowCountChange={(showCount) => taskViews.updateActiveView({ showCount })}
               sortOptions={taskSortOptions}

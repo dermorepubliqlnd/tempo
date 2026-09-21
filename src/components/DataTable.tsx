@@ -325,16 +325,24 @@ export default function DataTable<T>({
   // the Group-by popover), since there's nothing to collapse/expand there.
   const visibleGroupNames = useMemo(() => {
     if (!activeGroupOption) return [];
-    const names = new Set<string>();
-    activeGroupOption.allGroups?.().forEach((g) => names.add(g));
+    // Counts, not just a Set of names, so a zero-row pre-seeded group
+    // (see hideEmptyGroups below) can be told apart from one that has
+    // rows -- mirrors the `groups` Map built in the render branch below.
+    const counts = new Map<string, number>();
+    activeGroupOption.allGroups?.().forEach((g) => {
+      if (!counts.has(g)) counts.set(g, 0);
+    });
     sortedRows.forEach((row) => {
       const g = activeGroupOption.getGroup(row);
       if (g === GROUP_EXCLUDE) return;
-      names.add(g || "—");
+      const name = g || "—";
+      counts.set(name, (counts.get(name) ?? 0) + 1);
     });
     const hiddenGroups = view.hiddenGroups ?? [];
-    return Array.from(names).filter((n) => !hiddenGroups.includes(n));
-  }, [activeGroupOption, sortedRows, view.hiddenGroups]);
+    return Array.from(counts.entries())
+      .filter(([name, count]) => !hiddenGroups.includes(name) && (!view.hideEmptyGroups || count > 0))
+      .map(([name]) => name);
+  }, [activeGroupOption, sortedRows, view.hiddenGroups, view.hideEmptyGroups]);
 
   const allGroupsCollapsed = visibleGroupNames.length > 0 && visibleGroupNames.every((n) => collapsedGroups.includes(n));
 
@@ -588,10 +596,18 @@ export default function DataTable<T>({
       groups.get(g)!.push(row);
     });
     const hiddenGroups = view.hiddenGroups ?? [];
+    // 2026-09-21 (Sandra: "make items with 0 values hidden by default?
+    // but allow to show if ever the user wants... have an option in
+    // group to hide zero value"): opt-in per view (view.hideEmptyGroups,
+    // default off so every already-saved view is unaffected) -- when on,
+    // a pre-seeded-but-empty top-level group (allGroups() above) is
+    // dropped from the render entirely, same treatment as a manually
+    // hidden group via the Show/Hide list, just automatic and count-
+    // driven instead of a stored list of names.
     body = (
       <tbody>
         {Array.from(groups.entries())
-          .filter(([groupName]) => !hiddenGroups.includes(groupName))
+          .filter(([groupName, groupRows]) => !hiddenGroups.includes(groupName) && (!view.hideEmptyGroups || groupRows.length > 0))
           .map(([groupName, groupRows]) => {
           const collapsed = collapsedGroups.includes(groupName);
           // Bugfix (2026-08-26, Sandra: "Projects List -- Grouping has a

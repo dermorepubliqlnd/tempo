@@ -233,6 +233,19 @@ export interface TableView {
   // exactly as before.
   groupBy2?: string | null;
   hiddenGroups: string[];
+  // 2026-09-21 (Sandra: "can we make items with 0 values hidden by
+  // default? but allow to show if ever the user wants... have an option
+  // in group to hide zero value. if that is set then no 0 values should
+  // show"): a global-to-this-view toggle, separate from hiddenGroups'
+  // per-value list above -- optional/fallback-safe like every other
+  // field added after initial ship (undefined -> false, so every
+  // already-saved view keeps showing empty groups exactly as before
+  // unless someone opts in). Only affects TOP-level groups, the only
+  // ones that can ever legitimately be zero-count (GroupOption.allGroups()
+  // pre-seeds a canonical value's group even with no matching rows --
+  // see DataTable.tsx); "Then by" sub-groups are never pre-seeded, so
+  // they're never zero-count by construction and need no equivalent.
+  hideEmptyGroups?: boolean;
   color: string;
   showCount: boolean;
   sorts: SortRule[];
