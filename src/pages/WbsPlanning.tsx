@@ -2428,6 +2428,27 @@ export default function WbsPlanning() {
       await alert(`Can't request closure yet -- ${missingOutputCount.length} task(s) still need an Output Count.`);
       return;
     }
+    // Hard gate (2026-09-21, Sandra: "how come this project was closed
+    // when there are tasks that are still not tagged as complete?" --
+    // found on P-0028, closed with 2 tasks stuck at Not Started).
+    // Closing a project used to only check the project-level fields and
+    // Output Count above -- task STATUS itself was never checked, so a
+    // request could go out (and get approved) with real work still
+    // undone. Same isCompleteStatusForSched predicate already used to
+    // decide whether a task counts as "done" for scheduling purposes --
+    // Done or Cancelled both count, since Cancelled is the app's
+    // deliberate "this was scoped but abandoned" state, not incomplete
+    // work.
+    const notDoneTasks = orderedTasks.filter((t) => !isCompleteStatusForSched(t.status));
+    if (notDoneTasks.length) {
+      await alert(
+        `Can't request closure yet -- ${notDoneTasks.length} task(s) are still not Done or Cancelled: ${notDoneTasks
+          .slice(0, 8)
+          .map((t) => t.name)
+          .join(", ")}${notDoneTasks.length > 8 ? ", ..." : ""}. Finish or cancel these first.`
+      );
+      return;
+    }
     if (!(await confirm(`Request closure for "${project.name}"? This asks an approver to lock in the current plan as Final Scope.`))) return;
     const flushedBeforeClosureRequest = await flushPendingEdits();
     if (!flushedBeforeClosureRequest) return;
@@ -2470,6 +2491,21 @@ export default function WbsPlanning() {
       const missingOutputCount = orderedTasks.filter((t) => (t.output_count === null || t.output_count === undefined) && !(t.depth === 0 && hasChildren(t.id)));
       if (missingOutputCount.length) {
         await alert(`Can't approve closure yet -- ${missingOutputCount.length} task(s) still need an Output Count.`);
+        return;
+      }
+      // Same hard gate as handleRequestClosure above -- an approver
+      // shouldn't be able to wave through a closure whose tasks aren't
+      // actually finished just because the request itself slipped
+      // through before this gate existed (or was requested from a stale
+      // tab).
+      const notDoneTasks = orderedTasks.filter((t) => !isCompleteStatusForSched(t.status));
+      if (notDoneTasks.length) {
+        await alert(
+          `Can't approve closure yet -- ${notDoneTasks.length} task(s) are still not Done or Cancelled: ${notDoneTasks
+            .slice(0, 8)
+            .map((t) => t.name)
+            .join(", ")}${notDoneTasks.length > 8 ? ", ..." : ""}. Finish or cancel these first.`
+        );
         return;
       }
     }
