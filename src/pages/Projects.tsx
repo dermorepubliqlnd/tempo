@@ -2847,37 +2847,14 @@ export default function Projects() {
               {/* Sandra, 2026-07-29: removed the separate "WBS" button --
                   the Project name cell (Round 21) already navigates to
                   /projects/:id/wbs, so this was a duplicate affordance. */}
-              {/* Sandra, 2026-07-29: Report link now gated to Closed only
-                  (was "any non-draft status") -- the redesigned WBS page
-                  itself now surfaces baseline/revision/variance info
-                  in-place, so this report is reserved for the final,
-                  closed-project performance summary.
-                  2026-09-21 (Sandra: "instead of having a separate page,
-                  can we all be routed to the WBS page") -- this now
-                  points at /wbs instead of the retired /baseline route;
-                  the WBS page itself renders the same report content
-                  for closed projects (see ClosedProjectReportPanel). */}
-              {p.wbs_status === "closed" && (
-                <button
-                  onClick={() => navigate(`/projects/${p.id}/wbs`)}
-                  title="View this project's Baseline vs Final performance report"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "2px 8px",
-                    fontSize: 11,
-                    fontWeight: 500,
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border)",
-                    background: "var(--surface)",
-                    color: "var(--accent, #2563eb)",
-                    cursor: "pointer",
-                  }}
-                >
-                  Report
-                </button>
-              )}
+              {/* 2026-09-21 (Sandra: "remove this" -- the separate
+                  Report button, pointing at a screenshot of it):
+                  redundant now that the Project name cell already
+                  navigates to /wbs, and the WBS page renders the same
+                  report content in-place for closed projects (see
+                  ClosedProjectReportPanel) -- there's no longer a
+                  distinct destination for this button to justify
+                  existing alongside that link. */}
             </div>
           );
         },
