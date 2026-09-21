@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
+  BookOpen,
   type LucideIcon,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -36,6 +37,12 @@ const mainItems: NavItem[] = [
   { to: "/projects", label: "Projects & Tasks", icon: FolderKanban },
   { to: "/extension-requests", label: "Extension Requests", icon: CalendarClock },
   { to: "/time-tracking", label: "Time Tracking", icon: Timer },
+  // 2026-09-21 (Sandra: "Add a knowledge base page accesible to
+  // everyone") -- lives in mainItems (not adminItems) since read access
+  // is everyone; edit controls inside KnowledgeBase.tsx are gated to
+  // Full Access on their own, same pattern as the page-level content
+  // (not the whole page) being conditional elsewhere.
+  { to: "/knowledge-base", label: "Knowledge Base", icon: BookOpen },
 ];
 
 const resourcePlanningItems: NavItem[] = [

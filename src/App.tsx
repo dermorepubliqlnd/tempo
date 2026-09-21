@@ -17,6 +17,7 @@ import TimeOff from "./pages/TimeOff";
 import HolidayCalendar from "./pages/HolidayCalendar";
 import WbsPlanning from "./pages/WbsPlanning";
 import AuditTrail from "./pages/AuditTrail";
+import KnowledgeBase from "./pages/KnowledgeBase";
 import Login from "./pages/Login";
 import SetPassword from "./pages/SetPassword";
 
@@ -69,6 +70,7 @@ export default function App() {
               redirect straight to /wbs instead of breaking. */}
           <Route path="/projects/:projectId/baseline" element={<RedirectToWbs />} />
           <Route path="/projects/:projectId/audit-trail" element={<AuditTrail />} />
+          <Route path="/knowledge-base" element={<KnowledgeBase />} />
           <Route path="/tasks" element={<Navigate to="/projects" replace />} />
           <Route path="/tasks/:taskId" element={<Navigate to="/projects" replace />} />
           <Route path="/approval-center" element={<ApprovalCenter />} />
