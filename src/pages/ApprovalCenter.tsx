@@ -122,6 +122,7 @@ interface TaskCompletionRow {
   name: string;
   assignee_id: string | null;
   project_id: string;
+  current_due_date: string | null;
   actual_completion_date: string | null;
   submitted_on: string | null;
   project: { id: string; name: string; owner_id: string | null; wbs_status: string | null } | null;
@@ -224,7 +225,7 @@ export default function ApprovalCenter() {
       supabase
         .from("tasks")
         .select(
-          `id, name, assignee_id, project_id, actual_completion_date, submitted_on,
+          `id, name, assignee_id, project_id, current_due_date, actual_completion_date, submitted_on,
            project:projects ( id, name, owner_id, wbs_status )`
         )
         .eq("status", "Done")
@@ -387,15 +388,26 @@ export default function ApprovalCenter() {
 
   // No "reject" concept for task completion -- validate_task_completion
   // is the one action (same as the plain "Validate" button on Projects.tsx/
-  // WbsPlanning.tsx's Validated Date column). Uses the RPC's own default
-  // date order (actual_completion_date, then submitted_on, then today --
-  // see phase49_migration.sql) rather than exposing a date picker here;
-  // the Validated Date stays editable from the Tasks table afterward if
-  // it needs adjusting.
-  async function decideTaskCompletion(row: TaskCompletionRow) {
+  // WbsPlanning.tsx's Validated Date column).
+  //
+  // 2026-09-21 (Sandra, after the first round of this feature): "make
+  // sure the actual validation date when validation was made and who
+  // validated is also captured ... the date selected when someone
+  // validates just validates the actual [completion] date. but the
+  // actual validation date was the date when the approver did the
+  // validation." Two distinct dates now, matching her example exactly
+  // (actual completion yesterday, validated today -> validated
+  // completion date = yesterday, validation performed at = today):
+  //   - p_validated_date (chosen here, defaults to actual_completion_date/
+  //     submitted_on/today, same order validate_task_completion always
+  //     used) -- the completion date being confirmed/signed off.
+  //   - validation_performed_at -- stamped server-side to now() by the
+  //     RPC itself (phase54_migration.sql), always the real click
+  //     moment, never shown/edited here.
+  async function decideTaskCompletion(row: TaskCompletionRow, validatedDate: string) {
     const key = `taskval-${row.id}`;
     setDecidingKey(key);
-    const { error } = await supabase.rpc("validate_task_completion", { p_task_id: row.id });
+    const { error } = await supabase.rpc("validate_task_completion", { p_task_id: row.id, p_validated_date: new Date(validatedDate).toISOString() });
     setDecidingKey(null);
     if (error) {
       await alert(`Couldn't validate "${row.name}": ${error.message}`);
@@ -442,18 +454,38 @@ export default function ApprovalCenter() {
     );
   }
 
-  function ValidateButton({ rowKey, onValidate }: { rowKey: string; onValidate: () => void }) {
+  // 2026-09-21 (Sandra): clicking Validate now confirms a date first,
+  // rather than firing immediately with whatever validate_task_completion
+  // would have defaulted to silently -- same default (actual_completion_
+  // date, then submitted_on, then today) pre-filled into an editable
+  // date input, so the common case (the pre-filled date is correct) is
+  // still just one extra click, but a validator who needs to correct it
+  // can before it's saved. See decideTaskCompletion's own comment for
+  // how this date differs from validation_performed_at.
+  function ValidateAction({ row }: { row: TaskCompletionRow }) {
+    const rowKey = `taskval-${row.id}`;
+    const defaultDate = (row.actual_completion_date ?? row.submitted_on ?? new Date().toISOString()).slice(0, 10);
+    const [date, setDate] = useState(defaultDate);
     const busy = decidingKey === rowKey;
     return (
-      <button
-        onClick={onValidate}
-        disabled={busy}
-        title="Validate"
-        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-      >
-        <CheckCircle2 size={13} />
-        Validate
-      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          title="Validated (completion) date -- when the work was actually done"
+          style={{ fontSize: 11.5, padding: "6px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }}
+        />
+        <button
+          onClick={() => decideTaskCompletion(row, date)}
+          disabled={busy || !date}
+          title="Validate"
+          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          <CheckCircle2 size={13} />
+          Validate
+        </button>
+      </div>
     );
   }
 
@@ -553,6 +585,11 @@ export default function ApprovalCenter() {
     taskCompletions.forEach((row) => {
       const key = `taskval-${row.id}`;
       const canDecide = canDecideTaskCompletion(row);
+      // 2026-09-21 (Sandra: "show in the validation list the Due Date,
+      // Actual Completion Date -- tag them accordingly"): both dates
+      // surfaced here so a validator can see, before confirming, whether
+      // the task finished on time and what completion date they're
+      // about to sign off on.
       rows.push({
         key,
         kind: "task_completion",
@@ -563,9 +600,9 @@ export default function ApprovalCenter() {
         requestedAt: row.actual_completion_date ?? row.submitted_on ?? new Date().toISOString(),
         reasonCategory: null,
         reasonNotes: "Marked Done -- awaiting the assignee's manager (or skip-level) to validate the completion.",
-        extraLine: null,
+        extraLine: `Due: ${formatDate(row.current_due_date)}  ·  Actual Completion: ${row.actual_completion_date ? formatDate(row.actual_completion_date) : "Not set"}`,
         canDecide,
-        action: canDecide ? <ValidateButton rowKey={key} onValidate={() => decideTaskCompletion(row)} /> : null,
+        action: canDecide ? <ValidateAction row={row} /> : null,
       });
     });
 
