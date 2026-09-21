@@ -16,8 +16,9 @@
 // easy copy/paste into Excel for a stakeholder update.
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Download } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { toCsv } from "../lib/csv";
 import type { ProjectRow, TaskRow } from "./Projects";
 import { MaterialsOutputBarList, type OutputTypeRow } from "./Dashboard";
 
@@ -43,6 +44,21 @@ const selectStyle: React.CSSProperties = {
   borderRadius: "var(--radius-sm)",
   padding: "6px 10px",
   background: "var(--surface)",
+};
+
+const exportBtnStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  fontSize: 11.5,
+  fontWeight: 600,
+  color: "var(--navy)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius-btn)",
+  padding: "7px 12px",
+  background: "var(--surface)",
+  cursor: "pointer",
+  marginTop: 2,
 };
 
 export default function MaterialsOutput() {
@@ -153,6 +169,18 @@ export default function MaterialsOutput() {
   );
   const grandTotal = totals.closed + totals.tentative;
 
+  function exportCsv() {
+    const rows = materialsOutputRows.map((r) => [r.label, r.closed, r.tentative, r.closed + r.tentative]);
+    const csv = toCsv(["Output Type", "Closed", "Tentative", "Total"], rows);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `materials_output_${TODAY_ISO}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   if (loading) {
     return (
       <div>
@@ -167,10 +195,24 @@ export default function MaterialsOutput() {
       <Link to="/team-dashboard" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "var(--muted)", textDecoration: "none", marginBottom: 8 }}>
         <ChevronLeft size={14} /> Back to Team Dashboard
       </Link>
-      <h1 style={{ marginBottom: 4 }}>Materials Output</h1>
-      <p className="subtitle" style={{ marginBottom: 16 }}>
-        Every Output Type with logged Output Count, closed vs. tentative -- same rollup as the Team Dashboard card, unbounded.
-      </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <h1 style={{ marginBottom: 4 }}>Materials Output</h1>
+          <p className="subtitle" style={{ marginBottom: 16 }}>
+            Every Output Type with logged Output Count, closed vs. tentative -- same rollup as the Team Dashboard card, unbounded.
+          </p>
+        </div>
+        {/* 2026-09-21 (Sandra: "can't you just add an export to Excel
+            option?"): CSV rather than a true .xlsx -- Excel opens a .csv
+            natively, and this reuses the toCsv() helper already used for
+            User management's template download (src/lib/csv.ts) instead
+            of pulling in a new xlsx-writing dependency for one button.
+            Respects whatever Period/Owner/Source filters are currently
+            applied, same rows the table below shows. */}
+        <button onClick={exportCsv} disabled={materialsOutputRows.length === 0} style={exportBtnStyle}>
+          <Download size={13} /> Export to Excel
+        </button>
+      </div>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
         <select value={periodFilter} onChange={(e) => setPeriodFilter(e.target.value as typeof periodFilter)} style={selectStyle}>
