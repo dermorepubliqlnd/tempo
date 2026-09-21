@@ -421,14 +421,35 @@ export default function ApprovalCenter() {
   //   - validation_performed_at -- stamped server-side to now() by the
   //     RPC itself (phase54_migration.sql), always the real click
   //     moment, never shown/edited here.
+  // 2026-09-21 follow-up (Sandra, on a screenshot of a validated-but-
+  // unlocked row): "when that is done that equates to validation lock
+  // too, not this" -- validating through the Approval Center's confirm
+  // dialog (which already tells the validator this is the FINAL,
+  // approved completion date) now also locks it immediately, via the
+  // same lock_task_validation RPC the separate green-checkmark Lock
+  // button on Projects.tsx/WbsPlanning.tsx's Validated Date column
+  // calls ("Same authorization as Validate itself" -- see that button's
+  // own comment, so whoever could validate here can always lock too).
+  // The plain inline Validate button on those pages is UNCHANGED --
+  // still a separate two-step Validate-then-Lock there, since it has no
+  // "this is final" confirm step of its own; this only short-circuits
+  // that second step when validation happens through this page.
   async function decideTaskCompletion(row: TaskCompletionRow, validatedDate: string) {
     const key = `taskval-${row.id}`;
     setDecidingKey(key);
     const { error } = await supabase.rpc("validate_task_completion", { p_task_id: row.id, p_validated_date: new Date(validatedDate).toISOString() });
-    setDecidingKey(null);
     if (error) {
+      setDecidingKey(null);
       await alert(`Couldn't validate "${row.name}": ${error.message}`);
       return;
+    }
+    const { error: lockError } = await supabase.rpc("lock_task_validation", { p_task_id: row.id });
+    setDecidingKey(null);
+    if (lockError) {
+      // Validation itself succeeded -- only the lock step failed (rare;
+      // e.g. a permission edge case). Surface it rather than silently
+      // leaving the row unlocked with no explanation.
+      await alert(`"${row.name}" was validated, but couldn't be locked: ${lockError.message}`);
     }
     loadAll();
   }
