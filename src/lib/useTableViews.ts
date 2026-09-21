@@ -108,6 +108,15 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
   // beats a network round-trip).
   const [views, setViews] = useState<TableView[]>(() => load(storageKey, defaultView));
   const [activeViewId, setActiveViewId] = useState<string>(() => loadActiveId(activeKey, load(storageKey, defaultView)));
+  // Flips true once this person's REAL (server-side) views have been
+  // fetched -- before that, `views`/`activeViewId` are just the fast local
+  // first-paint guess and are about to be overwritten wholesale by
+  // whatever the fetch effect below finds. Anything that programmatically
+  // creates/switches a view on mount (e.g. Projects.tsx auto-creating a
+  // "My Projects"/"My Tasks" view from a dashboard link) MUST wait for
+  // this, or the fetch resolving a moment later silently reverts it --
+  // seen 2026-09-21 as a "view flashes then disappears" bug.
+  const [loaded, setLoaded] = useState(false);
 
   // Guards against the write-effect below re-uploading data the instant
   // it just came DOWN from a fetch (or was seeded from legacy localStorage
@@ -149,6 +158,7 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
         setViews(merged);
         setActiveViewId(activeId);
         readyToWriteRef.current = true;
+        setLoaded(true);
       } else {
         // No account-level row yet -- one-time migration: seed from
         // whatever's already sitting in this browser's local storage (or
@@ -166,6 +176,7 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
         if (upsertError) {
           console.error(`Couldn't migrate ${tableKey} view to your account:`, upsertError.message);
         }
+        setLoaded(true);
       }
     })();
 
@@ -289,5 +300,5 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     });
   }
 
-  return { views, activeView, activeViewId, setActiveViewId, updateActiveView, createView, renameView, duplicateView, setViewColor, setViewIcon, deleteView };
+  return { views, activeView, activeViewId, setActiveViewId, updateActiveView, createView, renameView, duplicateView, setViewColor, setViewIcon, deleteView, loaded };
 }

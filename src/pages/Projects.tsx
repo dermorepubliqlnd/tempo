@@ -961,30 +961,6 @@ export default function Projects() {
   const wantsMyProjectsView = searchParams.get("owner") === "me";
   const wantsMyTasksView = searchParams.get("assignee") === "me";
 
-  useEffect(() => {
-    if (!wantsMyProjectsView) return;
-    const existing = projectViews.views.find((v) => v.name === "My Projects");
-    if (existing) {
-      if (projectViews.activeViewId !== existing.id) projectViews.setActiveViewId(existing.id);
-    } else {
-      projectViews.createView("My Projects", "table", undefined, undefined, { filterPersonIds: ["me"] });
-    }
-    navigate("/projects", { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantsMyProjectsView]);
-
-  useEffect(() => {
-    if (!wantsMyTasksView) return;
-    const existing = taskViews.views.find((v) => v.name === "My Tasks");
-    if (existing) {
-      if (taskViews.activeViewId !== existing.id) taskViews.setActiveViewId(existing.id);
-    } else {
-      taskViews.createView("My Tasks", "table", undefined, undefined, { filterPersonIds: ["me"] });
-    }
-    document.getElementById("tasks-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    navigate("/projects", { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantsMyTasksView]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [people, setPeople] = useState<PersonOption[]>([]);
@@ -4407,6 +4383,35 @@ export default function Projects() {
     showCount: false,
     sorts: [],
   });
+
+  useEffect(() => {
+    // Wait for this person's REAL saved views to come back from Supabase
+    // first -- creating/switching before that resolves gets silently
+    // reverted the instant the fetch lands (see useTableViews' `loaded`
+    // doc comment).
+    if (!wantsMyProjectsView || !projectViews.loaded) return;
+    const existing = projectViews.views.find((v) => v.name === "My Projects");
+    if (existing) {
+      if (projectViews.activeViewId !== existing.id) projectViews.setActiveViewId(existing.id);
+    } else {
+      projectViews.createView("My Projects", "table", undefined, undefined, { filterPersonIds: ["me"] });
+    }
+    navigate("/projects", { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsMyProjectsView, projectViews.loaded]);
+
+  useEffect(() => {
+    if (!wantsMyTasksView || !taskViews.loaded) return;
+    const existing = taskViews.views.find((v) => v.name === "My Tasks");
+    if (existing) {
+      if (taskViews.activeViewId !== existing.id) taskViews.setActiveViewId(existing.id);
+    } else {
+      taskViews.createView("My Tasks", "table", undefined, undefined, { filterPersonIds: ["me"] });
+    }
+    document.getElementById("tasks-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    navigate("/projects", { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsMyTasksView, taskViews.loaded]);
 
   // Same upstream Filter step as filteredProjects above -- the person
   // filter reuses the same t.assignee_id === me?.id identity check already
