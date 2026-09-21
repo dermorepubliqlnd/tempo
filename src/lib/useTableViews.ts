@@ -222,7 +222,13 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     setViews((vs) => vs.map((v) => (v.id === activeView.id ? { ...v, ...patch } : v)));
   }
 
-  function createView(name: string, viewType: ViewType = "table", initialGroupBy?: string, initialHiddenColumns?: string[]) {
+  function createView(
+    name: string,
+    viewType: ViewType = "table",
+    initialGroupBy?: string,
+    initialHiddenColumns?: string[],
+    extra?: Partial<TableView>
+  ) {
     const id = `view_${Date.now()}`;
     setViews((vs) => [
       ...vs,
@@ -233,6 +239,13 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
         viewType,
         groupBy: initialGroupBy ?? defaultView.groupBy,
         hiddenColumns: initialHiddenColumns ?? defaultView.hiddenColumns,
+        // Extra fields (e.g. filterPersonIds) merged in at creation time,
+        // atomically with everything else -- a separate updateActiveView()
+        // call right after createView() would race the still-stale
+        // `activeView` closure from this same render and patch the WRONG
+        // view (see the "My Projects"/"My Tasks" auto-created views in
+        // Projects.tsx for why this matters, 2026-09-21).
+        ...extra,
       },
     ]);
     setActiveViewId(id);

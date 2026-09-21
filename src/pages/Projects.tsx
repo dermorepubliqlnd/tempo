@@ -947,21 +947,44 @@ async function deleteTasksAndDependents(ids: string[]): Promise<{ error: string 
 export default function Projects() {
   const navigate = useNavigate();
   const { person: me } = useSession();
-  // URL-driven "My Dashboard" quick filters (2026-09-21, Sandra: View All
-  // links should actually land the person on a filtered view, not the
-  // full unfiltered list). These are read-only, one-shot overrides layered
-  // on top of the normal saved-view filtering below -- they intentionally
-  // do NOT touch/persist into the saved view (filterPersonIds etc.) so
-  // clicking a dashboard link never mutates someone's own saved view.
+  // URL-driven "My Dashboard" quick links (2026-09-21, Sandra: "let's try
+  // the saved view approach" -- View All should land the person on a real,
+  // persistent view they can find again and keep customizing, not a
+  // one-off filter that vanishes). The very first time someone arrives via
+  // ?owner=me / ?assignee=me, this finds-or-creates a "My Projects"/
+  // "My Tasks" view (a normal view -- reuses the exact same filterPersonIds
+  // mechanism the person-filter picker already writes to) and switches to
+  // it, then strips the query param so the URL is just a one-time trigger,
+  // not a persistent filter of its own. Every later visit, whether via the
+  // dashboard link or the tab itself, just reuses that same saved view.
   const [searchParams] = useSearchParams();
-  const onlyMyProjects = searchParams.get("owner") === "me";
-  const onlyMyTasks = searchParams.get("assignee") === "me";
+  const wantsMyProjectsView = searchParams.get("owner") === "me";
+  const wantsMyTasksView = searchParams.get("assignee") === "me";
 
   useEffect(() => {
-    if (onlyMyTasks && !onlyMyProjects) {
-      document.getElementById("tasks-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!wantsMyProjectsView) return;
+    const existing = projectViews.views.find((v) => v.name === "My Projects");
+    if (existing) {
+      if (projectViews.activeViewId !== existing.id) projectViews.setActiveViewId(existing.id);
+    } else {
+      projectViews.createView("My Projects", "table", undefined, undefined, { filterPersonIds: ["me"] });
     }
-  }, [onlyMyTasks, onlyMyProjects]);
+    navigate("/projects", { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsMyProjectsView]);
+
+  useEffect(() => {
+    if (!wantsMyTasksView) return;
+    const existing = taskViews.views.find((v) => v.name === "My Tasks");
+    if (existing) {
+      if (taskViews.activeViewId !== existing.id) taskViews.setActiveViewId(existing.id);
+    } else {
+      taskViews.createView("My Tasks", "table", undefined, undefined, { filterPersonIds: ["me"] });
+    }
+    document.getElementById("tasks-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    navigate("/projects", { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsMyTasksView]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [people, setPeople] = useState<PersonOption[]>([]);
@@ -2216,11 +2239,8 @@ export default function Projects() {
       const statuses = view.filterStatuses;
       out = out.filter((p) => statuses.includes(projectStatusOf(p) ?? ""));
     }
-    if (onlyMyProjects) {
-      out = out.filter((p) => p.owner_id === me?.id);
-    }
     return out;
-  }, [projects, projectViews.activeView, me?.id, onlyMyProjects]);
+  }, [projects, projectViews.activeView, me?.id]);
 
   const projectColumns: ColumnDef<ProjectRow>[] = useMemo(
     () => [
@@ -3229,10 +3249,10 @@ export default function Projects() {
     navigate(`/projects/${data.id}/wbs`);
   }
 
-  const visibleTasks = useMemo(() => {
-    const source = onlyMyTasks ? tasks.filter((t) => t.assignee_id === me?.id) : tasks;
-    return buildTaskTree(source).filter((t) => !(t.parent_task_id && collapsedParents.includes(t.parent_task_id)));
-  }, [tasks, collapsedParents, onlyMyTasks, me?.id]);
+  const visibleTasks = useMemo(
+    () => buildTaskTree(tasks).filter((t) => !(t.parent_task_id && collapsedParents.includes(t.parent_task_id))),
+    [tasks, collapsedParents]
+  );
   const hasChildren = (taskId: string) => tasks.some((t) => t.parent_task_id === taskId);
 
   // Instant creation like createBlankTask/createBlankProject, instead of a
@@ -4619,17 +4639,6 @@ export default function Projects() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <h1>Projects</h1>
-          {onlyMyProjects && (
-            <span className="status-pill accent" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, marginTop: 4 }}>
-              Showing only projects you own
-              <button
-                onClick={() => navigate("/projects", { replace: true })}
-                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit", fontWeight: 700 }}
-              >
-                Clear
-              </button>
-            </span>
-          )}
         </div>
         <button
           onClick={() => {
@@ -4938,20 +4947,7 @@ export default function Projects() {
         )}
       </div>
 
-      <h2 id="tasks-section" style={{ marginTop: 0, display: "flex", alignItems: "center", gap: 8 }}>
-        Tasks
-        {onlyMyTasks && (
-          <span className="status-pill accent" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-            Showing only tasks assigned to you
-            <button
-              onClick={() => navigate("/projects", { replace: true })}
-              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit", fontWeight: 700 }}
-            >
-              Clear
-            </button>
-          </span>
-        )}
-      </h2>
+      <h2 id="tasks-section" style={{ marginTop: 0 }}>Tasks</h2>
 
       <div className="card" style={{ padding: 0 }}>
         <div className="sticky-toolbar-cluster" ref={taskClusterRef}>
