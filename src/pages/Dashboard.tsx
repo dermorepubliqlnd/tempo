@@ -625,15 +625,20 @@ export default function Dashboard() {
 
   const filteredProjectIds = useMemo(() => new Set(filteredProjects.map((p) => p.id)), [filteredProjects]);
 
-  // 2026-09-03 (Sandra: "for active can we just consider those that
-  // baseline are locked? if not locked then not active yet") -- "Active"
-  // now anchors to wbs_status === "baseline_locked" (the project has run
-  // Start Project) rather than the free-text Status field, which no
-  // longer drives this KPI at all. Confirmed scope: ONLY the exact
-  // "Baseline Locked" state counts -- once a project is edited further
-  // and flips to "Changed After Baseline" it no longer counts as Active
-  // here (Sandra's explicit call, not the "both count" default).
-  const isActiveProject = (p: ProjectRow) => p.wbs_status === "baseline_locked";
+  // 2026-09-21 (Sandra, after finding the Baseline-Locked-only
+  // definition undercounted -- her own "in progress" count of 15/16
+  // includes Changed After Baseline projects too): "can you take the
+  // Project status instead? if in progress then count as active."
+  // "Active" now anchors to the plain Status field (status === "In
+  // Progress") instead of wbs_status -- supersedes the 2026-09-03
+  // Baseline-Locked-only convention below (kept the paragraph for
+  // history/context on WHY that convention existed in the first place).
+  //
+  // Prior convention (2026-09-03, Sandra: "for active can we just
+  // consider those that baseline are locked? if not locked then not
+  // active yet"): anchored to wbs_status === "baseline_locked" instead
+  // of Status, deliberately excluding "Changed After Baseline" projects.
+  const isActiveProject = (p: ProjectRow) => p.status === "In Progress";
 
   const stats = useMemo(() => {
     const total = filteredProjects.length;
@@ -791,19 +796,10 @@ export default function Dashboard() {
   // scoped to isActiveProject (Baseline Locked), same scoping Active
   // Project Health already used, so their totals always match the
   // Active KPI card above.
-  const activeStatusDonut = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const p of filteredProjects.filter(isActiveProject)) {
-      const key = p.status ?? "Not Started";
-      counts[key] = (counts[key] ?? 0) + 1;
-    }
-    return Object.entries(counts).map(([label, value]) => ({
-      label,
-      value,
-      color: STATUS_CHART_COLOR[label] ?? "#8a94a6",
-    }));
-  }, [filteredProjects]);
-
+  // 2026-09-21: activeStatusDonut removed (see the removed "Active
+  // Project Status" card above) -- now that isActiveProject means
+  // status === "In Progress", a Status breakdown of active projects
+  // would always be a single, trivial 100% slice.
   const activePhaseDonut = useMemo(() => {
     const counts: Record<string, number> = {};
     let unset = 0;
@@ -1094,27 +1090,25 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Row 3 (new, 2026-09-04, Sandra: "3rd row add doughnut too ...
+      {/* Row 3 (2026-09-04, Sandra: "3rd row add doughnut too ...
           Active projects statuses, active project health, active
-          projects phase, and complexity of active only") -- all 4 donuts
-          scoped to isActiveProject (Baseline Locked), matching Active
-          Project Health's existing scope. */}
+          projects phase, and complexity of active only") -- all donuts
+          scoped to isActiveProject, matching the Active KPI card above.
+          2026-09-21 (Sandra: "remove the active project donut and
+          retain Active, then health breakdown, then by phase, by
+          complexity"): the Active Project STATUS donut (the 4th one)
+          is dropped -- now that "Active" itself means status === "In
+          Progress", a Status breakdown of only-In-Progress projects
+          would always be a single, trivial 100% slice. Health/Phase/
+          Complexity stay, since those are independent dimensions a
+          Status-based Active count still usefully breaks down. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 10, marginBottom: 16 }}>
         <div className="card">
-          <div style={{ fontSize: 12.5, fontWeight: 600 }}>Active Project Status</div>
-          <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 10 }}>Baseline Locked projects only</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <Donut segments={activeStatusDonut} centerLabel="Active" centerValue={stats.active} />
-            <DonutLegend segments={activeStatusDonut} total={stats.active} />
-          </div>
-        </div>
-        <div className="card">
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>Active Project Health</div>
-          {/* 2026-09-03: "Active" is a specific, defined term here now --
-              Baseline Locked only (see isActiveProject) -- spelled out so
-              it's never ambiguous with Total Projects or Status's own
-              "In Progress" count again. */}
-          <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 10 }}>Baseline Locked projects only</div>
+          {/* 2026-09-21: caption updated from "Baseline Locked projects
+              only" to match isActiveProject's new Status-based
+              definition (see that function's own comment for why). */}
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 10 }}>In Progress projects only</div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <Donut segments={healthDonut} centerLabel="Active" centerValue={stats.active} />
             <DonutLegend segments={healthDonut} total={stats.active} />
@@ -1122,7 +1116,7 @@ export default function Dashboard() {
         </div>
         <div className="card">
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>Active Project Phase</div>
-          <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 10 }}>Baseline Locked projects only</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 10 }}>In Progress projects only</div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <Donut segments={activePhaseDonut} centerLabel="Active" centerValue={stats.active} />
             <DonutLegend segments={activePhaseDonut} total={stats.active} />
@@ -1130,7 +1124,7 @@ export default function Dashboard() {
         </div>
         <div className="card">
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>Active Project Complexity</div>
-          <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 10 }}>Baseline Locked projects only</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 10 }}>In Progress projects only</div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <Donut segments={activeComplexityDonut} centerLabel="Active" centerValue={stats.active} />
             <DonutLegend segments={activeComplexityDonut} total={stats.active} />
