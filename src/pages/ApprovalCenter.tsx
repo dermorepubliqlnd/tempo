@@ -479,6 +479,28 @@ export default function ApprovalCenter() {
   // still just one extra click, but a validator who needs to correct it
   // can before it's saved. See decideTaskCompletion's own comment for
   // how this date differs from validation_performed_at.
+  //
+  // 2026-09-21 follow-up (Sandra: "add a confirmation prompt after
+  // click on validate ... confirming that Target Due Date is this and
+  // approving or validating that it was completed on this date as the
+  // final or approved completion date"): a second, explicit confirm
+  // step between choosing the date and it actually saving -- spells out
+  // both the (unchangeable) Due Date and the date about to be locked in
+  // as the final, approved completion date, so a validator can't
+  // mis-click their way into signing off on the wrong date.
+  async function confirmAndValidate(row: TaskCompletionRow, date: string) {
+    const ok = await confirm({
+      title: "Confirm task validation",
+      message: `Target Due Date: ${formatDate(row.current_due_date)}
+
+You are approving/validating that "${row.name}" was completed on ${formatDate(date)} -- this becomes the final, approved completion date.`,
+      confirmLabel: "Validate",
+      cancelLabel: "Cancel",
+    });
+    if (!ok) return;
+    decideTaskCompletion(row, date);
+  }
+
   function ValidateAction({ row }: { row: TaskCompletionRow }) {
     const rowKey = `taskval-${row.id}`;
     const defaultDate = (row.actual_completion_date ?? row.submitted_on ?? new Date().toISOString()).slice(0, 10);
@@ -494,7 +516,7 @@ export default function ApprovalCenter() {
           style={{ fontSize: 11.5, padding: "6px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }}
         />
         <button
-          onClick={() => decideTaskCompletion(row, date)}
+          onClick={() => confirmAndValidate(row, date)}
           disabled={busy || !date}
           title="Validate"
           style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
