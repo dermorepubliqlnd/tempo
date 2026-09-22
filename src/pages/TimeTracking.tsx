@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, Plus, Pencil, Timer, Folder, User, Calendar } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, Pencil, Timer, Folder, User, Calendar } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
@@ -232,7 +232,6 @@ export default function TimeTracking() {
   // Extension Requests and Approval Center pages.
   const [statusFilter, setStatusFilter] = useState<"all" | "pending_approval" | "approved" | "rejected">("all");
 
-  const [showLogForm, setShowLogForm] = useState(false);
   // 2026-09-22 (Sandra: non-project time -- meetings, team huddles --
   // shouldn't have to fake a task under a real project): toggle at the
   // top of this same form swaps the Project/Task pickers for an
@@ -390,7 +389,6 @@ export default function TimeTracking() {
         setLogError(res.error);
         return;
       }
-      setShowLogForm(false);
       setLogMode(null);
       setLogNotes("");
       await alert(
@@ -435,7 +433,6 @@ export default function TimeTracking() {
       setLogError(res.error);
       return;
     }
-    setShowLogForm(false);
     setLogMode(null);
     setLogProjectId("");
     setLogTaskId("");
@@ -715,19 +712,7 @@ export default function TimeTracking() {
       <h1>Time Tracking</h1>
 
       <div style={{ marginTop: 14, marginBottom: 18 }}>
-        {!showLogForm ? (
-          <button
-            onClick={() => {
-              setLogMode(null);
-              setShowLogForm(true);
-            }}
-            style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer" }}
-          >
-            <Plus size={13} />
-            Log time manually
-          </button>
-        ) : (
-          <div className="card" style={{ padding: 14, maxWidth: 480 }}>
+        <div className="card" style={{ padding: 14, maxWidth: 480 }}>
             <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10, color: "var(--navy)" }}>Log time</div>
             {/* 2026-09-22 (Sandra: non-project time -- meetings, team
                 huddles -- shouldn't need a fake task under a real
@@ -955,7 +940,6 @@ export default function TimeTracking() {
               </button>
               <button
                 onClick={() => {
-                  setShowLogForm(false);
                   setLogMode(null);
                   setLogProjectId("");
                   setLogTaskId("");
@@ -967,8 +951,7 @@ export default function TimeTracking() {
             </div>
               </>
             )}
-          </div>
-        )}
+        </div>
       </div>
 
       {loading ? (
