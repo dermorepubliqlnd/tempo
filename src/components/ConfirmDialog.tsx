@@ -22,11 +22,27 @@ interface ConfirmDialogProps {
   onCancel: () => void;
 }
 
+// 2026-09-22 (Sandra: "bold the fields that need to be accomplished
+// before setting actual completion date") -- lightweight **bold** inline
+// support, same convention as the Knowledge Base's markdown-lite
+// renderer, so a missing-fields list or a pre-completion summary can
+// call out the field names that matter without needing raw HTML.
+function renderInlineBold(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    return <Fragment key={i}>{part}</Fragment>;
+  });
+}
+
 // Splits a plain-text message into paragraphs, rendering any contiguous
 // run of "- " prefixed lines as a real <ul><li> list instead of relying on
 // literal "\n"s -- those collapse under normal CSS white-space and used to
 // run every bullet together on one line (e.g. the pre-lock missing-fields
-// summary). Non-bullet lines render as their own paragraph.
+// summary). Non-bullet lines render as their own paragraph. Each line also
+// runs through renderInlineBold so "**Field Name**" segments come out bold.
 function renderMessage(message: string) {
   const lines = message.split("\n");
   const blocks: { type: "text" | "list"; lines: string[] }[] = [];
@@ -53,7 +69,7 @@ function renderMessage(message: string) {
         <ul key={i} style={{ margin: "4px 0", paddingLeft: 18 }}>
           {block.lines.map((l, j) => (
             <li key={j} style={{ marginBottom: 2 }}>
-              {l}
+              {renderInlineBold(l)}
             </li>
           ))}
         </ul>
@@ -62,7 +78,7 @@ function renderMessage(message: string) {
     return (
       <Fragment key={i}>
         {block.lines.map((l, j) => (
-          <div key={j}>{l || "\u00A0"}</div>
+          <div key={j}>{l ? renderInlineBold(l) : "\u00A0"}</div>
         ))}
       </Fragment>
     );

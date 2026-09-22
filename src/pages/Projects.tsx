@@ -3654,10 +3654,17 @@ export default function Projects() {
         defaultWidth: 120,
         render: (t) => {
           const isParent = t._depth === 0 && hasChildren(t.id);
+          // 2026-09-22 (Sandra: "make sure output count can no longer be
+          // edited if task status is marked done") -- reverses the
+          // earlier "fillable right up through Done" convention now that
+          // Done itself is gated behind the completion-confirm dialog
+          // (which already shows Output Count at that moment). Once
+          // Done, it locks; still editable pre-Done and (same as
+          // before) never on a parent row.
           return (
             <InlineNumber
               value={t.output_count}
-              editable={canEditTask(t) && !isTaskLocked(t) && !isParent}
+              editable={canEditTask(t) && !isTaskLocked(t) && !isParent && t.status !== "Done"}
               onCommit={(v) => updateTask(t.id, { output_count: v })}
             />
           );
@@ -4039,30 +4046,43 @@ export default function Projects() {
                   );
                   return;
                 }
-                // Same logged-hours gate as before (Sandra, 2026-08-26) --
-                // an Actual Completion Date without any Confirmed/Approved
-                // time behind it is just as misleading as a bare Done
-                // status with no hours.
+                // 2026-09-22 (Sandra: "make output count a hard
+                // requirement too" + "when there's missing information
+                // before tagging completion date, all needed information
+                // as asked" -- both gates now checked together, up front,
+                // with every missing item named at once rather than one
+                // alert per field) -- Logged Hours (Confirmed/Approved)
+                // and Output Count are both required before Actual
+                // Completion Date can be set at all.
+                const scoped = t.estimated_hours;
+                const logged = spentHoursFor(t.id);
+                const outputCount = t.output_count;
+                const missing: string[] = [];
                 if (ownHoursFor(timeEntries, t.id) <= 0) {
-                  await alert("Can't set an Actual Completion Date yet -- this task has no logged hours (Confirmed or Approved) on it. Log time first.");
+                  missing.push("- **Logged Hours** -- no Confirmed/Approved time logged on this task yet. Log time first.");
+                }
+                if (outputCount === null || outputCount === undefined) {
+                  missing.push("- **Output Count** -- not set yet. Fill it in (Output Count column) first.");
+                }
+                if (missing.length) {
+                  await alert({
+                    title: "Can't set Actual Completion Date yet",
+                    message: `This task is missing required information before it can be tagged complete:\n\n${missing.join("\n")}`,
+                  });
                   return;
                 }
                 // 2026-09-22 (Sandra: "before accepting completion date
                 // ask user to confirm logged hours and output count") --
-                // one last look at the numbers behind this task before
-                // it locks Status to Done. Output Count isn't required
-                // here (it's only a hard gate at Closure), just surfaced
-                // so it isn't forgotten.
-                const scoped = t.estimated_hours;
-                const logged = spentHoursFor(t.id);
-                const outputCount = t.output_count;
+                // one last look at the numbers behind this task, with the
+                // two required fields bolded, before it locks Status to
+                // Done.
                 const ok = await confirm({
                   title: "Confirm task completion",
                   message:
                     `Scoped Hours: ${scoped != null ? scoped : "—"}\n` +
-                    `Logged Hours: ${logged.toFixed(1)}\n` +
-                    `Output Count: ${outputCount != null ? outputCount : "Not set yet"}\n\n` +
-                    `Marking ${formatDate(v)} as the Actual Completion Date will move this task's Status to Done. Confirm these numbers are correct?`,
+                    `**Logged Hours**: ${logged.toFixed(1)}\n` +
+                    `**Output Count**: ${outputCount}\n\n` +
+                    `Marking ${formatDate(v)} as the Actual Completion Date will move this task's Status to Done. Confirm these are correct?`,
                   confirmLabel: "Confirm & mark Done",
                 });
                 if (!ok) return;

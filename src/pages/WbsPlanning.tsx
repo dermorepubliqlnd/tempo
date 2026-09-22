@@ -6003,16 +6003,20 @@ export default function WbsPlanning() {
                           // enforce_done_task_lock trigger only locks
                           // scoping fields (name/hours/effort/work
                           // type/assignee/start date), NOT output_count,
-                          // so this was purely a frontend over-lock: every
-                          // WBS cell used the same blanket `rowEditable`
-                          // (canEditWbs && status!=='Done'). Output Count
-                          // is deliberately the CLOSURE-time gate (see
-                          // handleRequestClosure's missingOutputCount
-                          // check) -- it's supposed to stay fillable right
-                          // up through Done, only Project Closed
-                          // (!canEditWbs) or a parent row should disable
-                          // it.
-                          editable={canEditWbs && !isParent}
+                          // so this was purely a frontend over-lock at the
+                          // time.
+                          //
+                          // 2026-09-22 (Sandra: "make sure output count
+                          // can no longer be edited if task status is
+                          // marked done") -- REVERSES the above: now that
+                          // Done itself is gated behind the completion-
+                          // confirm dialog on Projects.tsx (which already
+                          // shows/asks about Output Count at that exact
+                          // moment, see [[project_capaciq_actual_completion_drives_done_2026_09_22]]),
+                          // it's fine -- intended, even -- for Output
+                          // Count to lock once Done, same as it locks on
+                          // Project Closed or a parent row.
+                          editable={canEditWbs && !isParent && t.status !== "Done"}
                           onCommit={(v) => saveTaskField(t.id, { output_count: v })}
                         />
                       </td>
