@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, Pencil, Timer } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, Pencil, Timer, Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, decideTimeEntry, correctTimeEntry } from "../lib/timeTracking";
+import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, decideTimeEntry, correctTimeEntry, editPendingManualTimeEntry, deletePendingManualTimeEntry } from "../lib/timeTracking";
 import { useSearchParams } from "react-router-dom";
 
 interface PersonLite {
@@ -282,6 +282,16 @@ export default function TimeTracking() {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [correctingId, setCorrectingId] = useState<string | null>(null);
   const [correctDraft, setCorrectDraft] = useState<{ hours: string; notes: string; reasonCategory: string }>({ hours: "", notes: "", reasonCategory: "" });
+  // 2026-09-22 (Sandra: "let's allow the assignee or requestor to delete
+  // or make changes with the manual time entry log" while it's still
+  // pending_approval) -- separate from correctingId/correctDraft above,
+  // which is the Full-Access-only correction flow for an already-decided
+  // entry.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<{ date: string; startTime: string; endTime: string; reasonCategory: string; activityTypeId: string; notes: string }>({
+    date: "", startTime: "", endTime: "", reasonCategory: "", activityTypeId: "", notes: "",
+  });
+  const [editSaving, setEditSaving] = useState(false);
   // Status filter (2026-09-19, Sandra: "fix the time tracking page to not
   // make it boring") -- same clickable metric-card filter as the
   // Extension Requests and Approval Center pages.
@@ -416,6 +426,65 @@ export default function TimeTracking() {
       return;
     }
     setCorrectingId(null);
+    loadAll();
+  }
+
+  // A manual entry (project or non-project) still sitting in
+  // pending_approval can be edited or deleted by whoever logged it or
+  // requested it -- Full Access too, same as everything else. The moment
+  // it's decided, this stops applying and only Full Access's Correct
+  // flow above can touch it.
+  function canEditDeletePending(row: EntryRow): boolean {
+    if (!me) return false;
+    if (row.source !== "manual" || row.status !== "pending_approval") return false;
+    return row.person_id === me.id || row.requested_by === me.id || me.access_level === "full";
+  }
+
+  function openEdit(row: EntryRow) {
+    const start = new Date(row.started_at);
+    const end = row.ended_at ? new Date(row.ended_at) : start;
+    setEditDraft({
+      date: toDateInputValue(start),
+      startTime: toTimeInputValue(start),
+      endTime: toTimeInputValue(end),
+      reasonCategory: row.reason_category ?? "",
+      activityTypeId: row.activity_type_id ?? "",
+      notes: row.reason_notes ?? "",
+    });
+    setEditingId(row.id);
+  }
+
+  async function submitEdit(row: EntryRow) {
+    const start = new Date(`${editDraft.date}T${editDraft.startTime}`);
+    const end = new Date(`${editDraft.date}T${editDraft.endTime}`);
+    if (end <= start) {
+      await alert("End time must be after start time.");
+      return;
+    }
+    setEditSaving(true);
+    const res = await editPendingManualTimeEntry(row.id, start.toISOString(), end.toISOString(), {
+      reasonCategory: row.activity_type_id ? undefined : editDraft.reasonCategory || undefined,
+      activityTypeId: row.activity_type_id ? editDraft.activityTypeId || undefined : undefined,
+      notes: editDraft.notes,
+    });
+    setEditSaving(false);
+    if (res.error) {
+      await alert(`Couldn't save these changes: ${res.error}`);
+      return;
+    }
+    setEditingId(null);
+    loadAll();
+  }
+
+  async function handleDeletePending(row: EntryRow) {
+    const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
+    const ok = await confirm({ message: `Delete this pending time entry for ${label}? This can't be undone.`, confirmLabel: "Delete", danger: true });
+    if (!ok) return;
+    const res = await deletePendingManualTimeEntry(row.id);
+    if (res.error) {
+      await alert(`Couldn't delete this entry: ${res.error}`);
+      return;
+    }
     loadAll();
   }
 
@@ -718,6 +787,8 @@ export default function TimeTracking() {
             {rows.map((row) => {
               const canCorrect = isFullAccess && (row.status === "confirmed" || row.status === "approved");
               const correcting = correctingId === row.id;
+              const canEditDelete = canEditDeletePending(row);
+              const editing = editingId === row.id;
               const isNonProject = Boolean(row.activity_type_id);
               const title = isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
               const subtitle = isNonProject ? "Non-project" : row.task?.project?.name ?? "—";
@@ -725,7 +796,7 @@ export default function TimeTracking() {
               const details = row.reason_notes?.trim() || row.reason_category || "—";
               return (
                 <Fragment key={row.id}>
-                  <tr style={{ borderBottom: correcting ? "none" : "1px solid var(--border)" }}>
+                  <tr style={{ borderBottom: correcting || editing ? "none" : "1px solid var(--border)" }}>
                     <td style={td}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <span className="status-pill neutral" style={{ fontSize: 9 }}>
@@ -806,8 +877,103 @@ export default function TimeTracking() {
                           <Pencil size={13} />
                         </button>
                       )}
+                      {canEditDelete && !editing && (
+                        <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+                          <button
+                            onClick={() => openEdit(row)}
+                            title="Edit"
+                            style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleDeletePending(row)}
+                            title="Delete"
+                            style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--danger-text)", background: "none", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
+                  {canEditDelete && editing && (
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <input
+                            type="date"
+                            value={editDraft.date}
+                            onChange={(e) => setEditDraft((d) => ({ ...d, date: e.target.value }))}
+                            style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                          />
+                          <input
+                            type="time"
+                            value={editDraft.startTime}
+                            onChange={(e) => setEditDraft((d) => ({ ...d, startTime: e.target.value }))}
+                            style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                          />
+                          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>to</span>
+                          <input
+                            type="time"
+                            value={editDraft.endTime}
+                            onChange={(e) => setEditDraft((d) => ({ ...d, endTime: e.target.value }))}
+                            style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                          />
+                          {isNonProject ? (
+                            <select
+                              value={editDraft.activityTypeId}
+                              onChange={(e) => setEditDraft((d) => ({ ...d, activityTypeId: e.target.value }))}
+                              style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                            >
+                              {nonProjectActivityTypes
+                                .filter((a) => a.is_active || a.id === editDraft.activityTypeId)
+                                .map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name}
+                                  </option>
+                                ))}
+                            </select>
+                          ) : (
+                            <select
+                              value={editDraft.reasonCategory}
+                              onChange={(e) => setEditDraft((d) => ({ ...d, reasonCategory: e.target.value }))}
+                              style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                            >
+                              <option value="">No reason</option>
+                              {reasonOptions
+                                .filter((r) => r.is_active || r.name === editDraft.reasonCategory)
+                                .map((r) => (
+                                  <option key={r.id} value={r.name}>
+                                    {r.name}
+                                  </option>
+                                ))}
+                            </select>
+                          )}
+                          <input
+                            type="text"
+                            placeholder="Notes"
+                            value={editDraft.notes}
+                            onChange={(e) => setEditDraft((d) => ({ ...d, notes: e.target.value }))}
+                            style={{ flex: "1 1 160px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                          />
+                          <button
+                            onClick={() => submitEdit(row)}
+                            disabled={editSaving}
+                            style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                          >
+                            Save changes
+                          </button>
+                          <button
+                            onClick={() => setEditingId(null)}
+                            style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {canCorrect && correcting && (
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
                       <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>

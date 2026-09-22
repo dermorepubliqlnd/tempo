@@ -226,3 +226,34 @@ export async function correctTimeEntry(entryId: string, durationMinutes: number,
   if (error) return { error: error.message };
   return {};
 }
+
+// 2026-09-22 (Sandra: "if there are manual time entries that are in
+// pending status, let's allow the assignee or requestor to delete or
+// make changes with the manual time entry log only ... anything after
+// approved status will be admin corrections only") -- self-service
+// edit/delete for a still-pending manual entry (project or non-project).
+// Timer entries aren't in scope -- confirm_time_entry already lets the
+// person adjust times before a stopped timer becomes final.
+export async function editPendingManualTimeEntry(
+  entryId: string,
+  startedAt: string,
+  endedAt: string,
+  opts: { reasonCategory?: string; notes?: string; activityTypeId?: string } = {}
+): Promise<{ error?: string }> {
+  const { error } = await supabase.rpc("edit_pending_manual_time_entry", {
+    p_entry_id: entryId,
+    p_started_at: startedAt,
+    p_ended_at: endedAt,
+    p_reason_category: opts.reasonCategory ?? null,
+    p_notes: opts.notes ?? null,
+    p_activity_type_id: opts.activityTypeId ?? null,
+  });
+  if (error) return { error: error.message };
+  return {};
+}
+
+export async function deletePendingManualTimeEntry(entryId: string): Promise<{ error?: string }> {
+  const { error } = await supabase.rpc("delete_pending_manual_time_entry", { p_entry_id: entryId });
+  if (error) return { error: error.message };
+  return {};
+}
