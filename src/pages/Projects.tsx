@@ -92,6 +92,15 @@ interface WorkTypeOption {
   is_active: boolean;
   sort_order: number;
 }
+// 2026-09-22 (Sandra: show Output Type/Output Count on the Task list,
+// outside WBS Planning) -- same admin-configurable lookup WbsPlanning.tsx
+// already uses (see its own OutputTypeOption).
+interface OutputTypeOption {
+  id: string;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+}
 
 // Project Source (Phase 20, 2026-08-24) -- admin-configurable lookup for
 // "how/why a project originated" (Intake, L&D Initiative, ...), managed
@@ -320,7 +329,7 @@ const PROJECT_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["category", "source", "planning
 // grouping is "by Project" -- worth re-showing if grouping changes).
 // All still available via Properties, just not cluttering a fresh
 // Timeline view by default.
-const TASK_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["project", "timing_variance_days", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "validated_completion_date", "validated_by", "actual_completion_date", "work_type"];
+const TASK_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["project", "timing_variance_days", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "validated_completion_date", "validated_by", "actual_completion_date", "work_type", "output_type", "output_count"];
 // Task Calendar cards are much denser than a Timeline row -- Sandra asked
 // specifically for Project/Effort/Assignee to show by default ("main
 // focal point should be the task" -- Name is always the card's title
@@ -329,8 +338,8 @@ const TASK_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["project", "timing_variance_days",
 // has no swimlane/group-by-project header to make it redundant (Notion's
 // own Calendar view doesn't support grouping either -- confirmed with
 // Sandra, not building it).
-const TASK_CALENDAR_DEFAULT_HIDDEN_COLUMNS = ["status", "timing", "validated_completion_date", "validated_by", "actual_completion_date", "estimated_hours", "time_spent_hours", "timing_variance_days", "hours_variance", "hours_variance_pct", "work_type"];
-const TASK_COLUMN_ORDER = ["name", "project", "assignee", "status", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "effort", "timing_variance_days", "due_date_ext", "work_type", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
+const TASK_CALENDAR_DEFAULT_HIDDEN_COLUMNS = ["status", "timing", "validated_completion_date", "validated_by", "actual_completion_date", "estimated_hours", "time_spent_hours", "timing_variance_days", "hours_variance", "hours_variance_pct", "work_type", "output_type", "output_count"];
+const TASK_COLUMN_ORDER = ["name", "project", "assignee", "status", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "effort", "timing_variance_days", "due_date_ext", "work_type", "output_type", "output_count", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
 
 // "Fun, not corporate" icons for Task Effort (Sandra's request) — a light
 // feather for quick work, a weight plate for a moderate lift, and a flexed
@@ -1018,6 +1027,7 @@ export default function Projects() {
   // still resolves to its historical label here; only the WBS Planning
   // picker itself narrows this down to is_active for new selections.
   const [workTypes, setWorkTypes] = useState<WorkTypeOption[]>([]);
+  const [outputTypes, setOutputTypes] = useState<OutputTypeOption[]>([]);
   const [projectSources, setProjectSources] = useState<ProjectSourceOption[]>([]);
   const [projectPlanningTypes, setProjectPlanningTypes] = useState<ProjectPlanningTypeOption[]>([]);
   const [projectTypes, setProjectTypes] = useState<ProjectTypeOption[]>([]);
@@ -1287,7 +1297,7 @@ export default function Projects() {
   async function loadAll() {
     setLoading(true);
     purgeExpiredArchives();
-    const [{ data: projectData }, { data: taskData }, { data: peopleData }, { data: chainPeopleData }, { data: holidayData }, { data: extReqData }, { data: timeEntryData }, { data: noteData }, { data: delSpentData }, { data: workTypeData }, { data: projectSourceData }, { data: projectCategoryData }, { data: projectPhaseData }, { data: phaseMappingData }, { data: pendingBaselineData }, { data: projectPlanningTypeData }, { data: projectTypeData }, { data: closeoutData }, { data: baselineApprovalData }, { data: declinedBaselineData }] = await Promise.all([
+    const [{ data: projectData }, { data: taskData }, { data: peopleData }, { data: chainPeopleData }, { data: holidayData }, { data: extReqData }, { data: timeEntryData }, { data: noteData }, { data: delSpentData }, { data: workTypeData }, { data: outputTypeData }, { data: projectSourceData }, { data: projectCategoryData }, { data: projectPhaseData }, { data: phaseMappingData }, { data: pendingBaselineData }, { data: projectPlanningTypeData }, { data: projectTypeData }, { data: closeoutData }, { data: baselineApprovalData }, { data: declinedBaselineData }] = await Promise.all([
       supabase.from("projects").select("*").eq("is_archived", false).order("sort_order"),
       supabase.from("tasks").select("*").eq("is_archived", false).order("sort_order"),
       supabase.from("people").select("id,name,color").eq("is_active", true).order("name"),
@@ -1309,6 +1319,7 @@ export default function Projects() {
       // Deletion archive (2026-08-14c) -- see DeletedSpentHourRow above.
       supabase.from("deleted_project_spent_hours_archive").select("project_id,person_id,hours"),
       supabase.from("work_types").select("id,name,is_active,sort_order").order("sort_order"),
+      supabase.from("output_types").select("id,name,is_active,sort_order").order("sort_order"),
       supabase.from("project_sources").select("id,name,is_active,sort_order").order("sort_order"),
       supabase.from("project_categories").select("id,name,is_active,sort_order,icon,color").order("sort_order"),
       supabase.from("project_phases").select("id,name,is_active,sort_order").order("sort_order"),
@@ -1352,6 +1363,7 @@ export default function Projects() {
     setTimeEntries((timeEntryData as TimeEntryRow[]) ?? []);
     setDeletedSpentHours((delSpentData as DeletedSpentHourRow[]) ?? []);
     setWorkTypes((workTypeData as WorkTypeOption[]) ?? []);
+    setOutputTypes((outputTypeData as OutputTypeOption[]) ?? []);
     setProjectSources((projectSourceData as ProjectSourceOption[]) ?? []);
     setProjectCategories((projectCategoryData as ProjectCategoryOption[]) ?? []);
     setProjectPhases((projectPhaseData as ProjectPhaseOption[]) ?? []);
@@ -3527,21 +3539,29 @@ export default function Projects() {
                   setCancelTaskDialog({ taskIds: [t.id], label: `"${t.name}"` });
                   return;
                 }
-                let patch: Partial<TaskRow>;
+                // 2026-09-22 (Sandra: tag Actual Completion Date first,
+                // then Status auto-changes to Done -- see the Actual
+                // Completion column below, which is now where Done gets
+                // triggered from). Manually picking "Done" here is no
+                // longer allowed; the dropdown reverts (no patch) and
+                // points the person at the field that actually drives it.
                 if (v === "Done") {
-                  // Sandra, 2026-08-26: don't allow tagging a task Done
-                  // without any logged time behind it -- gated on the same
-                  // Confirmed/Approved hours that already feed Spent Hrs
-                  // (ownHoursFor, not the parent rollup -- this is about
-                  // THIS task's own work, not its sub-tasks').
-                  if (ownHoursFor(timeEntries, t.id) <= 0) {
-                    await alert("This task can't be marked Done yet -- it has no logged hours (Confirmed or Approved) on it. Log time first, then mark it Done.");
-                    return;
-                  }
-                  patch = { status: v, submitted_on: new Date().toISOString(), submitted_by: me?.id ?? null };
-                } else {
-                  patch = { status: v || null, submitted_on: null, submitted_by: null };
+                  await alert("Set this task's Actual Completion Date instead -- Status moves to Done automatically once that's entered.");
+                  return;
                 }
+                // Moving to any other status clears the Done-related
+                // stamps, same as before -- and, now that Actual
+                // Completion Date is what puts a task INTO Done, also
+                // clears that date so a task moved back to In
+                // Progress/Not Started/Paused doesn't keep a stale
+                // completion date sitting on it (mirrors reopen_task's
+                // "reopening wipes the slate" convention).
+                const patch: Partial<TaskRow> = {
+                  status: v || null,
+                  submitted_on: null,
+                  submitted_by: null,
+                  actual_completion_date: null,
+                };
                 await updateTask(t.id, patch);
                 // 2026-09-07: cascade this leaf's new status up to its
                 // parent (and grandparent, if any) so their own computed
@@ -3608,6 +3628,39 @@ export default function Projects() {
         render: (t) => {
           const wt = workTypes.find((w) => w.id === t.work_type_id);
           return wt ? <span className="status-pill neutral">{wt.name}</span> : <span style={{ color: "var(--muted)" }}>—</span>;
+        },
+      },
+      // 2026-09-22 (Sandra: "enable output count and output type to be
+      // shown in the task list too, outside the WBS, with output count
+      // editable and not the output type") -- Output Type stays a
+      // WBS-Planning-only edit (it's a scoping decision, set once and
+      // matched against work_type_output_types there); Output Count is
+      // deliberately editable here too since it's the CLOSURE-time gate
+      // (see WbsPlanning's handleRequestClosure/missingOutputCount) and
+      // Sandra doesn't want people forced back into WBS Planning just to
+      // fill it in.
+      {
+        key: "output_type",
+        label: "Output Type",
+        defaultWidth: 140,
+        render: (t) => {
+          const ot = outputTypes.find((o) => o.id === t.output_type_id);
+          return ot ? <span className="status-pill neutral">{ot.name}</span> : <span style={{ color: "var(--muted)" }}>—</span>;
+        },
+      },
+      {
+        key: "output_count",
+        label: "Output Count",
+        defaultWidth: 120,
+        render: (t) => {
+          const isParent = t._depth === 0 && hasChildren(t.id);
+          return (
+            <InlineNumber
+              value={t.output_count}
+              editable={canEditTask(t) && !isTaskLocked(t) && !isParent}
+              onCommit={(v) => updateTask(t.id, { output_count: v })}
+            />
+          );
         },
       },
       {
@@ -3961,23 +4014,69 @@ export default function Projects() {
             );
           }
           const editable = canEditTask(t) && !isTaskLocked(t);
-          if (t.status !== "Done" && !t.actual_completion_date) {
-            return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>—</span>;
-          }
+          // 2026-09-22 (Sandra: tag Actual Completion Date first, then
+          // Status auto-changes to Done): this field is no longer gated
+          // behind Status already being Done -- it's the trigger now, so
+          // it needs to be enterable from any status.
           return (
             <InlineDate
               value={t.actual_completion_date}
               editable={editable}
               onCommit={async (v) => {
-                // Same logged-hours gate as marking Status Done (Sandra,
-                // 2026-08-26) -- an Actual Completion Date without any
-                // Confirmed/Approved time behind it is just as misleading
-                // as a bare Done status with no hours.
-                if (v && ownHoursFor(timeEntries, t.id) <= 0) {
+                if (!v) {
+                  // Clearing the date takes the task back out of Done --
+                  // same "reopening wipes the slate" convention as
+                  // reopen_task, since Done no longer means anything
+                  // without a completion date behind it.
+                  const patch: Partial<TaskRow> = {
+                    actual_completion_date: null,
+                    ...(t.status === "Done" ? { status: "In Progress", submitted_on: null, submitted_by: null } : {}),
+                  };
+                  await updateTask(t.id, patch);
+                  await recomputeAncestorStatus(
+                    t.id,
+                    tasks.map((row) => (row.id === t.id ? { ...row, ...patch } : row))
+                  );
+                  return;
+                }
+                // Same logged-hours gate as before (Sandra, 2026-08-26) --
+                // an Actual Completion Date without any Confirmed/Approved
+                // time behind it is just as misleading as a bare Done
+                // status with no hours.
+                if (ownHoursFor(timeEntries, t.id) <= 0) {
                   await alert("Can't set an Actual Completion Date yet -- this task has no logged hours (Confirmed or Approved) on it. Log time first.");
                   return;
                 }
-                updateTask(t.id, { actual_completion_date: v || null });
+                // 2026-09-22 (Sandra: "before accepting completion date
+                // ask user to confirm logged hours and output count") --
+                // one last look at the numbers behind this task before
+                // it locks Status to Done. Output Count isn't required
+                // here (it's only a hard gate at Closure), just surfaced
+                // so it isn't forgotten.
+                const scoped = t.estimated_hours;
+                const logged = spentHoursFor(t.id);
+                const outputCount = t.output_count;
+                const ok = await confirm({
+                  title: "Confirm task completion",
+                  message:
+                    `Scoped Hours: ${scoped != null ? scoped : "—"}\n` +
+                    `Logged Hours: ${logged.toFixed(1)}\n` +
+                    `Output Count: ${outputCount != null ? outputCount : "Not set yet"}\n\n` +
+                    `Marking ${formatDate(v)} as the Actual Completion Date will move this task's Status to Done. Confirm these numbers are correct?`,
+                  confirmLabel: "Confirm & mark Done",
+                });
+                if (!ok) return;
+                const patch: Partial<TaskRow> = {
+                  actual_completion_date: v,
+                  status: "Done",
+                  submitted_on: new Date().toISOString(),
+                  submitted_by: me?.id ?? null,
+                };
+                await updateTask(t.id, patch);
+                await recomputeAncestorStatus(
+                  t.id,
+                  tasks.map((row) => (row.id === t.id ? { ...row, ...patch } : row))
+                );
               }}
             />
           );

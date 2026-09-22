@@ -2841,7 +2841,13 @@ export default function WbsPlanning() {
   async function cancelTask(taskId: string, reason: string) {
     const flushed = await flushPendingEdits();
     if (!flushed) return;
-    const { error } = await supabase.from("tasks").update({ status: "Cancelled", cancellation_reason: reason, submitted_on: null, submitted_by: null }).eq("id", taskId);
+    // 2026-09-22 (phase58): Actual Completion Date now drives Done, so
+    // cancelling -- which also clears submitted_on/by -- clears it too,
+    // same "reopening/undoing wipes the slate" convention as reopen_task.
+    const { error } = await supabase
+      .from("tasks")
+      .update({ status: "Cancelled", cancellation_reason: reason, submitted_on: null, submitted_by: null, actual_completion_date: null })
+      .eq("id", taskId);
     if (error) {
       await alert(`Couldn't cancel: ${error.message}`);
       return;

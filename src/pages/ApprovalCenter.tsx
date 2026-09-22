@@ -21,7 +21,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { decideTimeEntry } from "../lib/timeTracking";
+import { decideTimeEntry, ownHoursFor } from "../lib/timeTracking";
 
 // Approval Center (2026-09-18, Sandra: "create an approval center page
 // under main... where all things for approval should show like extension
@@ -126,6 +126,10 @@ interface TaskCompletionRow {
   current_due_date: string | null;
   actual_completion_date: string | null;
   submitted_on: string | null;
+  // 2026-09-22 (Sandra: "show scoped hours vs logged hours" on this
+  // card) -- Scoped is just the task's own estimated_hours; Logged comes
+  // from a separate lightweight time_entries fetch below (ownHoursFor).
+  estimated_hours: number | null;
   project: { id: string; name: string; owner_id: string | null; wbs_status: string | null } | null;
 }
 
@@ -167,6 +171,10 @@ interface Row {
   extraLine: string | null;
   canDecide: boolean;
   action: JSX.Element | null;
+  // 2026-09-22 (Sandra: Scoped vs Logged Hours as its own column) --
+  // task_completion-only; every other kind leaves this null and the
+  // column just doesn't render for that row.
+  hoursSummary: string | null;
 }
 
 export default function ApprovalCenter() {
@@ -181,6 +189,10 @@ export default function ApprovalCenter() {
   const [baselineRequests, setBaselineRequests] = useState<BaselineRow[]>([]);
   const [closureRequests, setClosureRequests] = useState<ClosureRow[]>([]);
   const [taskCompletions, setTaskCompletions] = useState<TaskCompletionRow[]>([]);
+  // 2026-09-22 (Sandra: Scoped vs Logged Hours column) -- a lightweight
+  // fetch of just the fields ownHoursFor needs, same
+  // confirmed/approved-only scope Spent Hrs itself uses on Projects.tsx.
+  const [allTimeEntries, setAllTimeEntries] = useState<{ task_id: string; duration_minutes: number | null; status: "confirmed" | "approved" }[]>([]);
   // Unfiltered (includes inactive) id/reports_to/is_active projection,
   // separate from the active-only `people` state above -- needed to walk
   // PAST an inactive immediate manager to find the nearest active one
@@ -201,7 +213,7 @@ export default function ApprovalCenter() {
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: peopleData }, { data: chainPeopleData }, { data: projectData }, { data: extData }, { data: teData }, { data: blData }, { data: clData }, { data: tcData }, { data: parentIdData }] = await Promise.all([
+    const [{ data: peopleData }, { data: chainPeopleData }, { data: projectData }, { data: extData }, { data: teData }, { data: blData }, { data: clData }, { data: tcData }, { data: allTeData }, { data: parentIdData }] = await Promise.all([
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
       supabase.from("people").select("id,reports_to,is_active"),
       supabase.from("projects").select("id,name,owner_id,wbs_status"),
@@ -229,13 +241,14 @@ export default function ApprovalCenter() {
       supabase
         .from("tasks")
         .select(
-          `id, name, assignee_id, project_id, parent_task_id, current_due_date, actual_completion_date, submitted_on,
+          `id, name, assignee_id, project_id, parent_task_id, current_due_date, actual_completion_date, submitted_on, estimated_hours,
            project:projects ( id, name, owner_id, wbs_status )`
         )
         .eq("status", "Done")
         .is("validated_completion_date", null)
         .eq("is_archived", false)
         .order("submitted_on", { ascending: false }),
+      supabase.from("time_entries").select("task_id, duration_minutes, status").in("status", ["confirmed", "approved"]),
       // 2026-09-21 bugfix (Sandra, spotting "Revise deck" -- a parent
       // task -- sitting in "Other pending approvals" with no assignee):
       // a parent task's completion is fully computed from its children
@@ -260,6 +273,7 @@ export default function ApprovalCenter() {
     setBaselineRequests((blData as BaselineRow[]) ?? []);
     setClosureRequests((clData as ClosureRow[]) ?? []);
     setTaskCompletions((tcData as unknown as TaskCompletionRow[]) ?? []);
+    setAllTimeEntries((allTeData as { task_id: string; duration_minutes: number | null; status: "confirmed" | "approved" }[]) ?? []);
     setChainPeople((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []);
     setParentTaskIds(new Set(((parentIdData as { parent_task_id: string }[]) ?? []).map((r) => r.parent_task_id)));
     setLoading(false);
@@ -577,6 +591,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         reasonCategory: row.reason_category,
         reasonNotes: row.reason_notes,
         extraLine: `${formatDate(row.project ? row.project.end_date : row.task?.current_due_date)} → ${formatDate(row.requested_new_due_date)}`,
+        hoursSummary: null,
         canDecide: canDecideExtension(row),
         action: canDecideExtension(row) ? (
           <DecideButtons rowKey={key} onApprove={() => decideExtension(row, "Approved")} onReject={() => decideExtension(row, "Rejected")} />
@@ -597,6 +612,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         reasonCategory: row.reason_category,
         reasonNotes: row.reason_notes,
         extraLine: `Logged: ${hours(row.duration_minutes)}`,
+        hoursSummary: null,
         canDecide: canDecideTimeEntry(row),
         action: canDecideTimeEntry(row) ? (
           <DecideButtons rowKey={key} onApprove={() => decideTime(row, "approved")} onReject={() => decideTime(row, "rejected")} />
@@ -618,6 +634,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         reasonCategory: null,
         reasonNotes: "Captures the current plan as the official Baseline and marks the project as started.",
         extraLine: null,
+        hoursSummary: null,
         canDecide: canDecideBaseline,
         action: canDecideBaseline ? <ReviewLink projectId={row.project_id} /> : null,
       });
@@ -637,6 +654,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         reasonCategory: null,
         reasonNotes: "Locks in the current plan as Final Scope — final, no re-opening.",
         extraLine: null,
+        hoursSummary: null,
         canDecide: canDecideClosure(row),
         action: canDecideClosure(row) ? <ReviewLink projectId={row.project_id} /> : null,
       });
@@ -671,6 +689,11 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         reasonCategory: null,
         reasonNotes: null,
         extraLine: `Due Date: ${formatDate(row.current_due_date)}\nActual Completion: ${row.actual_completion_date ? formatDate(row.actual_completion_date) : "Not set"}`,
+        // 2026-09-22 (Sandra: "show the scoped hours vs logged hours,
+        // can be the 3rd column"): Scoped is the task's own estimated_hours;
+        // Logged is ownHoursFor over the same Confirmed/Approved entries
+        // Spent Hrs itself counts (see allTimeEntries fetch above).
+        hoursSummary: `${row.estimated_hours != null ? row.estimated_hours : "—"} scoped / ${ownHoursFor(allTimeEntries as unknown as import("../lib/timeTracking").TimeEntryRow[], row.id).toFixed(1)} logged`,
         canDecide,
         action: canDecide ? <ValidateAction row={row} /> : null,
       });
@@ -678,7 +701,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
 
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensions, timeEntries, baselineRequests, closureRequests, taskCompletions, parentTaskIds, chainPeople, people, projects, me]);
+  }, [extensions, timeEntries, baselineRequests, closureRequests, taskCompletions, allTimeEntries, parentTaskIds, chainPeople, people, projects, me]);
 
   const counts = {
     extension: extensions.length,
@@ -822,6 +845,18 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
             </span>
           )}
         </div>
+
+        {/* 2026-09-22 (Sandra: "show scoped hours vs logged hours, can
+            be the 3rd column"): its own column, task_completion only --
+            sits between the Project/Assignee block and the Due/Actual
+            Completion block, so the row now reads Task -> Project/
+            Assignee -> Scoped vs Logged -> Due/Actual -> Validation. */}
+        {row.hoursSummary && (
+          <div style={{ minWidth: 150, flex: "1 1 150px", fontSize: 11 }}>
+            <span style={{ fontSize: 9.5, color: "var(--muted)", display: "block", marginBottom: 3 }}>Scoped vs Logged</span>
+            <span style={{ fontWeight: 700, color: "var(--navy)" }}>{row.hoursSummary}</span>
+          </div>
+        )}
 
         <div style={{ minWidth: 220, flex: "1 1 220px", fontSize: 11 }}>
           {row.reasonCategory && (
