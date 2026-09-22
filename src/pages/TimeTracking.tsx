@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, Pencil, Timer, Folder, User, Calendar } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, Pencil, Timer } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
@@ -683,213 +683,187 @@ export default function TimeTracking() {
     );
   }
 
-  function EntriesTable({ rows, showDecideActions }: { rows: EntryRow[]; showDecideActions: boolean }) {
+  // 2026-09-22 (Sandra: "can you make sure that all time entries for
+  // approval and done follow the same format as we did earlier") --
+  // "My entries" and "Other visible entries" now use the same 8-column
+  // table shape as DecisionTable (Task/Project, Assignee, Work Date,
+  // Time, Duration, Details, Requested On, Action) instead of the older
+  // card layout. There's no decision to make here, so Action shows the
+  // status pill + who/when it was decided, plus the Correct button
+  // (Full Access only, on a confirmed/approved entry) -- correcting
+  // expands an inline row below, same interaction shape as
+  // DecisionTable's reject-note row.
+  function EntriesTable({ rows }: { rows: EntryRow[] }) {
     if (rows.length === 0) return null;
     const isFullAccess = me?.access_level === "full";
+    const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
+    const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
     return (
-      <div>
-        {rows.map((row) => {
-          const canCorrect = isFullAccess && (row.status === "confirmed" || row.status === "approved");
-          const busy = decidingId === row.id;
-          const correcting = correctingId === row.id;
-          return (
-            <div
-              key={row.id}
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                flexWrap: "wrap",
-                gap: 16,
-                padding: 16,
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius)",
-                background: "var(--surface)",
-                marginBottom: 10,
-              }}
-            >
-              <span className="status-pill accent" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 10, flexShrink: 0 }}>
-                <Timer size={15} />
-              </span>
-
-              <div style={{ minWidth: 190, flex: "1 1 190px" }}>
-                <span className="status-pill neutral" style={{ fontSize: 9.5, marginBottom: 4, display: "inline-block" }}>
-                  {SOURCE_LABEL[row.source]}
-                </span>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", display: "flex", alignItems: "center", gap: 6 }}>
-                  {row.activity_type_id ? (row.activity_type?.name ?? "Non-project") : row.task?.name ?? "Untitled task"}
-                  {row.activity_type_id && (
-                    <span className="status-pill neutral" style={{ fontSize: 9 }}>
-                      Non-project
-                    </span>
+      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Task / Project</th>
+              <th style={th}>Assignee</th>
+              <th style={th}>Work Date</th>
+              <th style={th}>Time</th>
+              <th style={th}>Duration</th>
+              <th style={th}>Details</th>
+              <th style={th}>Requested On</th>
+              <th style={{ ...th, textAlign: "center" }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const canCorrect = isFullAccess && (row.status === "confirmed" || row.status === "approved");
+              const correcting = correctingId === row.id;
+              const isNonProject = Boolean(row.activity_type_id);
+              const title = isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
+              const subtitle = isNonProject ? "Non-project" : row.task?.project?.name ?? "—";
+              const assigneeName = row.person?.name ?? personName(row.person_id);
+              const details = row.reason_notes?.trim() || row.reason_category || "—";
+              return (
+                <Fragment key={row.id}>
+                  <tr style={{ borderBottom: correcting ? "none" : "1px solid var(--border)" }}>
+                    <td style={td}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span className="status-pill neutral" style={{ fontSize: 9 }}>
+                          {SOURCE_LABEL[row.source]}
+                        </span>
+                        {isNonProject && (
+                          <span className="status-pill neutral" style={{ fontSize: 9 }}>
+                            Non-project
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>{title}</div>
+                      <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{subtitle}</div>
+                    </td>
+                    <td style={td}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span
+                          style={{
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            width: 22, height: 22, borderRadius: "50%",
+                            background: "var(--accent-bg, #eaf2fb)", color: "var(--accent)",
+                            fontSize: 9.5, fontWeight: 700, flexShrink: 0,
+                          }}
+                        >
+                          {initials(assigneeName)}
+                        </span>
+                        {assigneeName}
+                      </div>
+                    </td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{formatWorkDate(row.started_at)}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>
+                      {formatClockRange(row.started_at, row.ended_at)}
+                      {row.auto_stopped && (
+                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>Auto-stopped after being idle</div>
+                      )}
+                    </td>
+                    <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>
+                      {formatDuration(row.duration_minutes)}
+                      {row.corrected_at && row.original_duration_minutes !== row.duration_minutes && (
+                        <span title={`Originally ${formatDuration(row.original_duration_minutes)}`} style={{ marginLeft: 5, fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>
+                          (corrected)
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ ...td, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={details !== "—" ? details : undefined}>
+                      {details}
+                    </td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDateTime(row.created_at)}</td>
+                    <td style={{ ...td, textAlign: "center", minWidth: 150 }}>
+                      <span className={`status-pill ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
+                      {row.status !== "pending_approval" && row.status !== "running" && row.status !== "pending_confirm" && row.decided_by && (
+                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>
+                          by {personName(row.decided_by)} on {formatDate(row.decided_at)}
+                          {row.decision_notes && <> — "{row.decision_notes}"</>}
+                        </div>
+                      )}
+                      {row.corrected_at && (
+                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>
+                          {row.original_duration_minutes !== row.duration_minutes ? (
+                            <>Corrected from {formatDuration(row.original_duration_minutes)} to {formatDuration(row.duration_minutes)} by </>
+                          ) : (
+                            <>Reason corrected by </>
+                          )}
+                          {personName(row.corrected_by)} on {formatDate(row.corrected_at)}
+                          {row.correction_notes && <> — "{row.correction_notes}"</>}
+                        </div>
+                      )}
+                      {canCorrect && !correcting && (
+                        <button
+                          onClick={() => {
+                            setCorrectingId(row.id);
+                            setCorrectDraft({
+                              hours: String(Math.round(((row.duration_minutes ?? 0) / 60) * 100) / 100),
+                              notes: "",
+                              reasonCategory: row.reason_category ?? "",
+                            });
+                          }}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer", whiteSpace: "nowrap", marginTop: 6 }}
+                        >
+                          <Pencil size={11} />
+                          Correct
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {canCorrect && correcting && (
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td colSpan={8} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <input
+                            type="number"
+                            step="0.25"
+                            placeholder="Corrected hours"
+                            value={correctDraft.hours}
+                            onChange={(e) => setCorrectDraft((d) => ({ ...d, hours: e.target.value }))}
+                            style={{ width: 110, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                          />
+                          <select
+                            value={correctDraft.reasonCategory}
+                            onChange={(e) => setCorrectDraft((d) => ({ ...d, reasonCategory: e.target.value }))}
+                            style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                          >
+                            <option value="">No reason</option>
+                            {reasonOptions
+                              .filter((r) => r.is_active || r.name === correctDraft.reasonCategory)
+                              .map((r) => (
+                                <option key={r.id} value={r.name}>
+                                  {r.name}
+                                </option>
+                              ))}
+                          </select>
+                          <input
+                            type="text"
+                            placeholder="Correction notes"
+                            value={correctDraft.notes}
+                            onChange={(e) => setCorrectDraft((d) => ({ ...d, notes: e.target.value }))}
+                            style={{ flex: "1 1 160px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                          />
+                          <button
+                            onClick={() => submitCorrection(row)}
+                            style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                          >
+                            Save correction
+                          </button>
+                          <button
+                            onClick={() => setCorrectingId(null)}
+                            style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
                   )}
-                </div>
-              </div>
-
-              <div style={{ minWidth: 170, flex: "1 1 170px", display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-secondary)" }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                  <Folder size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
-                  {row.activity_type_id ? "Non-project" : row.task?.project?.name ?? "—"}
-                </span>
-                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                  <User size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
-                  {row.person?.name ?? personName(row.person_id)}
-                </span>
-                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                  <Calendar size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
-                  {formatDate(row.started_at)}
-                </span>
-              </div>
-
-              <div style={{ minWidth: 220, flex: "1 1 220px", fontSize: 11 }}>
-                {row.reason_category && (
-                  <>
-                    <span style={{ fontSize: 9.5, color: "var(--muted)", marginRight: 5 }}>Reason</span>
-                    <span className="status-pill neutral" style={{ fontSize: 9.5 }}>
-                      {row.reason_category}
-                    </span>
-                  </>
-                )}
-                {row.reason_notes && <div style={{ color: "var(--text-secondary)", marginTop: 3 }}>{row.reason_notes}</div>}
-                <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>
-                  {formatDuration(row.duration_minutes)}
-                  {row.corrected_at && row.original_duration_minutes !== row.duration_minutes && (
-                    <span title={`Originally ${formatDuration(row.original_duration_minutes)}`} style={{ marginLeft: 5, fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>
-                      (corrected)
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>
-                  {formatTimeRange(row.started_at, row.ended_at)}
-                  {row.auto_stopped && " (auto-stopped after being idle)"}
-                  {row.source === "manual" && <> · Logged on {formatDateTime(row.created_at)}</>}
-                </div>
-                {row.corrected_at && (
-                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>
-                    {row.original_duration_minutes !== row.duration_minutes ? (
-                      <>Corrected from {formatDuration(row.original_duration_minutes)} to {formatDuration(row.duration_minutes)} by </>
-                    ) : (
-                      <>Reason corrected by </>
-                    )}
-                    {personName(row.corrected_by)} on {formatDate(row.corrected_at)}
-                    {row.correction_notes && <> — "{row.correction_notes}"</>}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ minWidth: 90, flex: "0 0 auto" }}>
-                <span className={`status-pill ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
-                {row.status !== "pending_approval" && row.status !== "running" && row.status !== "pending_confirm" && row.decided_by && (
-                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 5 }}>
-                    by {personName(row.decided_by)} on {formatDate(row.decided_at)}
-                    {row.decision_notes && <> — "{row.decision_notes}"</>}
-                  </div>
-                )}
-              </div>
-
-              {showDecideActions && (
-                <div style={{ minWidth: 160, flex: "1 1 160px" }}>
-                  <input
-                    type="text"
-                    placeholder="Add an optional note..."
-                    value={notesDraft[row.id] ?? ""}
-                    onChange={(e) => setNotesDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                    style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", width: "100%", boxSizing: "border-box" }}
-                  />
-                </div>
-              )}
-
-              {showDecideActions && (
-                <div style={{ marginLeft: "auto", flexShrink: 0, display: "flex", gap: 6 }}>
-                  <button
-                    onClick={() => decide(row, "rejected")}
-                    disabled={busy}
-                    style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                  >
-                    <XCircle size={13} />
-                    Reject
-                  </button>
-                  <button
-                    onClick={() => decide(row, "approved")}
-                    disabled={busy}
-                    style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                  >
-                    <CheckCircle2 size={13} />
-                    Approve
-                  </button>
-                </div>
-              )}
-
-              {/* 2026-09-19 (Sandra: "bring out the correction option
-                  instead of having to click on the expand button") --
-                  always visible for a correctable entry now, not tucked
-                  behind a row-expand click. */}
-              {canCorrect && !correcting && (
-                <div style={{ marginLeft: showDecideActions ? 0 : "auto", flexShrink: 0 }}>
-                  <button
-                    onClick={() => {
-                      setCorrectingId(row.id);
-                      setCorrectDraft({
-                        hours: String(Math.round(((row.duration_minutes ?? 0) / 60) * 100) / 100),
-                        notes: "",
-                        reasonCategory: row.reason_category ?? "",
-                      });
-                    }}
-                    style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                  >
-                    <Pencil size={12} />
-                    Correct
-                  </button>
-                </div>
-              )}
-
-              {canCorrect && correcting && (
-                <div style={{ width: "100%", marginTop: 4, borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <input
-                    type="number"
-                    step="0.25"
-                    placeholder="Corrected hours"
-                    value={correctDraft.hours}
-                    onChange={(e) => setCorrectDraft((d) => ({ ...d, hours: e.target.value }))}
-                    style={{ width: 110, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                  />
-                  <select
-                    value={correctDraft.reasonCategory}
-                    onChange={(e) => setCorrectDraft((d) => ({ ...d, reasonCategory: e.target.value }))}
-                    style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                  >
-                    <option value="">No reason</option>
-                    {reasonOptions
-                      .filter((r) => r.is_active || r.name === correctDraft.reasonCategory)
-                      .map((r) => (
-                        <option key={r.id} value={r.name}>
-                          {r.name}
-                        </option>
-                      ))}
-                  </select>
-                  <input
-                    type="text"
-                    placeholder="Correction notes"
-                    value={correctDraft.notes}
-                    onChange={(e) => setCorrectDraft((d) => ({ ...d, notes: e.target.value }))}
-                    style={{ flex: "1 1 160px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                  />
-                  <button
-                    onClick={() => submitCorrection(row)}
-                    style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                  >
-                    Save correction
-                  </button>
-                  <button
-                    onClick={() => setCorrectingId(null)}
-                    style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     );
   }
@@ -1225,7 +1199,7 @@ export default function TimeTracking() {
           {mine.length === 0 ? (
             <p style={{ fontSize: 12, color: "var(--muted)" }}>No time logged yet.</p>
           ) : (
-            <EntriesTable rows={mine} showDecideActions={false} />
+            <EntriesTable rows={mine} />
           )}
 
           {rest.length > 0 && (
@@ -1233,7 +1207,7 @@ export default function TimeTracking() {
               <div style={{ marginTop: 24, marginBottom: 8 }}>
                 <h2 style={{ margin: 0, fontSize: 13 }}>Other visible entries ({rest.length})</h2>
               </div>
-              <EntriesTable rows={rest} showDecideActions={false} />
+              <EntriesTable rows={rest} />
             </>
           )}
         </>
