@@ -109,6 +109,28 @@ function formatDateTime(value: string | null | undefined): string {
   });
 }
 
+// 2026-09-22 (Sandra: on a non-project entry, "why do the request not
+// show the start and end time? ... this one is just showing dates which
+// does not make sense") -- the row's date+duration line used to render
+// formatDate(started_at) -- formatDate(ended_at), which for a same-day
+// entry is two identical dates side by side and tells you nothing about
+// when the work actually happened. This shows the log date once, plus
+// the actual start/end clock times (or, on the rare cross-midnight
+// entry, a full date+time for each side).
+function formatTimeRange(startedAt: string, endedAt: string | null): string {
+  const start = new Date(startedAt);
+  if (isNaN(start.getTime())) return formatDate(startedAt);
+  const startTime = start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (!endedAt) return `${formatDate(startedAt)}, ${startTime} -- in progress`;
+  const end = new Date(endedAt);
+  if (isNaN(end.getTime())) return formatDate(startedAt);
+  const endTime = end.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const sameDay = start.toDateString() === end.toDateString();
+  return sameDay
+    ? `${formatDate(startedAt)}, ${startTime} -- ${endTime}`
+    : `${formatDate(startedAt)} ${startTime} -- ${formatDate(endedAt)} ${endTime}`;
+}
+
 // Small searchable combobox (Sandra, 2026-08-26: "allow project selection
 // in the time tracker then next will be task... allow search too for both
 // options") -- a plain <select> got unwieldy once Project became its own
@@ -540,7 +562,7 @@ export default function TimeTracking() {
               <div style={{ minWidth: 170, flex: "1 1 170px", display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-secondary)" }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   <Folder size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
-                  {row.activity_type_id ? "—" : row.task?.project?.name ?? "—"}
+                  {row.activity_type_id ? "Non-project" : row.task?.project?.name ?? "—"}
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   <User size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
@@ -571,7 +593,7 @@ export default function TimeTracking() {
                   )}
                 </div>
                 <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>
-                  {formatDate(row.started_at)} -- {row.ended_at ? formatDate(row.ended_at) : "in progress"}
+                  {formatTimeRange(row.started_at, row.ended_at)}
                   {row.auto_stopped && " (auto-stopped after being idle)"}
                   {row.source === "manual" && <> · Logged on {formatDateTime(row.created_at)}</>}
                 </div>

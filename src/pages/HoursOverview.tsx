@@ -69,7 +69,12 @@ interface TaskRow {
 }
 interface TimeEntryRow {
   id: string;
-  task_id: string;
+  // 2026-09-22: null on a non-project entry (Meeting/Admin/Coaching/etc.
+  // logged via the Activity Type picker instead of a task) -- see
+  // activity_type below.
+  task_id: string | null;
+  activity_type_id: string | null;
+  activity_type?: { id: string; name: string } | null;
   person_id: string;
   started_at: string;
   duration_minutes: number | null;
@@ -204,7 +209,10 @@ export default function HoursOverview() {
           .from("tasks")
           .select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived")
           .eq("is_archived", false),
-        supabase.from("time_entries").select("id,task_id,person_id,started_at,duration_minutes,status").in("status", ["confirmed", "approved"]),
+        supabase
+          .from("time_entries")
+          .select("id,task_id,activity_type_id,person_id,started_at,duration_minutes,status,activity_type:non_project_activity_types ( id, name )")
+          .in("status", ["confirmed", "approved"]),
         supabase.from("holidays").select("*"),
         supabase.from("person_availability").select("person_id,date,status"),
         supabase.from("project_owner_history").select("project_id,person_id,effective_from,effective_to"),
@@ -216,7 +224,7 @@ export default function HoursOverview() {
     setAllPeople((ap as PersonRow[]) ?? []);
     setProjects((pr as ProjectRow[]) ?? []);
     setTasks((tk as TaskRow[]) ?? []);
-    setTimeEntries((te as TimeEntryRow[]) ?? []);
+    setTimeEntries(((te as unknown as TimeEntryRow[]) ?? []));
     setHolidays((hol as HolidayRow[]) ?? []);
     setAvailability((av as AvailabilityRow[]) ?? []);
     // Same global off-switch Utilization.tsx honours (app_settings
@@ -386,9 +394,17 @@ export default function HoursOverview() {
       .filter((e) => e.person_id === personId && e.started_at.slice(0, 10) === dateStr)
       .reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);
   }
+  // 2026-09-22: item.taskId is either a real task id, or a synthetic
+  // "np:<activity_type_id>" key for a non-project sub-row (see
+  // combinedSubItemsFor below) -- route to the matching entries either way.
   function loggedHoursFor(personId: string, taskId: string, dateStr: string): number {
+    const npId = taskId.startsWith("np:") ? taskId.slice(3) : null;
     return timeEntries
-      .filter((e) => e.person_id === personId && e.task_id === taskId && e.started_at.slice(0, 10) === dateStr)
+      .filter((e) =>
+        e.person_id === personId &&
+        e.started_at.slice(0, 10) === dateStr &&
+        (npId ? e.activity_type_id === npId : e.task_id === taskId)
+      )
       .reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);
   }
   // 2026-08-26 bugfix, UPDATED 2026-09-03: originally made to agree with
@@ -419,8 +435,9 @@ export default function HoursOverview() {
   // what was scoped for it" -- regardless of which real day the person
   // happened to sit down and log the time.
   function totalLoggedHoursForTask(personId: string, taskId: string): number {
+    const npId = taskId.startsWith("np:") ? taskId.slice(3) : null;
     return timeEntries
-      .filter((e) => e.person_id === personId && e.task_id === taskId)
+      .filter((e) => e.person_id === personId && (npId ? e.activity_type_id === npId : e.task_id === taskId))
       .reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);
   }
   function fulfillmentLoggedHoursFor(personId: string, taskId: string, dateStr: string): number {
@@ -451,7 +468,17 @@ export default function HoursOverview() {
     timeEntries
       .filter((e) => e.person_id === personId)
       .forEach((e) => {
-        if (byId.has(e.task_id)) return;
+        // 2026-09-22: a non-project entry (task_id null, activity_type_id
+        // set) used to fall through to the task lookup below, which always
+        // missed and mislabeled every one of them "Deleted/archived task"
+        // -- bucket these separately, by activity type, instead.
+        if (e.activity_type_id) {
+          const key = `np:${e.activity_type_id}`;
+          if (byId.has(key)) return;
+          byId.set(key, { taskId: key, label: e.activity_type?.name ?? "Non-project", project: "Non-project" });
+          return;
+        }
+        if (!e.task_id || byId.has(e.task_id)) return;
         const t = tasks.find((x) => x.id === e.task_id);
         const proj = t ? projects.find((p) => p.id === t.project_id) : undefined;
         byId.set(e.task_id, { taskId: e.task_id, label: t?.name ?? "Deleted/archived task", project: proj?.name });

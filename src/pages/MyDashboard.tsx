@@ -67,7 +67,10 @@ interface OutputTypeRow {
 }
 interface TimeEntryRow {
   id: string;
-  task_id: string;
+  // 2026-09-22: null on a non-project entry (Meeting/Admin/etc.) --
+  // these still count toward the person's logged hours, just not toward
+  // any task.
+  task_id: string | null;
   person_id: string;
   started_at: string;
   duration_minutes: number | null;
@@ -307,8 +310,12 @@ export default function MyDashboard() {
       const capacity = off ? 0 : dailyCapacityHours(person, !!halfDayRow);
       const scoped = off ? 0 : engine.totalFor(me.id, dateStr);
       const pct = capacity > 0 ? (scoped / capacity) * 100 : scoped > 0 ? 999 : 0;
+      // 2026-09-22 bugfix (Sandra: non-project time wasn't showing in "My
+      // Logged Hours This Week") -- this used to require e.task_id, which
+      // silently dropped every non-project entry (task_id is null there)
+      // from the week's logged total.
       const logged = monthEntries
-        .filter((e) => e.task_id && toISO(new Date(e.started_at)) === dateStr)
+        .filter((e) => toISO(new Date(e.started_at)) === dateStr)
         .reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);
       return { date: d, dateStr, capacity, scoped, pct, logged, off };
     });
