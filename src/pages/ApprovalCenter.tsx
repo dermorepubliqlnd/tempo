@@ -243,6 +243,11 @@ interface Row {
   // just the standalone page): extension rows carry their raw source
   // row the same way, for the same reason.
   extensionRow?: ExtensionRow;
+  // 2026-09-22 (Sandra, on a Baseline-table mockup screenshot: "now
+  // baseline approvals, please change action to review WBS") -- baseline
+  // rows carry the project id so BaselineTable's Action button can link
+  // straight to that project's WBS Planning page.
+  linkProjectId?: string;
 }
 
 export default function ApprovalCenter() {
@@ -694,13 +699,32 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
     );
   }
 
-  function ReviewLink({ projectId }: { projectId: string }) {
+  // 2026-09-22 (Sandra, on a Baseline mockup: "change action to review
+  // WBS") -- gained a `label` prop so BaselineTable's Action button can
+  // read "Review WBS" (matching her mockup's plain blue button) while
+  // Closure requests, which weren't part of that ask, keep the original
+  // "Review in WBS Planning" text link.
+  function ReviewLink({ projectId, label = "Review in WBS Planning", button = false }: { projectId: string; label?: string; button?: boolean }) {
+    if (button) {
+      return (
+        <Link
+          to={`/projects/${projectId}/wbs`}
+          style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4,
+            fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)",
+            textDecoration: "none", whiteSpace: "nowrap", padding: "7px 14px", borderRadius: "var(--radius-sm)",
+          }}
+        >
+          {label}
+        </Link>
+      );
+    }
     return (
       <Link
         to={`/projects/${projectId}/wbs`}
         style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: "var(--accent)", textDecoration: "none", whiteSpace: "nowrap" }}
       >
-        Review in WBS Planning
+        {label}
         <ChevronRight size={13} />
       </Link>
     );
@@ -774,7 +798,8 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         reasonNotes: "Captures the current plan as the official Baseline and marks the project as started.",
         extraLine: null,
         canDecide: canDecideBaseline,
-        action: canDecideBaseline ? <ReviewLink projectId={row.project_id} /> : null,
+        action: canDecideBaseline ? <ReviewLink projectId={row.project_id} label="Review WBS" button /> : null,
+        linkProjectId: row.project_id,
       });
     });
 
@@ -1230,6 +1255,69 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
     );
   }
 
+  // 2026-09-22 (Sandra, on a screenshot of the Baseline cards: "now
+  // baseline approvals, please change action to review WBS") -- same
+  // real-table treatment as ExtensionTable/TaskCompletionTable. Columns
+  // match her mockup: Project, Owner, Baseline Date, What Approval Does,
+  // Status, Action -- Action is a solid button reading "Review WBS"
+  // (ReviewLink's `button` variant) instead of the plain text link Baseline
+  // shared with Closure requests before. Closure requests weren't part of
+  // this ask and still use RequestCard + the original text-link ReviewLink.
+  function BaselineTable({ rows }: { rows: Row[] }) {
+    const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
+    const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
+    return (
+      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)", marginBottom: 10 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Project</th>
+              <th style={th}>Owner</th>
+              <th style={th}>Baseline Date</th>
+              <th style={th}>What Approval Does</th>
+              <th style={th}>Status</th>
+              <th style={{ ...th, textAlign: "center" }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                <td style={td}>
+                  <div style={{ fontWeight: 700, color: "var(--navy)" }}>{row.subject}</div>
+                  <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{row.context}</div>
+                </td>
+                <td style={td}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        width: 22, height: 22, borderRadius: "50%",
+                        background: "var(--accent-bg, #eaf2fb)", color: "var(--accent)",
+                        fontSize: 9.5, fontWeight: 700, flexShrink: 0,
+                      }}
+                    >
+                      {initials(row.requestedByName)}
+                    </span>
+                    <div>
+                      {row.requestedByName}
+                      <div style={{ fontSize: 9.5, color: "var(--muted)" }}>Project Owner</div>
+                    </div>
+                  </div>
+                </td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{formatWorkDate(row.requestedAt)}</td>
+                <td style={{ ...td, maxWidth: 280, whiteSpace: "normal", wordBreak: "break-word" }}>{row.reasonNotes}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>
+                  <span className="status-pill warning">PENDING</span>
+                </td>
+                <td style={{ ...td, textAlign: "center" }}>{row.action ?? <span style={{ color: "var(--muted)" }}>—</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   // 2026-09-22 (Sandra: "do not group by name, just type. also can it
   // be collapsed by default and when the header is clicked then it
   // expands -- the header will be the trigger for expand and collapse")
@@ -1269,6 +1357,8 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
             <TaskCompletionTable rows={rows} />
           ) : kind === "extension" ? (
             <ExtensionTable rows={rows} />
+          ) : kind === "baseline" ? (
+            <BaselineTable rows={rows} />
           ) : (
             rows.map((row) => <RequestCard key={row.key} row={row} />)
           ))}
