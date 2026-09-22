@@ -238,7 +238,7 @@ export default function TimeTracking() {
   // top of this same form swaps the Project/Task pickers for an
   // Activity Type picker instead. Everything else (date/start/end,
   // notes, the pending_approval lifecycle) is unchanged.
-  const [logMode, setLogMode] = useState<"project" | "non_project">("project");
+  const [logMode, setLogMode] = useState<"project" | "non_project" | null>(null);
   const [nonProjectActivityTypes, setNonProjectActivityTypes] = useState<NonProjectActivityTypeRow[]>([]);
   const [logActivityTypeId, setLogActivityTypeId] = useState("");
   const [logProjectId, setLogProjectId] = useState("");
@@ -391,6 +391,7 @@ export default function TimeTracking() {
         return;
       }
       setShowLogForm(false);
+      setLogMode(null);
       setLogNotes("");
       await alert(
         clampedAtMidnight
@@ -435,6 +436,7 @@ export default function TimeTracking() {
       return;
     }
     setShowLogForm(false);
+    setLogMode(null);
     setLogProjectId("");
     setLogTaskId("");
     setLogNotes("");
@@ -715,7 +717,10 @@ export default function TimeTracking() {
       <div style={{ marginTop: 14, marginBottom: 18 }}>
         {!showLogForm ? (
           <button
-            onClick={() => setShowLogForm(true)}
+            onClick={() => {
+              setLogMode(null);
+              setShowLogForm(true);
+            }}
             style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer" }}
           >
             <Plus size={13} />
@@ -751,6 +756,8 @@ export default function TimeTracking() {
                 </button>
               ))}
             </div>
+            {logMode && (
+              <>
             {logMode === "non_project" ? (
               <label style={{ display: "block", marginBottom: 8 }}>
                 <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Activity type</span>
@@ -949,6 +956,7 @@ export default function TimeTracking() {
               <button
                 onClick={() => {
                   setShowLogForm(false);
+                  setLogMode(null);
                   setLogProjectId("");
                   setLogTaskId("");
                 }}
@@ -957,6 +965,8 @@ export default function TimeTracking() {
                 Cancel
               </button>
             </div>
+              </>
+            )}
           </div>
         )}
       </div>
