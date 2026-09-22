@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { CheckCircle2, XCircle, Clock, ShieldCheck, BarChart3, ListChecks, Folder, User, Calendar, CalendarClock, ChevronRight } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
@@ -57,15 +57,27 @@ function daysBetween(a: string, b: string): number {
   return Math.round((new Date(b).getTime() - new Date(a).getTime()) / (1000 * 60 * 60 * 24));
 }
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 export default function ExtensionRequests() {
   const { person: me } = useSession();
-  const { confirm, alert, dialog: confirmDialog } = useConfirm();
+  const { alert, dialog: confirmDialog } = useConfirm();
   const [tab, setTab] = useState<"requests" | "report">("requests");
   const [requests, setRequests] = useState<ExtensionRequestRow[]>([]);
   const [people, setPeople] = useState<PersonLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
+  // 2026-09-22 (Sandra: "match with Time Tracking, check or cross for
+  // actions") -- Reject now expands an inline note row (optional, same
+  // note as before) instead of a window confirm() dialog, same
+  // interaction shape as Time Tracking's DecisionTable.
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
   // Status filter (2026-09-19, Sandra: card-layout mockup + "add metric
   // cards like All request | Pending | approved") -- the metric cards
   // double as the filter, same convention as the Approval Center page.
@@ -135,11 +147,6 @@ export default function ExtensionRequests() {
   const assigneeName = (id: string | null) => people.find((p) => p.id === id)?.name ?? "\u2014";
 
   async function decide(row: ExtensionRequestRow, status: "Approved" | "Rejected") {
-    const label = row.project ? `"${row.project.name}"'s timeline` : `the extension request for "${row.task?.name}"`;
-    if (status === "Rejected") {
-      const ok = await confirm({ message: `Reject ${label}?`, confirmLabel: "Reject", danger: true });
-      if (!ok) return;
-    }
     setDecidingId(row.id);
     const { error } = await supabase.rpc(row.project ? "decide_project_extension_request" : "decide_extension_request", {
       p_request_id: row.id,
@@ -151,6 +158,7 @@ export default function ExtensionRequests() {
       await alert(`Couldn't ${status === "Approved" ? "approve" : "reject"} this request: ${error.message}`);
       return;
     }
+    if (status === "Rejected") setRejectingId(null);
     loadAll();
   }
 
@@ -172,127 +180,163 @@ export default function ExtensionRequests() {
   // layout) -- each section (Needs your decision / My requests / Other
   // visible) renders its own card list instead of a table now; the
   // grouping itself is unchanged.
+  // 2026-09-22 (Sandra: "for due date extension requests, format to
+  // match Time Tracking, with check or cross for actions") -- rebuilt
+  // from the flex/card layout into a real bordered table, same shape
+  // family as Time Tracking's DecisionTable/EntriesTable and Approval
+  // Center's TimeEntryTable/TaskCompletionTable: Task/Project, Assignee,
+  // Current Deadline, Requested Deadline, Extension, Reason, Requested
+  // On, Status, Action. Action is icon-only (check/x); rejecting expands
+  // an inline optional-note row below, same interaction shape as
+  // DecisionTable's reject box (just not required here -- this page
+  // never required a reject note, only Time Tracking's revamp did, and
+  // that wasn't part of what Sandra asked to match).
   function RequestsTable({ rows, showDecideActions }: { rows: ExtensionRequestRow[]; showDecideActions: boolean }) {
     if (rows.length === 0) return null;
+    const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
+    const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
     return (
-      <div>
-        {rows.map((row) => {
-          const busy = decidingId === row.id;
-          const isProjectLevel = !!row.project;
-          return (
-            <div
-              key={row.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: 16,
-                padding: 16,
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius)",
-                background: "var(--surface)",
-                marginBottom: 10,
-              }}
-            >
-              <span
-                className={`status-pill ${isProjectLevel ? "accent" : "gold"}`}
-                style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 10, flexShrink: 0 }}
-              >
-                <CalendarClock size={15} />
-              </span>
-
-              <div style={{ minWidth: 190, flex: "1 1 190px" }}>
-                <span className={`status-pill ${isProjectLevel ? "accent" : "gold"}`} style={{ fontSize: 9.5, marginBottom: 4, display: "inline-block" }}>
-                  {isProjectLevel ? "Project Timeline Extension" : "Task Extension"}
-                </span>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>
-                  {isProjectLevel ? row.project?.name : row.task?.name ?? "Untitled task"}
-                  {row.is_manager_initiated && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: "var(--muted)" }}>(manager-initiated)</span>}
-                </div>
-              </div>
-
-              <div style={{ minWidth: 190, flex: "1 1 190px", display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-secondary)" }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                  <Folder size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
-                  {isProjectLevel ? row.project?.name : row.task?.project?.name ?? "—"}
-                </span>
-                {!isProjectLevel && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                    <User size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
-                    {assigneeName(row.task?.assignee_id ?? null)} <span style={{ color: "var(--muted)" }}>(assignee)</span>
-                  </span>
-                )}
-                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                  <User size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
-                  {row.requester?.name ?? "—"}
-                  {row.task && row.requester && row.task.assignee_id !== row.requester.id && (
-                    <span style={{ fontSize: 9, fontWeight: 600, color: "var(--muted)" }} title="Requested on behalf of the assignee">
-                      (on behalf)
-                    </span>
+      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)", marginBottom: 10 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Task / Project</th>
+              <th style={th}>Assignee</th>
+              <th style={th}>Current Deadline</th>
+              <th style={th}>Requested Deadline</th>
+              <th style={th}>Extension</th>
+              <th style={th}>Reason</th>
+              <th style={th}>Requested On</th>
+              <th style={th}>Status</th>
+              <th style={{ ...th, textAlign: "center" }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const busy = decidingId === row.id;
+              const rejecting = rejectingId === row.id;
+              const isProjectLevel = !!row.project;
+              const currentDeadline = row.project ? row.project.end_date : row.task?.current_due_date ?? null;
+              const extensionDays = currentDeadline ? daysBetween(currentDeadline, row.requested_new_due_date) : null;
+              const assigneeId = isProjectLevel ? null : row.task?.assignee_id ?? null;
+              const onBehalf = !isProjectLevel && row.requester && assigneeId && row.requester.id !== assigneeId;
+              const primaryName = row.requester?.name ?? (isProjectLevel ? "—" : assigneeName(assigneeId));
+              const noteValue = notesDraft[row.id] ?? "";
+              const canDecideNow = showDecideActions && row.status === "Pending";
+              return (
+                <Fragment key={row.id}>
+                  <tr style={{ borderBottom: rejecting ? "none" : "1px solid var(--border)" }}>
+                    <td style={td}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span className={`status-pill ${isProjectLevel ? "accent" : "gold"}`} style={{ fontSize: 9 }}>
+                          {isProjectLevel ? "Project Timeline" : "Task Extension"}
+                        </span>
+                        {row.is_manager_initiated && <span style={{ fontSize: 9, fontWeight: 600, color: "var(--muted)" }}>(manager-initiated)</span>}
+                      </div>
+                      <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>
+                        {isProjectLevel ? row.project?.name : row.task?.name ?? "Untitled task"}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>
+                        {isProjectLevel ? row.project?.name : row.task?.project?.name ?? "—"}
+                      </div>
+                    </td>
+                    <td style={td}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span
+                          style={{
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            width: 22, height: 22, borderRadius: "50%",
+                            background: "var(--accent-bg, #eaf2fb)", color: "var(--accent)",
+                            fontSize: 9.5, fontWeight: 700, flexShrink: 0,
+                          }}
+                        >
+                          {initials(primaryName)}
+                        </span>
+                        {primaryName}
+                      </div>
+                      {onBehalf && (
+                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>(on behalf: {assigneeName(assigneeId)})</div>
+                      )}
+                    </td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(currentDeadline)}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(row.requested_new_due_date)}</td>
+                    <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>
+                      {extensionDays === null ? "—" : `${extensionDays >= 0 ? "+" : ""}${extensionDays} day${Math.abs(extensionDays) === 1 ? "" : "s"}`}
+                    </td>
+                    <td style={{ ...td, maxWidth: 220, whiteSpace: "normal", wordBreak: "break-word" }}>
+                      <span className="status-pill neutral" style={{ fontSize: 9.5 }}>
+                        {row.reason_category}
+                      </span>
+                      {row.reason_notes && <div style={{ marginTop: 3 }}>{row.reason_notes}</div>}
+                    </td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(row.created_at)}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>
+                      <span className={`status-pill ${STATUS_TONE[row.status]}`}>{row.status}</span>
+                      {row.status !== "Pending" && (
+                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3 }}>
+                          by {row.decider?.name ?? "—"} on {formatDate(row.decided_at)}
+                          {row.decision_notes && <> — "{row.decision_notes}"</>}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {canDecideNow ? (
+                        <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+                          <button
+                            onClick={() => setRejectingId(rejecting ? null : row.id)}
+                            disabled={busy}
+                            title="Reject"
+                            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+                          >
+                            <XCircle size={14} />
+                          </button>
+                          <button
+                            onClick={() => decide(row, "Approved")}
+                            disabled={busy}
+                            title="Approve"
+                            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+                          >
+                            <CheckCircle2 size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <span style={{ color: "var(--muted)" }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                  {rejecting && (
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <input
+                            type="text"
+                            placeholder="Add an optional note..."
+                            value={noteValue}
+                            onChange={(e) => setNotesDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                            style={{ flex: "1 1 220px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                          />
+                          <button
+                            onClick={() => decide(row, "Rejected")}
+                            disabled={busy}
+                            style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--danger-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                          >
+                            Confirm reject
+                          </button>
+                          <button
+                            onClick={() => setRejectingId(null)}
+                            style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
                   )}
-                </span>
-                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                  <Calendar size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
-                  {formatDate(row.created_at)}
-                </span>
-              </div>
-
-              <div style={{ minWidth: 220, flex: "1 1 220px", fontSize: 11 }}>
-                <span style={{ fontSize: 9.5, color: "var(--muted)", marginRight: 5 }}>Reason</span>
-                <span className="status-pill neutral" style={{ fontSize: 9.5 }}>
-                  {row.reason_category}
-                </span>
-                {row.reason_notes && <div style={{ color: "var(--text-secondary)", marginTop: 3 }}>{row.reason_notes}</div>}
-                <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>
-                  {formatDate(row.project ? row.project.end_date : row.task?.current_due_date)} &rarr; {formatDate(row.requested_new_due_date)}
-                </div>
-              </div>
-
-              <div style={{ minWidth: 90, flex: "0 0 auto" }}>
-                <span className={`status-pill ${STATUS_TONE[row.status]}`}>{row.status}</span>
-                {row.status !== "Pending" && (
-                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 5 }}>
-                    by {row.decider?.name ?? "—"} on {formatDate(row.decided_at)}
-                    {row.decision_notes && <> — "{row.decision_notes}"</>}
-                  </div>
-                )}
-              </div>
-
-              {showDecideActions && row.status === "Pending" && (
-                <div style={{ minWidth: 160, flex: "1 1 160px" }}>
-                  <input
-                    type="text"
-                    placeholder="Add an optional note..."
-                    value={notesDraft[row.id] ?? ""}
-                    onChange={(e) => setNotesDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                    style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", width: "100%", boxSizing: "border-box" }}
-                  />
-                </div>
-              )}
-
-              {showDecideActions && row.status === "Pending" && (
-                <div style={{ marginLeft: "auto", flexShrink: 0, display: "flex", gap: 6 }}>
-                  <button
-                    onClick={() => decide(row, "Rejected")}
-                    disabled={busy}
-                    style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                  >
-                    <XCircle size={13} />
-                    Reject
-                  </button>
-                  <button
-                    onClick={() => decide(row, "Approved")}
-                    disabled={busy}
-                    style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                  >
-                    <CheckCircle2 size={13} />
-                    Approve
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     );
   }
