@@ -143,6 +143,15 @@ function hours(minutes: number | null): string {
   return `${(minutes / 60).toFixed(1)}h`;
 }
 
+// 2026-09-22 (Sandra: "for due date extension requests, format to match
+// Time Tracking" -- applied to Approval Center too, not just the
+// standalone Extension Requests page): same delta helper
+// ExtensionRequests.tsx already has, duplicated locally like this
+// file's other small formatters.
+function daysBetween(a: string, b: string): number {
+  return Math.round((new Date(b).getTime() - new Date(a).getTime()) / (1000 * 60 * 60 * 24));
+}
+
 // 2026-09-22 (Sandra: revamp of time-entry approval rows into a table --
 // Task/Project, Assignee, Work Date, Time, Duration, Details, Requested
 // On, Action) -- same small formatting helpers TimeTracking.tsx's
@@ -229,6 +238,11 @@ interface Row {
   // Reported Completion / Confirm Completion Date as real columns
   // instead of parsing them back out of extraLine text.
   taskCompletionRow?: TaskCompletionRow;
+  // 2026-09-22 (Sandra: "not applied in approval center" -- the
+  // Extension Requests table treatment needs to show up here too, not
+  // just the standalone page): extension rows carry their raw source
+  // row the same way, for the same reason.
+  extensionRow?: ExtensionRow;
 }
 
 export default function ApprovalCenter() {
@@ -712,6 +726,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         action: canDecideExtension(row) ? (
           <DecideButtons rowKey={key} onApprove={() => decideExtension(row, "Approved")} onReject={() => decideExtension(row, "Rejected")} />
         ) : null,
+        extensionRow: row,
       });
     });
 
@@ -1125,6 +1140,96 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
   // single most-recent (or oldest, when the sort is flipped) request
   // comes first -- no separate group-level sort needed, flipping the
   // Sort button flips both row order AND group order for free.
+  // 2026-09-22 (Sandra: "not applied in approval center" -- the same
+  // real-table + icon check/cross treatment ExtensionRequests.tsx got
+  // needs to show up here too). Same 9 columns: Task/Project, Assignee,
+  // Current Deadline, Requested Deadline, Extension, Reason, Requested
+  // On, Status, Action. This page's extension query is Pending-only, so
+  // Status always reads PENDING here (no decided-by history to show,
+  // unlike the standalone page).
+  function ExtensionTable({ rows }: { rows: Row[] }) {
+    const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
+    const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
+    return (
+      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)", marginBottom: 10 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Task / Project</th>
+              <th style={th}>Assignee</th>
+              <th style={th}>Current Deadline</th>
+              <th style={th}>Requested Deadline</th>
+              <th style={th}>Extension</th>
+              <th style={th}>Reason</th>
+              <th style={th}>Requested On</th>
+              <th style={th}>Status</th>
+              <th style={{ ...th, textAlign: "center" }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const ext = row.extensionRow;
+              if (!ext) return null;
+              const isProjectLevel = !!ext.project;
+              const currentDeadline = ext.project ? ext.project.end_date : ext.task?.current_due_date ?? null;
+              const extensionDays = currentDeadline ? daysBetween(currentDeadline, ext.requested_new_due_date) : null;
+              const assigneeId = isProjectLevel ? null : ext.task?.assignee_id ?? null;
+              const onBehalf = !isProjectLevel && ext.requester && assigneeId && ext.requester.id !== assigneeId;
+              return (
+                <tr key={row.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={td}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <span className={`status-pill ${isProjectLevel ? "accent" : "gold"}`} style={{ fontSize: 9 }}>
+                        {isProjectLevel ? "Project Timeline" : "Task Extension"}
+                      </span>
+                      {ext.is_manager_initiated && <span style={{ fontSize: 9, fontWeight: 600, color: "var(--muted)" }}>(manager-initiated)</span>}
+                    </div>
+                    <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>{row.subject}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{row.context}</div>
+                  </td>
+                  <td style={td}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          width: 22, height: 22, borderRadius: "50%",
+                          background: "var(--accent-bg, #eaf2fb)", color: "var(--accent)",
+                          fontSize: 9.5, fontWeight: 700, flexShrink: 0,
+                        }}
+                      >
+                        {initials(row.requestedByName)}
+                      </span>
+                      {row.requestedByName}
+                    </div>
+                    {onBehalf && (
+                      <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>(on behalf: {personName(assigneeId)})</div>
+                    )}
+                  </td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(currentDeadline)}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(ext.requested_new_due_date)}</td>
+                  <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>
+                    {extensionDays === null ? "—" : `${extensionDays >= 0 ? "+" : ""}${extensionDays} day${Math.abs(extensionDays) === 1 ? "" : "s"}`}
+                  </td>
+                  <td style={{ ...td, maxWidth: 220, whiteSpace: "normal", wordBreak: "break-word" }}>
+                    <span className="status-pill neutral" style={{ fontSize: 9.5 }}>
+                      {ext.reason_category}
+                    </span>
+                    {ext.reason_notes && <div style={{ marginTop: 3 }}>{ext.reason_notes}</div>}
+                  </td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(row.requestedAt)}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>
+                    <span className="status-pill warning">PENDING</span>
+                  </td>
+                  <td style={{ ...td, textAlign: "center" }}>{row.action ?? <span style={{ color: "var(--muted)" }}>—</span>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   function groupByRequester(rows: Row[]): { name: string; rows: Row[] }[] {
     const order: string[] = [];
     const map = new Map<string, Row[]>();
@@ -1170,6 +1275,8 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
               <TimeEntryTable rows={g.rows} />
             ) : kind === "task_completion" ? (
               <TaskCompletionTable rows={g.rows} />
+            ) : kind === "extension" ? (
+              <ExtensionTable rows={g.rows} />
             ) : (
               g.rows.map((row) => <RequestCard key={row.key} row={row} />)
             )}
