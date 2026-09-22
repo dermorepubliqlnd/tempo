@@ -649,6 +649,7 @@ export default function TimeTracking() {
               <th style={th}>Duration</th>
               <th style={th}>Details</th>
               <th style={th}>Requested On</th>
+              <th style={th}>Status</th>
               <th style={{ ...th, textAlign: "center" }}>Action</th>
             </tr>
           </thead>
@@ -691,6 +692,9 @@ export default function TimeTracking() {
                       {details}
                     </td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDateTime(row.created_at)}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>
+                      <span className={`status-pill ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
+                    </td>
                     <td style={{ ...td, textAlign: "center" }}>
                       <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
                         <button
@@ -714,7 +718,7 @@ export default function TimeTracking() {
                   </tr>
                   {rejecting && (
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td colSpan={8} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
+                      <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                           <input
                             type="text"
