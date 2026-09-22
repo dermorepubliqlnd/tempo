@@ -4080,7 +4080,7 @@ export default function Projects() {
                   title: "Confirm task completion",
                   message:
                     `Scoped Hours: ${scoped != null ? scoped : "—"}\n` +
-                    `**Logged Hours**: ${logged.toFixed(1)}\n` +
+                    `**Logged Hours**: ${logged.toFixed(2)}\n` +
                     `**Output Count**: ${outputCount}\n\n` +
                     `Marking ${formatDate(v)} as the Actual Completion Date will move this task's Status to Done. Confirm these are correct?`,
                   confirmLabel: "Confirm & mark Done",

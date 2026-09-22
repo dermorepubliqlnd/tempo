@@ -693,7 +693,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         // can be the 3rd column"): Scoped is the task's own estimated_hours;
         // Logged is ownHoursFor over the same Confirmed/Approved entries
         // Spent Hrs itself counts (see allTimeEntries fetch above).
-        hoursSummary: `${row.estimated_hours != null ? row.estimated_hours : "—"} scoped / ${ownHoursFor(allTimeEntries as unknown as import("../lib/timeTracking").TimeEntryRow[], row.id).toFixed(1)} logged`,
+        hoursSummary: `${row.estimated_hours != null ? row.estimated_hours : "—"} scoped / ${ownHoursFor(allTimeEntries as unknown as import("../lib/timeTracking").TimeEntryRow[], row.id).toFixed(2)} logged`,
         canDecide,
         action: canDecide ? <ValidateAction row={row} /> : null,
       });
