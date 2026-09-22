@@ -1230,58 +1230,48 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
     );
   }
 
-  function groupByRequester(rows: Row[]): { name: string; rows: Row[] }[] {
-    const order: string[] = [];
-    const map = new Map<string, Row[]>();
-    for (const row of rows) {
-      const existing = map.get(row.requestedByName);
-      if (existing) {
-        existing.push(row);
-      } else {
-        map.set(row.requestedByName, [row]);
-        order.push(row.requestedByName);
-      }
-    }
-    return order.map((name) => ({ name, rows: map.get(name)! }));
-  }
-
-  // 2026-09-22 (Sandra, on the old flat "sequenced by request time, all
-  // 4 types in one table" layout): "now that each type of approvals has
-  // its own table format, group them" -- KindSection makes each kind
-  // (Task Completion, Time Entries, Extensions, Baselines/Closures)
-  // always its own section instead of only accidentally grouping when
-  // same-kind rows happened to land next to each other in the flat
-  // list, then sub-groups each section by requester.
+  // 2026-09-22 (Sandra: "do not group by name, just type. also can it
+  // be collapsed by default and when the header is clicked then it
+  // expands -- the header will be the trigger for expand and collapse")
+  // -- drops the requester sub-grouping this same session added earlier
+  // today: each kind is still always its own section (unchanged reason,
+  // see below), but rows within it render as one flat table/list again,
+  // no per-person headers. Each section now starts collapsed and only
+  // renders its body once its header is clicked -- with 26 pending
+  // items across 4 types, a collapsed-by-default header row per type
+  // (Extension Requests (1), Time Entries (1), Baselines (2), Task
+  // Validations (22)) is a much shorter default view than expanding all
+  // 22 task validations immediately.
   function KindSection({ kind, rows }: { kind: ApprovalKind; rows: Row[] }) {
+    const [expanded, setExpanded] = useState(false);
     if (rows.length === 0) return null;
     const meta = KIND_META[kind];
-    const groups = groupByRequester(rows);
     return (
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+      <div style={{ marginBottom: 12 }}>
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+            padding: "8px 10px", background: "var(--surface)", border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)", cursor: "pointer", marginBottom: expanded ? 8 : 0,
+          }}
+        >
+          <ChevronRight size={14} style={{ color: "var(--muted)", flexShrink: 0, transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
           <span className={`status-pill ${meta.tone}`} style={{ fontSize: 10 }}>
             {meta.pluralLabel}
           </span>
           <span style={{ fontSize: 11, color: "var(--muted)" }}>({rows.length})</span>
-        </div>
-        {groups.map((g) => (
-          <div key={g.name} style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)", marginBottom: 5, display: "flex", alignItems: "center", gap: 5 }}>
-              <User size={11} style={{ color: "var(--muted)" }} />
-              {g.name}
-              <span style={{ color: "var(--muted)", fontWeight: 400 }}>({g.rows.length})</span>
-            </div>
-            {kind === "time" ? (
-              <TimeEntryTable rows={g.rows} />
-            ) : kind === "task_completion" ? (
-              <TaskCompletionTable rows={g.rows} />
-            ) : kind === "extension" ? (
-              <ExtensionTable rows={g.rows} />
-            ) : (
-              g.rows.map((row) => <RequestCard key={row.key} row={row} />)
-            )}
-          </div>
-        ))}
+        </button>
+        {expanded &&
+          (kind === "time" ? (
+            <TimeEntryTable rows={rows} />
+          ) : kind === "task_completion" ? (
+            <TaskCompletionTable rows={rows} />
+          ) : kind === "extension" ? (
+            <ExtensionTable rows={rows} />
+          ) : (
+            rows.map((row) => <RequestCard key={row.key} row={row} />)
+          ))}
       </div>
     );
   }
