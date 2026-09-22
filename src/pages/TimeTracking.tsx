@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, Pencil, Timer, Folder, User, Calendar } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
@@ -131,6 +131,35 @@ function formatTimeRange(startedAt: string, endedAt: string | null): string {
     : `${formatDate(startedAt)} ${startTime} -- ${formatDate(endedAt)} ${endTime}`;
 }
 
+// 2026-09-22 (Sandra: revamped "Needs your decision" table) -- Time-only
+// counterpart to formatTimeRange, for the table's separate Time column
+// (Work Date already carries the date).
+function formatClockRange(startedAt: string, endedAt: string | null): string {
+  const start = new Date(startedAt);
+  if (isNaN(start.getTime())) return "—";
+  const startTime = start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (!endedAt) return `${startTime} -- in progress`;
+  const end = new Date(endedAt);
+  if (isNaN(end.getTime())) return startTime;
+  const endTime = end.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${startTime} -- ${endTime}`;
+}
+
+function formatWorkDate(value: string): string {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "—";
+  const datePart = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const weekday = d.toLocaleDateString(undefined, { weekday: "short" });
+  return `${datePart} (${weekday})`;
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 // Small searchable combobox (Sandra, 2026-08-26: "allow project selection
 // in the time tracker then next will be task... allow search too for both
 // options") -- a plain <select> got unwieldy once Project became its own
@@ -247,6 +276,10 @@ export default function TimeTracking() {
   const [loading, setLoading] = useState(true);
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
+  // 2026-09-22 (Sandra: revamped decision table -- icon-only actions,
+  // rejecting requires a note): which row's inline "why are you
+  // rejecting this" note box is expanded, if any.
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [correctingId, setCorrectingId] = useState<string | null>(null);
   const [correctDraft, setCorrectDraft] = useState<{ hours: string; notes: string; reasonCategory: string }>({ hours: "", notes: "", reasonCategory: "" });
   // Status filter (2026-09-19, Sandra: "fix the time tracking page to not
@@ -339,9 +372,14 @@ export default function TimeTracking() {
     return false;
   }
 
-  async function decide(row: EntryRow, status: "approved" | "rejected") {
+  // 2026-09-22 (Sandra: reject now requires a note) -- the new
+  // DecisionTable's inline reject box IS the confirmation step (type a
+  // reason, then click Confirm reject), so it skips the old modal
+  // confirm() to avoid asking twice; EntriesTable's older inline-note
+  // flow still gets the modal since its note stays optional there.
+  async function decide(row: EntryRow, status: "approved" | "rejected", skipConfirm = false) {
     const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
-    if (status === "rejected") {
+    if (status === "rejected" && !skipConfirm) {
       const ok = await confirm({ message: `Reject this manual time entry for ${label}?`, confirmLabel: "Reject", danger: true });
       if (!ok) return;
     }
@@ -352,6 +390,7 @@ export default function TimeTracking() {
       await alert(`Couldn't ${status === "approved" ? "approve" : "reject"} this entry: ${res.error}`);
       return;
     }
+    setRejectingId(null);
     loadAll();
   }
 
@@ -516,6 +555,133 @@ export default function TimeTracking() {
   const pendingForMe = filteredEntries.filter((e) => e.status === "pending_approval" && canDecide(e));
   const mine = filteredEntries.filter((e) => e.person_id === me?.id && !pendingForMe.includes(e));
   const rest = filteredEntries.filter((e) => !pendingForMe.includes(e) && e.person_id !== me?.id);
+
+  // 2026-09-22 (Sandra: revamp of the "Needs your decision" list into a
+  // real table -- Task/Project, Assignee, Work Date, Time, Duration,
+  // Details, Requested On, Action) -- Action is icon-only (check/x);
+  // rejecting expands an inline note box that's required before the
+  // reject can be confirmed. Only used for pendingForMe -- "My entries"
+  // and "Other visible entries" keep the older EntriesTable card layout
+  // below, since those have no decision to make and carry different
+  // info (status, decided-by, correction workflow).
+  function DecisionTable({ rows }: { rows: EntryRow[] }) {
+    if (rows.length === 0) return null;
+    const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
+    const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
+    return (
+      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Task / Project</th>
+              <th style={th}>Assignee</th>
+              <th style={th}>Work Date</th>
+              <th style={th}>Time</th>
+              <th style={th}>Duration</th>
+              <th style={th}>Details</th>
+              <th style={th}>Requested On</th>
+              <th style={{ ...th, textAlign: "center" }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const busy = decidingId === row.id;
+              const rejecting = rejectingId === row.id;
+              const isNonProject = Boolean(row.activity_type_id);
+              const title = isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
+              const subtitle = isNonProject ? "Non-project" : row.task?.project?.name ?? "—";
+              const assigneeName = row.person?.name ?? personName(row.person_id);
+              const details = row.reason_notes?.trim() || row.reason_category || "—";
+              const noteValue = notesDraft[row.id] ?? "";
+              return (
+                <Fragment key={row.id}>
+                  <tr style={{ borderBottom: rejecting ? "none" : "1px solid var(--border)" }}>
+                    <td style={td}>
+                      <div style={{ fontWeight: 700, color: "var(--navy)" }}>{title}</div>
+                      <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{subtitle}</div>
+                    </td>
+                    <td style={td}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span
+                          style={{
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            width: 22, height: 22, borderRadius: "50%",
+                            background: "var(--accent-bg, #eaf2fb)", color: "var(--accent)",
+                            fontSize: 9.5, fontWeight: 700, flexShrink: 0,
+                          }}
+                        >
+                          {initials(assigneeName)}
+                        </span>
+                        {assigneeName}
+                      </div>
+                    </td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{formatWorkDate(row.started_at)}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{formatClockRange(row.started_at, row.ended_at)}</td>
+                    <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{formatDuration(row.duration_minutes)}</td>
+                    <td style={{ ...td, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={details !== "—" ? details : undefined}>
+                      {details}
+                    </td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDateTime(row.created_at)}</td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+                        <button
+                          onClick={() => setRejectingId(rejecting ? null : row.id)}
+                          disabled={busy}
+                          title="Reject"
+                          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+                        >
+                          <XCircle size={14} />
+                        </button>
+                        <button
+                          onClick={() => decide(row, "approved")}
+                          disabled={busy}
+                          title="Approve"
+                          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+                        >
+                          <CheckCircle2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {rejecting && (
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td colSpan={8} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <input
+                            type="text"
+                            placeholder="Reason for rejecting (required)"
+                            value={noteValue}
+                            onChange={(e) => setNotesDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                            style={{ flex: "1 1 220px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                          />
+                          <button
+                            onClick={() => decide(row, "rejected", true)}
+                            disabled={busy || !noteValue.trim()}
+                            style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: noteValue.trim() ? "var(--danger-text)" : "var(--muted)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: noteValue.trim() ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
+                          >
+                            Confirm reject
+                          </button>
+                          <button
+                            onClick={() => setRejectingId(null)}
+                            style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        {!noteValue.trim() && (
+                          <div style={{ fontSize: 10, color: "var(--danger-text)", marginTop: 5 }}>A note is required to reject a time entry.</div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 
   function EntriesTable({ rows, showDecideActions }: { rows: EntryRow[]; showDecideActions: boolean }) {
     if (rows.length === 0) return null;
@@ -1049,7 +1215,7 @@ export default function TimeTracking() {
           {pendingForMe.length === 0 ? (
             <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing waiting on you right now.</p>
           ) : (
-            <EntriesTable rows={pendingForMe} showDecideActions />
+            <DecisionTable rows={pendingForMe} />
           )}
 
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 24, marginBottom: 8 }}>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import {
   CheckCircle2,
@@ -21,7 +21,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { decideTimeEntry, ownHoursFor } from "../lib/timeTracking";
+import { decideTimeEntry, ownHoursFor, formatDuration } from "../lib/timeTracking";
 
 // Approval Center (2026-09-18, Sandra: "create an approval center page
 // under main... where all things for approval should show like extension
@@ -86,6 +86,8 @@ interface TimeEntryRowLite {
   activity_type_id: string | null;
   person_id: string;
   started_at: string;
+  ended_at: string | null;
+  created_at: string;
   duration_minutes: number | null;
   requested_by: string | null;
   reason_category: string | null;
@@ -141,6 +143,45 @@ function hours(minutes: number | null): string {
   return `${(minutes / 60).toFixed(1)}h`;
 }
 
+// 2026-09-22 (Sandra: revamp of time-entry approval rows into a table --
+// Task/Project, Assignee, Work Date, Time, Duration, Details, Requested
+// On, Action) -- same small formatting helpers TimeTracking.tsx's
+// DecisionTable uses, duplicated locally rather than shared since
+// they're one-liners and this file already keeps its own small
+// formatters (e.g. hours() above) separate from that page's.
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return value;
+  return d.toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "numeric", minute: "2-digit" });
+}
+
+function formatWorkDate(value: string): string {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "—";
+  const datePart = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const weekday = d.toLocaleDateString(undefined, { weekday: "short" });
+  return `${datePart} (${weekday})`;
+}
+
+function formatClockRange(startedAt: string, endedAt: string | null | undefined): string {
+  const start = new Date(startedAt);
+  if (isNaN(start.getTime())) return "—";
+  const startTime = start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (!endedAt) return `${startTime} -- in progress`;
+  const end = new Date(endedAt);
+  if (isNaN(end.getTime())) return startTime;
+  const endTime = end.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${startTime} -- ${endTime}`;
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 // Request type -- a stable discriminator used both for the type filter
 // (the summary cards) and the color-coded pill/icon, kept separate from
 // typeLabel so the two extension sub-labels ("Task extension" / "Project
@@ -178,6 +219,14 @@ interface Row {
   // task_completion-only; every other kind leaves this null and the
   // column just doesn't render for that row.
   hoursSummary: string | null;
+  // 2026-09-22 (Sandra: revamp time-entry rows into the same 8-column
+  // table Time Tracking uses) -- time-kind rows only; everything else
+  // leaves these undefined and RequestList's grouping keeps them as
+  // regular cards.
+  workStartedAt?: string;
+  workEndedAt?: string | null;
+  durationMinutes?: number | null;
+  loggedOnAt?: string;
 }
 
 export default function ApprovalCenter() {
@@ -233,7 +282,7 @@ export default function ApprovalCenter() {
       supabase
         .from("time_entries")
         .select(
-          `id, task_id, activity_type_id, person_id, started_at, duration_minutes, requested_by, reason_category, reason_notes,
+          `id, task_id, activity_type_id, person_id, started_at, ended_at, created_at, duration_minutes, requested_by, reason_category, reason_notes,
            task:tasks ( id, name, project_id, project:projects ( id, name, owner_id ) ),
            activity_type:non_project_activity_types ( id, name ),
            person:people!time_entries_person_id_fkey ( id, name )`
@@ -392,12 +441,10 @@ export default function ApprovalCenter() {
     return nearestActiveManager(row.assignee_id) === me.id;
   }
 
+  // 2026-09-22: the old modal confirm() for "Reject ...?" is gone -- the
+  // Reject icon's required-note popover (DecideButtons) IS the
+  // confirmation step now, so this no longer asks twice.
   async function decideExtension(row: ExtensionRow, status: "Approved" | "Rejected") {
-    const label = row.project ? `"${row.project.name}"'s timeline` : `the extension request for "${row.task?.name}"`;
-    if (status === "Rejected") {
-      const ok = await confirm({ message: `Reject ${label}?`, confirmLabel: "Reject", danger: true });
-      if (!ok) return;
-    }
     const key = `ext-${row.id}`;
     setDecidingKey(key);
     const { error } = await supabase.rpc(row.project ? "decide_project_extension_request" : "decide_extension_request", {
@@ -413,11 +460,9 @@ export default function ApprovalCenter() {
     loadAll();
   }
 
+  // 2026-09-22: same -- the popover's own "Confirm reject" is the
+  // confirmation now.
   async function decideTime(row: TimeEntryRowLite, status: "approved" | "rejected") {
-    if (status === "rejected") {
-      const ok = await confirm({ message: "Reject this time entry?", confirmLabel: "Reject", danger: true });
-      if (!ok) return;
-    }
     const key = `time-${row.id}`;
     setDecidingKey(key);
     const res = await decideTimeEntry(row.id, status, notesDraft[key]?.trim() || null);
@@ -480,40 +525,78 @@ export default function ApprovalCenter() {
     loadAll();
   }
 
-  function NotesField({ rowKey }: { rowKey: string }) {
-    return (
-      <input
-        type="text"
-        placeholder="Add an optional note..."
-        value={notesDraft[rowKey] ?? ""}
-        onChange={(e) => setNotesDraft((prev) => ({ ...prev, [rowKey]: e.target.value }))}
-        style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", width: "100%", boxSizing: "border-box" }}
-      />
-    );
-  }
-
+  // 2026-09-22 (Sandra: "replace actions with Approved or Reject buttons
+  // check/x icons only. If rejecting require a note from the
+  // approver/decliner") -- icon-only now (no text labels); Approve is a
+  // single click. Reject opens a small required-note popover right
+  // under the icon -- the "Confirm reject" click inside it IS the
+  // confirmation step, so it replaces the old modal confirm() that used
+  // to ask "Reject this...?" a second time. Shared by every kind that
+  // still has a real approve/reject decision here (Extension, Time
+  // Entry/Non-project Time) -- Baseline/Closure deep-link to WBS instead
+  // (ReviewLink) and Task Completion has no reject concept (ValidateAction).
   function DecideButtons({ rowKey, onApprove, onReject }: { rowKey: string; onApprove: () => void; onReject: () => void }) {
     const busy = decidingKey === rowKey;
+    const [rejecting, setRejecting] = useState(false);
+    const note = notesDraft[rowKey] ?? "";
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <button
-          onClick={onReject}
-          disabled={busy}
-          title="Reject"
-          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-        >
-          <XCircle size={13} />
-          Reject
-        </button>
-        <button
-          onClick={onApprove}
-          disabled={busy}
-          title="Approve"
-          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-        >
-          <CheckCircle2 size={13} />
-          Approve
-        </button>
+      <div style={{ position: "relative", display: "inline-flex" }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            onClick={() => setRejecting((r) => !r)}
+            disabled={busy}
+            title="Reject"
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+          >
+            <XCircle size={14} />
+          </button>
+          <button
+            onClick={onApprove}
+            disabled={busy}
+            title="Approve"
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+          >
+            <CheckCircle2 size={14} />
+          </button>
+        </div>
+        {rejecting && (
+          <div
+            style={{
+              position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 30,
+              background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
+              padding: 10, width: 240, boxShadow: "0 6px 20px rgba(15,23,42,0.16)",
+            }}
+          >
+            <input
+              type="text"
+              autoFocus
+              placeholder="Reason for rejecting (required)"
+              value={note}
+              onChange={(e) => setNotesDraft((prev) => ({ ...prev, [rowKey]: e.target.value }))}
+              style={{ width: "100%", fontSize: 11.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
+            />
+            {!note.trim() && <div style={{ fontSize: 10, color: "var(--danger-text)", marginTop: 4 }}>A note is required to reject.</div>}
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <button
+                onClick={() => {
+                  if (!note.trim()) return;
+                  onReject();
+                  setRejecting(false);
+                }}
+                disabled={busy || !note.trim()}
+                style={{ flex: 1, fontSize: 11, fontWeight: 600, color: "#fff", background: note.trim() ? "var(--danger-text)" : "var(--muted)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 8px", cursor: note.trim() ? "pointer" : "not-allowed" }}
+              >
+                Confirm reject
+              </button>
+              <button
+                onClick={() => setRejecting(false)}
+                style={{ fontSize: 11, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 8px", cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -630,6 +713,10 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         reasonNotes: row.reason_notes,
         extraLine: `Logged: ${hours(row.duration_minutes)}`,
         hoursSummary: null,
+        workStartedAt: row.started_at,
+        workEndedAt: row.ended_at,
+        durationMinutes: row.duration_minutes,
+        loggedOnAt: row.created_at,
         canDecide: canDecideTimeEntry(row),
         action: canDecideTimeEntry(row) ? (
           <DecideButtons rowKey={key} onApprove={() => decideTime(row, "approved")} onReject={() => decideTime(row, "rejected")} />
@@ -888,13 +975,73 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
           {row.extraLine && <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3, whiteSpace: "pre-line" }}>{row.extraLine}</div>}
         </div>
 
-        {row.action && row.kind !== "baseline" && row.kind !== "closure" && row.kind !== "task_completion" && (
-          <div style={{ minWidth: 160, flex: "1 1 160px" }}>
-            <NotesField rowKey={row.key} />
-          </div>
-        )}
-
         <div style={{ marginLeft: "auto", flexShrink: 0 }}>{row.action ?? <span style={{ fontSize: 11, color: "var(--muted)" }}>—</span>}</div>
+      </div>
+    );
+  }
+
+  // 2026-09-22 (Sandra: "replace actions with... check/x icons only" --
+  // rebuilds the Time Entry / Non-project Time rows as the same
+  // 8-column table Time Tracking's own "Needs your decision" list uses,
+  // while every other kind keeps its existing card. RequestList groups
+  // consecutive same-kind runs so the overall sort/search/filter order
+  // is unchanged -- a run of time-kind rows becomes one table, a run of
+  // anything else stays individual RequestCards.
+  function TimeEntryTable({ rows }: { rows: Row[] }) {
+    const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
+    const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
+    return (
+      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)", marginBottom: 10 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Task / Project</th>
+              <th style={th}>Assignee</th>
+              <th style={th}>Work Date</th>
+              <th style={th}>Time</th>
+              <th style={th}>Duration</th>
+              <th style={th}>Details</th>
+              <th style={th}>Requested On</th>
+              <th style={{ ...th, textAlign: "center" }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const details = row.reasonNotes?.trim() || row.reasonCategory || "—";
+              return (
+                <tr key={row.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={td}>
+                    <div style={{ fontWeight: 700, color: "var(--navy)" }}>{row.subject}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{row.context}</div>
+                  </td>
+                  <td style={td}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          width: 22, height: 22, borderRadius: "50%",
+                          background: "var(--accent-bg, #eaf2fb)", color: "var(--accent)",
+                          fontSize: 9.5, fontWeight: 700, flexShrink: 0,
+                        }}
+                      >
+                        {initials(row.requestedByName)}
+                      </span>
+                      {row.requestedByName}
+                    </div>
+                  </td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{row.workStartedAt ? formatWorkDate(row.workStartedAt) : "—"}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{row.workStartedAt ? formatClockRange(row.workStartedAt, row.workEndedAt) : "—"}</td>
+                  <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{formatDuration(row.durationMinutes ?? null)}</td>
+                  <td style={{ ...td, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={details !== "—" ? details : undefined}>
+                    {details}
+                  </td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{row.loggedOnAt ? formatDateTime(row.loggedOnAt) : "—"}</td>
+                  <td style={{ ...td, textAlign: "center" }}>{row.action ?? <span style={{ color: "var(--muted)" }}>—</span>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     );
   }
@@ -903,11 +1050,25 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
     if (rows.length === 0) {
       return <p style={{ fontSize: 12, color: "var(--muted)", padding: "10px 0" }}>{emptyLabel}</p>;
     }
+    const groups: { isTime: boolean; items: Row[] }[] = [];
+    for (const row of rows) {
+      const isTime = row.kind === "time";
+      const last = groups[groups.length - 1];
+      if (last && last.isTime === isTime) {
+        last.items.push(row);
+      } else {
+        groups.push({ isTime, items: [row] });
+      }
+    }
     return (
       <div>
-        {rows.map((row) => (
-          <RequestCard key={row.key} row={row} />
-        ))}
+        {groups.map((g, i) =>
+          g.isTime ? (
+            <TimeEntryTable key={i} rows={g.items} />
+          ) : (
+            g.items.map((row) => <RequestCard key={row.key} row={row} />)
+          )
+        )}
       </div>
     );
   }
