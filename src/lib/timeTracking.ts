@@ -13,7 +13,12 @@ export type TimeEntryStatus = "running" | "pending_confirm" | "confirmed" | "pen
 
 export interface TimeEntryRow {
   id: string;
-  task_id: string;
+  // 2026-09-22: nullable now that non-project time entries exist --
+  // exactly one of task_id/activity_type_id is set, never both, never
+  // neither (enforced by a DB check constraint). See
+  // submitNonProjectTimeEntry above.
+  task_id: string | null;
+  activity_type_id?: string | null;
   person_id: string;
   started_at: string;
   ended_at: string | null;
@@ -83,7 +88,7 @@ export function personHoursBreakdownFor(taskId: string, entries: TimeEntryRow[],
   const relevantTaskIds = new Set([taskId, ...childrenOf(taskId)]);
   const minutesByPerson = new Map<string, number>();
   entries
-    .filter((e) => relevantTaskIds.has(e.task_id) && isCountedEntry(e))
+    .filter((e) => e.task_id != null && relevantTaskIds.has(e.task_id) && isCountedEntry(e))
     .forEach((e) => {
       minutesByPerson.set(e.person_id, (minutesByPerson.get(e.person_id) ?? 0) + (e.duration_minutes ?? 0));
     });
@@ -178,6 +183,32 @@ export async function decideTimeEntry(entryId: string, status: "approved" | "rej
   const { error } = await supabase.rpc("decide_time_entry", { p_entry_id: entryId, p_status: status, p_decision_notes: notes });
   if (error) return { error: error.message };
   return {};
+}
+
+// 2026-09-22 (Sandra: "the team work on non-project tasks sometimes --
+// example meetings, the team weekly huddles -- how do we make the
+// system capture that without plotting it in the project tasks?") --
+// same time_entries table and pending_approval/approved lifecycle as
+// submitManualTimeEntry, just logged against an activity type instead
+// of a task (task_id stays null on these rows -- see
+// [[project_capaciq_non_project_time_2026_09_22]]). Always requires
+// approval, same as any other manual entry -- no auto-confirm path.
+export async function submitNonProjectTimeEntry(
+  personId: string,
+  activityTypeId: string,
+  startedAt: string,
+  endedAt: string,
+  notes: string
+): Promise<{ id?: string; error?: string }> {
+  const { data, error } = await supabase.rpc("submit_non_project_time_entry", {
+    p_person_id: personId,
+    p_activity_type_id: activityTypeId,
+    p_started_at: startedAt,
+    p_ended_at: endedAt,
+    p_notes: notes,
+  });
+  if (error) return { error: error.message };
+  return { id: data as unknown as string };
 }
 
 // reasonCategory: pass a new category name to also correct it alongside

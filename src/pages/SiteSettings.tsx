@@ -130,6 +130,20 @@ interface TimeEntryReasonRow {
   is_active: boolean;
 }
 
+// Non-Project Activity Types (Phase 59, 2026-09-22, Sandra: "the team
+// work on non-project tasks sometimes -- example meetings, the team
+// weekly huddles -- how do we make the system capture that without
+// plotting it in the project tasks?"). FK-based (time_entries.
+// activity_type_id), same shape/rename semantics as Output Types --
+// renaming is a plain UPDATE, no cascade needed since every entry
+// already points at this row by id, not by name.
+interface NonProjectActivityTypeRow {
+  id: string;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+}
+
 // Start Project Decline Reason -- admin-configurable lookup (Phase 46,
 // 2026-09-08). Sandra: "we can add predefined reasons too, can add in
 // the list settings" -- same plain-text-tag pattern as Time Logging
@@ -308,7 +322,7 @@ export default function SiteSettings() {
   // matrix directly ("add by row or by column then just check"), so
   // Output Type rename/activate/delete/add all happen from inside that
   // matrix's column headers instead of a separate list.
-  const [manageDrawer, setManageDrawer] = useState<"sources" | "categories" | "phases" | "phase_mapping" | "work_types" | "reasons" | "planning_types" | "project_types" | "decline_reasons" | "cancellation_reasons" | null>(null);
+  const [manageDrawer, setManageDrawer] = useState<"sources" | "categories" | "phases" | "phase_mapping" | "work_types" | "reasons" | "planning_types" | "project_types" | "decline_reasons" | "cancellation_reasons" | "non_project_activity_types" | null>(null);
   const [draggedWorkTypeId, setDraggedWorkTypeId] = useState<string | null>(null);
   const [draggedOutputTypeId, setDraggedOutputTypeId] = useState<string | null>(null);
   const [draggedProjectSourceId, setDraggedProjectSourceId] = useState<string | null>(null);
@@ -322,6 +336,14 @@ export default function SiteSettings() {
   const [editingTimeEntryReasonId, setEditingTimeEntryReasonId] = useState<string | null>(null);
   const [editTimeEntryReasonName, setEditTimeEntryReasonName] = useState("");
   const [draggedTimeEntryReasonId, setDraggedTimeEntryReasonId] = useState<string | null>(null);
+
+  const [nonProjectActivityTypes, setNonProjectActivityTypes] = useState<NonProjectActivityTypeRow[]>([]);
+  const [nonProjectActivityTypesLoading, setNonProjectActivityTypesLoading] = useState(true);
+  const [newNonProjectActivityTypeName, setNewNonProjectActivityTypeName] = useState("");
+  const [nonProjectActivityTypeBusy, setNonProjectActivityTypeBusy] = useState(false);
+  const [editingNonProjectActivityTypeId, setEditingNonProjectActivityTypeId] = useState<string | null>(null);
+  const [editNonProjectActivityTypeName, setEditNonProjectActivityTypeName] = useState("");
+  const [draggedNonProjectActivityTypeId, setDraggedNonProjectActivityTypeId] = useState<string | null>(null);
   const [draggedProjectCategoryId, setDraggedProjectCategoryId] = useState<string | null>(null);
 
   // Start Project Decline Reasons (2026-09-08) -- same list-management
@@ -1386,6 +1408,132 @@ export default function SiteSettings() {
     loadTimeEntryReasons();
   }
 
+  // Non-Project Activity Types (Phase 59, 2026-09-22) -- full CRUD set,
+  // FK-based like Output Types (time_entries.activity_type_id), so
+  // rename is a plain UPDATE -- no cascade needed, every entry already
+  // points at this row's id, not its name.
+  async function loadNonProjectActivityTypes() {
+    setNonProjectActivityTypesLoading(true);
+    const { data } = await supabase.from("non_project_activity_types").select("id,name,sort_order,is_active").order("sort_order");
+    setNonProjectActivityTypes((data as NonProjectActivityTypeRow[]) ?? []);
+    setNonProjectActivityTypesLoading(false);
+  }
+
+  async function addNonProjectActivityType() {
+    const name = newNonProjectActivityTypeName.trim();
+    if (!name) return;
+    setNonProjectActivityTypeBusy(true);
+    const nextSortOrder = nonProjectActivityTypes.length > 0 ? Math.max(...nonProjectActivityTypes.map((a) => a.sort_order)) + 1 : 1;
+    const { error } = await supabase.from("non_project_activity_types").insert({ name, sort_order: nextSortOrder });
+    setNonProjectActivityTypeBusy(false);
+    if (error) {
+      window.alert(`Couldn't add: ${error.message}`);
+      return;
+    }
+    setNewNonProjectActivityTypeName("");
+    loadNonProjectActivityTypes();
+  }
+
+  function startEditNonProjectActivityType(a: NonProjectActivityTypeRow) {
+    setEditingNonProjectActivityTypeId(a.id);
+    setEditNonProjectActivityTypeName(a.name);
+  }
+
+  async function saveNonProjectActivityTypeRename(id: string) {
+    const name = editNonProjectActivityTypeName.trim();
+    if (!name) return;
+    const current = nonProjectActivityTypes.find((a) => a.id === id);
+    if (current && !confirmFkRename(current.name, name, "non-project time entry")) {
+      setEditingNonProjectActivityTypeId(null);
+      return;
+    }
+    setNonProjectActivityTypeBusy(true);
+    const { error } = await supabase.from("non_project_activity_types").update({ name }).eq("id", id);
+    setNonProjectActivityTypeBusy(false);
+    if (error) {
+      window.alert(`Couldn't rename: ${error.message}`);
+      return;
+    }
+    setEditingNonProjectActivityTypeId(null);
+    loadNonProjectActivityTypes();
+  }
+
+  async function toggleNonProjectActivityTypeActive(a: NonProjectActivityTypeRow) {
+    setNonProjectActivityTypeBusy(true);
+    const { error } = await supabase.from("non_project_activity_types").update({ is_active: !a.is_active }).eq("id", a.id);
+    setNonProjectActivityTypeBusy(false);
+    if (error) {
+      window.alert(`Couldn't update: ${error.message}`);
+      return;
+    }
+    loadNonProjectActivityTypes();
+  }
+
+  async function moveNonProjectActivityType(a: NonProjectActivityTypeRow, direction: "up" | "down") {
+    const idx = nonProjectActivityTypes.findIndex((x) => x.id === a.id);
+    const neighborIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (idx === -1 || neighborIdx < 0 || neighborIdx >= nonProjectActivityTypes.length) return;
+    const neighbor = nonProjectActivityTypes[neighborIdx];
+    setNonProjectActivityTypeBusy(true);
+    const [{ error: e1 }, { error: e2 }] = await Promise.all([
+      supabase.from("non_project_activity_types").update({ sort_order: neighbor.sort_order }).eq("id", a.id),
+      supabase.from("non_project_activity_types").update({ sort_order: a.sort_order }).eq("id", neighbor.id),
+    ]);
+    setNonProjectActivityTypeBusy(false);
+    if (e1 || e2) {
+      window.alert(`Couldn't reorder: ${(e1 ?? e2)?.message}`);
+      return;
+    }
+    loadNonProjectActivityTypes();
+  }
+
+  async function reorderNonProjectActivityTypes(orderedIds: string[]) {
+    setNonProjectActivityTypeBusy(true);
+    const results = await Promise.all(
+      orderedIds.map((id, idx) => supabase.from("non_project_activity_types").update({ sort_order: idx + 1 }).eq("id", id))
+    );
+    setNonProjectActivityTypeBusy(false);
+    const err = results.find((r) => r.error)?.error;
+    if (err) {
+      window.alert(`Couldn't reorder: ${err.message}`);
+      return;
+    }
+    loadNonProjectActivityTypes();
+  }
+
+  // Delete: only allowed when no time entry currently references this
+  // Activity Type, same convention as deleteOutputType/deleteWorkType.
+  async function deleteNonProjectActivityType(a: NonProjectActivityTypeRow) {
+    setNonProjectActivityTypeBusy(true);
+    const { count, error: countError } = await supabase
+      .from("time_entries")
+      .select("id", { count: "exact", head: true })
+      .eq("activity_type_id", a.id);
+    if (countError) {
+      setNonProjectActivityTypeBusy(false);
+      window.alert(`Couldn't check usage: ${countError.message}`);
+      return;
+    }
+    if ((count ?? 0) > 0) {
+      setNonProjectActivityTypeBusy(false);
+      window.alert(
+        `Can't delete -- ${count} time ${count === 1 ? "entry" : "entries"} still use this Activity Type. Deactivate it instead.`
+      );
+      return;
+    }
+    if (!window.confirm(`Delete "${a.name}"? This can't be undone. (Only possible because no time entry currently uses it -- Activity Types in use can't be deleted.)`)) {
+      setNonProjectActivityTypeBusy(false);
+      return;
+    }
+    const { error } = await supabase.from("non_project_activity_types").delete().eq("id", a.id);
+    setNonProjectActivityTypeBusy(false);
+    if (error) {
+      window.alert(`Couldn't delete: ${error.message}`);
+      return;
+    }
+    loadNonProjectActivityTypes();
+  }
+
   // Start Project Decline Reasons (Phase 46, 2026-09-08) -- full CRUD
   // set, same shape as Time Logging Reasons above, except rename
   // cascades into project_baseline_requests.decline_reason (plain text,
@@ -1656,6 +1804,7 @@ export default function SiteSettings() {
       loadProjectTypes();
       loadBaselineDeclineReasons();
       loadTaskCancellationReasons();
+      loadNonProjectActivityTypes();
     }
   }, [me?.access_level]);
 
@@ -1800,6 +1949,21 @@ export default function SiteSettings() {
               <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>{timeEntryReasonsLoading ? "…" : listSummary(timeEntryReasons)}</td>
               <td>
                 <button onClick={() => setManageDrawer("reasons")} style={manageButtonStyle}>
+                  Manage List
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>Non-Project Activity Types</div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                  Offered when logging non-project time in Time Tracking (meetings, huddles, admin -- work not tied
+                  to a project task).
+                </div>
+              </td>
+              <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>{nonProjectActivityTypesLoading ? "…" : listSummary(nonProjectActivityTypes)}</td>
+              <td>
+                <button onClick={() => setManageDrawer("non_project_activity_types")} style={manageButtonStyle}>
                   Manage List
                 </button>
               </td>
@@ -2491,6 +2655,118 @@ export default function SiteSettings() {
                           {r.is_active ? <ShieldOff size={13} /> : <ShieldCheck size={13} />}
                         </button>
                         <button onClick={() => deleteTimeEntryReason(r)} disabled={timeEntryReasonBusy} title="Delete (only if unused)" style={iconBtnStyle("var(--danger-text)")}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : manageDrawer === "non_project_activity_types" ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>Manage Non-Project Activity Types</div>
+                  <button onClick={() => setManageDrawer(null)} style={{ display: "flex", background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+                    <X size={16} />
+                  </button>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 14 }}>
+                  Drag the grip handle to reorder. Offered on the Non-project toggle when someone logs time in Time
+                  Tracking. Keep an "Others" entry -- that form requires a note whenever it's picked. Deactivating
+                  keeps a type's label on any entry that already has it set -- it just disappears from the picker
+                  on new entries.
+                </div>
+
+                <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                  <input
+                    value={newNonProjectActivityTypeName}
+                    onChange={(e) => setNewNonProjectActivityTypeName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addNonProjectActivityType();
+                    }}
+                    placeholder="New activity type name"
+                    spellCheck={false}
+                    autoComplete="off"
+                    style={{ ...inputStyle, marginTop: 0, flex: 1 }}
+                  />
+                  <button onClick={addNonProjectActivityType} disabled={nonProjectActivityTypeBusy || !newNonProjectActivityTypeName.trim()} style={addButtonStyle(!newNonProjectActivityTypeName.trim())}>
+                    <Plus size={14} />
+                    Add
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+                  {nonProjectActivityTypesLoading && <div style={{ padding: 10, fontSize: 11.5, color: "var(--muted)" }}>Loading…</div>}
+                  {!nonProjectActivityTypesLoading && nonProjectActivityTypes.length === 0 && (
+                    <div style={{ padding: 10, fontSize: 11.5, color: "var(--muted)" }}>None yet.</div>
+                  )}
+                  {nonProjectActivityTypes.map((a) => {
+                    const isEditing = editingNonProjectActivityTypeId === a.id;
+                    const isDragging = draggedNonProjectActivityTypeId === a.id;
+                    return (
+                      <div
+                        key={a.id}
+                        onDragOver={(e) => {
+                          if (!draggedNonProjectActivityTypeId || draggedNonProjectActivityTypeId === a.id) return;
+                          e.preventDefault();
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (!draggedNonProjectActivityTypeId) return;
+                          const ids = nonProjectActivityTypes.map((x) => x.id);
+                          const without = ids.filter((id) => id !== draggedNonProjectActivityTypeId);
+                          without.splice(without.indexOf(a.id), 0, draggedNonProjectActivityTypeId);
+                          setDraggedNonProjectActivityTypeId(null);
+                          reorderNonProjectActivityTypes(without);
+                        }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          padding: "7px 10px",
+                          borderBottom: "1px solid var(--border)",
+                          opacity: isDragging ? 0.4 : a.is_active ? 1 : 0.55,
+                        }}
+                      >
+                        <span
+                          draggable
+                          onDragStart={() => setDraggedNonProjectActivityTypeId(a.id)}
+                          onDragEnd={() => setDraggedNonProjectActivityTypeId(null)}
+                          title="Drag to reorder"
+                          style={{ display: "flex", cursor: "grab", color: "var(--text-secondary)", flexShrink: 0 }}
+                        >
+                          <GripVertical size={14} />
+                        </span>
+                        {isEditing ? (
+                          <input
+                            value={editNonProjectActivityTypeName}
+                            onChange={(e) => setEditNonProjectActivityTypeName(e.target.value)}
+                            onBlur={() => saveNonProjectActivityTypeRename(a.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveNonProjectActivityTypeRename(a.id);
+                              if (e.key === "Escape") setEditingNonProjectActivityTypeId(null);
+                            }}
+                            autoFocus
+                            spellCheck={false}
+                            autoComplete="off"
+                            style={{ ...inputStyle, marginTop: 0, flex: 1, fontWeight: 600 }}
+                          />
+                        ) : (
+                          <span
+                            onClick={() => startEditNonProjectActivityType(a)}
+                            title="Click to rename"
+                            style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: "var(--navy)", cursor: "pointer" }}
+                          >
+                            {a.name}
+                          </span>
+                        )}
+                        <span className={`status-pill ${a.is_active ? "success" : "neutral"}`} style={{ fontSize: 10 }}>
+                          {a.is_active ? "Active" : "Off"}
+                        </span>
+                        <button onClick={() => toggleNonProjectActivityTypeActive(a)} disabled={nonProjectActivityTypeBusy} title={a.is_active ? "Deactivate" : "Reactivate"} style={iconBtnStyle(a.is_active ? "var(--danger-text)" : "var(--success-text)")}>
+                          {a.is_active ? <ShieldOff size={13} /> : <ShieldCheck size={13} />}
+                        </button>
+                        <button onClick={() => deleteNonProjectActivityType(a)} disabled={nonProjectActivityTypeBusy} title="Delete (only if unused)" style={iconBtnStyle("var(--danger-text)")}>
                           <Trash2 size={13} />
                         </button>
                       </div>

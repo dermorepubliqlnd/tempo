@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { formatDuration, submitManualTimeEntry, decideTimeEntry, correctTimeEntry } from "../lib/timeTracking";
+import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, decideTimeEntry, correctTimeEntry } from "../lib/timeTracking";
 import { useSearchParams } from "react-router-dom";
 
 interface PersonLite {
@@ -23,6 +23,15 @@ interface TimeEntryReasonRow {
   is_active: boolean;
 }
 
+// Non-Project Activity Types (Phase 59, 2026-09-22) -- admin-configurable
+// via Site Settings, same id/name/sort_order/is_active shape as Work
+// Types/Output Types/Time Logging Reasons.
+interface NonProjectActivityTypeRow {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
 interface TaskLite {
   id: string;
   name: string;
@@ -35,7 +44,9 @@ interface TaskLite {
 
 interface EntryRow {
   id: string;
-  task_id: string;
+  // 2026-09-22: null on a non-project entry -- see activity_type below.
+  task_id: string | null;
+  activity_type_id: string | null;
   person_id: string;
   started_at: string;
   ended_at: string | null;
@@ -55,6 +66,7 @@ interface EntryRow {
   correction_notes: string | null;
   created_at: string;
   task: TaskLite | null;
+  activity_type: { id: string; name: string } | null;
   person: { id: string; name: string } | null;
 }
 
@@ -221,6 +233,14 @@ export default function TimeTracking() {
   const [statusFilter, setStatusFilter] = useState<"all" | "pending_approval" | "approved" | "rejected">("all");
 
   const [showLogForm, setShowLogForm] = useState(false);
+  // 2026-09-22 (Sandra: non-project time -- meetings, team huddles --
+  // shouldn't have to fake a task under a real project): toggle at the
+  // top of this same form swaps the Project/Task pickers for an
+  // Activity Type picker instead. Everything else (date/start/end,
+  // notes, the pending_approval lifecycle) is unchanged.
+  const [logMode, setLogMode] = useState<"project" | "non_project">("project");
+  const [nonProjectActivityTypes, setNonProjectActivityTypes] = useState<NonProjectActivityTypeRow[]>([]);
+  const [logActivityTypeId, setLogActivityTypeId] = useState("");
   const [logProjectId, setLogProjectId] = useState("");
   const [logTaskId, setLogTaskId] = useState("");
   const [logStartDate, setLogStartDate] = useState(toDateInputValue());
@@ -234,25 +254,30 @@ export default function TimeTracking() {
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: entryData }, { data: peopleData }, { data: taskData }, { data: reasonData }] = await Promise.all([
+    const [{ data: entryData }, { data: peopleData }, { data: taskData }, { data: reasonData }, { data: activityTypeData }] = await Promise.all([
       supabase
         .from("time_entries")
         .select(
-          `id, task_id, person_id, started_at, ended_at, duration_minutes, source, status, requested_by, reason_category, reason_notes, auto_stopped,
+          `id, task_id, activity_type_id, person_id, started_at, ended_at, duration_minutes, source, status, requested_by, reason_category, reason_notes, auto_stopped,
            decided_by, decided_at, decision_notes, corrected_by, corrected_at, original_duration_minutes, correction_notes, created_at,
            task:tasks ( id, name, assignee_id, project_id, project:projects ( id, name, owner_id ) ),
+           activity_type:non_project_activity_types ( id, name ),
            person:people!time_entries_person_id_fkey ( id, name )`
         )
         .order("started_at", { ascending: false }),
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
       supabase.from("tasks").select("id,name,assignee_id,project_id,current_due_date,status,project:projects(id,name,owner_id,timelines_locked,wbs_status)").eq("is_archived", false),
       supabase.from("time_entry_reasons").select("id,name,is_active").order("sort_order"),
+      supabase.from("non_project_activity_types").select("id,name,is_active").order("sort_order"),
     ]);
     setEntries(((entryData as unknown as EntryRow[]) ?? []));
     setPeople((peopleData as PersonLite[]) ?? []);
     setMyTasks((((taskData as unknown as TaskLite[]) ?? [])).filter((t) => t.assignee_id === me?.id));
     const reasons = (reasonData as TimeEntryReasonRow[]) ?? [];
     setReasonOptions(reasons);
+    const activityTypes = (activityTypeData as NonProjectActivityTypeRow[]) ?? [];
+    setNonProjectActivityTypes(activityTypes);
+    setLogActivityTypeId((current) => current || activityTypes.find((a) => a.is_active)?.id || "");
     // Default the manual-entry form to the first active reason -- only set
     // once (on first successful load, or if the field's still blank), so
     // it doesn't stomp on a choice already made mid-edit.
@@ -273,6 +298,15 @@ export default function TimeTracking() {
   function canDecide(row: EntryRow): boolean {
     if (!me) return false;
     if (me.access_level === "full") return true;
+    // 2026-09-22: a non-project entry has no project owner to defer to --
+    // authority is the logger's own manager instead (mirrors
+    // can_decide_time_entry's server-side non-project branch, including
+    // the "no one active above me" self-exemption).
+    if (row.activity_type_id) {
+      const logger = people.find((p) => p.id === row.person_id);
+      if (!logger?.reports_to) return row.person_id === me.id;
+      return logger.reports_to === me.id;
+    }
     const ownerId = row.task?.project?.owner_id;
     if (!ownerId) return false;
     const requesterId = row.requested_by;
@@ -285,8 +319,9 @@ export default function TimeTracking() {
   }
 
   async function decide(row: EntryRow, status: "approved" | "rejected") {
+    const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
     if (status === "rejected") {
-      const ok = await confirm({ message: `Reject this manual time entry for "${row.task?.name}"?`, confirmLabel: "Reject", danger: true });
+      const ok = await confirm({ message: `Reject this manual time entry for ${label}?`, confirmLabel: "Reject", danger: true });
       if (!ok) return;
     }
     setDecidingId(row.id);
@@ -326,6 +361,45 @@ export default function TimeTracking() {
 
   async function handleSubmitManual() {
     setLogError(null);
+    if (logMode === "non_project") {
+      // 2026-09-22 (Sandra: "notes be optional except when Others is
+      // selected, where they will be required to specify"). Reason
+      // (Time Logging Reasons) doesn't apply here -- that field answers
+      // "why a manual entry instead of the timer", which isn't relevant
+      // to logging non-project time in the first place.
+      if (!logActivityTypeId) {
+        setLogError("Choose an activity type.");
+        return;
+      }
+      const activityType = nonProjectActivityTypes.find((a) => a.id === logActivityTypeId);
+      if (activityType?.name === "Others" && !logNotes.trim()) {
+        setLogError('Please add a note specifying what this was when "Others" is selected.');
+        return;
+      }
+      const start = new Date(`${logStartDate}T${logStartTime}`);
+      let end = new Date(`${logStartDate}T${logEndTime}`);
+      let clampedAtMidnight = false;
+      if (end <= start) {
+        end = new Date(`${logStartDate}T23:59:59`);
+        clampedAtMidnight = true;
+      }
+      setLogSaving(true);
+      const res = await submitNonProjectTimeEntry(me?.id ?? "", logActivityTypeId, start.toISOString(), end.toISOString(), logNotes.trim());
+      setLogSaving(false);
+      if (res.error) {
+        setLogError(res.error);
+        return;
+      }
+      setShowLogForm(false);
+      setLogNotes("");
+      await alert(
+        clampedAtMidnight
+          ? "Time entry submitted -- your end time was before the start time, so it was clamped to 11:59 PM the same day. It goes to your manager for approval."
+          : "Time entry submitted -- it goes to your manager for approval."
+      );
+      loadAll();
+      return;
+    }
     if (!logTaskId) {
       setLogError("Choose a task.");
       return;
@@ -454,13 +528,20 @@ export default function TimeTracking() {
                 <span className="status-pill neutral" style={{ fontSize: 9.5, marginBottom: 4, display: "inline-block" }}>
                   {SOURCE_LABEL[row.source]}
                 </span>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>{row.task?.name ?? "Untitled task"}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", display: "flex", alignItems: "center", gap: 6 }}>
+                  {row.activity_type_id ? (row.activity_type?.name ?? "Non-project") : row.task?.name ?? "Untitled task"}
+                  {row.activity_type_id && (
+                    <span className="status-pill neutral" style={{ fontSize: 9 }}>
+                      Non-project
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div style={{ minWidth: 170, flex: "1 1 170px", display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-secondary)" }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   <Folder size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
-                  {row.task?.project?.name ?? "—"}
+                  {row.activity_type_id ? "—" : row.task?.project?.name ?? "—"}
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   <User size={11} style={{ color: "var(--muted)", flexShrink: 0 }} />
@@ -642,37 +723,85 @@ export default function TimeTracking() {
           </button>
         ) : (
           <div className="card" style={{ padding: 14, maxWidth: 480 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10, color: "var(--navy)" }}>Log time manually</div>
-            {/* Sandra, 2026-08-26: "allow project selection in the time
-                tracker then next will be task" -- Project first narrows
-                down which tasks show, then Task, both searchable. */}
-            <label style={{ display: "block", marginBottom: 8 }}>
-              <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Project</span>
-              <SearchSelect
-                placeholder="Choose a project…"
-                value={logProjectId}
-                onChange={(id) => {
-                  setLogProjectId(id);
-                  setLogTaskId("");
-                }}
-                options={loggableProjectOptions}
-              />
-            </label>
-            <label style={{ display: "block", marginBottom: 8 }}>
-              <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Task (assigned to you)</span>
-              <SearchSelect
-                placeholder={logProjectId ? "Choose a task…" : "Choose a project first"}
-                value={logTaskId}
-                onChange={setLogTaskId}
-                disabled={!logProjectId}
-                options={loggableTasksForProject}
-              />
-              {loggableProjectOptions.length === 0 && (
-                <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-                  None of your tasks are loggable right now -- either their project's baseline hasn't been locked in WBS Planning, or they're already marked Done.
-                </span>
-              )}
-            </label>
+            <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10, color: "var(--navy)" }}>Log time</div>
+            {/* 2026-09-22 (Sandra: non-project time -- meetings, team
+                huddles -- shouldn't need a fake task under a real
+                project). This toggle swaps Project/Task for a single
+                Activity Type picker; date/start/end, notes and the
+                approval lifecycle stay the same either way. */}
+            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+              {(["project", "non_project"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setLogMode(mode)}
+                  style={{
+                    flex: 1,
+                    textAlign: "center",
+                    padding: "8px 0",
+                    borderRadius: "var(--radius-sm)",
+                    border: `1px solid ${logMode === mode ? "var(--accent)" : "var(--border)"}`,
+                    background: logMode === mode ? "var(--accent-bg, #eaf2fb)" : "transparent",
+                    fontSize: 12,
+                    fontWeight: logMode === mode ? 600 : 500,
+                    color: logMode === mode ? "var(--accent)" : "var(--text-secondary)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {mode === "project" ? "Project task" : "Non-project"}
+                </button>
+              ))}
+            </div>
+            {logMode === "non_project" ? (
+              <label style={{ display: "block", marginBottom: 8 }}>
+                <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Activity type</span>
+                <select
+                  value={logActivityTypeId}
+                  onChange={(e) => setLogActivityTypeId(e.target.value)}
+                  style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                >
+                  {nonProjectActivityTypes
+                    .filter((a) => a.is_active || a.id === logActivityTypeId)
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            ) : (
+              <>
+                {/* Sandra, 2026-08-26: "allow project selection in the time
+                    tracker then next will be task" -- Project first narrows
+                    down which tasks show, then Task, both searchable. */}
+                <label style={{ display: "block", marginBottom: 8 }}>
+                  <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Project</span>
+                  <SearchSelect
+                    placeholder="Choose a project…"
+                    value={logProjectId}
+                    onChange={(id) => {
+                      setLogProjectId(id);
+                      setLogTaskId("");
+                    }}
+                    options={loggableProjectOptions}
+                  />
+                </label>
+                <label style={{ display: "block", marginBottom: 8 }}>
+                  <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Task (assigned to you)</span>
+                  <SearchSelect
+                    placeholder={logProjectId ? "Choose a task…" : "Choose a project first"}
+                    value={logTaskId}
+                    onChange={setLogTaskId}
+                    disabled={!logProjectId}
+                    options={loggableTasksForProject}
+                  />
+                  {loggableProjectOptions.length === 0 && (
+                    <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
+                      None of your tasks are loggable right now -- either their project's baseline hasn't been locked in WBS Planning, or they're already marked Done.
+                    </span>
+                  )}
+                </label>
+              </>
+            )}
             {/* Sandra, 2026-08-26: "add in the time tracker a view for the
                 user to see logged hours for the task selected, and due
                 date" -- context while filling out the form, so someone
@@ -680,7 +809,7 @@ export default function TimeTracking() {
                 the task and when it's due, without leaving this page.
                 Logged hours only counts Confirmed/Approved entries (same
                 rule Spent Hrs uses elsewhere -- see ownHoursFor). */}
-            {logTaskId &&
+            {logMode === "project" && logTaskId &&
               (() => {
                 const selectedTask = myTasks.find((t) => t.id === logTaskId);
                 const loggedMinutes = entries
@@ -746,45 +875,68 @@ export default function TimeTracking() {
               </label>
             </div>
             <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 8 }}>Ends past midnight? It'll be clamped to 11:59 PM the same day.</div>
-            <label style={{ display: "block", marginBottom: 8 }}>
-              <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Reason</span>
-              <select
-                value={logReasonCategory}
-                onChange={(e) => setLogReasonCategory(e.target.value)}
-                style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-              >
-                {reasonOptions
-                  .filter((r) => r.is_active || r.name === logReasonCategory)
-                  .map((r) => (
-                    <option key={r.id} value={r.name}>
-                      {r.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            {logReasonCategory === "Other" && (
-              <label style={{ display: "block", marginBottom: 10 }}>
-                <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Specify</span>
-                <input
-                  type="text"
-                  value={logNotes}
-                  onChange={(e) => setLogNotes(e.target.value)}
-                  placeholder="What happened?"
-                  style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
-                />
-              </label>
+            {logMode === "project" && (
+              <>
+                <label style={{ display: "block", marginBottom: 8 }}>
+                  <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Reason</span>
+                  <select
+                    value={logReasonCategory}
+                    onChange={(e) => setLogReasonCategory(e.target.value)}
+                    style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                  >
+                    {reasonOptions
+                      .filter((r) => r.is_active || r.name === logReasonCategory)
+                      .map((r) => (
+                        <option key={r.id} value={r.name}>
+                          {r.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                {logReasonCategory === "Other" && (
+                  <label style={{ display: "block", marginBottom: 10 }}>
+                    <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Specify</span>
+                    <input
+                      type="text"
+                      value={logNotes}
+                      onChange={(e) => setLogNotes(e.target.value)}
+                      placeholder="What happened?"
+                      style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
+                    />
+                  </label>
+                )}
+                {logReasonCategory !== "Other" && (
+                  <label style={{ display: "block", marginBottom: 10 }}>
+                    <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Additional details (optional)</span>
+                    <input
+                      type="text"
+                      value={logNotes}
+                      onChange={(e) => setLogNotes(e.target.value)}
+                      style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
+                    />
+                  </label>
+                )}
+              </>
             )}
-            {logReasonCategory !== "Other" && (
-              <label style={{ display: "block", marginBottom: 10 }}>
-                <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Additional details (optional)</span>
-                <input
-                  type="text"
-                  value={logNotes}
-                  onChange={(e) => setLogNotes(e.target.value)}
-                  style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
-                />
-              </label>
-            )}
+            {logMode === "non_project" &&
+              (() => {
+                const activityType = nonProjectActivityTypes.find((a) => a.id === logActivityTypeId);
+                const notesRequired = activityType?.name === "Others";
+                return (
+                  <label style={{ display: "block", marginBottom: 10 }}>
+                    <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>
+                      Notes {notesRequired ? "(required for Others)" : "(optional)"}
+                    </span>
+                    <input
+                      type="text"
+                      value={logNotes}
+                      onChange={(e) => setLogNotes(e.target.value)}
+                      placeholder={notesRequired ? "What was this?" : "e.g. Weekly team sync"}
+                      style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
+                    />
+                  </label>
+                );
+              })()}
             {logError && <div style={{ color: "var(--danger-text)", fontSize: 11.5, marginBottom: 8 }}>{logError}</div>}
             <div style={{ display: "flex", gap: 8 }}>
               <button

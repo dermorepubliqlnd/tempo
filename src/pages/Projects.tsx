@@ -5586,7 +5586,7 @@ export default function Projects() {
         const childIds = tasks.filter((tt) => tt.parent_task_id === task.id).map((tt) => tt.id);
         const relevantTaskIds = new Set([task.id, ...childIds]);
         const entries = timeEntries
-          .filter((e) => relevantTaskIds.has(e.task_id))
+          .filter((e) => e.task_id != null && relevantTaskIds.has(e.task_id))
           .slice()
           .sort((a, b) => a.started_at.localeCompare(b.started_at));
         const byPerson = new Map<string, TimeEntryRow[]>();

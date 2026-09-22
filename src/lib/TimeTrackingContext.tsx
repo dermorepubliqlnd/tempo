@@ -90,9 +90,13 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
 
     const rows = (data as unknown as (TimeEntryRow & { task: { name: string } | null })[]) ?? [];
     const runningRow = rows.find((r) => r.status === "running");
+    // 2026-09-22: task_id is nullable on TimeEntryRow now (non-project
+    // entries), but running/pending_confirm rows are always timer-based
+    // and timers only ever run against a task -- non-project logging is
+    // manual-only and lands straight in pending_approval. Safe to assert.
     setRunning(
       runningRow
-        ? { id: runningRow.id, task_id: runningRow.task_id, task_name: runningRow.task?.name ?? "Untitled task", started_at: runningRow.started_at }
+        ? { id: runningRow.id, task_id: runningRow.task_id as string, task_name: runningRow.task?.name ?? "Untitled task", started_at: runningRow.started_at }
         : null
     );
     setPendingConfirm(
@@ -100,7 +104,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         .filter((r) => r.status === "pending_confirm")
         .map((r) => ({
           id: r.id,
-          task_id: r.task_id,
+          task_id: r.task_id as string,
           task_name: r.task?.name ?? "Untitled task",
           started_at: r.started_at,
           ended_at: r.ended_at!,

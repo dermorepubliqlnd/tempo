@@ -81,7 +81,9 @@ interface ExtensionRow {
 
 interface TimeEntryRowLite {
   id: string;
-  task_id: string;
+  // 2026-09-22: null on a non-project entry -- see activity_type below.
+  task_id: string | null;
+  activity_type_id: string | null;
   person_id: string;
   started_at: string;
   duration_minutes: number | null;
@@ -94,6 +96,7 @@ interface TimeEntryRowLite {
     project_id: string;
     project: { id: string; name: string; owner_id: string | null } | null;
   } | null;
+  activity_type: { id: string; name: string } | null;
   person: { id: string; name: string } | null;
 }
 
@@ -230,8 +233,9 @@ export default function ApprovalCenter() {
       supabase
         .from("time_entries")
         .select(
-          `id, task_id, person_id, started_at, duration_minutes, requested_by, reason_category, reason_notes,
+          `id, task_id, activity_type_id, person_id, started_at, duration_minutes, requested_by, reason_category, reason_notes,
            task:tasks ( id, name, project_id, project:projects ( id, name, owner_id ) ),
+           activity_type:non_project_activity_types ( id, name ),
            person:people!time_entries_person_id_fkey ( id, name )`
         )
         .eq("status", "pending_approval")
@@ -314,6 +318,14 @@ export default function ApprovalCenter() {
   function canDecideTimeEntry(row: TimeEntryRowLite): boolean {
     if (!me) return false;
     if (isFullAccess) return true;
+    // 2026-09-22: a non-project entry has no project owner to defer to --
+    // authority is the logger's own manager chain instead (same
+    // nearestActiveManager helper task validation already uses,
+    // including its "no one active above me" self-exemption).
+    if (row.activity_type_id) {
+      const mgr = nearestActiveManager(row.person_id);
+      return mgr === me.id || (mgr === null && row.person_id === me.id);
+    }
     const ownerId = row.task?.project?.owner_id ?? null;
     if (!ownerId) return false;
     const requesterId = row.requested_by;
@@ -601,12 +613,17 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
 
     timeEntries.forEach((row) => {
       const key = `time-${row.id}`;
+      // 2026-09-22: a non-project entry has an activity type instead of a
+      // task/project -- surfaced the same way, just with a "Non-project"
+      // typeLabel instead of "Time Entry" so it reads distinctly in the
+      // shared list.
+      const isNonProject = Boolean(row.activity_type_id);
       rows.push({
         key,
         kind: "time",
-        typeLabel: "Time Entry",
-        subject: row.task?.name ?? "Untitled task",
-        context: row.task?.project?.name ?? "—",
+        typeLabel: isNonProject ? "Non-project Time" : "Time Entry",
+        subject: isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task",
+        context: isNonProject ? "Non-project" : row.task?.project?.name ?? "—",
         requestedByName: row.person?.name ?? "—",
         requestedAt: row.started_at,
         reasonCategory: row.reason_category,
