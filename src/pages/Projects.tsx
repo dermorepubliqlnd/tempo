@@ -4071,6 +4071,26 @@ export default function Projects() {
                   });
                   return;
                 }
+                // 2026-09-22 (Sandra: "we have output count that is 0,
+                // can you add a verifying layer if output count is 0 to
+                // confirm there was really no output for this task") --
+                // Output Count = 0 passes the "is it set" check above (0
+                // is a real, deliberate value, not missing), but it's
+                // also the easiest value to leave behind by accident, so
+                // it gets its own extra confirmation, separate from and
+                // before the general completion confirm below. Cancelling
+                // here aborts the whole commit so nothing gets saved.
+                if (outputCount === 0) {
+                  const zeroOk = await confirm({
+                    title: "Output Count is 0",
+                    message:
+                      `**Output Count** is set to 0 for this task. Confirm that this task genuinely produced no output.\n\n` +
+                      `If that's not right, cancel and enter the actual number in the Output Count column first.`,
+                    confirmLabel: "Yes, 0 is correct",
+                    cancelLabel: "Cancel, let me fix it",
+                  });
+                  if (!zeroOk) return;
+                }
                 // 2026-09-22 (Sandra: "before accepting completion date
                 // ask user to confirm logged hours and output count") --
                 // one last look at the numbers behind this task, with the
