@@ -710,6 +710,7 @@ export default function TimeTracking() {
               <th style={th}>Duration</th>
               <th style={th}>Details</th>
               <th style={th}>Requested On</th>
+              <th style={th}>Status</th>
               <th style={{ ...th, textAlign: "center" }}>Action</th>
             </tr>
           </thead>
@@ -730,11 +731,6 @@ export default function TimeTracking() {
                         <span className="status-pill neutral" style={{ fontSize: 9 }}>
                           {SOURCE_LABEL[row.source]}
                         </span>
-                        {isNonProject && (
-                          <span className="status-pill neutral" style={{ fontSize: 9 }}>
-                            Non-project
-                          </span>
-                        )}
                       </div>
                       <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>{title}</div>
                       <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{subtitle}</div>
@@ -769,11 +765,11 @@ export default function TimeTracking() {
                         </span>
                       )}
                     </td>
-                    <td style={{ ...td, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={details !== "—" ? details : undefined}>
+                    <td style={{ ...td, maxWidth: 260, whiteSpace: "normal", wordBreak: "break-word" }}>
                       {details}
                     </td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDateTime(row.created_at)}</td>
-                    <td style={{ ...td, textAlign: "center", minWidth: 150 }}>
+                    <td style={{ ...td, minWidth: 140 }}>
                       <span className={`status-pill ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
                       {row.status !== "pending_approval" && row.status !== "running" && row.status !== "pending_confirm" && row.decided_by && (
                         <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>
@@ -792,6 +788,8 @@ export default function TimeTracking() {
                           {row.correction_notes && <> — "{row.correction_notes}"</>}
                         </div>
                       )}
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
                       {canCorrect && !correcting && (
                         <button
                           onClick={() => {
@@ -802,17 +800,17 @@ export default function TimeTracking() {
                               reasonCategory: row.reason_category ?? "",
                             });
                           }}
-                          style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer", whiteSpace: "nowrap", marginTop: 6 }}
+                          title="Correct"
+                          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
                         >
-                          <Pencil size={11} />
-                          Correct
+                          <Pencil size={13} />
                         </button>
                       )}
                     </td>
                   </tr>
                   {canCorrect && correcting && (
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td colSpan={8} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
+                      <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                           <input
                             type="number"
