@@ -212,7 +212,8 @@ export default function HoursOverview() {
         supabase
           .from("time_entries")
           .select("id,task_id,activity_type_id,person_id,started_at,duration_minutes,status,activity_type:non_project_activity_types ( id, name )")
-          .in("status", ["confirmed", "approved"]),
+          .in("status", ["confirmed", "approved"])
+          .eq("is_archived", false),
         supabase.from("holidays").select("*"),
         supabase.from("person_availability").select("person_id,date,status"),
         supabase.from("project_owner_history").select("project_id,person_id,effective_from,effective_to"),

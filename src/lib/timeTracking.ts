@@ -37,6 +37,13 @@ export interface TimeEntryRow {
   original_duration_minutes: number | null;
   correction_notes: string | null;
   created_at: string;
+  // 2026-09-23 (phase63): admin soft-delete for a confirmed/approved
+  // entry -- reversible, excluded from every hour rollup (isCountedEntry
+  // below). See archiveTimeEntry/unarchiveTimeEntry.
+  is_archived?: boolean;
+  archived_at?: string | null;
+  archived_by?: string | null;
+  archive_reason?: string | null;
 }
 
 // Only these statuses represent finalized, real time -- Spent Hrs (and any
@@ -46,8 +53,8 @@ const COUNTED_STATUSES: TimeEntryStatus[] = ["confirmed", "approved", "legacy"] 
 // so in practice this is just ['confirmed', 'approved'] -- kept as a
 // named constant so the intent reads clearly at call sites.)
 
-export function isCountedEntry(e: Pick<TimeEntryRow, "status">): boolean {
-  return e.status === "confirmed" || e.status === "approved";
+export function isCountedEntry(e: Pick<TimeEntryRow, "status" | "is_archived">): boolean {
+  return (e.status === "confirmed" || e.status === "approved") && !e.is_archived;
 }
 
 export function minutesFor(entries: TimeEntryRow[], taskId: string): number {
@@ -216,12 +223,19 @@ export async function submitNonProjectTimeEntry(
 // full access only") -- omit/undefined leaves the entry's existing
 // reason_category untouched (see correct_time_entry's p_reason_category
 // default null + coalesce in policies.sql).
-export async function correctTimeEntry(entryId: string, durationMinutes: number, notes: string, reasonCategory?: string): Promise<{ error?: string }> {
+export async function correctTimeEntry(
+  entryId: string,
+  durationMinutes: number,
+  notes: string,
+  reasonCategory?: string,
+  activityTypeId?: string
+): Promise<{ error?: string }> {
   const { error } = await supabase.rpc("correct_time_entry", {
     p_entry_id: entryId,
     p_duration_minutes: durationMinutes,
     p_notes: notes,
     p_reason_category: reasonCategory ?? null,
+    p_activity_type_id: activityTypeId ?? null,
   });
   if (error) return { error: error.message };
   return {};
@@ -254,6 +268,24 @@ export async function editPendingManualTimeEntry(
 
 export async function deletePendingManualTimeEntry(entryId: string): Promise<{ error?: string }> {
   const { error } = await supabase.rpc("delete_pending_manual_time_entry", { p_entry_id: entryId });
+  if (error) return { error: error.message };
+  return {};
+}
+
+// 2026-09-23 (phase63, Sandra: "can admin delete timelogs that have been
+// approved -- can be soft first and archived") -- reversible soft-delete
+// for a confirmed/approved entry, Full Access only. Archived entries
+// stay on record (trail visible in the table) but drop out of every
+// Spent Hrs / Scoped-vs-Logged / dashboard rollup via isCountedEntry
+// above + each rollup query's `.eq("is_archived", false)`.
+export async function archiveTimeEntry(entryId: string, reason?: string): Promise<{ error?: string }> {
+  const { error } = await supabase.rpc("archive_time_entry", { p_entry_id: entryId, p_reason: reason ?? null });
+  if (error) return { error: error.message };
+  return {};
+}
+
+export async function unarchiveTimeEntry(entryId: string): Promise<{ error?: string }> {
+  const { error } = await supabase.rpc("unarchive_time_entry", { p_entry_id: entryId });
   if (error) return { error: error.message };
   return {};
 }

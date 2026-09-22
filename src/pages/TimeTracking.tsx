@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, Pencil, Timer, Trash2 } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, Pencil, Timer, Trash2, Archive, RotateCcw } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, decideTimeEntry, correctTimeEntry, editPendingManualTimeEntry, deletePendingManualTimeEntry } from "../lib/timeTracking";
+import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, decideTimeEntry, correctTimeEntry, editPendingManualTimeEntry, deletePendingManualTimeEntry, archiveTimeEntry, unarchiveTimeEntry } from "../lib/timeTracking";
 import { useSearchParams } from "react-router-dom";
 
 interface PersonLite {
@@ -65,6 +65,12 @@ interface EntryRow {
   original_duration_minutes: number | null;
   correction_notes: string | null;
   created_at: string;
+  // 2026-09-23 (phase63): admin soft-delete, reversible, excluded from
+  // every hour rollup.
+  is_archived: boolean;
+  archived_at: string | null;
+  archived_by: string | null;
+  archive_reason: string | null;
   task: TaskLite | null;
   activity_type: { id: string; name: string } | null;
   person: { id: string; name: string } | null;
@@ -281,7 +287,9 @@ export default function TimeTracking() {
   // rejecting this" note box is expanded, if any.
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [correctingId, setCorrectingId] = useState<string | null>(null);
-  const [correctDraft, setCorrectDraft] = useState<{ hours: string; notes: string; reasonCategory: string }>({ hours: "", notes: "", reasonCategory: "" });
+  const [correctDraft, setCorrectDraft] = useState<{ hours: string; notes: string; reasonCategory: string; activityTypeId: string }>({ hours: "", notes: "", reasonCategory: "", activityTypeId: "" });
+  const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [archiveNotes, setArchiveNotes] = useState("");
   // 2026-09-22 (Sandra: "let's allow the assignee or requestor to delete
   // or make changes with the manual time entry log" while it's still
   // pending_approval) -- separate from correctingId/correctDraft above,
@@ -324,6 +332,7 @@ export default function TimeTracking() {
         .select(
           `id, task_id, activity_type_id, person_id, started_at, ended_at, duration_minutes, source, status, requested_by, reason_category, reason_notes, auto_stopped,
            decided_by, decided_at, decision_notes, corrected_by, corrected_at, original_duration_minutes, correction_notes, created_at,
+           is_archived, archived_at, archived_by, archive_reason,
            task:tasks ( id, name, assignee_id, project_id, project:projects ( id, name, owner_id ) ),
            activity_type:non_project_activity_types ( id, name ),
            person:people!time_entries_person_id_fkey ( id, name )`
@@ -415,17 +424,60 @@ export default function TimeTracking() {
       confirmLabel: "Correct",
     });
     if (!ok) return;
+    // 2026-09-23 (phase63): a non-project entry's correctable field is
+    // its Activity Type, not Reason -- Reason was never asked of the
+    // person for these in the first place (see handleSubmitManual).
+    const isNonProject = Boolean(row.activity_type_id);
     const res = await correctTimeEntry(
       row.id,
       Math.round(hours * 60),
       correctDraft.notes.trim() || "Corrected by Full Access",
-      correctDraft.reasonCategory || undefined
+      isNonProject ? undefined : correctDraft.reasonCategory || undefined,
+      isNonProject ? correctDraft.activityTypeId || undefined : undefined
     );
     if (res.error) {
       await alert(`Couldn't correct this entry: ${res.error}`);
       return;
     }
     setCorrectingId(null);
+    loadAll();
+  }
+
+  // 2026-09-23 (phase63, Sandra: "can admin delete timelogs that have
+  // been approved -- can be soft first and archived") -- reversible
+  // soft-delete for a confirmed/approved entry. Excluded from every
+  // hour rollup once archived; the row itself and its trail stay
+  // visible here for audit.
+  function openArchive(row: EntryRow) {
+    setArchiveNotes("");
+    setArchivingId(row.id);
+  }
+
+  async function submitArchive(row: EntryRow) {
+    const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
+    const ok = await confirm({
+      message: `Archive this ${formatDuration(row.duration_minutes)} entry for ${label}? It stays on record but stops counting toward Spent Hrs, Scoped vs Logged, and dashboard totals. You can restore it anytime.`,
+      confirmLabel: "Archive",
+      danger: true,
+    });
+    if (!ok) return;
+    const res = await archiveTimeEntry(row.id, archiveNotes.trim() || undefined);
+    if (res.error) {
+      await alert(`Couldn't archive this entry: ${res.error}`);
+      return;
+    }
+    setArchivingId(null);
+    loadAll();
+  }
+
+  async function submitUnarchive(row: EntryRow) {
+    const ok = await confirm({ message: "Restore this entry? It'll count toward Spent Hrs and other totals again.", confirmLabel: "Restore" });
+    if (!ok) return;
+    const res = await unarchiveTimeEntry(row.id);
+    if (res.error) {
+      await alert(`Couldn't restore this entry: ${res.error}`);
+      return;
+    }
     loadAll();
   }
 
@@ -810,10 +862,15 @@ export default function TimeTracking() {
           </thead>
           <tbody>
             {rows.map((row) => {
-              const canCorrect = isFullAccess && (row.status === "confirmed" || row.status === "approved");
+              const canCorrect = isFullAccess && (row.status === "confirmed" || row.status === "approved") && !row.is_archived;
               const correcting = correctingId === row.id;
               const canEditDelete = canEditDeletePending(row);
               const editing = editingId === row.id;
+              // 2026-09-23 (phase63): admin soft-delete for a
+              // confirmed/approved entry, reversible.
+              const canArchive = isFullAccess && (row.status === "confirmed" || row.status === "approved") && !row.is_archived;
+              const canUnarchive = isFullAccess && row.is_archived;
+              const archiving = archivingId === row.id;
               const isNonProject = Boolean(row.activity_type_id);
               const title = isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
               const subtitle = isNonProject ? "Non-project" : row.task?.project?.name ?? "—";
@@ -821,7 +878,7 @@ export default function TimeTracking() {
               const details = row.reason_notes?.trim() || row.reason_category || "—";
               return (
                 <Fragment key={row.id}>
-                  <tr style={{ borderBottom: correcting || editing ? "none" : "1px solid var(--border)" }}>
+                  <tr style={{ borderBottom: correcting || editing || archiving ? "none" : "1px solid var(--border)" }}>
                     <td style={td}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <span className="status-pill neutral" style={{ fontSize: 9 }}>
@@ -867,6 +924,11 @@ export default function TimeTracking() {
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDateTime(row.created_at)}</td>
                     <td style={{ ...td, minWidth: 140 }}>
                       <span className={`status-pill ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
+                      {row.is_archived && (
+                        <span className="status-pill slate" style={{ marginLeft: 4, fontSize: 9, padding: "1px 5px" }}>
+                          Archived
+                        </span>
+                      )}
                       {row.status !== "pending_approval" && row.status !== "running" && row.status !== "pending_confirm" && row.decided_by && (
                         <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>
                           by {personName(row.decided_by)} on {formatDate(row.decided_at)}
@@ -884,22 +946,51 @@ export default function TimeTracking() {
                           {row.correction_notes && <> — "{row.correction_notes}"</>}
                         </div>
                       )}
+                      {row.is_archived && (
+                        <div style={{ fontSize: 9.5, color: "var(--danger-text)", marginTop: 4 }}>
+                          Archived by {personName(row.archived_by)} on {formatDate(row.archived_at)}
+                          {row.archive_reason && <> — "{row.archive_reason}"</>}
+                        </div>
+                      )}
                     </td>
                     <td style={{ ...td, textAlign: "center" }}>
-                      {canCorrect && !correcting && (
+                      {(canCorrect || canArchive) && !correcting && !archiving && (
+                        <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+                          {canCorrect && (
+                            <button
+                              onClick={() => {
+                                setCorrectingId(row.id);
+                                setCorrectDraft({
+                                  hours: String(Math.round(((row.duration_minutes ?? 0) / 60) * 100) / 100),
+                                  notes: "",
+                                  reasonCategory: row.reason_category ?? "",
+                                  activityTypeId: row.activity_type_id ?? "",
+                                });
+                              }}
+                              title="Correct"
+                              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+                            >
+                              <Pencil size={13} />
+                            </button>
+                          )}
+                          {canArchive && (
+                            <button
+                              onClick={() => openArchive(row)}
+                              title="Archive"
+                              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--danger-text)", background: "none", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+                            >
+                              <Archive size={13} />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {canUnarchive && (
                         <button
-                          onClick={() => {
-                            setCorrectingId(row.id);
-                            setCorrectDraft({
-                              hours: String(Math.round(((row.duration_minutes ?? 0) / 60) * 100) / 100),
-                              notes: "",
-                              reasonCategory: row.reason_category ?? "",
-                            });
-                          }}
-                          title="Correct"
+                          onClick={() => submitUnarchive(row)}
+                          title="Restore"
                           style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
                         >
-                          <Pencil size={13} />
+                          <RotateCcw size={13} />
                         </button>
                       )}
                       {canEditDelete && !editing && (
@@ -922,6 +1013,33 @@ export default function TimeTracking() {
                       )}
                     </td>
                   </tr>
+                  {archiving && (
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <input
+                            type="text"
+                            placeholder="Reason (optional)"
+                            value={archiveNotes}
+                            onChange={(e) => setArchiveNotes(e.target.value)}
+                            style={{ flex: "1 1 220px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                          />
+                          <button
+                            onClick={() => submitArchive(row)}
+                            style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--danger-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                          >
+                            Archive
+                          </button>
+                          <button
+                            onClick={() => setArchivingId(null)}
+                            style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {canEditDelete && editing && (
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
                       <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
@@ -1011,20 +1129,36 @@ export default function TimeTracking() {
                             onChange={(e) => setCorrectDraft((d) => ({ ...d, hours: e.target.value }))}
                             style={{ width: 110, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
                           />
-                          <select
-                            value={correctDraft.reasonCategory}
-                            onChange={(e) => setCorrectDraft((d) => ({ ...d, reasonCategory: e.target.value }))}
-                            style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                          >
-                            <option value="">No reason</option>
-                            {reasonOptions
-                              .filter((r) => r.is_active || r.name === correctDraft.reasonCategory)
-                              .map((r) => (
-                                <option key={r.id} value={r.name}>
-                                  {r.name}
-                                </option>
-                              ))}
-                          </select>
+                          {row.activity_type_id ? (
+                            <select
+                              value={correctDraft.activityTypeId}
+                              onChange={(e) => setCorrectDraft((d) => ({ ...d, activityTypeId: e.target.value }))}
+                              style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                            >
+                              {nonProjectActivityTypes
+                                .filter((a) => a.is_active || a.id === correctDraft.activityTypeId)
+                                .map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name}
+                                  </option>
+                                ))}
+                            </select>
+                          ) : (
+                            <select
+                              value={correctDraft.reasonCategory}
+                              onChange={(e) => setCorrectDraft((d) => ({ ...d, reasonCategory: e.target.value }))}
+                              style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                            >
+                              <option value="">No reason</option>
+                              {reasonOptions
+                                .filter((r) => r.is_active || r.name === correctDraft.reasonCategory)
+                                .map((r) => (
+                                  <option key={r.id} value={r.name}>
+                                    {r.name}
+                                  </option>
+                                ))}
+                            </select>
+                          )}
                           <input
                             type="text"
                             placeholder="Correction notes"
@@ -1156,7 +1290,7 @@ export default function TimeTracking() {
               (() => {
                 const selectedTask = myTasks.find((t) => t.id === logTaskId);
                 const loggedMinutes = entries
-                  .filter((e) => e.task_id === logTaskId && (e.status === "confirmed" || e.status === "approved"))
+                  .filter((e) => e.task_id === logTaskId && (e.status === "confirmed" || e.status === "approved") && !e.is_archived)
                   .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
                 const loggedHours = Math.round((loggedMinutes / 60) * 100) / 100;
                 return (

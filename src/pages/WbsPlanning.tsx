@@ -1063,7 +1063,7 @@ export default function WbsPlanning() {
     if (taskIds.length) {
       const [{ data: deps }, { data: entries }] = await Promise.all([
         supabase.from("task_dependencies").select("task_id,depends_on_task_id").in("task_id", taskIds),
-        supabase.from("time_entries").select("*").in("task_id", taskIds).in("status", ["confirmed", "approved"]),
+        supabase.from("time_entries").select("*").in("task_id", taskIds).in("status", ["confirmed", "approved"]).eq("is_archived", false),
       ]);
       setDependencies((deps as DependencyRow[]) ?? []);
       setTimeEntries((entries as TimeEntryRow[]) ?? []);

@@ -209,6 +209,7 @@ export default function MyDashboard() {
             .select("id,task_id,person_id,started_at,duration_minutes,status")
             .eq("person_id", me.id)
             .in("status", ["confirmed", "approved"])
+            .eq("is_archived", false)
             .gte("started_at", monthStart.toISOString())
         : Promise.resolve({ data: [] as TimeEntryRow[] }),
       supabase

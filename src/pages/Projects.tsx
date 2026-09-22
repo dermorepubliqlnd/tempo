@@ -1321,7 +1321,7 @@ export default function Projects() {
       // Only confirmed/approved/legacy entries actually count toward Spent
       // Hrs (see rollupHoursFor) -- fetching just those keeps this list
       // small instead of pulling every running/pending/rejected row too.
-      supabase.from("time_entries").select("*").in("status", ["confirmed", "approved"]),
+      supabase.from("time_entries").select("*").in("status", ["confirmed", "approved"]).eq("is_archived", false),
       // Project Notes bubble/count (2026-08-14) -- just the project_id per
       // note, reduced client-side into a count map. The sidebar itself
       // fetches full note rows (body, timestamps, mentions) lazily only

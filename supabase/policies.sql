@@ -909,24 +909,34 @@ grant execute on function decide_time_entry(uuid, text, text) to authenticated;
 -- sites/callers that only correct hours keep working unchanged). Dropped
 -- and recreated rather than adding a second overload, so there's only
 -- ever one `correct_time_entry` in the schema and no ambiguous-call risk.
-drop function if exists correct_time_entry(uuid, numeric, text);
+--
+-- 2026-09-23 (phase63, Sandra: "why are the reasons the same for project
+-- vs non project corrections -- is that relevant?"): added
+-- p_activity_type_id and a task_id-is-null branch, mirroring
+-- edit_pending_manual_time_entry (phase62) -- a non-project entry's
+-- correctable field is its Activity Type, not reason_category (which was
+-- never asked at submission for non-project entries in the first place).
+drop function if exists correct_time_entry(uuid, numeric, text, text);
 
 create or replace function correct_time_entry(
   p_entry_id uuid,
   p_duration_minutes numeric,
   p_notes text,
-  p_reason_category text default null
+  p_reason_category text default null,
+  p_activity_type_id uuid default null
 ) returns void
 language plpgsql security definer as $$
 declare
   v_status text;
   v_current_duration numeric;
+  v_task_id uuid;
 begin
   if my_access_level() <> 'full' then
     raise exception 'only Full Access can correct a finalized time entry';
   end if;
 
-  select status, duration_minutes into v_status, v_current_duration from time_entries where id = p_entry_id;
+  select status, duration_minutes, task_id into v_status, v_current_duration, v_task_id
+    from time_entries where id = p_entry_id;
   if v_status is null then
     raise exception 'time entry not found';
   end if;
@@ -938,18 +948,101 @@ begin
   end if;
 
   perform set_config('app.bypass_time_entry_lock', 'on', true);
+
+  if v_task_id is not null then
+    update time_entries
+      set duration_minutes = p_duration_minutes,
+          original_duration_minutes = coalesce(original_duration_minutes, v_current_duration),
+          corrected_by = my_person_id(),
+          corrected_at = now(),
+          correction_notes = p_notes,
+          reason_category = coalesce(p_reason_category, reason_category)
+      where id = p_entry_id;
+  else
+    if p_activity_type_id is not null and not exists (select 1 from non_project_activity_types where id = p_activity_type_id) then
+      raise exception 'unknown activity type';
+    end if;
+    update time_entries
+      set duration_minutes = p_duration_minutes,
+          original_duration_minutes = coalesce(original_duration_minutes, v_current_duration),
+          corrected_by = my_person_id(),
+          corrected_at = now(),
+          correction_notes = p_notes,
+          activity_type_id = coalesce(p_activity_type_id, activity_type_id)
+      where id = p_entry_id;
+  end if;
+end;
+$$;
+
+grant execute on function correct_time_entry(uuid, numeric, text, text, uuid) to authenticated;
+
+-- 5b. Archive (soft-delete) a finalized entry, Full Access only --------
+-- (phase63, 2026-09-23, Sandra: "can be soft first and archived") --
+-- reversible, mirrors the is_archived/archived_at pattern already used
+-- by projects/tasks. Archived entries stay on record but are excluded
+-- from every Spent Hrs / Scoped-vs-Logged / dashboard rollup (see each
+-- rollup query's `.eq("is_archived", false)`), same as a Cancelled task
+-- drops out of scheduling/variance totals.
+
+create or replace function archive_time_entry(p_entry_id uuid, p_reason text default null) returns void
+language plpgsql security definer as $$
+declare
+  v_status text;
+  v_is_archived boolean;
+begin
+  if my_access_level() <> 'full' then
+    raise exception 'only Full Access can archive a finalized time entry';
+  end if;
+
+  select status, is_archived into v_status, v_is_archived from time_entries where id = p_entry_id;
+  if v_status is null then
+    raise exception 'time entry not found';
+  end if;
+  if v_status not in ('confirmed','approved') then
+    raise exception 'only a confirmed or approved time entry can be archived';
+  end if;
+  if v_is_archived then
+    raise exception 'this entry is already archived';
+  end if;
+
   update time_entries
-    set duration_minutes = p_duration_minutes,
-        original_duration_minutes = coalesce(original_duration_minutes, v_current_duration),
-        corrected_by = my_person_id(),
-        corrected_at = now(),
-        correction_notes = p_notes,
-        reason_category = coalesce(p_reason_category, reason_category)
+    set is_archived = true,
+        archived_at = now(),
+        archived_by = my_person_id(),
+        archive_reason = p_reason
     where id = p_entry_id;
 end;
 $$;
 
-grant execute on function correct_time_entry(uuid, numeric, text, text) to authenticated;
+grant execute on function archive_time_entry(uuid, text) to authenticated;
+
+create or replace function unarchive_time_entry(p_entry_id uuid) returns void
+language plpgsql security definer as $$
+declare
+  v_is_archived boolean;
+begin
+  if my_access_level() <> 'full' then
+    raise exception 'only Full Access can restore an archived time entry';
+  end if;
+
+  select is_archived into v_is_archived from time_entries where id = p_entry_id;
+  if v_is_archived is null then
+    raise exception 'time entry not found';
+  end if;
+  if not v_is_archived then
+    raise exception 'this entry is not archived';
+  end if;
+
+  update time_entries
+    set is_archived = false,
+        archived_at = null,
+        archived_by = null,
+        archive_reason = null
+    where id = p_entry_id;
+end;
+$$;
+
+grant execute on function unarchive_time_entry(uuid) to authenticated;
 
 -- 6. Idle auto-stop -----------------------------------------------------
 

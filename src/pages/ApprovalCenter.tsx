@@ -322,7 +322,7 @@ export default function ApprovalCenter() {
         .is("validated_completion_date", null)
         .eq("is_archived", false)
         .order("submitted_on", { ascending: false }),
-      supabase.from("time_entries").select("task_id, duration_minutes, status").in("status", ["confirmed", "approved"]),
+      supabase.from("time_entries").select("task_id, duration_minutes, status").in("status", ["confirmed", "approved"]).eq("is_archived", false),
       // 2026-09-21 bugfix (Sandra, spotting "Revise deck" -- a parent
       // task -- sitting in "Other pending approvals" with no assignee):
       // a parent task's completion is fully computed from its children
