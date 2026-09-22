@@ -3557,7 +3557,7 @@ export default function Projects() {
                 // longer allowed; the dropdown reverts (no patch) and
                 // points the person at the field that actually drives it.
                 if (v === "Done") {
-                  await alert("Set this task's Actual Completion Date instead -- Status moves to Done automatically once that's entered.");
+                  await alert("Set this task's Reported Completion Date instead -- Status moves to Done automatically once that's entered.");
                   return;
                 }
                 // Moving to any other status clears the Done-related
@@ -3814,7 +3814,7 @@ export default function Projects() {
       },
       {
         key: "validated_completion_date",
-        label: "Validated Date",
+        label: "Confirm Completion Date",
         defaultWidth: 160,
         minWidth: 140,
         // Independent completion check, distinct from the assignee's own
@@ -3946,7 +3946,7 @@ export default function Projects() {
                     // on completion before the work was actually done.
                     const completionRef = t.actual_completion_date ?? t.submitted_on;
                     if (completionRef && v < completionRef.slice(0, 10)) {
-                      alert(`Validation date can't be earlier than the actual completion date (${formatDate(completionRef)}).`);
+                      alert(`Confirm Completion Date can't be earlier than the reported completion date (${formatDate(completionRef)}).`);
                       return;
                     }
                     const { error } = await supabase.rpc("validate_task_completion", { p_task_id: t.id, p_validated_date: new Date(v).toISOString() });
@@ -4004,7 +4004,7 @@ export default function Projects() {
       },
       {
         key: "actual_completion_date",
-        label: "Actual Completion",
+        label: "Reported Completion",
         defaultWidth: 160,
         minWidth: 140,
         // Self-reported by the assignee (2026-08-20, Sandra: "allow users
@@ -4077,7 +4077,7 @@ export default function Projects() {
                 }
                 if (missing.length) {
                   await alert({
-                    title: "Can't set Actual Completion Date yet",
+                    title: "Can't set Reported Completion Date yet",
                     message: `This task is missing required information before it can be tagged complete:\n\n${missing.join("\n")}`,
                   });
                   return;
@@ -4113,7 +4113,7 @@ export default function Projects() {
                     `Scoped Hours: ${scoped != null ? scoped : "—"}\n` +
                     `**Logged Hours**: ${logged.toFixed(2)}\n` +
                     `**Output Count**: ${outputCount}\n\n` +
-                    `Marking ${formatDate(v)} as the Actual Completion Date will move this task's Status to Done. Confirm these are correct?`,
+                    `Marking ${formatDate(v)} as the Reported Completion Date will move this task's Status to Done. Confirm these are correct?`,
                   confirmLabel: "Confirm & mark Done",
                 });
                 if (!ok) return;

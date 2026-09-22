@@ -21,7 +21,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { decideTimeEntry, ownHoursFor, formatDuration } from "../lib/timeTracking";
+import { decideTimeEntry, formatDuration } from "../lib/timeTracking";
 
 // Approval Center (2026-09-18, Sandra: "create an approval center page
 // under main... where all things for approval should show like extension
@@ -215,10 +215,6 @@ interface Row {
   extraLine: string | null;
   canDecide: boolean;
   action: JSX.Element | null;
-  // 2026-09-22 (Sandra: Scoped vs Logged Hours as its own column) --
-  // task_completion-only; every other kind leaves this null and the
-  // column just doesn't render for that row.
-  hoursSummary: string | null;
   // 2026-09-22 (Sandra: revamp time-entry rows into the same 8-column
   // table Time Tracking uses) -- time-kind rows only; everything else
   // leaves these undefined and RequestList's grouping keeps them as
@@ -227,6 +223,12 @@ interface Row {
   workEndedAt?: string | null;
   durationMinutes?: number | null;
   loggedOnAt?: string;
+  // 2026-09-22 (Sandra: drop Scoped vs Logged, give Task Completion its
+  // own real table like Time Entries has) -- task_completion rows carry
+  // their raw source row so TaskCompletionTable can render Due Date /
+  // Reported Completion / Confirm Completion Date as real columns
+  // instead of parsing them back out of extraLine text.
+  taskCompletionRow?: TaskCompletionRow;
 }
 
 export default function ApprovalCenter() {
@@ -631,30 +633,50 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
     decideTaskCompletion(row, date);
   }
 
-  function ValidateAction({ row }: { row: TaskCompletionRow }) {
+  // 2026-09-22 (Sandra: "Due Date, Reported Completion, Confirm Completion
+  // Date, Action -- each in their own column, term them clearly so they
+  // don't get confused with each other") -- split from the old single
+  // flex block (date input + button together) into two separate <td>
+  // cells so TaskCompletionTable can give the input its own labeled
+  // column, distinct from the plain Action/Validate button next to it.
+  // Terminology, fixed platform-wide (see also Projects.tsx's "Reported
+  // Completion"/"Confirm Completion Date" column labels):
+  //   - Due Date: the scoped/target date, unchanged reference only.
+  //   - Reported Completion: actual_completion_date -- self-reported by
+  //     the assignee, already on file (may be "Not set").
+  //   - Confirm Completion Date: the editable input here -- the date
+  //     that gets locked in as validated_completion_date the moment
+  //     Validate is clicked. Pre-filled from Reported Completion (or
+  //     submitted_on, or today) same as before.
+  function ValidateActionCells({ row }: { row: TaskCompletionRow }) {
     const rowKey = `taskval-${row.id}`;
     const defaultDate = (row.actual_completion_date ?? row.submitted_on ?? new Date().toISOString()).slice(0, 10);
     const [date, setDate] = useState(defaultDate);
     const busy = decidingKey === rowKey;
+    const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          title="Validated (completion) date -- when the work was actually done"
-          style={{ fontSize: 11.5, padding: "6px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }}
-        />
-        <button
-          onClick={() => confirmAndValidate(row, date)}
-          disabled={busy || !date}
-          title="Validate"
-          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-        >
-          <CheckCircle2 size={13} />
-          Validate
-        </button>
-      </div>
+      <>
+        <td style={{ ...td, whiteSpace: "nowrap" }}>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            title="Confirm Completion Date -- the date that gets locked in when you validate"
+            style={{ fontSize: 11.5, padding: "6px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }}
+          />
+        </td>
+        <td style={{ ...td, textAlign: "center" }}>
+          <button
+            onClick={() => confirmAndValidate(row, date)}
+            disabled={busy || !date}
+            title="Validate"
+            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap", margin: "0 auto" }}
+          >
+            <CheckCircle2 size={13} />
+            Validate
+          </button>
+        </td>
+      </>
     );
   }
 
@@ -686,7 +708,6 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         reasonCategory: row.reason_category,
         reasonNotes: row.reason_notes,
         extraLine: `${formatDate(row.project ? row.project.end_date : row.task?.current_due_date)} → ${formatDate(row.requested_new_due_date)}`,
-        hoursSummary: null,
         canDecide: canDecideExtension(row),
         action: canDecideExtension(row) ? (
           <DecideButtons rowKey={key} onApprove={() => decideExtension(row, "Approved")} onReject={() => decideExtension(row, "Rejected")} />
@@ -712,7 +733,6 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         reasonCategory: row.reason_category,
         reasonNotes: row.reason_notes,
         extraLine: `Logged: ${hours(row.duration_minutes)}`,
-        hoursSummary: null,
         workStartedAt: row.started_at,
         workEndedAt: row.ended_at,
         durationMinutes: row.duration_minutes,
@@ -738,7 +758,6 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         reasonCategory: null,
         reasonNotes: "Captures the current plan as the official Baseline and marks the project as started.",
         extraLine: null,
-        hoursSummary: null,
         canDecide: canDecideBaseline,
         action: canDecideBaseline ? <ReviewLink projectId={row.project_id} /> : null,
       });
@@ -758,7 +777,6 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         reasonCategory: null,
         reasonNotes: "Locks in the current plan as Final Scope — final, no re-opening.",
         extraLine: null,
-        hoursSummary: null,
         canDecide: canDecideClosure(row),
         action: canDecideClosure(row) ? <ReviewLink projectId={row.project_id} /> : null,
       });
@@ -785,21 +803,19 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         context: row.project?.name ?? "—",
         requestedByName: personName(row.assignee_id),
         requestedAt: row.actual_completion_date ?? row.submitted_on ?? new Date().toISOString(),
-        // 2026-09-21 (Sandra, on a screenshot of the crossed-out sentence):
-        // "remove this" -- the generic "Marked Done -- awaiting..."
-        // sentence was redundant once the Due/Actual Completion dates
-        // were added, so it's dropped; those two now stand alone as
-        // their own lines instead of a single "Due: X · Actual: Y" line.
         reasonCategory: null,
         reasonNotes: null,
-        extraLine: `Due Date: ${formatDate(row.current_due_date)}\nActual Completion: ${row.actual_completion_date ? formatDate(row.actual_completion_date) : "Not set"}`,
-        // 2026-09-22 (Sandra: "show the scoped hours vs logged hours,
-        // can be the 3rd column"): Scoped is the task's own estimated_hours;
-        // Logged is ownHoursFor over the same Confirmed/Approved entries
-        // Spent Hrs itself counts (see allTimeEntries fetch above).
-        hoursSummary: `${row.estimated_hours != null ? row.estimated_hours : "—"} scoped / ${ownHoursFor(allTimeEntries as unknown as import("../lib/timeTracking").TimeEntryRow[], row.id).toFixed(2)} logged`,
+        // 2026-09-22 (Sandra: "each type has its own table format,
+        // group them" + drop Scoped vs Logged): Task Completion now
+        // renders as its own real table (TaskCompletionTable) instead
+        // of a generic RequestCard, so extraLine/action aren't used for
+        // this kind any more -- taskCompletionRow carries the raw row
+        // through so the table can read Due Date / Reported Completion
+        // straight off it.
+        extraLine: null,
         canDecide,
-        action: canDecide ? <ValidateAction row={row} /> : null,
+        action: null,
+        taskCompletionRow: row,
       });
     });
 
@@ -950,18 +966,6 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
           )}
         </div>
 
-        {/* 2026-09-22 (Sandra: "show scoped hours vs logged hours, can
-            be the 3rd column"): its own column, task_completion only --
-            sits between the Project/Assignee block and the Due/Actual
-            Completion block, so the row now reads Task -> Project/
-            Assignee -> Scoped vs Logged -> Due/Actual -> Validation. */}
-        {row.hoursSummary && (
-          <div style={{ minWidth: 150, flex: "1 1 150px", fontSize: 11 }}>
-            <span style={{ fontSize: 9.5, color: "var(--muted)", display: "block", marginBottom: 3 }}>Scoped vs Logged</span>
-            <span style={{ fontWeight: 700, color: "var(--navy)" }}>{row.hoursSummary}</span>
-          </div>
-        )}
-
         <div style={{ minWidth: 220, flex: "1 1 220px", fontSize: 11 }}>
           {row.reasonCategory && (
             <>
@@ -1046,29 +1050,150 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
     );
   }
 
+  // 2026-09-22 (Sandra: "each type has its own table format, group
+  // them" + terminology cleanup): Task Completion gets the same real-
+  // table treatment TimeEntryTable already has, instead of the generic
+  // RequestCard. Six columns: Task/Project, Assignee, Due Date,
+  // Reported Completion, Confirm Completion Date, Action -- see
+  // ValidateActionCells above for what the last two mean and why
+  // they're split into two cells instead of one combined block.
+  function TaskCompletionTable({ rows }: { rows: Row[] }) {
+    const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
+    const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
+    return (
+      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)", marginBottom: 10 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Task / Project</th>
+              <th style={th}>Assignee</th>
+              <th style={th}>Due Date</th>
+              <th style={th}>Reported Completion</th>
+              <th style={th}>Confirm Completion Date</th>
+              <th style={{ ...th, textAlign: "center" }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const tc = row.taskCompletionRow;
+              if (!tc) return null;
+              return (
+                <tr key={row.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={td}>
+                    <div style={{ fontWeight: 700, color: "var(--navy)" }}>{row.subject}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{row.context}</div>
+                  </td>
+                  <td style={td}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          width: 22, height: 22, borderRadius: "50%",
+                          background: "var(--accent-bg, #eaf2fb)", color: "var(--accent)",
+                          fontSize: 9.5, fontWeight: 700, flexShrink: 0,
+                        }}
+                      >
+                        {initials(row.requestedByName)}
+                      </span>
+                      {row.requestedByName}
+                    </div>
+                  </td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(tc.current_due_date)}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{tc.actual_completion_date ? formatDate(tc.actual_completion_date) : "Not set"}</td>
+                  {row.canDecide ? (
+                    <ValidateActionCells row={tc} />
+                  ) : (
+                    <>
+                      <td style={td}>—</td>
+                      <td style={{ ...td, textAlign: "center", color: "var(--muted)" }}>—</td>
+                    </>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  // 2026-09-22 (Sandra: "group them per request, then sort by orders to
+  // new per request by default, but allow sort vice versa") -- groups a
+  // (single-kind, already-sorted) row list by requester. Since `rows` is
+  // already sorted by requestedAt per sortNewestFirst before this runs,
+  // a plain first-seen-order groupBy naturally puts whichever person's
+  // single most-recent (or oldest, when the sort is flipped) request
+  // comes first -- no separate group-level sort needed, flipping the
+  // Sort button flips both row order AND group order for free.
+  function groupByRequester(rows: Row[]): { name: string; rows: Row[] }[] {
+    const order: string[] = [];
+    const map = new Map<string, Row[]>();
+    for (const row of rows) {
+      const existing = map.get(row.requestedByName);
+      if (existing) {
+        existing.push(row);
+      } else {
+        map.set(row.requestedByName, [row]);
+        order.push(row.requestedByName);
+      }
+    }
+    return order.map((name) => ({ name, rows: map.get(name)! }));
+  }
+
+  // 2026-09-22 (Sandra, on the old flat "sequenced by request time, all
+  // 4 types in one table" layout): "now that each type of approvals has
+  // its own table format, group them" -- KindSection makes each kind
+  // (Task Completion, Time Entries, Extensions, Baselines/Closures)
+  // always its own section instead of only accidentally grouping when
+  // same-kind rows happened to land next to each other in the flat
+  // list, then sub-groups each section by requester.
+  function KindSection({ kind, rows }: { kind: ApprovalKind; rows: Row[] }) {
+    if (rows.length === 0) return null;
+    const meta = KIND_META[kind];
+    const groups = groupByRequester(rows);
+    return (
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <span className={`status-pill ${meta.tone}`} style={{ fontSize: 10 }}>
+            {meta.pluralLabel}
+          </span>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>({rows.length})</span>
+        </div>
+        {groups.map((g) => (
+          <div key={g.name} style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-secondary)", marginBottom: 5, display: "flex", alignItems: "center", gap: 5 }}>
+              <User size={11} style={{ color: "var(--muted)" }} />
+              {g.name}
+              <span style={{ color: "var(--muted)", fontWeight: 400 }}>({g.rows.length})</span>
+            </div>
+            {kind === "time" ? (
+              <TimeEntryTable rows={g.rows} />
+            ) : kind === "task_completion" ? (
+              <TaskCompletionTable rows={g.rows} />
+            ) : (
+              g.rows.map((row) => <RequestCard key={row.key} row={row} />)
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Fixed section order -- same order the summary cards already use, so
+  // the page reads consistently top to bottom regardless of what's
+  // currently pending. Sections with 0 matching rows just don't render
+  // (KindSection returns null).
+  const KIND_ORDER: ApprovalKind[] = ["extension", "time", "baseline", "closure", "task_completion"];
+
   function RequestList({ rows, emptyLabel }: { rows: Row[]; emptyLabel: string }) {
     if (rows.length === 0) {
       return <p style={{ fontSize: 12, color: "var(--muted)", padding: "10px 0" }}>{emptyLabel}</p>;
     }
-    const groups: { isTime: boolean; items: Row[] }[] = [];
-    for (const row of rows) {
-      const isTime = row.kind === "time";
-      const last = groups[groups.length - 1];
-      if (last && last.isTime === isTime) {
-        last.items.push(row);
-      } else {
-        groups.push({ isTime, items: [row] });
-      }
-    }
     return (
       <div>
-        {groups.map((g, i) =>
-          g.isTime ? (
-            <TimeEntryTable key={i} rows={g.items} />
-          ) : (
-            g.items.map((row) => <RequestCard key={row.key} row={row} />)
-          )
-        )}
+        {KIND_ORDER.map((kind) => (
+          <KindSection key={kind} kind={kind} rows={rows.filter((r) => r.kind === kind)} />
+        ))}
       </div>
     );
   }
