@@ -633,13 +633,33 @@ export default function TimeTracking() {
   // and "Other visible entries" keep the older EntriesTable card layout
   // below, since those have no decision to make and carry different
   // info (status, decided-by, correction workflow).
+  // 2026-09-22 (Sandra: "align the column width of Needs your decision
+  // with My entries -- that has good column sizing") -- both tables are
+  // separate <table> elements with independent auto-width content-based
+  // sizing, so identical headers still drifted out of alignment (e.g.
+  // DecisionTable's Details column was nowrap+ellipsis while
+  // EntriesTable's wraps). A shared colgroup + table-layout: fixed on
+  // both forces the exact same column proportions on both tables
+  // regardless of what their own rows contain.
+  const ENTRY_TABLE_COL_WIDTHS = ["18%", "12%", "10%", "12%", "7%", "20%", "11%", "8%", "12%"];
+  function EntryTableColGroup() {
+    return (
+      <colgroup>
+        {ENTRY_TABLE_COL_WIDTHS.map((w, i) => (
+          <col key={i} style={{ width: w }} />
+        ))}
+      </colgroup>
+    );
+  }
+
   function DecisionTable({ rows }: { rows: EntryRow[] }) {
     if (rows.length === 0) return null;
     const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
     const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
     return (
       <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+          <EntryTableColGroup />
           <thead>
             <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
               <th style={th}>Task / Project</th>
@@ -773,7 +793,8 @@ export default function TimeTracking() {
     const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
     return (
       <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+          <EntryTableColGroup />
           <thead>
             <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
               <th style={th}>Task / Project</th>
