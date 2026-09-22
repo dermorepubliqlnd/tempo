@@ -526,11 +526,20 @@ export function healthOf(
 // 100%) -- so a project with a few big Done tasks and many small
 // Not-Started ones reads differently than raw task-count-complete would.
 // Tasks with no effort set contribute zero weight to both sides of the
-// ratio (in effect excluded, same as CapacIQ has no distinct "Cancelled"
-// task status to exclude -- see project_capaciq_actual_progress memory).
+// ratio (in effect excluded).
 // Returns null (not 0) when the project has no tasks, or none of them
 // have effort set, so callers can render a distinct "No tasks" state
 // instead of a misleading 0%.
+//
+// 2026-09-22 (Sandra: "cancelled task should not be part of the
+// denominator") -- Cancelled tasks are filtered out of actualProgress
+// entirely, same as parent tasks already were (see below), rather than
+// falling through this lookup to a factor of 0. Cancelled scope isn't
+// "0% done" -- it's not part of what's left to finish at all, so
+// counting its hours in the denominator was permanently capping a
+// project's Actual Progress below 100% even once every remaining task
+// was genuinely Done. (This map intentionally still has no "Cancelled"
+// key -- the exclusion happens before a task ever reaches this lookup.)
 const TASK_COMPLETION_FACTOR: Record<string, number> = {
   "Not Started": 0,
   "In Progress": 0.5,
@@ -555,9 +564,11 @@ export function actualProgress(projectId: string, allTasks: TaskRow[]): number |
   //
   // Parent tasks are excluded: a parent's estimated_hours is auto-populated
   // as the SUM of its sub-tasks', so counting it too double-weighted every
-  // grouped branch.
+  // grouped branch. Cancelled tasks are excluded too (2026-09-22, see the
+  // comment on TASK_COMPLETION_FACTOR above) -- cancelled scope shouldn't
+  // count against a project's Actual Progress.
   const parentIds = new Set(allTasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
-  const projectTasks = allTasks.filter((t) => t.project_id === projectId && !parentIds.has(t.id));
+  const projectTasks = allTasks.filter((t) => t.project_id === projectId && !parentIds.has(t.id) && t.status !== "Cancelled");
   if (projectTasks.length === 0) return null;
   let numerator = 0;
   let denominator = 0;
