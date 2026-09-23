@@ -104,6 +104,67 @@ export function personHoursBreakdownFor(taskId: string, entries: TimeEntryRow[],
     .sort((a, b) => b.hours - a.hours);
 }
 
+// Time Log Status (2026-09-23, Sandra: "add if time tracking has been
+// finalized or approved" -- then, self-caught: "time tracking for a task
+// is multiple entries, how do I get the data to see if the log has been
+// validated already?"). A task can have any number of time_entries in
+// any mix of states, so this collapses them into ONE of three values by
+// taking the weakest link, not an average or a most-common-value:
+//   - "none": no non-rejected entry exists for the task at all yet.
+//   - "pending": at least one entry still needs action -- running,
+//     awaiting the logger's own confirmation (pending_confirm), or
+//     awaiting a decision (pending_approval). A single still-open entry
+//     means the task's logged time is NOT fully finalized, even if every
+//     other entry against it is long since confirmed/approved.
+//   - "finalized": every non-rejected entry is confirmed or approved --
+//     the same two terminal states isCountedEntry() already treats as
+//     "real, finalized time" for Spent Hrs. "Confirmed" (timer entries,
+//     self-service, no manager review needed) and "Approved" (manual
+//     entries, went through a decision) are both terminal, so both read
+//     as Finalized here -- matches Sandra's own phrasing, "finalized OR
+//     approved", as two names for the same end state rather than two
+//     different things to distinguish in the UI.
+// Rejected entries are excluded entirely (voided, same as they're
+// excluded from every hour rollup) -- a task with only rejected entries
+// reads as "none", same as if nothing had ever been logged.
+export type TimeLogStatus = "none" | "pending" | "finalized";
+
+// Shared display strings/tones -- centralized here (not redefined per
+// page) so Time Log Status reads identically everywhere it's shown (the
+// same drift class flagged in [[project_capaciq_logged_hours_6tier_bands_2026_09_23]]).
+export const TIME_LOG_STATUS_LABEL: Record<TimeLogStatus, string> = { none: "—", pending: "Pending", finalized: "Finalized" };
+export const TIME_LOG_STATUS_TONE: Record<TimeLogStatus, string> = { none: "neutral", pending: "warning", finalized: "success" };
+
+type TimeLogStatusEntry = Pick<TimeEntryRow, "task_id" | "status" | "is_archived">;
+
+function timeLogStatusOf(relevant: TimeLogStatusEntry[]): TimeLogStatus {
+  if (relevant.length === 0) return "none";
+  const hasPending = relevant.some((e) => e.status === "running" || e.status === "pending_confirm" || e.status === "pending_approval");
+  return hasPending ? "pending" : "finalized";
+}
+
+// Own entries only -- same scope as ownHoursFor/minutesFor. Use this for
+// a leaf task, or anywhere that already shows a task's OWN logged hours
+// (not a parent's rollup). Takes a minimal Pick (same convention as
+// isCountedEntry above) so pages with their own narrower local
+// TimeEntryRow interface (e.g. HoursOverview.tsx, which doesn't fetch
+// every column this lib's full TimeEntryRow has) can still call this
+// without needing to fetch/carry columns they don't otherwise use.
+export function ownTimeLogStatusFor(entries: TimeLogStatusEntry[], taskId: string): TimeLogStatus {
+  return timeLogStatusOf(entries.filter((e) => e.task_id === taskId && !e.is_archived && e.status !== "rejected"));
+}
+
+// Own + every descendant's entries -- same own+descendant scope as
+// rollupHoursFor/personHoursBreakdownFor. Use this anywhere a parent
+// task's Spent Hrs already rolls up its children's hours (e.g. the main
+// Tasks list), so the two columns stay conceptually in sync: if Spent
+// Hrs includes a child's hours, Time Log Status should reflect whether
+// those same hours are finalized.
+export function rollupTimeLogStatusFor(taskId: string, entries: TimeLogStatusEntry[], childrenOf: (id: string) => string[]): TimeLogStatus {
+  const relevantTaskIds = new Set([taskId, ...childrenOf(taskId)]);
+  return timeLogStatusOf(entries.filter((e) => e.task_id != null && relevantTaskIds.has(e.task_id) && !e.is_archived && e.status !== "rejected"));
+}
+
 export function formatDuration(minutes: number | null | undefined): string {
   if (minutes === null || minutes === undefined) return "—";
   const h = Math.floor(minutes / 60);

@@ -37,7 +37,7 @@ const WBS_STATUS_TONES: Record<WbsStatus, string> = {
   changed_after_baseline: "gold",
   closed: "neutral",
 };
-import { rollupHoursFor, ownHoursFor, formatHours, type TimeEntryRow } from "../lib/timeTracking";
+import { rollupHoursFor, ownHoursFor, formatHours, rollupTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, type TimeEntryRow, type TimeLogStatus } from "../lib/timeTracking";
 // Deletion history archive (2026-08-14c): a permanently-deleted task's own
 // logged Spent Hrs are archived (supabase/policies.sql "Migration
 // 2026-08-14c") as a raw per-project-per-person hours total before the
@@ -346,7 +346,7 @@ const TASK_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["project", "timing_variance_days",
 // own Calendar view doesn't support grouping either -- confirmed with
 // Sandra, not building it).
 const TASK_CALENDAR_DEFAULT_HIDDEN_COLUMNS = ["status", "timing", "validated_completion_date", "validated_by", "actual_completion_date", "estimated_hours", "time_spent_hours", "timing_variance_days", "hours_variance", "hours_variance_pct", "work_type", "output_type", "output_count"];
-const TASK_COLUMN_ORDER = ["name", "task_number", "project", "assignee", "status", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "effort", "timing_variance_days", "due_date_ext", "work_type", "output_type", "output_count", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
+const TASK_COLUMN_ORDER = ["name", "task_number", "project", "assignee", "status", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "time_log_status", "effort", "timing_variance_days", "due_date_ext", "work_type", "output_type", "output_count", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
 
 // "Fun, not corporate" icons for Task Effort (Sandra's request) — a light
 // feather for quick work, a weight plate for a moderate lift, and a flexed
@@ -1673,6 +1673,17 @@ export default function Projects() {
   // useEffect syncing it into a DB column.
   function spentHoursFor(taskId: string): number {
     return rollupHoursFor(taskId, timeEntries, (id) => tasks.filter((t) => t.parent_task_id === id).map((t) => t.id));
+  }
+
+  // Phase 68 (2026-09-23, Sandra: "add if time tracking has been
+  // finalized or approved"). Same own+descendant scope as spentHoursFor
+  // above -- if Spent Hrs already rolls a child task's hours into its
+  // parent, Time Log Status rolls up the same set of entries so the two
+  // columns describe the same pool of hours. See ownTimeLogStatusFor/
+  // rollupTimeLogStatusFor in lib/timeTracking.ts for how multiple
+  // entries in different states collapse into one value.
+  function timeLogStatusFor(taskId: string): TimeLogStatus {
+    return rollupTimeLogStatusFor(taskId, timeEntries, (id) => tasks.filter((t) => t.parent_task_id === id).map((t) => t.id));
   }
 
   function taskDatesFromSubtasks(parentId: string): { start: string | null; end: string | null } | null {
@@ -4296,6 +4307,29 @@ export default function Projects() {
         },
       },
       {
+        // Phase 68 (2026-09-23, Sandra: "add if time tracking has been
+        // finalized or approved" -- then, self-caught, "time tracking for
+        // a task is multiple entries, how do I get the data to see if the
+        // log has been validated already?"). Read-only rollup, not a DB
+        // column -- collapses every non-rejected time_entry against this
+        // task (and its sub-tasks, same scope as Spent Hrs) into one of
+        // three values. See ownTimeLogStatusFor/rollupTimeLogStatusFor in
+        // lib/timeTracking.ts for exactly how mixed-status entries
+        // collapse into a single Pending/Finalized read.
+        key: "time_log_status",
+        label: "Time Log Status",
+        defaultWidth: 130,
+        maxWidth: 150,
+        render: (t) => {
+          const tls = timeLogStatusFor(t.id);
+          return (
+            <span className={`status-pill ${TIME_LOG_STATUS_TONE[tls]}`} style={{ fontSize: 11 }}>
+              {TIME_LOG_STATUS_LABEL[tls]}
+            </span>
+          );
+        },
+      },
+      {
         // Phase 67 (2026-09-23, Sandra: "add task ids ... leaving it up
         // to you to assign IDs to all task existing") -- read-only, no
         // edit path anywhere (assigned once by the DB, see task_number in
@@ -4638,6 +4672,7 @@ export default function Projects() {
       getValue: (t) => ["No Extension", "Requested", "Rejected", "Extended"].indexOf(dueDateExtStatus(t).label),
     },
     { key: "task_number", label: "Task ID", getValue: (t) => t.task_number },
+    { key: "time_log_status", label: "Time Log Status", getValue: (t) => ({ none: 0, pending: 1, finalized: 2 }[timeLogStatusFor(t.id)]) },
     { key: "created_at", label: "Created", getValue: (t) => new Date(t.created_at).getTime() },
     { key: "created_by", label: "Created By", getValue: (t) => ownerName(t.created_by) },
   ];
@@ -4655,7 +4690,9 @@ export default function Projects() {
     // never sees them at all.
     // 3 = 2026-09-23: new Task ID column inserted right after Name -- same
     // reasoning as bump 2.
-    columnOrderVersion: 3,
+    // 4 = 2026-09-23: new Time Log Status column inserted after Spent
+    // hrs -- same reasoning again.
+    columnOrderVersion: 4,
     hiddenColumns: [],
     columnWidths: {},
     groupBy: "project",

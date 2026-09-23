@@ -6,6 +6,7 @@ import { useSearchParams } from "react-router-dom";
 import { buildHolidaySet } from "../lib/workingDays";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
 import { TASK_STATUS_GROUPED, statusGroupOf } from "../lib/notionOptions";
+import { ownTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, type TimeLogStatus } from "../lib/timeTracking";
 import { toCsv } from "../lib/csv";
 // Same shared allocation engine Utilization.tsx and WbsPlanning.tsx's
 // Utilization snapshot use -- see src/lib/dailyAllocation.ts. Before this,
@@ -536,6 +537,7 @@ export default function HoursOverview() {
           ownerId: t.assignee_id,
           owner: owner ? (owner.is_active ? owner.name : `${owner.name} (inactive)`) : "Unassigned",
           status: t.status,
+          timeLogStatus: ownTimeLogStatusFor(timeEntries, t.id),
           scoped,
           logged,
           variance: logged - scoped,
@@ -601,11 +603,12 @@ export default function HoursOverview() {
       r.name,
       `T-${String(r.taskNumber).padStart(4, "0")}`,
       r.status ?? "—",
+      TIME_LOG_STATUS_LABEL[r.timeLogStatus],
       r.scoped.toFixed(1),
       r.logged.toFixed(1),
       r.variance.toFixed(1),
     ]);
-    const csv = toCsv(["Team Member", "Project", "Task", "Task ID", "Status", "Scoped (h)", "Logged (h)", "Variance (h)"], rows);
+    const csv = toCsv(["Team Member", "Project", "Task", "Task ID", "Status", "Time Log Status", "Scoped (h)", "Logged (h)", "Variance (h)"], rows);
     downloadCsv(csv, `productivity_per_task_${toISO(new Date())}.csv`);
   }
 
@@ -1223,6 +1226,7 @@ export default function HoursOverview() {
                   <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Task</th>
                   <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Task ID</th>
                   <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Status</th>
+                  <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }} title="Whether every logged time entry for this task has been confirmed/approved, or is still pending">Time Log Status</th>
                   <th style={{ textAlign: "right", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Scoped</th>
                   <th style={{ textAlign: "right", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Logged</th>
                   <th style={{ textAlign: "right", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Variance</th>
@@ -1231,7 +1235,7 @@ export default function HoursOverview() {
               <tbody>
                 {sortedTaskRows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>
+                    <td colSpan={9} style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>
                       No tasks with Scoped or Logged hours yet.
                     </td>
                   </tr>
@@ -1242,7 +1246,7 @@ export default function HoursOverview() {
                     return (
                       <Fragment key={group.label}>
                         <tr>
-                          <td colSpan={5} style={{ padding: "6px 13px", fontSize: 11.5, fontWeight: 700, color: "var(--navy)", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
+                          <td colSpan={6} style={{ padding: "6px 13px", fontSize: 11.5, fontWeight: 700, color: "var(--navy)", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
                             {group.label} <span style={{ fontWeight: 500, color: "var(--muted)" }}>({group.rows.length})</span>
                           </td>
                           <td style={{ padding: "6px 13px", textAlign: "right", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>{groupScoped.toFixed(1)}h</td>
@@ -1263,6 +1267,7 @@ export default function HoursOverview() {
                 <tfoot>
                   <tr>
                     <td style={{ padding: "8px 13px", fontWeight: 600 }}>Total</td>
+                    <td style={{ padding: "8px 13px" }} />
                     <td style={{ padding: "8px 13px" }} />
                     <td style={{ padding: "8px 13px" }} />
                     <td style={{ padding: "8px 13px" }} />
@@ -1292,10 +1297,12 @@ type TaskHourRowData = {
   ownerId: string | null;
   owner: string;
   status: string | null;
+  timeLogStatus: TimeLogStatus;
   scoped: number;
   logged: number;
   variance: number;
 };
+
 
 // Mirrors Projects.tsx's local statusTone (not exported from there) --
 // same 4-bucket grouping (statusGroupOf/TASK_STATUS_GROUPED) so the pill
@@ -1327,6 +1334,11 @@ function TaskHourRow({ r }: { r: TaskHourRowData }) {
         ) : (
           "—"
         )}
+      </td>
+      <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)" }}>
+        <span className={`status-pill ${TIME_LOG_STATUS_TONE[r.timeLogStatus]}`} style={{ fontSize: 11 }}>
+          {TIME_LOG_STATUS_LABEL[r.timeLogStatus]}
+        </span>
       </td>
       <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", textAlign: "right" }}>{r.scoped.toFixed(1)}h</td>
       <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", textAlign: "right" }}>{r.logged.toFixed(1)}h</td>
