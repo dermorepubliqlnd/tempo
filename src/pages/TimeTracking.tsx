@@ -73,6 +73,10 @@ interface EntryRow {
   archived_at: string | null;
   archived_by: string | null;
   archive_reason: string | null;
+  // 2026-09-23 (phase75): sequence-backed ID for a non-project entry
+  // (activity_type_id set), same padding convention as task_number's
+  // "T-0007" -- displayed "NP-0007". Always null on a project-task entry.
+  non_project_entry_number: number | null;
   task: TaskLite | null;
   activity_type: { id: string; name: string } | null;
   person: { id: string; name: string } | null;
@@ -477,7 +481,7 @@ export default function TimeTracking() {
         .select(
           `id, task_id, activity_type_id, person_id, started_at, ended_at, duration_minutes, source, status, requested_by, reason_category, reason_notes, auto_stopped,
            decided_by, decided_at, decision_notes, corrected_by, corrected_at, original_duration_minutes, correction_notes, created_at,
-           is_archived, archived_at, archived_by, archive_reason,
+           is_archived, archived_at, archived_by, archive_reason, non_project_entry_number,
            task:tasks ( id, name, assignee_id, project_id, task_number, project:projects ( id, name, owner_id ) ),
            activity_type:non_project_activity_types ( id, name ),
            person:people!time_entries_person_id_fkey ( id, name )`
@@ -869,7 +873,11 @@ export default function TimeTracking() {
               const isNonProject = Boolean(row.activity_type_id);
               const title = isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
               const subtitle = isNonProject ? "Non-project" : row.task?.project?.name ?? "—";
-              const taskIdLabel = row.task?.task_number ? `T-${String(row.task.task_number).padStart(4, "0")}` : "—";
+              const taskIdLabel = row.task?.task_number
+                ? `T-${String(row.task.task_number).padStart(4, "0")}`
+                : row.non_project_entry_number
+                ? `NP-${String(row.non_project_entry_number).padStart(4, "0")}`
+                : "—";
               const assigneeName = row.person?.name ?? personName(row.person_id);
               const details = row.reason_notes?.trim() || row.reason_category || "—";
               return (
