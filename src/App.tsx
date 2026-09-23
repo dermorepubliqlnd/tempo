@@ -89,6 +89,8 @@ export default function App() {
           <Route path="/projects/:projectId/baseline" element={<RedirectToWbs />} />
           <Route path="/projects/:projectId/audit-trail" element={<AuditTrail />} />
           <Route path="/knowledge-base" element={<KnowledgeBase />} />
+          <Route path="/knowledge-base/category/:categoryId" element={<KnowledgeBase />} />
+          <Route path="/knowledge-base/article/:entryId" element={<KnowledgeBase />} />
           <Route path="/archive" element={<Archive />} />
           <Route path="/tasks" element={<Navigate to="/projects" replace />} />
           <Route path="/tasks/:taskId" element={<Navigate to="/projects" replace />} />

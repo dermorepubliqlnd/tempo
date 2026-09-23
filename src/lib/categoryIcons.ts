@@ -40,6 +40,11 @@ import {
   Briefcase,
   Building2,
   Compass,
+  Clock,
+  Gauge,
+  Lock,
+  Palmtree,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react";
 
@@ -72,6 +77,13 @@ export const CATEGORY_ICON_LIBRARY: Record<string, LucideIcon> = {
   Briefcase,
   Building2,
   Compass,
+  // 2026-09-24: added for Knowledge Base topic cards (still available to
+  // project categories too).
+  Clock,
+  Gauge,
+  Lock,
+  Palmtree,
+  BarChart3,
 };
 
 export const CATEGORY_ICON_NAMES = Object.keys(CATEGORY_ICON_LIBRARY);
