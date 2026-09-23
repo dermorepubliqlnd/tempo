@@ -679,7 +679,7 @@ export default function KnowledgeBase() {
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 11, color: "var(--muted)", margin: "12px 0 18px", paddingBottom: 14, borderBottom: "1px solid var(--border)" }}>
                   <span>Last updated {fmtDate(entry.updated_at)}</span>
-                  <span>Maintained by {personName(entry.updated_by)}</span>
+                  <span>Updated by {personName(entry.updated_by)}</span>
                   <span>{readMinutes(entry)} min read</span>
                 </div>
                 {entry.content.trim() ? (
