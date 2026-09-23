@@ -7,6 +7,7 @@ import { buildHolidaySet } from "../lib/workingDays";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
 import { TASK_STATUS_GROUPED, statusGroupOf } from "../lib/notionOptions";
 import { ownTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, formatHours, type TimeLogStatus } from "../lib/timeTracking";
+import { timingOf, timingRank } from "../lib/taskTiming";
 import { toCsv } from "../lib/csv";
 import { formatDate } from "../lib/formatDate";
 import Modal from "../components/Modal";
@@ -77,6 +78,12 @@ interface TaskRow {
   is_archived: boolean;
   // Phase 67 (2026-09-23): sequential Task ID, see supabase/phase67_migration.sql.
   task_number: number;
+  // Phase 71 (2026-09-23, Sandra: "add task due date and timing in the
+  // per tasks view") -- feeds timingOf()/lib/taskTiming.ts, same fields
+  // Projects.tsx's Tasks list already fetches for its own Timing column.
+  submitted_on: string | null;
+  validated_completion_date: string | null;
+  actual_completion_date: string | null;
 }
 interface TimeEntryRow {
   id: string;
@@ -123,7 +130,7 @@ function addDays(d: Date, n: number): Date {
 }
 // Per Task view (DataTable) default column order -- Task ID first per
 // Sandra's ask (2026-09-23: "put the task ID as the first column").
-const TASK_HOUR_COLUMN_ORDER = ["task_number", "owner", "project", "name", "status", "timeLogStatus", "scoped", "logged", "variance"];
+const TASK_HOUR_COLUMN_ORDER = ["task_number", "owner", "project", "name", "status", "current_due_date", "timing", "timeLogStatus", "scoped", "logged", "variance"];
 
 const WEEKDAY_LABEL = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const CELL_W = 74;
@@ -230,7 +237,7 @@ export default function HoursOverview() {
         supabase.from("projects").select("id,name,is_archived,owner_id,start_date,end_date,wbs_status").eq("is_archived", false),
         supabase
           .from("tasks")
-          .select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,task_number")
+          .select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,task_number,submitted_on,validated_completion_date,actual_completion_date")
           .eq("is_archived", false),
         supabase
           .from("time_entries")
@@ -501,6 +508,8 @@ export default function HoursOverview() {
           ownerId: t.assignee_id,
           owner: owner ? (owner.is_active ? owner.name : `${owner.name} (inactive)`) : "Unassigned",
           status: t.status,
+          dueDate: t.current_due_date,
+          timing: timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)),
           timeLogStatus: ownTimeLogStatusFor(timeEntries, t.id),
           scoped,
           logged,
@@ -555,6 +564,12 @@ export default function HoursOverview() {
   const taskHourViews = useTableViews("hours_overview_per_task", me?.id, {
     viewType: "table",
     columnOrder: TASK_HOUR_COLUMN_ORDER,
+    // Phase 71 (2026-09-23): Due/Timing columns added -- bump so anyone
+    // who already saved a column order from this view's first release
+    // (run #436/437) picks up the two new columns instead of never
+    // seeing them, same convention as Projects.tsx's TASK_COLUMN_ORDER
+    // version bumps.
+    columnOrderVersion: 1,
     hiddenColumns: [],
     columnWidths: {},
     groupBy: null,
@@ -569,6 +584,8 @@ export default function HoursOverview() {
     { key: "scoped", label: "Scoped hours", getValue: (r) => r.scoped },
     { key: "logged", label: "Logged hours", getValue: (r) => r.logged },
     { key: "name", label: "Task name", getValue: (r) => r.name },
+    { key: "current_due_date", label: "Due date", getValue: (r) => (r.dueDate ? new Date(r.dueDate).getTime() : null) },
+    { key: "timing", label: "Timing", getValue: (r) => timingRank(r.timing.label) },
   ];
 
   const taskHourGroupOptions: GroupOption<TaskHourRowData>[] = [
@@ -600,6 +617,18 @@ export default function HoursOverview() {
         ) : (
           "—"
         ),
+    },
+    {
+      key: "current_due_date",
+      label: "Due",
+      defaultWidth: 100,
+      render: (r) => <span style={{ color: "var(--text-secondary)", fontSize: 11.5 }}>{formatDate(r.dueDate)}</span>,
+    },
+    {
+      key: "timing",
+      label: "Timing",
+      defaultWidth: 110,
+      render: (r) => <span className={`status-pill ${r.timing.tone}`} style={{ fontSize: 11 }}>{r.timing.label}</span>,
     },
     {
       key: "timeLogStatus",
@@ -684,12 +713,14 @@ export default function HoursOverview() {
       r.name,
       `T-${String(r.taskNumber).padStart(4, "0")}`,
       r.status ?? "—",
+      formatDate(r.dueDate),
+      r.timing.label,
       TIME_LOG_STATUS_LABEL[r.timeLogStatus],
       r.scoped.toFixed(2),
       r.logged.toFixed(2),
       r.variance.toFixed(2),
     ]);
-    const csv = toCsv(["Team Member", "Project", "Task", "Task ID", "Status", "Time Log Status", "Scoped (h)", "Logged (h)", "Variance (h)"], rows);
+    const csv = toCsv(["Team Member", "Project", "Task", "Task ID", "Status", "Due", "Timing", "Time Log Status", "Scoped (h)", "Logged (h)", "Variance (h)"], rows);
     downloadCsv(csv, `productivity_per_task_${toISO(new Date())}.csv`);
   }
 
@@ -1283,6 +1314,8 @@ type TaskHourRowData = {
   ownerId: string | null;
   owner: string;
   status: string | null;
+  dueDate: string;
+  timing: { label: string; tone: "success" | "warning" | "danger" | "neutral" };
   timeLogStatus: TimeLogStatus;
   scoped: number;
   logged: number;

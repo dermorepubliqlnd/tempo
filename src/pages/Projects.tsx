@@ -38,6 +38,7 @@ const WBS_STATUS_TONES: Record<WbsStatus, string> = {
   closed: "neutral",
 };
 import { rollupHoursFor, ownHoursFor, formatHours, rollupTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, type TimeEntryRow, type TimeLogStatus } from "../lib/timeTracking";
+import { parseLocalDate, calendarDaysBetween, timingOf, timingVarianceDays, timingRank } from "../lib/taskTiming";
 // Deletion history archive (2026-08-14c): a permanently-deleted task's own
 // logged Spent Hrs are archived (supabase/policies.sql "Migration
 // 2026-08-14c") as a raw per-project-per-person hours total before the
@@ -619,20 +620,6 @@ function healthRank(label: string): number {
   return 7; // manually-echoed status labels (Canceled/Merged/etc.)
 }
 
-// Same worst-first idea as healthRank, for Tasks' analogous computed
-// "Timing" column (Overdue/Due soon/On track while open, Late/On time once
-// complete).
-function timingRank(label: string): number {
-  if (label === "Overdue") return 0;
-  if (label === "Late") return 1;
-  if (label === "Due soon") return 2;
-  if (label === "On track") return 3;
-  if (label === "Pending") return 4;
-  if (label === "On time") return 5;
-  if (label === "Early") return 6;
-  return 7;
-}
-
 function priorityTone(priority: string | null): "success" | "warning" | "danger" | "neutral" {
   if (priority === "High") return "danger";
   if (priority === "Medium") return "warning";
@@ -735,78 +722,6 @@ function resolveBoardGroupBy(groupBy: string | null, groupableKeys: string[], fa
 // rather than a forced fallback field.
 function resolveTimelineGroupBy(groupBy: string | null, groupableKeys: string[]): string | null {
   return groupBy && groupableKeys.includes(groupBy) ? groupBy : null;
-}
-
-// Supabase date columns come back as plain "YYYY-MM-DD" strings. Passing
-// that straight to `new Date(...)` parses it as UTC midnight, which in any
-// timezone behind UTC silently rolls it back a calendar day (a task due
-// "today" would parse as "yesterday" and read as overdue). Parsing the
-// pieces directly as LOCAL date components avoids that shift entirely.
-function parseLocalDate(dateStr: string): Date {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1);
-}
-
-// Whole-calendar-day difference (ignores time-of-day) so "due today" never
-// reads as overdue — a day only counts as passed once the clock actually
-// rolls into the next calendar date.
-function calendarDaysBetween(a: Date, b: Date): number {
-  const da = new Date(a.getFullYear(), a.getMonth(), a.getDate());
-  const db = new Date(b.getFullYear(), b.getMonth(), b.getDate());
-  return Math.round((da.getTime() - db.getTime()) / (1000 * 60 * 60 * 24));
-}
-
-// The actual completion moment for Timing purposes: prefer the owner/
-// manager-validated date once it exists (the authoritative record), but
-// fall back to the assignee's own submitted_on stamp (set automatically
-// the moment status flips to Done) rather than assuming On time by
-// default. That old default silently hid genuinely late completions that
-// simply hadn't been through Validate yet -- Sandra's report, 2026-07-21.
-function actualCompletionDateOf(t: TaskRow): string | null {
-  // Priority: manager/owner-validated date (authoritative) > the
-  // assignee's own self-reported actual_completion_date > the automatic
-  // submitted_on stamp as a last resort (2026-08-20: added the
-  // self-reported tier between the two existing ones, at Sandra's
-  // request, so Days +/- reflects when someone says they actually
-  // finished rather than only the system's Done-flip timestamp once a
-  // validator gets to it).
-  return t.validated_completion_date ?? t.actual_completion_date ?? t.submitted_on;
-}
-
-function timingOf(t: TaskRow): { label: string; tone: "success" | "warning" | "danger" | "neutral" } {
-  const group = statusGroupOf(TASK_STATUS_GROUPED, t.status);
-  // 2026-09-10: a cancelled task was never actually finished (on time or
-  // otherwise) -- Timing is meaningless for it, same "N/A" treatment a
-  // parent row's own Timing already gets (see TASK_TIMING_BOARD_COLUMNS'
-  // N/A column above).
-  if (group === "cancelled") return { label: "N/A", tone: "neutral" };
-  const due = parseLocalDate(t.current_due_date);
-  if (group === "complete") {
-    const actualDateStr = actualCompletionDateOf(t);
-    if (!actualDateStr) return { label: "Pending", tone: "neutral" };
-    const days = calendarDaysBetween(parseLocalDate(actualDateStr.slice(0, 10)), due);
-    if (days > 0) return { label: "Late", tone: "danger" };
-    if (days < 0) return { label: "Early", tone: "success" };
-    return { label: "On time", tone: "success" };
-  }
-  const daysLeft = calendarDaysBetween(due, new Date());
-  if (daysLeft < 0) return { label: "Overdue", tone: "danger" };
-  if (daysLeft <= 3) return { label: "Due soon", tone: "warning" };
-  return { label: "On track", tone: "success" };
-}
-
-// Signed +/- days variance vs the due date -- positive means completed
-// that many days late, negative means that many days early. null when
-// there's no actual completion date to compare yet (task isn't Done, or
-// Done but neither validated nor submitted -- shouldn't happen in
-// practice since submitted_on is stamped automatically).
-function timingVarianceDays(t: TaskRow): number | null {
-  const group = statusGroupOf(TASK_STATUS_GROUPED, t.status);
-  if (group !== "complete") return null; // includes "cancelled" -- see timingOf above
-  const actualDateStr = actualCompletionDateOf(t);
-  if (!actualDateStr) return null;
-  const due = parseLocalDate(t.current_due_date);
-  return calendarDaysBetween(parseLocalDate(actualDateStr.slice(0, 10)), due);
 }
 
 // Est. vs Actual hours variance -- null when there's no estimate to
@@ -3748,7 +3663,7 @@ export default function Projects() {
               </span>
             );
           }
-          const timing = timingOf(t);
+          const timing = timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status));
           return <span className={`status-pill ${timing.tone}`}>{timing.label}</span>;
         },
       },
@@ -3766,7 +3681,7 @@ export default function Projects() {
               </span>
             );
           }
-          const days = timingVarianceDays(t);
+          const days = timingVarianceDays(t, statusGroupOf(TASK_STATUS_GROUPED, t.status));
           if (days === null) return <span style={{ color: "var(--muted)" }}>—</span>;
           if (days === 0) return <span className="status-pill success">On time</span>;
           const tone = days > 0 ? "danger" : "success";
@@ -4530,8 +4445,8 @@ export default function Projects() {
       // column's own isParent branch above) -- group them under "N/A"
       // rather than letting them fall into whatever timingOf() computes
       // now that its underlying fields are permanently blank on a parent.
-      getGroup: (t) => (t._depth === 0 && hasChildren(t.id) ? "N/A" : timingOf(t).label),
-      getTone: (t) => (t._depth === 0 && hasChildren(t.id) ? "neutral" : timingOf(t).tone),
+      getGroup: (t) => (t._depth === 0 && hasChildren(t.id) ? "N/A" : timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)).label),
+      getTone: (t) => (t._depth === 0 && hasChildren(t.id) ? "neutral" : timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)).tone),
       allGroups: () => TASK_TIMING_BOARD_COLUMNS.map((c) => c.value),
     },
     {
@@ -4567,8 +4482,8 @@ export default function Projects() {
     {
       key: "timing",
       label: "Timing",
-      getGroup: (t) => (t._depth === 0 && hasChildren(t.id) ? "N/A" : timingOf(t).label),
-      getTone: (t) => (t._depth === 0 && hasChildren(t.id) ? "neutral" : timingOf(t).tone),
+      getGroup: (t) => (t._depth === 0 && hasChildren(t.id) ? "N/A" : timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)).label),
+      getTone: (t) => (t._depth === 0 && hasChildren(t.id) ? "neutral" : timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)).tone),
       boardGroupable: true,
     },
     { key: "start_date", label: "Start", getGroup: () => "", boardGroupable: false },
@@ -4634,7 +4549,7 @@ export default function Projects() {
     if (groupBy === "effort") return t.effort;
     if (groupBy === "work_type") return t.work_type_id;
     if (groupBy === "project") return t.project_id;
-    if (groupBy === "timing") return t._depth === 0 && hasChildren(t.id) ? "N/A" : timingOf(t).label;
+    if (groupBy === "timing") return t._depth === 0 && hasChildren(t.id) ? "N/A" : timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)).label;
     if (groupBy === "due_date_ext") return dueDateExtStatus(t).label;
     return t.status;
   }
@@ -4662,7 +4577,7 @@ export default function Projects() {
     { key: "effort", label: "Effort", getValue: (t) => (t.effort ? (TASK_EFFORT_OPTIONS.indexOf(t.effort) + 1 || null) : null) },
     { key: "work_type", label: "Work Type", getValue: (t) => workTypes.find((w) => w.id === t.work_type_id)?.name ?? "" },
     { key: "start_date", label: "Start", getValue: (t) => (t.start_date ? new Date(t.start_date).getTime() : null) },
-    { key: "timing", label: "Timing", getValue: (t) => (t._depth === 0 && hasChildren(t.id) ? -1 : timingRank(timingOf(t).label)) },
+    { key: "timing", label: "Timing", getValue: (t) => (t._depth === 0 && hasChildren(t.id) ? -1 : timingRank(timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)).label)) },
     { key: "current_due_date", label: "Due", getValue: (t) => (t.current_due_date ? new Date(t.current_due_date).getTime() : null) },
     { key: "estimated_hours", label: "Scoped Hours", getValue: (t) => t.estimated_hours ?? null },
     { key: "time_spent_hours", label: "Spent hrs", getValue: (t) => spentHoursFor(t.id) },
