@@ -11,6 +11,8 @@ import {
   ChevronRight,
   ChevronLeft,
   Calendar,
+  ArrowDown,
+  ArrowUp,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
@@ -640,7 +642,19 @@ export default function MyDashboard() {
                 const colors = loggedHoursTier(d.logged);
                 return (
                   <div key={d.dateStr} style={{ textAlign: "center", background: colors.bg, color: colors.fg, fontWeight: 700, fontSize: 12, padding: "8px 0", borderRadius: "var(--radius-sm)" }}>
-                    {d.logged > 0 ? `${d.logged.toFixed(1)}h` : "—"}
+                    {d.logged > 0 ? (
+                      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 2 }}>
+                        {d.logged.toFixed(1)}h
+                        {/* 2026-09-23 (Sandra): Very low and Significantly above
+                            share the same danger-red -- the arrow tells the two
+                            apart at a glance, same as HoursOverview.tsx's Daily
+                            Activity grid. */}
+                        {colors.key === "very_low" && <ArrowDown size={10} />}
+                        {colors.key === "excessive" && <ArrowUp size={10} />}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                   </div>
                 );
               })}
@@ -670,6 +684,8 @@ export default function MyDashboard() {
                     {range}
                   </span>
                   {label}
+                  {label === "Very low" && <ArrowDown size={10} style={{ color: "var(--danger-text)" }} />}
+                  {label === "Significantly above" && <ArrowUp size={10} style={{ color: "var(--danger-text)" }} />}
                 </span>
               ))}
             </div>

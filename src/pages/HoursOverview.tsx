@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon, Download } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon, Download, ArrowDown, ArrowUp } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
@@ -1035,7 +1035,21 @@ export default function HoursOverview() {
                               const bg = !hasValue ? (weekend || isHoliday ? "var(--hover-bg)" : undefined) : colors.bg;
                               return (
                                 <td key={i} style={{ ...rollupCellStyle(i), background: bg, color: colors.fg, fontSize: 11.5, fontWeight: 600 }}>
-                                  {hasValue ? `${logged.toFixed(2)}h` : "–"}
+                                  {hasValue ? (
+                                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 2 }}>
+                                      {logged.toFixed(2)}h
+                                      {/* 2026-09-23 (Sandra: "show an arrow down after the number if it's
+                                          very low, arrow up for significantly above -- visual cue for why
+                                          it's red") -- Very low and Significantly above deliberately share
+                                          the same danger-red (see loggedHoursBands.ts), so the arrow is
+                                          what tells the two apart at a glance instead of needing the
+                                          legend. */}
+                                      {colors.key === "very_low" && <ArrowDown size={10} />}
+                                      {colors.key === "excessive" && <ArrowUp size={10} />}
+                                    </span>
+                                  ) : (
+                                    "–"
+                                  )}
                                 </td>
                               );
                             })}
@@ -1131,6 +1145,8 @@ export default function HoursOverview() {
                   {range}
                 </span>
                 {label}
+                {label === "Very low" && <ArrowDown size={11} style={{ color: "var(--danger-text)" }} />}
+                {label === "Significantly above" && <ArrowUp size={11} style={{ color: "var(--danger-text)" }} />}
               </span>
             ))}
             <span>Logged hours always show on the day they were actually worked, even outside a task's scoped window. A 7.5h shift (±1h) is the reference for “Within expected.”</span>
