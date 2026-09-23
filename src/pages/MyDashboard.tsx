@@ -167,6 +167,12 @@ export default function MyDashboard() {
   // me (tiny dataset) -- filtered down to "hidden_date === today" at
   // render time so this doesn't need to be a query dependency.
   const [hiddenToday, setHiddenToday] = useState<{ task_id: string; hidden_date: string }[]>([]);
+  // 2026-09-23 (My Work Today "Logged" column, Sandra: "show logged
+  // hours against the tasks") -- same confirmed/approved, not-archived
+  // definition Projects.tsx's own Spent Hrs column uses, just scoped to
+  // entries I logged myself (my own assigned tasks) rather than a
+  // month window like the weekly card above.
+  const [myTaskEntries, setMyTaskEntries] = useState<{ task_id: string | null; duration_minutes: number | null }[]>([]);
   const [justHidden, setJustHidden] = useState<{ id: string; name: string } | null>(null);
   const [showHiddenToday, setShowHiddenToday] = useState(false);
 
@@ -205,6 +211,7 @@ export default function MyDashboard() {
       { data: blData },
       { data: clData },
       { data: hiddenData },
+      { data: myTaskEntryData },
     ] = await Promise.all([
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
       supabase.from("projects").select("*").eq("is_archived", false),
@@ -246,6 +253,9 @@ export default function MyDashboard() {
       supabase.from("project_baseline_requests").select("id,project_id,requested_by,requested_at").eq("status", "pending").order("requested_at", { ascending: false }),
       supabase.from("project_closure_requests").select("id,project_id,requested_by,requested_at").eq("status", "pending").order("requested_at", { ascending: false }),
       me ? supabase.from("task_daily_hidden").select("task_id,hidden_date").eq("person_id", me.id) : Promise.resolve({ data: [] as { task_id: string; hidden_date: string }[] }),
+      me
+        ? supabase.from("time_entries").select("task_id,duration_minutes").eq("person_id", me.id).eq("is_archived", false).in("status", ["confirmed", "approved"])
+        : Promise.resolve({ data: [] as { task_id: string | null; duration_minutes: number | null }[] }),
     ]);
 
     setPeople((peopleData as PersonLite[]) ?? []);
@@ -264,6 +274,7 @@ export default function MyDashboard() {
     setBaselineRequests((blData as BaselineRow[]) ?? []);
     setClosureRequests((clData as ClosureRow[]) ?? []);
     setHiddenToday((hiddenData as { task_id: string; hidden_date: string }[]) ?? []);
+    setMyTaskEntries((myTaskEntryData as { task_id: string | null; duration_minutes: number | null }[]) ?? []);
     setLoading(false);
   }
 
@@ -303,6 +314,28 @@ export default function MyDashboard() {
   );
   const myWorkTodayHiddenCount = myWorkTodayAll.filter((t) => hiddenTodayIds.has(t.id)).length;
   const myWorkTodayVisible = showHiddenToday ? myWorkTodayAll : myWorkTodayAll.filter((t) => !hiddenTodayIds.has(t.id));
+  function loggedHoursForTask(taskId: string): number {
+    const childIds = new Set(tasks.filter((t) => t.parent_task_id === taskId).map((t) => t.id));
+    const minutes = myTaskEntries
+      .filter((e) => e.task_id === taskId || (e.task_id && childIds.has(e.task_id)))
+      .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
+    return Math.round((minutes / 60) * 100) / 100;
+  }
+  // 2026-09-23 (Sandra: "separate column for tagging -- starts today,
+  // due soon, etc"), a judgment call on the "due soon" threshold: within
+  // the next 3 calendar days (exclusive of today, which is its own
+  // "Due Today" tag). Flag to her if 3 days isn't the window she meant.
+  function workTodayTag(t: (typeof myWorkTodayAll)[number]): { label: string; tone: string } | null {
+    const start = t.start_date?.slice(0, 10);
+    const due = t.current_due_date?.slice(0, 10);
+    if (start === todayIso) return { label: "Starts Today", tone: "accent" };
+    if (due === todayIso) return { label: "Due Today", tone: "warning" };
+    if (due) {
+      const daysOut = Math.round((new Date(due).getTime() - new Date(todayIso).getTime()) / 86400000);
+      if (daysOut > 0 && daysOut <= 3) return { label: "Due Soon", tone: "gold" };
+    }
+    return null;
+  }
 
   async function hideTaskFromToday(taskId: string, taskName: string) {
     if (!me) return;
@@ -568,7 +601,7 @@ export default function MyDashboard() {
                 onClick={() => setShowHiddenToday((v) => !v)}
                 style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, color: "var(--accent)", flexShrink: 0 }}
               >
-                {showHiddenToday ? "Hide hidden tasks" : `${myWorkTodayHiddenCount} hidden · Show hidden`}
+                {showHiddenToday ? `Hide hidden (${myWorkTodayHiddenCount})` : `Show hidden (${myWorkTodayHiddenCount})`}
               </button>
             )}
           </div>
@@ -581,12 +614,15 @@ export default function MyDashboard() {
             </div>
           )}
           <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "8px 4px 6px", borderBottom: "1px solid var(--border)" }}>
-            <span style={{ flex: "1 1 26%" }}>Task</span>
-            <span style={{ flex: "1 1 18%" }}>Project</span>
-            <span style={{ flex: "0 0 110px" }}>Schedule</span>
-            <span style={{ flex: "0 0 90px" }}>Due Date</span>
-            <span style={{ flex: "0 0 80px", textAlign: "right" }}>Planned</span>
-            <span style={{ flex: "0 0 70px", textAlign: "center" }}>Progress</span>
+            <span style={{ flex: "0 0 68px" }}>Task ID</span>
+            <span style={{ flex: "0 0 90px" }}>Tag</span>
+            <span style={{ flex: "1 1 24%" }}>Task</span>
+            <span style={{ flex: "1 1 16%" }}>Project</span>
+            <span style={{ flex: "0 0 82px" }}>Start Date</span>
+            <span style={{ flex: "0 0 82px" }}>Due Date</span>
+            <span style={{ flex: "0 0 70px", textAlign: "right" }}>Planned</span>
+            <span style={{ flex: "0 0 65px", textAlign: "right" }}>Logged</span>
+            <span style={{ flex: "0 0 90px", textAlign: "center" }}>Progress</span>
             <span style={{ flex: "0 0 40px", textAlign: "center" }}>Timer</span>
             <span style={{ flex: "0 0 40px", textAlign: "center" }}>Hide</span>
           </div>
@@ -598,24 +634,30 @@ export default function MyDashboard() {
               const isRunningHere = running?.task_id === t.id;
               const timerDisabled = timerBusy || (Boolean(running) && !isRunningHere);
               const progressPct = TASK_PROGRESS_PCT[t.status ?? ""] ?? 0;
-              const startsToday = t.start_date?.slice(0, 10) === todayIso;
-              const dueToday = t.current_due_date?.slice(0, 10) === todayIso;
+              const tag = workTodayTag(t);
+              const logged = loggedHoursForTask(t.id);
               return (
                 <div key={t.id} className="dash-row" style={{ opacity: isHidden ? 0.55 : 1 }}>
-                  <span style={{ flex: "1 1 26%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>
-                    <Link to={`/projects?assignee=me`} style={{ color: "inherit", textDecoration: "none" }}>
-                      {t.name}
-                    </Link>
-                    {startsToday && <span className="status-pill accent" style={{ fontSize: 8.5, marginLeft: 6, verticalAlign: 1 }}>STARTS TODAY</span>}
-                    {!startsToday && dueToday && <span className="status-pill warning" style={{ fontSize: 8.5, marginLeft: 6, verticalAlign: 1 }}>DUE TODAY</span>}
+                  <span style={{ flex: "0 0 68px", fontSize: 11.5, color: "var(--text-secondary)" }}>T-{String(t.task_number).padStart(4, "0")}</span>
+                  <span style={{ flex: "0 0 90px" }}>
+                    {tag && (
+                      <span className={`status-pill ${tag.tone}`} style={{ fontSize: 9 }}>
+                        {tag.label}
+                      </span>
+                    )}
                   </span>
-                  <span style={{ flex: "1 1 18%", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.project?.name ?? "—"}</span>
-                  <span style={{ flex: "0 0 110px", fontSize: 11.5, color: "var(--text-secondary)" }}>
-                    {t.start_date ? formatDate(t.start_date) : "—"} – {formatDate(t.current_due_date)}
+                  <span style={{ flex: "1 1 24%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>{t.name}</span>
+                  <span style={{ flex: "1 1 16%", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.project?.name ?? "—"}</span>
+                  <span style={{ flex: "0 0 82px", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.start_date ? formatDate(t.start_date) : "—"}</span>
+                  <span style={{ flex: "0 0 82px", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(t.current_due_date)}</span>
+                  <span style={{ flex: "0 0 70px", textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
+                  <span style={{ flex: "0 0 65px", textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)" }}>{logged > 0 ? `${logged.toFixed(1)}h` : "—"}</span>
+                  <span style={{ flex: "0 0 90px", display: "flex", alignItems: "center", gap: 6, padding: "0 4px" }}>
+                    <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
+                      <div style={{ width: `${progressPct}%`, height: "100%", background: "var(--accent)", borderRadius: 3 }} />
+                    </div>
+                    <span style={{ fontSize: 10.5, color: "var(--muted)", flexShrink: 0 }}>{progressPct}%</span>
                   </span>
-                  <span style={{ flex: "0 0 90px", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(t.current_due_date)}</span>
-                  <span style={{ flex: "0 0 80px", textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
-                  <span style={{ flex: "0 0 70px", textAlign: "center", fontSize: 11.5, color: "var(--text-secondary)" }}>{progressPct}%</span>
                   <span style={{ flex: "0 0 40px", textAlign: "center" }}>
                     <button
                       onClick={async () => {
