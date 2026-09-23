@@ -1160,8 +1160,6 @@ export default function HoursOverview() {
                   {range}
                 </span>
                 {label}
-                {label === "Very low" && <ArrowDown size={11} style={{ color: "var(--danger-text)" }} />}
-                {label === "Significantly above" && <ArrowUp size={11} style={{ color: "var(--danger-text)" }} />}
               </span>
             ))}
             <span>Logged hours always show on the day they were actually worked, even outside a task's scoped window. A 7.5h shift (±1h) is the reference for “Within expected.”</span>

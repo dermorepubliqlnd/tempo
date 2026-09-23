@@ -73,12 +73,18 @@ export function loggedHoursTier(hours: number, expectedHours: number): HoursTier
 // expected-hours figure using these same percentage cutoffs, not
 // against 7.5h. "Time Off" is its own row: a full-day approved time
 // off day is never colored red/amber/green (see loggedHoursTier).
+// 2026-09-23 (Sandra: "remove the expected work [percentages] ... let's
+// stick with Very Low, Below, Within, Above, Significantly Above --
+// remove the arrows in the legend too, having it in the display works
+// and is straightforward") -- plain labels only, no % breakdown; arrow
+// icons stay on the actual day cells (HoursOverview/MyDashboard) but are
+// no longer duplicated in the legend itself.
 export const LOGGED_HOURS_LEGEND = [
-  { range: "Time Off", label: "Full-day approved time off (not evaluated)", tone: "neutral" as const },
-  { range: "— / Off", label: "No hours expected/logged", tone: "neutral" as const },
-  { range: "<3.75h", label: "Very low (<50% of expected)", tone: "danger" as const },
-  { range: "3.75–6.37h", label: "Below expected (50–84%)", tone: "warning" as const },
-  { range: "6.38–8.47h", label: "Within expected (85–113%)", tone: "success" as const },
-  { range: "8.48–9.97h", label: "Above expected (114–133%)", tone: "orange" as const },
-  { range: ">9.97h", label: "Significantly above (>133%)", tone: "danger" as const },
+  { range: "Time Off", label: "Time Off", tone: "neutral" as const },
+  { range: "— / Off", label: "No hours logged", tone: "neutral" as const },
+  { range: "<3.75h", label: "Very low", tone: "danger" as const },
+  { range: "3.75–6.37h", label: "Below expected", tone: "warning" as const },
+  { range: "6.38–8.47h", label: "Within expected", tone: "success" as const },
+  { range: "8.48–9.97h", label: "Above expected", tone: "orange" as const },
+  { range: ">9.97h", label: "Significantly above", tone: "danger" as const },
 ];

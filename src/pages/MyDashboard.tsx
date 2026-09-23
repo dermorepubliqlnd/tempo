@@ -13,6 +13,10 @@ import {
   Calendar,
   ArrowDown,
   ArrowUp,
+  Play,
+  Square,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
@@ -21,6 +25,7 @@ import { formatDate } from "../lib/formatDate";
 import { buildHolidaySet } from "../lib/workingDays";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
 import { colorForPerson } from "../lib/personColors";
+import { useTimeTracking } from "../lib/TimeTrackingContext";
 // Reuses Health/Progress straight from Projects.tsx (same convention
 // Dashboard.tsx already follows) so this page's numbers can never drift
 // out of sync with what the Projects table itself shows for a project.
@@ -135,6 +140,7 @@ const WEEKDAY_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function MyDashboard() {
   const { person: me } = useSession();
+  const { running, busy: timerBusy, start: startTaskTimer, requestStop } = useTimeTracking();
   const { dialog: confirmDialog } = useConfirm();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -154,6 +160,15 @@ export default function MyDashboard() {
   const [pendingTimeEntries, setPendingTimeEntries] = useState<PendingTimeEntryRow[]>([]);
   const [baselineRequests, setBaselineRequests] = useState<BaselineRow[]>([]);
   const [closureRequests, setClosureRequests] = useState<ClosureRow[]>([]);
+
+  // 2026-09-23 (My Work Today, "Hide from Today"): a per-person-per-day
+  // dismissal, kept in its own small table (task_daily_hidden) so it
+  // never touches the task row itself. Fetched unfiltered-by-date for
+  // me (tiny dataset) -- filtered down to "hidden_date === today" at
+  // render time so this doesn't need to be a query dependency.
+  const [hiddenToday, setHiddenToday] = useState<{ task_id: string; hidden_date: string }[]>([]);
+  const [justHidden, setJustHidden] = useState<{ id: string; name: string } | null>(null);
+  const [showHiddenToday, setShowHiddenToday] = useState(false);
 
   // Week picker (2026-09-19, mockup's top-right date range) -- Monday-
   // start work week, navigable, drives every "This Week" card/widget.
@@ -189,6 +204,7 @@ export default function MyDashboard() {
       { data: teData },
       { data: blData },
       { data: clData },
+      { data: hiddenData },
     ] = await Promise.all([
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
       supabase.from("projects").select("*").eq("is_archived", false),
@@ -229,6 +245,7 @@ export default function MyDashboard() {
         .order("started_at", { ascending: false }),
       supabase.from("project_baseline_requests").select("id,project_id,requested_by,requested_at").eq("status", "pending").order("requested_at", { ascending: false }),
       supabase.from("project_closure_requests").select("id,project_id,requested_by,requested_at").eq("status", "pending").order("requested_at", { ascending: false }),
+      me ? supabase.from("task_daily_hidden").select("task_id,hidden_date").eq("person_id", me.id) : Promise.resolve({ data: [] as { task_id: string; hidden_date: string }[] }),
     ]);
 
     setPeople((peopleData as PersonLite[]) ?? []);
@@ -246,6 +263,7 @@ export default function MyDashboard() {
     setPendingTimeEntries((teData as unknown as PendingTimeEntryRow[]) ?? []);
     setBaselineRequests((blData as BaselineRow[]) ?? []);
     setClosureRequests((clData as ClosureRow[]) ?? []);
+    setHiddenToday((hiddenData as { task_id: string; hidden_date: string }[]) ?? []);
     setLoading(false);
   }
 
@@ -270,6 +288,48 @@ export default function MyDashboard() {
   }, [tasks, me, projectById]);
   const overdueTasks = myOpenTasks.filter((t) => t.current_due_date && t.current_due_date.slice(0, 10) < todayIso);
   const tasksDueToday = myOpenTasks.filter((t) => t.current_due_date && t.current_due_date.slice(0, 10) === todayIso);
+
+  // ---- My Work Today (2026-09-23) ------------------------------------
+  // NOT the same as "due today"/"due this week" -- tasks whose SCHEDULE
+  // (start_date..current_due_date) is active today, even if the actual
+  // due date is later. Reuses myOpenTasks (already the assignee-me +
+  // isOpenTask filter, i.e. excludes Done/Cancelled -- tasks don't have
+  // a separate "archived" status, see [[project_capaciq_archive_semantics]])
+  // rather than re-deriving the exclusion rule.
+  const hiddenTodayIds = useMemo(() => new Set(hiddenToday.filter((h) => h.hidden_date === todayIso).map((h) => h.task_id)), [hiddenToday, todayIso]);
+  const myWorkTodayAll = useMemo(
+    () => myOpenTasks.filter((t) => t.start_date && t.start_date.slice(0, 10) <= todayIso && t.current_due_date && t.current_due_date.slice(0, 10) >= todayIso),
+    [myOpenTasks, todayIso]
+  );
+  const myWorkTodayHiddenCount = myWorkTodayAll.filter((t) => hiddenTodayIds.has(t.id)).length;
+  const myWorkTodayVisible = showHiddenToday ? myWorkTodayAll : myWorkTodayAll.filter((t) => !hiddenTodayIds.has(t.id));
+
+  async function hideTaskFromToday(taskId: string, taskName: string) {
+    if (!me) return;
+    setHiddenToday((prev) => [...prev, { task_id: taskId, hidden_date: todayIso }]);
+    setJustHidden({ id: taskId, name: taskName });
+    const { error } = await supabase.from("task_daily_hidden").upsert({ person_id: me.id, task_id: taskId, hidden_date: todayIso }, { onConflict: "person_id,task_id,hidden_date" });
+    if (error) {
+      // Roll back the optimistic update if the write failed.
+      setHiddenToday((prev) => prev.filter((h) => !(h.task_id === taskId && h.hidden_date === todayIso)));
+      alert(`Couldn't hide task: ${error.message}`);
+    }
+  }
+  async function unhideTaskFromToday(taskId: string) {
+    if (!me) return;
+    setHiddenToday((prev) => prev.filter((h) => !(h.task_id === taskId && h.hidden_date === todayIso)));
+    setJustHidden((cur) => (cur?.id === taskId ? null : cur));
+    const { error } = await supabase.from("task_daily_hidden").delete().eq("person_id", me.id).eq("task_id", taskId).eq("hidden_date", todayIso);
+    if (error) alert(`Couldn't restore task: ${error.message}`);
+  }
+  // Auto-dismiss the "Task hidden from Today. Undo" banner -- the hide
+  // itself already took effect; this just stops offering an undo after
+  // it's no longer the most recent action.
+  useEffect(() => {
+    if (!justHidden) return;
+    const t = setTimeout(() => setJustHidden(null), 6000);
+    return () => clearTimeout(t);
+  }, [justHidden]);
   const weekEndIso = toISO(weekDays[4]);
   const weekStartIso = toISO(weekDays[0]);
   const tasksThisWeek = myOpenTasks.filter((t) => t.current_due_date && t.current_due_date.slice(0, 10) >= weekStartIso && t.current_due_date.slice(0, 10) <= weekEndIso);
@@ -490,6 +550,120 @@ export default function MyDashboard() {
         </div>
       )}
 
+      {/* 2026-09-23 (Sandra: "My Work Today ... helps employees quickly
+          see what they are expected to work on today ... complement,
+          not replace, the existing task list") -- distinct from Due
+          Today/Due This Week: schedule-active-today (start_date <=
+          today <= current_due_date), not deadline-today. Placed above
+          My Projects per her follow-up. */}
+      {myWorkTodayAll.length > 0 && (
+        <div className="dash-card">
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
+            <div>
+              <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>My Work Today</h2>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Tasks scheduled to be active today, whether or not they're due today</div>
+            </div>
+            {myWorkTodayHiddenCount > 0 && (
+              <button
+                onClick={() => setShowHiddenToday((v) => !v)}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, color: "var(--accent)", flexShrink: 0 }}
+              >
+                {showHiddenToday ? "Hide hidden tasks" : `${myWorkTodayHiddenCount} hidden · Show hidden`}
+              </button>
+            )}
+          </div>
+          {justHidden && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--text-secondary)", background: "var(--hover-bg)", borderRadius: "var(--radius-sm)", padding: "6px 10px", marginBottom: 8 }}>
+              <span>Task hidden from Today.</span>
+              <button onClick={() => unhideTaskFromToday(justHidden.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontWeight: 600, fontSize: 11.5, padding: 0 }}>
+                Undo
+              </button>
+            </div>
+          )}
+          <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "8px 4px 6px", borderBottom: "1px solid var(--border)" }}>
+            <span style={{ flex: "1 1 26%" }}>Task</span>
+            <span style={{ flex: "1 1 18%" }}>Project</span>
+            <span style={{ flex: "0 0 110px" }}>Schedule</span>
+            <span style={{ flex: "0 0 90px" }}>Due Date</span>
+            <span style={{ flex: "0 0 80px", textAlign: "right" }}>Planned</span>
+            <span style={{ flex: "0 0 70px", textAlign: "center" }}>Progress</span>
+            <span style={{ flex: "0 0 40px", textAlign: "center" }}>Timer</span>
+            <span style={{ flex: "0 0 40px", textAlign: "center" }}>Hide</span>
+          </div>
+          {myWorkTodayVisible.length === 0 ? (
+            <p style={{ fontSize: 12, color: "var(--muted)", padding: "10px 4px" }}>Nothing left to show -- everything scheduled for today is hidden.</p>
+          ) : (
+            myWorkTodayVisible.map((t) => {
+              const isHidden = hiddenTodayIds.has(t.id);
+              const isRunningHere = running?.task_id === t.id;
+              const timerDisabled = timerBusy || (Boolean(running) && !isRunningHere);
+              const progressPct = TASK_PROGRESS_PCT[t.status ?? ""] ?? 0;
+              const startsToday = t.start_date?.slice(0, 10) === todayIso;
+              const dueToday = t.current_due_date?.slice(0, 10) === todayIso;
+              return (
+                <div key={t.id} className="dash-row" style={{ opacity: isHidden ? 0.55 : 1 }}>
+                  <span style={{ flex: "1 1 26%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>
+                    <Link to={`/projects?assignee=me`} style={{ color: "inherit", textDecoration: "none" }}>
+                      {t.name}
+                    </Link>
+                    {startsToday && <span className="status-pill accent" style={{ fontSize: 8.5, marginLeft: 6, verticalAlign: 1 }}>STARTS TODAY</span>}
+                    {!startsToday && dueToday && <span className="status-pill warning" style={{ fontSize: 8.5, marginLeft: 6, verticalAlign: 1 }}>DUE TODAY</span>}
+                  </span>
+                  <span style={{ flex: "1 1 18%", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.project?.name ?? "—"}</span>
+                  <span style={{ flex: "0 0 110px", fontSize: 11.5, color: "var(--text-secondary)" }}>
+                    {t.start_date ? formatDate(t.start_date) : "—"} – {formatDate(t.current_due_date)}
+                  </span>
+                  <span style={{ flex: "0 0 90px", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(t.current_due_date)}</span>
+                  <span style={{ flex: "0 0 80px", textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
+                  <span style={{ flex: "0 0 70px", textAlign: "center", fontSize: 11.5, color: "var(--text-secondary)" }}>{progressPct}%</span>
+                  <span style={{ flex: "0 0 40px", textAlign: "center" }}>
+                    <button
+                      onClick={async () => {
+                        if (isRunningHere) {
+                          const res = await requestStop();
+                          if (res.error) alert(`Couldn't stop timer: ${res.error}`);
+                        } else {
+                          const res = await startTaskTimer({ id: t.id, name: t.name });
+                          if (res.error) alert(`Couldn't start timer: ${res.error}`);
+                        }
+                      }}
+                      disabled={timerDisabled}
+                      title={isRunningHere ? "Stop timer" : running ? `Stop the timer running on "${running.task_name}" first` : "Start timer"}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 22,
+                        height: 22,
+                        borderRadius: "var(--radius-sm)",
+                        border: "none",
+                        background: isRunningHere ? "var(--danger-text)" : "var(--accent)",
+                        color: "#fff",
+                        cursor: timerDisabled ? "default" : "pointer",
+                        opacity: Boolean(running) && !isRunningHere ? 0.35 : 1,
+                      }}
+                    >
+                      {isRunningHere ? <Square size={11} fill="currentColor" /> : <Play size={11} fill="currentColor" />}
+                    </button>
+                  </span>
+                  <span style={{ flex: "0 0 40px", textAlign: "center" }}>
+                    {isHidden ? (
+                      <button onClick={() => unhideTaskFromToday(t.id)} title="Restore to My Work Today" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", padding: 4 }}>
+                        <EyeOff size={14} />
+                      </button>
+                    ) : (
+                      <button onClick={() => hideTaskFromToday(t.id, t.name)} title="Hide this task for today" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", padding: 4 }}>
+                        <Eye size={14} />
+                      </button>
+                    )}
+                  </span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20, alignItems: "start" }}>
         <div>
           <div className="dash-card">
@@ -626,18 +800,12 @@ export default function MyDashboard() {
 
           <div className="dash-card">
             <SectionHeader title="My Logged Hours This Week" to="/hours-overview?person=me" small="Based on your actual submitted time entries" />
-            <div style={{ display: "grid", gridTemplateColumns: "1.4fr repeat(5, 1fr)", gap: 6, alignItems: "center" }}>
-              <span />
-              {dailyStats.map((d) => (
-                <span key={d.dateStr} style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>
-                  {WEEKDAY_LABEL[d.date.getDay()]}
-                  <div style={{ fontSize: 9, fontWeight: 400 }}>{d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
-                </span>
-              ))}
-              <div>
-                <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12 }}>{me.name}</div>
-                <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{me.job_title || "Team Member"}</div>
-              </div>
+            {/* 2026-09-23 (Sandra: "match the My Logged Hours UI with My
+                Utilization. I like the per day borders/shape... since
+                this is a personal dashboard, I don't think we need to
+                show the name and role") -- same bordered-card grid as
+                My Utilization This Week above, name/role row dropped. */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
               {dailyStats.map((d) => {
                 // 2026-09-23 (dynamic expected hours): d.capacity already
                 // accounts for off/half-day/holiday (computed above in
@@ -649,22 +817,28 @@ export default function MyDashboard() {
                 const colors = loggedHoursTier(d.logged, d.capacity);
                 const isFullTimeOff = d.off && d.logged <= 0;
                 return (
-                  <div key={d.dateStr} style={{ textAlign: "center", background: colors.bg, color: colors.fg, fontWeight: 700, fontSize: 12, padding: "8px 0", borderRadius: "var(--radius-sm)" }}>
-                    {isFullTimeOff ? (
-                      <span style={{ fontSize: 10.5, fontWeight: 600 }}>Time Off</span>
-                    ) : d.logged > 0 ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 2 }}>
-                        {d.logged.toFixed(1)}h
-                        {/* 2026-09-23 (Sandra): Very low and Significantly above
-                            share the same danger-red -- the arrow tells the two
-                            apart at a glance, same as HoursOverview.tsx's Daily
-                            Activity grid. */}
-                        {colors.key === "very_low" && <ArrowDown size={10} />}
-                        {colors.key === "excessive" && <ArrowUp size={10} />}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
+                  <div key={d.dateStr} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textAlign: "center", padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
+                      {WEEKDAY_LABEL[d.date.getDay()]}
+                      <div style={{ fontSize: 9, fontWeight: 400 }}>{d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                    </div>
+                    <div style={{ padding: "10px 4px", textAlign: "center", background: colors.bg }}>
+                      {isFullTimeOff ? (
+                        <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Time Off</div>
+                      ) : d.logged > 0 ? (
+                        <div style={{ fontSize: 14, fontWeight: 700, color: colors.fg, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 2 }}>
+                          {d.logged.toFixed(1)}h
+                          {/* 2026-09-23 (Sandra): Very low and Significantly above
+                              share the same danger-red -- the arrow tells the two
+                              apart at a glance, same as HoursOverview.tsx's Daily
+                              Activity grid. */}
+                          {colors.key === "very_low" && <ArrowDown size={11} />}
+                          {colors.key === "excessive" && <ArrowUp size={11} />}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 14, fontWeight: 700, color: colors.fg }}>{"—"}</div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -694,8 +868,6 @@ export default function MyDashboard() {
                     {range}
                   </span>
                   {label}
-                  {label === "Very low" && <ArrowDown size={10} style={{ color: "var(--danger-text)" }} />}
-                  {label === "Significantly above" && <ArrowUp size={10} style={{ color: "var(--danger-text)" }} />}
                 </span>
               ))}
             </div>
@@ -757,6 +929,17 @@ export default function MyDashboard() {
     </div>
   );
 }
+
+// 2026-09-23 (My Work Today "Progress" column): there's no per-task
+// percent field in the schema -- Projects.tsx's own actualProgress() is
+// project-level only, weighting each task by this same factor. Mirrors
+// that convention at the single-task level (Cancelled tasks never reach
+// this table -- isOpenTask excludes them).
+const TASK_PROGRESS_PCT: Record<string, number> = {
+  "Not Started": 0,
+  "In Progress": 50,
+  Done: 100,
+};
 
 const METRIC_COLORS: Record<string, { bg: string; fg: string }> = {
   blue: { bg: "#e5f0fe", fg: "#2f6fed" },
