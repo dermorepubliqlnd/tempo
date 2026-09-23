@@ -40,6 +40,15 @@ begin
 end $$;
 
 -- Backfill what was already archived under the old 30-day scheme.
+-- (lock triggers would otherwise reject touching finalized/closed rows)
+select set_config('app.bypass_time_entry_lock', 'on', false),
+       set_config('app.bypass_closed_project_lock', 'on', false),
+       set_config('app.bypass_done_task_lock', 'on', false),
+       set_config('app.bypass_due_date_lock', 'on', false),
+       set_config('app.bypass_start_date_lock', 'on', false),
+       set_config('app.bypass_status_baseline_lock', 'on', false),
+       set_config('app.bypass_timelines_lock_governance', 'on', false),
+       set_config('app.bypass_time_entry_daily_cap', 'on', false);
 update projects set archive_batch_id = gen_random_uuid(), archive_is_root = true, archived_at = coalesce(archived_at, now())
  where is_archived and archive_batch_id is null;
 update tasks t set archive_batch_id = p.archive_batch_id, archive_is_root = false, archived_at = coalesce(t.archived_at, p.archived_at)
@@ -49,6 +58,14 @@ update tasks set archive_batch_id = gen_random_uuid(), archive_is_root = true, a
  where is_archived and archive_batch_id is null;
 update time_entries set archive_batch_id = gen_random_uuid(), archive_is_root = true, archived_at = coalesce(archived_at, now())
  where is_archived and archive_batch_id is null;
+select set_config('app.bypass_time_entry_lock', '', false),
+       set_config('app.bypass_closed_project_lock', '', false),
+       set_config('app.bypass_done_task_lock', '', false),
+       set_config('app.bypass_due_date_lock', '', false),
+       set_config('app.bypass_start_date_lock', '', false),
+       set_config('app.bypass_status_baseline_lock', '', false),
+       set_config('app.bypass_timelines_lock_governance', '', false),
+       set_config('app.bypass_time_entry_daily_cap', '', false);
 
 -- 2. Kind registry --------------------------------------------------------
 create or replace function archive_kind_table(p_kind text) returns text
