@@ -175,8 +175,7 @@ export function formatDuration(minutes: number | null | undefined): string {
 }
 
 export function formatHours(hours: number): string {
-  if (hours === 0) return "0";
-  return hours.toFixed(hours % 1 === 0 ? 0 : 2);
+  return hours.toFixed(2);
 }
 
 export async function startTimer(taskId: string): Promise<{ id?: string; error?: string }> {

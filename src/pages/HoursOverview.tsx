@@ -157,27 +157,10 @@ function downloadCsv(csv: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function coverageTone(scoped: number, logged: number): "neutral" | "success" | "warning" | "danger" {
-  if (scoped <= 0) return logged > 0 ? "success" : "neutral";
-  const ratio = logged / scoped;
-  if (ratio >= 0.9) return "success";
-  if (ratio >= 0.5) return "warning";
-  return "danger";
-}
-function toneColors(tone: "neutral" | "success" | "warning" | "danger"): { bg?: string; fg: string } {
-  if (tone === "success") return { bg: "var(--success-bg)", fg: "var(--success-text)" };
-  if (tone === "warning") return { bg: "var(--warning-bg)", fg: "var(--warning-text)" };
-  if (tone === "danger") return { bg: "var(--danger-bg)", fg: "var(--danger-text)" };
-  return { fg: "var(--muted)" };
-}
-
 // Daily Activity color coding (2026-09-18, Sandra: "just show the actual
 // hours logged daily... color code based on a 7.5 shift, lower be green
 // higher be red"; refined 2026-09-23, phase64, into loggedHoursBands.ts's
-// 6-tier scale -- see that file for why) -- replaces the scoped-vs-logged
-// coverage ratio for this view only (Scope Fulfillment keeps
-// coverageTone/toneColors above, since it's still comparing logged against
-// scoped).
+// 6-tier scale -- see that file for why).
 
 export default function HoursOverview() {
   const { person: me } = useSession();
@@ -197,7 +180,7 @@ export default function HoursOverview() {
   // there, actively mislabelling real work.
   const [allPeople, setAllPeople] = useState<PersonRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"grid" | "fulfillment" | "task">("grid");
+  const [view, setView] = useState<"grid" | "task">("grid");
   const [expanded, setExpanded] = useState<string[]>([]);
 
   // 2026-09-03 (Sandra: default to the current month, with date filters
@@ -463,38 +446,6 @@ export default function HoursOverview() {
     return engine.taskHoursOnDate(personId, t as UtilTaskRow, dateStr);
   }
 
-  // --- Scope Fulfillment view (2026-09-03, Sandra) ---------------------
-  // Same Scoped side as Daily Activity (scopedHoursFor/scopedPersonTotalFor
-  // above, unchanged). The LOGGED side is different on purpose: instead of
-  // bucketing a person's real time entries by the day they actually logged
-  // them, a task's TOTAL logged hours (wherever/whenever they were logged)
-  // get spread evenly across the task's own SCOPED days -- the exact same
-  // day-set scopedHoursFor already divides the Scoped hours across (see
-  // engine.taskDays). This answers a different question than Daily
-  // Activity: not "what did this person log on this calendar day" but
-  // "was the work planned FOR this day eventually done, within/below/above
-  // what was scoped for it" -- regardless of which real day the person
-  // happened to sit down and log the time.
-  function totalLoggedHoursForTask(personId: string, taskId: string): number {
-    const npId = taskId.startsWith("np:") ? taskId.slice(3) : null;
-    return timeEntries
-      .filter((e) => e.person_id === personId && (npId ? e.activity_type_id === npId : e.task_id === taskId))
-      .reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);
-  }
-  function fulfillmentLoggedHoursFor(personId: string, taskId: string, dateStr: string): number {
-    const t = tasks.find((x) => x.id === taskId && x.assignee_id === personId);
-    if (!t) return 0;
-    if (parentTaskIds.has(t.id)) return 0;
-    const days = engine.taskDays(personId, t as UtilTaskRow);
-    if (days.size === 0 || !days.has(dateStr)) return 0;
-    const total = totalLoggedHoursForTask(personId, taskId);
-    if (total <= 0) return 0;
-    return total / days.size;
-  }
-  function fulfillmentPersonTotalFor(personId: string, dateStr: string): number {
-    return combinedSubItemsFor(personId).reduce((sum, item) => sum + fulfillmentLoggedHoursFor(personId, item.taskId, dateStr), 0);
-  }
-
   // Combined per-task breakdown for a person's expand row: union of their
   // open scoped-eligible tasks AND any task they've logged time against
   // (even if reassigned, completed, or archived since) -- otherwise a
@@ -665,7 +616,7 @@ export default function HoursOverview() {
       key: "scoped",
       label: "Scoped",
       defaultWidth: 90,
-      render: (r) => <div style={{ textAlign: "right" }}>{r.scoped.toFixed(1)}h</div>,
+      render: (r) => <div style={{ textAlign: "right" }}>{r.scoped.toFixed(2)}h</div>,
     },
     {
       key: "logged",
@@ -690,7 +641,7 @@ export default function HoursOverview() {
               textUnderlineOffset: 2,
             }}
           >
-            {r.logged.toFixed(1)}h
+            {r.logged.toFixed(2)}h
           </button>
         </div>
       ),
@@ -704,7 +655,7 @@ export default function HoursOverview() {
         return (
           <div style={{ textAlign: "right", fontWeight: 600, color: varColor }}>
             {r.variance > 0 ? "+" : ""}
-            {r.variance.toFixed(1)}h
+            {r.variance.toFixed(2)}h
           </div>
         );
       },
@@ -734,33 +685,31 @@ export default function HoursOverview() {
       `T-${String(r.taskNumber).padStart(4, "0")}`,
       r.status ?? "—",
       TIME_LOG_STATUS_LABEL[r.timeLogStatus],
-      r.scoped.toFixed(1),
-      r.logged.toFixed(1),
-      r.variance.toFixed(1),
+      r.scoped.toFixed(2),
+      r.logged.toFixed(2),
+      r.variance.toFixed(2),
     ]);
     const csv = toCsv(["Team Member", "Project", "Task", "Task ID", "Status", "Time Log Status", "Scoped (h)", "Logged (h)", "Variance (h)"], rows);
     downloadCsv(csv, `productivity_per_task_${toISO(new Date())}.csv`);
   }
 
-  // Same idea for Daily Activity/Scope Fulfillment -- one row per
-  // visible team member x date in the currently selected range/filters,
-  // Scoped + Logged both included regardless of which of the two grid
-  // views is active (Daily Activity's cells only show Logged, but Scoped
-  // is already computed either way and is more useful to have in the
-  // export than to leave out).
+  // One row per visible team member x date in the currently selected
+  // range/filters, Scoped + Logged both included (Daily Activity's cells
+  // only show Logged, but Scoped is already computed either way and is
+  // more useful to have in the export than to leave out).
   function exportDailyCsv() {
     const rows: (string | number)[][] = [];
     for (const person of visiblePeople) {
       for (const d of days) {
         const dateStr = toISO(d);
         const scoped = scopedPersonTotalFor(person.id, dateStr);
-        const logged = view === "fulfillment" ? fulfillmentPersonTotalFor(person.id, dateStr) : loggedPersonTotalFor(person.id, dateStr);
+        const logged = loggedPersonTotalFor(person.id, dateStr);
         if (scoped <= 0 && logged <= 0) continue;
-        rows.push([person.name, dateStr, scoped.toFixed(1), logged.toFixed(1)]);
+        rows.push([person.name, dateStr, scoped.toFixed(2), logged.toFixed(2)]);
       }
     }
     const csv = toCsv(["Team Member", "Date", "Scoped (h)", "Logged (h)"], rows);
-    downloadCsv(csv, `${view === "fulfillment" ? "scope_fulfillment" : "daily_activity"}_${toISO(rangeStart)}_to_${toISO(rangeEnd)}.csv`);
+    downloadCsv(csv, `daily_activity_${toISO(rangeStart)}_to_${toISO(rangeEnd)}.csv`);
   }
 
   function rollupCellStyle(i: number): CSSProperties {
@@ -806,27 +755,6 @@ export default function HoursOverview() {
         >
           Daily Activity
         </button>
-        {/* Scope Fulfillment (2026-09-03, Sandra): same calendar-grid shape
-            as Daily Activity, but the Logged side re-attributes a task's
-            TOTAL logged hours back onto the day(s) its hours were SCOPED,
-            instead of the day they were actually logged -- see
-            fulfillmentLoggedHoursFor/fulfillmentPersonTotalFor above. Order
-            requested: Daily Activity, Scope Fulfillment, Per Task. */}
-        <button
-          onClick={() => setView("fulfillment")}
-          style={{
-            padding: "6px 14px",
-            fontSize: 12,
-            fontWeight: 600,
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-sm)",
-            background: view === "fulfillment" ? "var(--navy)" : "var(--surface)",
-            color: view === "fulfillment" ? "#fff" : "var(--text-secondary)",
-            cursor: "pointer",
-          }}
-        >
-          Scope Fulfillment
-        </button>
         <button
           onClick={() => setView("task")}
           style={{
@@ -844,7 +772,7 @@ export default function HoursOverview() {
         </button>
       </div>
 
-      {view === "grid" || view === "fulfillment" ? (
+      {view === "grid" ? (
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
             {/* 2026-09-03 (Sandra: default to the current month, with date
@@ -1048,7 +976,7 @@ export default function HoursOverview() {
                               const isHoliday = holidayByDate.has(dateStr);
                               const off = isOffDay(person.id, dateStr);
                               const scoped = scopedPersonTotalFor(person.id, dateStr);
-                              const logged = view === "fulfillment" ? fulfillmentPersonTotalFor(person.id, dateStr) : loggedPersonTotalFor(person.id, dateStr);
+                              const logged = loggedPersonTotalFor(person.id, dateStr);
                               // 2026-08-31: holiday / Time Off days are now
                               // labelled the same way Utilization.tsx labels
                               // them, instead of silently reading as a normal
@@ -1070,108 +998,17 @@ export default function HoursOverview() {
                               }
                               // Daily Activity (2026-09-18, Sandra): show
                               // only the actual logged hours here, color
-                              // coded against a 7.5h shift -- not the
-                              // scoped-vs-logged coverage ratio. Scope
-                              // Fulfillment is untouched and still compares
-                              // logged against scoped.
-                              const colors = view === "grid" ? loggedHoursTier(logged) : toneColors(coverageTone(scoped, logged));
-                              const hasValue = view === "grid" ? logged > 0 : scoped > 0 || logged > 0;
+                              // coded against a 7.5h shift.
+                              const colors = loggedHoursTier(logged);
+                              const hasValue = logged > 0;
                               const bg = !hasValue ? (weekend || isHoliday ? "var(--hover-bg)" : undefined) : colors.bg;
                               return (
                                 <td key={i} style={{ ...rollupCellStyle(i), background: bg, color: colors.fg, fontSize: 11.5, fontWeight: 600 }}>
-                                  {view === "grid" ? (hasValue ? `${logged.toFixed(1)}h` : "–") : hasValue ? `${scoped.toFixed(1)} / ${logged.toFixed(1)}h` : "–"}
+                                  {hasValue ? `${logged.toFixed(2)}h` : "–"}
                                 </td>
                               );
                             })}
                           </tr>
-                          {/* PM-overhead sub-rows (2026-08-31). The person
-                              rollup above now includes the same
-                              project-ownership allowance Utilization.tsx
-                              counts, so it has to be visible here too --
-                              otherwise the rollup would simply not equal the
-                              sum of its own sub-rows, which is the exact class
-                              of bug this page already had once (see
-                              scopedHoursFor). Logged side is always "–": time
-                              is logged against tasks, never against PM
-                              overhead. */}
-                          {isExpanded &&
-                            view !== "grid" &&
-                            ownedProjectsFor(person.id).map((proj) => {
-                              const pmDays = engine.pmDays(person.id, proj as UtilProjectRow);
-                              if (pmDays.size === 0) return null;
-                              return (
-                                <tr key={`${person.id}-pm-${proj.id}`}>
-                                  <td
-                                    title={`${proj.name} — project management`}
-                                    style={{
-                                      position: "sticky",
-                                      left: 0,
-                                      zIndex: 1,
-                                      background: "var(--surface)",
-                                      padding: "5px 13px 5px 35px",
-                                      fontSize: 11,
-                                      color: "var(--text-secondary)",
-                                      borderBottom: "1px solid var(--border)",
-                                      whiteSpace: "nowrap",
-                                      maxWidth: LABEL_W,
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                    }}
-                                  >
-                                    {proj.name}
-                                    <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)", marginLeft: 6 }}>(PM)</span>
-                                  </td>
-                                  {days.map((d, i) => {
-                                    const dateStr = toISO(d);
-                                    const v = engine.pmHoursOnDate(person.id, proj as UtilProjectRow, dateStr);
-                                    return (
-                                      <td key={i} style={subCellStyle(i)}>
-                                        {v > 0 ? (
-                                          <span style={{ fontSize: 10.5, color: "var(--navy)" }}>
-                                            {v.toFixed(2)}
-                                            <span style={{ color: "var(--muted)" }}> / – </span>
-                                          </span>
-                                        ) : null}
-                                      </td>
-                                    );
-                                  })}
-                                </tr>
-                              );
-                            })}
-                          {isExpanded && view !== "grid" && engine.hasDeletedHistory(person.id) && (
-                            <tr>
-                              <td
-                                title="Hours from tasks/projects that have since been permanently deleted — numbers only, no name retained"
-                                style={{
-                                  position: "sticky",
-                                  left: 0,
-                                  zIndex: 1,
-                                  background: "var(--surface)",
-                                  padding: "5px 13px 5px 35px",
-                                  fontSize: 11,
-                                  color: "var(--muted)",
-                                  fontStyle: "italic",
-                                  borderBottom: "1px solid var(--border)",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                Deleted items
-                              </td>
-                              {days.map((d, i) => {
-                                const v = engine.deletedHoursOnDate(person.id, toISO(d));
-                                return (
-                                  <td key={i} style={subCellStyle(i)}>
-                                    {v > 0 ? (
-                                      <span style={{ fontSize: 10.5, color: "var(--navy)" }}>
-                                        {v.toFixed(2)}
-                                        <span style={{ color: "var(--muted)" }}> / – </span>
-                                      </span>
-                                    ) : null}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          )}
                           {isExpanded &&
                             (items.length === 0 ? (
                               <tr>
@@ -1179,7 +1016,7 @@ export default function HoursOverview() {
                                   colSpan={1 + days.length}
                                   style={{ padding: "5px 13px 5px 35px", fontSize: 11, color: "var(--muted)", fontStyle: "italic", borderBottom: "1px solid var(--border)" }}
                                 >
-                                  {view === "grid" ? "No logged hours yet." : "No scoped tasks or logged hours yet."}
+                                  No logged hours yet.
                                 </td>
                               </tr>
                             ) : (
@@ -1207,24 +1044,10 @@ export default function HoursOverview() {
                                   </td>
                                   {days.map((d, i) => {
                                     const dateStr = toISO(d);
-                                    const scoped = scopedHoursFor(person.id, item.taskId, dateStr);
-                                    const logged = view === "fulfillment" ? fulfillmentLoggedHoursFor(person.id, item.taskId, dateStr) : loggedHoursFor(person.id, item.taskId, dateStr);
-                                    if (view === "grid") {
-                                      return (
-                                        <td key={i} style={subCellStyle(i)}>
-                                          {logged > 0 ? <span style={{ fontSize: 10.5, color: "var(--navy)" }}>{logged.toFixed(1)}h</span> : null}
-                                        </td>
-                                      );
-                                    }
+                                    const logged = loggedHoursFor(person.id, item.taskId, dateStr);
                                     return (
                                       <td key={i} style={subCellStyle(i)}>
-                                        {scoped > 0 || logged > 0 ? (
-                                          <span style={{ fontSize: 10.5, color: "var(--navy)" }}>
-                                            {scoped > 0 ? scoped.toFixed(1) : "–"}
-                                            <span style={{ color: "var(--muted)" }}> / </span>
-                                            {logged > 0 ? logged.toFixed(1) : "–"}
-                                          </span>
-                                        ) : null}
+                                        {logged > 0 ? <span style={{ fontSize: 10.5, color: "var(--navy)" }}>{logged.toFixed(2)}h</span> : null}
                                       </td>
                                     );
                                   })}
@@ -1253,11 +1076,10 @@ export default function HoursOverview() {
                       </td>
                       {days.map((d, i) => {
                         const dateStr = toISO(d);
-                        const scoped = visiblePeople.reduce((sum, p) => sum + scopedPersonTotalFor(p.id, dateStr), 0);
-                        const logged = visiblePeople.reduce((sum, p) => sum + (view === "fulfillment" ? fulfillmentPersonTotalFor(p.id, dateStr) : loggedPersonTotalFor(p.id, dateStr)), 0);
+                        const logged = visiblePeople.reduce((sum, p) => sum + loggedPersonTotalFor(p.id, dateStr), 0);
                         return (
                           <td key={i} style={{ ...rollupCellStyle(i), borderTop: "1px solid var(--border)", fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>
-                            {view === "grid" ? (logged > 0 ? `${logged.toFixed(1)}h` : "–") : scoped > 0 || logged > 0 ? `${scoped.toFixed(1)}/${logged.toFixed(1)}h` : "–"}
+                            {logged > 0 ? `${logged.toFixed(2)}h` : "–"}
                           </td>
                         );
                       })}
@@ -1269,37 +1091,18 @@ export default function HoursOverview() {
           </div>
           {/* 2026-08-26 (Sandra: "can the guide text at the bottom of
               this page show the color coding instead of just text") --
-              actual swatches matching coverageTone/toneColors' real
-              colors, instead of naming them in prose. */}
+              actual swatches matching the real colors, instead of naming
+              them in prose. */}
           <div style={{ marginTop: 10, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 14, fontSize: 11.5, color: "var(--muted)" }}>
-            {view === "grid"
-              ? LOGGED_HOURS_LEGEND.map(({ range, label, tone }) => (
-                  <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                    <span className={`status-pill ${tone}`} style={{ fontSize: 10, padding: "1px 6px", fontWeight: 700 }}>
-                      {range}
-                    </span>
-                    {label}
-                  </span>
-                ))
-              : [
-                  { tone: "success" as const, label: "Logged covers ≥90% of scoped" },
-                  { tone: "warning" as const, label: "50–89%" },
-                  { tone: "danger" as const, label: "Under 50%" },
-                  { tone: "neutral" as const, label: '"–" = nothing scoped or logged' },
-                ].map(({ tone, label }) => {
-                  const colors = toneColors(tone);
-                  return (
-                    <span key={tone} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 3, background: colors.bg ?? "var(--hover-bg)", border: `1px solid ${colors.fg}` }} />
-                      {label}
-                    </span>
-                  );
-                })}
-            <span>
-              {view === "fulfillment"
-                ? "Logged hours here are re-attributed to the day(s) each task's hours were scoped -- not the day they were actually logged."
-                : "Logged hours always show on the day they were actually worked, even outside a task's scoped window. A 7.5h shift (±1h) is the reference for “Within expected.”"}
-            </span>
+            {LOGGED_HOURS_LEGEND.map(({ range, label, tone }) => (
+              <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span className={`status-pill ${tone}`} style={{ fontSize: 10, padding: "1px 6px", fontWeight: 700 }}>
+                  {range}
+                </span>
+                {label}
+              </span>
+            ))}
+            <span>Logged hours always show on the day they were actually worked, even outside a task's scoped window. A 7.5h shift (±1h) is the reference for “Within expected.”</span>
           </div>
         </>
       ) : (
@@ -1366,6 +1169,7 @@ export default function HoursOverview() {
               <Download size={13} /> Export to Excel
             </button>
           </div>
+          <div className="card" style={{ padding: 0 }}>
           <div className="data-table-dense">
             <DataTable
               columns={taskHourColumns}
@@ -1384,8 +1188,8 @@ export default function HoursOverview() {
                     <td colSpan={Math.max(colSpan - 3, 1)} style={{ padding: "6px 13px", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
                       Subtotal <span style={{ fontWeight: 500, color: "var(--muted)" }}>({group.rows.length})</span>
                     </td>
-                    <td style={{ padding: "6px 13px", textAlign: "right", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>{groupScoped.toFixed(1)}h</td>
-                    <td style={{ padding: "6px 13px", textAlign: "right", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>{groupLogged.toFixed(1)}h</td>
+                    <td style={{ padding: "6px 13px", textAlign: "right", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>{groupScoped.toFixed(2)}h</td>
+                    <td style={{ padding: "6px 13px", textAlign: "right", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>{groupLogged.toFixed(2)}h</td>
                     <td style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)" }} />
                   </>
                 );
@@ -1395,14 +1199,15 @@ export default function HoursOverview() {
                   <td colSpan={Math.max(colSpan - 3, 1)} style={{ padding: "8px 13px", fontWeight: 600 }}>
                     Total
                   </td>
-                  <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>{taskTotals.scoped.toFixed(1)}h</td>
-                  <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>{taskTotals.logged.toFixed(1)}h</td>
+                  <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>{taskTotals.scoped.toFixed(2)}h</td>
+                  <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>{taskTotals.logged.toFixed(2)}h</td>
                   <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>
-                    {(taskTotals.logged - taskTotals.scoped > 0 ? "+" : "") + (taskTotals.logged - taskTotals.scoped).toFixed(1)}h
+                    {(taskTotals.logged - taskTotals.scoped > 0 ? "+" : "") + (taskTotals.logged - taskTotals.scoped).toFixed(2)}h
                   </td>
                 </>
               )}
             />
+          </div>
           </div>
         </>
       )}
