@@ -1633,8 +1633,15 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
       <h2 style={{ fontSize: 13 }}>Needs your decision ({needsDecision.length})</h2>
       <RequestList rows={needsDecision} emptyLabel="Nothing needs your decision right now." />
 
-      <h2 style={{ fontSize: 13, marginTop: 24 }}>Other pending approvals ({otherPending.length})</h2>
-      <RequestList rows={otherPending} emptyLabel="No other pending approvals." />
+      {/* 2026-09-24 (Sandra: "only show what they need to see") --
+          requests someone else must decide are an oversight view for
+          Full Access only. */}
+      {isFullAccess && (
+        <>
+          <h2 style={{ fontSize: 13, marginTop: 24 }}>Other pending approvals ({otherPending.length})</h2>
+          <RequestList rows={otherPending} emptyLabel="No other pending approvals." />
+        </>
+      )}
 
       {confirmDialog}
     </div>

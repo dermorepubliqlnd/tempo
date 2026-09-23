@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { useSearchParams } from "react-router-dom";
+import HolidayCalendar from "./HolidayCalendar";
 import { useSession } from "../lib/useSession";
 
 // Time Off (2026-08-25) -- split out of the old Work Schedule "Scheduled"
@@ -20,6 +22,7 @@ interface PersonRow {
   id: string;
   name: string;
   is_active: boolean;
+  reports_to: string | null;
 }
 interface AvailabilityRow {
   id: string;
@@ -67,7 +70,7 @@ function DayMenu({ onPick, onClose }: { onPick: (s: "off" | "half_day" | null) =
   );
 }
 
-export default function TimeOff() {
+function TimeOffGrid() {
   const { person: me } = useSession();
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
@@ -80,7 +83,7 @@ export default function TimeOff() {
   async function loadAll() {
     setLoading(true);
     const [{ data: p }, { data: av }, { data: hol }] = await Promise.all([
-      supabase.from("people").select("id,name,is_active").eq("is_active", true).order("name"),
+      supabase.from("people").select("id,name,is_active,reports_to").eq("is_active", true).order("name"),
       supabase.from("person_availability").select("*"),
       supabase.from("holidays").select("*"),
     ]);
@@ -167,7 +170,6 @@ export default function TimeOff() {
 
   return (
     <div>
-      <h1>Time Off</h1>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
         <button
@@ -283,6 +285,10 @@ export default function TimeOff() {
             ) : (
               people.map((person) => {
                 const isMe = me?.id === person.id;
+                // 2026-09-24 (Sandra): supervisors can plot time off for
+                // their DIRECT reports; Full Access for anyone. Everyone
+                // still plots their own. Mirrored by phase105 RLS.
+                const canPlot = isMe || me?.access_level === "full" || person.reports_to === me?.id;
                 return (
                   <tr key={person.id}>
                     <td
@@ -307,7 +313,7 @@ export default function TimeOff() {
                       const weekend = dow === 0 || dow === 6;
                       const holiday = holidayByDate.get(dateStr);
                       const av = availabilityFor(person.id, dateStr);
-                      const clickable = isMe && !holiday && !weekend;
+                      const clickable = canPlot && !holiday && !weekend;
                       let label: string | null = null;
                       let bg: string | undefined;
                       let fg = "var(--muted)";
@@ -361,6 +367,46 @@ export default function TimeOff() {
           <DayMenu onPick={(s) => setDayStatus(dayMenu.personId, dayMenu.date, s)} onClose={() => setDayMenu(null)} />
         </div>
       )}
+    </div>
+  );
+}
+
+// 2026-09-24 (Sandra: sidebar cleanup -- "combine Time Off and Holiday
+// Calendar under one navigation item"). Two tabs, same mechanisms as
+// before: Time Off (everyone plots their own; supervisors for direct
+// reports; Full Access for anyone) and Holiday Calendar (view-only for
+// everyone, editable by Full Access only). ?tab=holidays deep-links the
+// second tab (old /admin/holidays redirects there).
+export default function TimeOff() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") === "holidays" ? "holidays" : "time_off";
+  const tabs: { key: "time_off" | "holidays"; label: string }[] = [
+    { key: "time_off", label: "Time Off" },
+    { key: "holidays", label: "Holiday Calendar" },
+  ];
+  return (
+    <div>
+      <h1>Time Off &amp; Holidays</h1>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        {tabs.map((t) => {
+          const active = tab === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setSearchParams(t.key === "holidays" ? { tab: "holidays" } : {}, { replace: true })}
+              style={{
+                fontSize: 12, fontWeight: 600, padding: "6px 12px", borderRadius: "var(--radius-sm)", cursor: "pointer",
+                border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
+                background: active ? "var(--accent-bg, #eaf2fb)" : "var(--surface)",
+                color: active ? "var(--accent)" : "var(--text-secondary)",
+              }}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+      {tab === "holidays" ? <HolidayCalendar embedded /> : <TimeOffGrid />}
     </div>
   );
 }

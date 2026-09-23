@@ -19,6 +19,7 @@ import {
 import { supabase } from "../lib/supabaseClient";
 import Modal from "../components/Modal";
 import { useSession } from "../lib/useSession";
+import { useApprovalAuthority } from "../lib/useApprovalAuthority";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
 import { buildHolidaySet, buildHolidayNameMap, nonWorkingDayConfirmMessage } from "../lib/workingDays";
@@ -160,6 +161,9 @@ function notOnArchived(r: unknown): boolean {
 
 export default function MyDashboard() {
   const { person: me } = useSession();
+  // 2026-09-24: Approval Center is hidden for users without approval
+  // authority, so the Pending Approvals header links elsewhere for them.
+  const hasApprovalAuthority = useApprovalAuthority();
   const { running, busy: timerBusy, start: startTaskTimer, requestStop } = useTimeTracking();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const navigate = useNavigate();
@@ -529,7 +533,7 @@ export default function MyDashboard() {
       project: r.project ? "Whole project" : r.task?.project?.name ?? "—",
       date: r.created_at,
       kind: "extension" as const,
-      to: "/extension-requests",
+      to: "/projects",
     })),
     ...myPendingTimeEntries.map((r) => ({
       key: `time-${r.id}`,
@@ -942,7 +946,7 @@ export default function MyDashboard() {
           </div>
 
           <div className="dash-card" style={{ marginBottom: 0 }}>
-            <SectionHeader title="Pending Approvals" to="/approval-center" small="Requests you've sent that are still awaiting a decision" />
+            <SectionHeader title="Pending Approvals" to={hasApprovalAuthority ? "/approval-center" : "/time-tracking?scope=mine"} small="Requests you've sent that are still awaiting a decision" />
             {mySubmittedItems.length === 0 ? (
               <p style={{ fontSize: 12, color: "var(--muted)" }}>You have no pending requests right now.</p>
             ) : (

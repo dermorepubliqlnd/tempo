@@ -5,14 +5,12 @@ import {
   LayoutDashboard,
   BarChart3,
   FolderKanban,
-  CalendarClock,
   Timer,
   Gauge,
   Scale,
   Palmtree,
   Users,
   Settings,
-  CalendarDays,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
@@ -22,27 +20,22 @@ import {
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
+import { useApprovalAuthority } from "../lib/useApprovalAuthority";
 import TimeTrackerBar from "./TimeTrackerBar";
 import TempoMark from "./TempoMark";
 
 type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
+// 2026-09-24 (Sandra: sidebar cleanup) -- Extension Requests removed
+// (decided in Approval Center now); Approval Center only for users with
+// approval authority (useApprovalAuthority); Time Off + Holiday calendar
+// combined into one "Time Off & Holidays" item.
 const mainItems: NavItem[] = [
-  // 2026-09-19 (Sandra: everyone gets a personal dashboard by default,
-  // with the former team-wide one still reachable as its own view) --
-  // "/" is now the personal snapshot; the original Dashboard.tsx moved to
-  // "/team-dashboard" and kept its own nav entry right below.
   { to: "/", label: "My Dashboard", icon: LayoutDashboard, end: true },
   { to: "/team-dashboard", label: "Team Dashboard", icon: BarChart3 },
-  { to: "/approval-center", label: "Approval Center", icon: ClipboardCheck },
   { to: "/projects", label: "Projects & Tasks", icon: FolderKanban },
-  { to: "/extension-requests", label: "Extension Requests", icon: CalendarClock },
   { to: "/time-tracking", label: "Time Tracking", icon: Timer },
-  // 2026-09-21 (Sandra: "Add a knowledge base page accesible to
-  // everyone") -- lives in mainItems (not adminItems) since read access
-  // is everyone; edit controls inside KnowledgeBase.tsx are gated to
-  // Full Access on their own, same pattern as the page-level content
-  // (not the whole page) being conditional elsewhere.
+  { to: "/approval-center", label: "Approval Center", icon: ClipboardCheck },
   { to: "/knowledge-base", label: "Knowledge Base", icon: BookOpen },
   { to: "/archive", label: "Archive", icon: ArchiveIcon },
 ];
@@ -50,7 +43,7 @@ const mainItems: NavItem[] = [
 const resourcePlanningItems: NavItem[] = [
   { to: "/utilization", label: "Utilization", icon: Gauge },
   { to: "/hours-overview", label: "Productivity", icon: Scale },
-  { to: "/time-off", label: "Time Off", icon: Palmtree },
+  { to: "/time-off", label: "Time Off & Holidays", icon: Palmtree },
 ];
 
 const adminItems: NavItem[] = [
@@ -60,7 +53,6 @@ const adminItems: NavItem[] = [
   // calendar highlighted both itself AND User management at once.
   { to: "/admin", label: "User management", icon: Users, end: true },
   { to: "/site-settings", label: "Site settings", icon: Settings },
-  { to: "/admin/holidays", label: "Holiday calendar", icon: CalendarDays },
 ];
 
 // Sandra, 2026-09-03: collapse the nav pane down to icons-only, to give
@@ -126,6 +118,8 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const { person } = useSession();
   const groups = person?.access_level === "full" ? [mainItems, adminItems] : [mainItems];
+  const hasApprovalAuthority = useApprovalAuthority();
+  const visibleMainItems = mainItems.filter((item) => item.to !== "/approval-center" || hasApprovalAuthority === true);
 
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -218,7 +212,7 @@ export default function AppLayout() {
           </div>
         </div>
 
-        <NavGroup title="Main" items={mainItems} collapsed={collapsed} />
+        <NavGroup title="Main" items={visibleMainItems} collapsed={collapsed} />
         <NavGroup title="Resource Planning" items={resourcePlanningItems} collapsed={collapsed} />
         {groups.length > 1 && <NavGroup title="Admin" items={adminItems} collapsed={collapsed} />}
 

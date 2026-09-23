@@ -6,7 +6,7 @@ import Dashboard from "./pages/Dashboard";
 import MaterialsOutput from "./pages/MaterialsOutput";
 import MyDashboard from "./pages/MyDashboard";
 import Projects from "./pages/Projects";
-import ExtensionRequests from "./pages/ExtensionRequests";
+import { useApprovalAuthority } from "./lib/useApprovalAuthority";
 import ApprovalCenter from "./pages/ApprovalCenter";
 import TimeTracking from "./pages/TimeTracking";
 import Utilization from "./pages/Utilization";
@@ -14,13 +14,30 @@ import Admin from "./pages/Admin";
 import SiteSettings from "./pages/SiteSettings";
 import HoursOverview from "./pages/HoursOverview";
 import TimeOff from "./pages/TimeOff";
-import HolidayCalendar from "./pages/HolidayCalendar";
 import WbsPlanning from "./pages/WbsPlanning";
 import AuditTrail from "./pages/AuditTrail";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import Archive from "./pages/Archive";
 import Login from "./pages/Login";
 import SetPassword from "./pages/SetPassword";
+
+// 2026-09-24 (sidebar cleanup): Extension Requests left the menu -- its
+// decisions live in Approval Center. Old links/bookmarks send approvers
+// there and everyone else to Projects & Tasks (a task's extension history
+// is on the task itself). The page file is kept, just unrouted.
+function ExtensionRequestsRedirect() {
+  const has = useApprovalAuthority();
+  if (has === null) return null;
+  return <Navigate to={has ? "/approval-center" : "/projects"} replace />;
+}
+
+// Approval Center is only reachable by people with approval authority
+// (same rule that hides its menu item).
+function ApprovalCenterGate() {
+  const has = useApprovalAuthority();
+  if (has === null) return null;
+  return has ? <ApprovalCenter /> : <Navigate to="/" replace />;
+}
 
 function RedirectToWbs() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -75,15 +92,15 @@ export default function App() {
           <Route path="/archive" element={<Archive />} />
           <Route path="/tasks" element={<Navigate to="/projects" replace />} />
           <Route path="/tasks/:taskId" element={<Navigate to="/projects" replace />} />
-          <Route path="/approval-center" element={<ApprovalCenter />} />
-          <Route path="/extension-requests" element={<ExtensionRequests />} />
+          <Route path="/approval-center" element={<ApprovalCenterGate />} />
+          <Route path="/extension-requests" element={<ExtensionRequestsRedirect />} />
           <Route path="/time-tracking" element={<TimeTracking />} />
           <Route path="/utilization" element={<Utilization />} />
           <Route path="/hours-overview" element={<HoursOverview />} />
           <Route path="/time-off" element={<TimeOff />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="/site-settings" element={<SiteSettings />} />
-          <Route path="/admin/holidays" element={<HolidayCalendar />} />
+          <Route path="/admin/holidays" element={<Navigate to="/time-off?tab=holidays" replace />} />
         </Route>
       </Routes>
     </HashRouter>

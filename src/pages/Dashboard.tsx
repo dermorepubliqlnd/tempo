@@ -1279,7 +1279,7 @@ export default function Dashboard() {
         <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>Needs Attention</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
           <AttentionChip icon={<ShieldQuestion size={24} />} tone="purple" count={needsAttention.baselinePending} label="Baseline approvals pending" to="/projects" />
-          <AttentionChip icon={<Clock3 size={24} />} tone="accent" count={needsAttention.extPending} label="Extension requests pending" to="/extension-requests" />
+          <AttentionChip icon={<Clock3 size={24} />} tone="accent" count={needsAttention.extPending} label="Extension requests pending" to="/approval-center" />
           <AttentionChip icon={<AlertTriangle size={24} />} tone="warning" count={needsAttention.atRisk} label="At risk" to="/projects" />
           <AttentionChip icon={<Ban size={24} />} tone="danger" count={needsAttention.overdue} label="Overdue" to="/projects" />
           <AttentionChip icon={<CalendarClock size={24} />} tone="accent" count={needsAttention.dueSoon} label="Due in next 7 days" to="/projects" />

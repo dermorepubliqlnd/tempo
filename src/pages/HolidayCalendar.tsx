@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { InlineText, InlineDate, InlineSelect } from "../components/InlineCell";
 import { useConfirm } from "../lib/useConfirm";
+import { useSession } from "../lib/useSession";
 
 interface HolidayRow {
   id: string;
@@ -34,7 +35,12 @@ const CATEGORY_TO_VALUE: Record<string, HolidayRow["category"]> = {
 // PH holiday dates shift every year (proclamations, movable dates), so
 // this is a flat per-year list to maintain rather than a recurring rule —
 // expect to refresh it annually.
-export default function HolidayCalendar() {
+// 2026-09-24 (sidebar cleanup): now shown as the "Holiday Calendar" tab
+// inside Time Off & Holidays. View-only for everyone; only Full Access
+// can add/edit/delete (RLS already enforces this -- the UI now matches).
+export default function HolidayCalendar({ embedded = false }: { embedded?: boolean }) {
+  const { person: me } = useSession();
+  const canEdit = me?.access_level === "full";
   const [holidays, setHolidays] = useState<HolidayRow[]>([]);
   const [loading, setLoading] = useState(true);
   const { confirm, dialog } = useConfirm();
@@ -88,7 +94,7 @@ export default function HolidayCalendar() {
   return (
     <div>
       {dialog}
-      <h1>Holiday calendar</h1>
+      {!embedded && <h1>Holiday calendar</h1>}
       <p className="subtitle">
         Company-wide non-working days for the Day Planner. Legal PH Holidays, Local Holidays, and Internal Time Off (e.g. strat planning, team building) all
         block the whole team's grid for that date, regardless of any task's own start/due window. PH holiday dates shift every year, so refresh this list
@@ -119,27 +125,30 @@ export default function HolidayCalendar() {
               {holidays.map((h) => (
                 <tr key={h.id}>
                   <td>
-                    <InlineDate value={h.date} editable onCommit={(v) => v && update(h.id, { date: v })} />
+                    <InlineDate value={h.date} editable={canEdit} onCommit={(v) => v && update(h.id, { date: v })} />
                   </td>
                   <td>
-                    <InlineText value={h.name} editable onCommit={(v) => update(h.id, { name: v })} />
+                    <InlineText value={h.name} editable={canEdit} onCommit={(v) => update(h.id, { name: v })} />
                   </td>
                   <td>
                     <InlineSelect
                       value={CATEGORY_LABEL[h.category]}
-                      editable
+                      editable={canEdit}
                       options={CATEGORY_OPTIONS}
                       renderReadOnly={() => <span className={`status-pill ${CATEGORY_TONE[h.category]}`}>{CATEGORY_LABEL[h.category]}</span>}
                       onCommit={(v) => update(h.id, { category: CATEGORY_TO_VALUE[v] ?? "legal_ph" })}
                     />
                   </td>
                   <td>
-                    <button className="row-icon-btn" onClick={() => remove(h)} title="Delete holiday">
-                      <Trash2 size={12} />
-                    </button>
+                    {canEdit && (
+                      <button className="row-icon-btn" onClick={() => remove(h)} title="Delete holiday">
+                        <Trash2 size={12} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
+              {canEdit && (
               <tr>
                 <td colSpan={4} className="add-row-cell">
                   <div className="add-row-trigger" onClick={addHoliday}>
@@ -148,6 +157,7 @@ export default function HolidayCalendar() {
                   </div>
                 </td>
               </tr>
+              )}
             </tbody>
           </table>
         )}
