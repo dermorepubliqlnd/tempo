@@ -158,6 +158,40 @@ function formatClockRange(startedAt: string, endedAt: string | null): string {
   return `${startTime} -- ${endTime}`;
 }
 
+// 2026-09-23 (Sandra: "flag time entries that has timing overlaps... i
+// see this mostly applicable when logging manual entries... if someone
+// is claiming hours worked and there is an existing task (pending or
+// approved, confirmed) - flag it") -- a running entry has no ended_at
+// yet, so it's treated as ongoing (blocks anything starting before
+// "now"). Rejected/archived entries never block -- they're not a real
+// claim on that time.
+const OVERLAP_BLOCKING_STATUSES = new Set(["pending_confirm", "pending_approval", "confirmed", "approved"]);
+function findOverlappingEntry(entries: EntryRow[], personId: string, startIso: string, endIso: string, excludeId?: string): EntryRow | null {
+  const s = new Date(startIso).getTime();
+  const e = new Date(endIso).getTime();
+  for (const row of entries) {
+    if (row.person_id !== personId || row.id === excludeId || row.is_archived) continue;
+    if (!OVERLAP_BLOCKING_STATUSES.has(row.status)) continue;
+    const rs = new Date(row.started_at).getTime();
+    const re = row.ended_at ? new Date(row.ended_at).getTime() : Date.now();
+    if (s < re && rs < e) return row;
+  }
+  return null;
+}
+function overlapTaskIdLabel(row: EntryRow): string {
+  return row.task?.task_number
+    ? `T-${String(row.task.task_number).padStart(4, "0")}`
+    : row.non_project_entry_number
+    ? `NP-${String(row.non_project_entry_number).padStart(4, "0")}`
+    : "—";
+}
+function overlapTitle(row: EntryRow): string {
+  return row.activity_type_id ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
+}
+function overlapMessageText(row: EntryRow): string {
+  return `Time overlap detected\n\nYou already have a logged entry for this period:\nTask ID: ${overlapTaskIdLabel(row)}\nTask: ${overlapTitle(row)}\nTime: ${formatClockRange(row.started_at, row.ended_at)}\nStatus: ${STATUS_LABEL[row.status]}\n\nPlease adjust the start or end time.`;
+}
+
 function formatWorkDate(value: string): string {
   const d = new Date(value);
   if (isNaN(d.getTime())) return "—";
@@ -568,6 +602,10 @@ export default function TimeTracking() {
   const [logReasonCategory, setLogReasonCategory] = useState("");
   const [logNotes, setLogNotes] = useState("");
   const [logError, setLogError] = useState<string | null>(null);
+  // 2026-09-23 (Sandra: overlap flagging) -- holds the conflicting entry
+  // so the Add Time modal can render her exact "Time overlap detected"
+  // message format (bold heading + field lines) instead of a plain string.
+  const [logOverlapEntry, setLogOverlapEntry] = useState<EntryRow | null>(null);
   const [logSaving, setLogSaving] = useState(false);
 
   async function loadAll() {
@@ -693,6 +731,11 @@ export default function TimeTracking() {
       await alert("End time must be after start time.");
       return;
     }
+    const overlap = findOverlappingEntry(entries, row.person_id, start.toISOString(), end.toISOString(), row.id);
+    if (overlap) {
+      await alert(overlapMessageText(overlap));
+      return;
+    }
     setEditSaving(true);
     const res = await editPendingManualTimeEntry(row.id, start.toISOString(), end.toISOString(), {
       reasonCategory: row.activity_type_id ? undefined : v.reasonCategory || undefined,
@@ -722,6 +765,7 @@ export default function TimeTracking() {
 
   async function handleSubmitManual() {
     setLogError(null);
+    setLogOverlapEntry(null);
     if (logMode === "non_project") {
       // 2026-09-22 (Sandra: "notes be optional except when Others is
       // selected, where they will be required to specify"). Reason
@@ -743,6 +787,11 @@ export default function TimeTracking() {
       if (end <= start) {
         end = new Date(`${logStartDate}T23:59:59`);
         clampedAtMidnight = true;
+      }
+      const overlap = findOverlappingEntry(entries, me?.id ?? "", start.toISOString(), end.toISOString());
+      if (overlap) {
+        setLogOverlapEntry(overlap);
+        return;
       }
       setLogSaving(true);
       const res = await submitNonProjectTimeEntry(me?.id ?? "", logActivityTypeId, start.toISOString(), end.toISOString(), logNotes.trim());
@@ -787,6 +836,11 @@ export default function TimeTracking() {
     if (end <= start) {
       end = new Date(`${logStartDate}T23:59:59`);
       clampedAtMidnight = true;
+    }
+    const overlap = findOverlappingEntry(entries, me?.id ?? "", start.toISOString(), end.toISOString());
+    if (overlap) {
+      setLogOverlapEntry(overlap);
+      return;
     }
     setLogSaving(true);
     const res = await submitManualTimeEntry(logTaskId, start.toISOString(), end.toISOString(), logReasonCategory, logNotes.trim() || logReasonCategory);
@@ -1505,6 +1559,22 @@ export default function TimeTracking() {
                 );
               })()}
             {logError && <div style={{ color: "var(--danger-text)", fontSize: 11.5, marginBottom: 8 }}>{logError}</div>}
+            {logOverlapEntry && (
+              <div
+                style={{
+                  color: "var(--danger-text)", fontSize: 11.5, marginBottom: 8, padding: "8px 10px",
+                  background: "var(--danger-bg)", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)",
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>Time overlap detected</div>
+                <div>You already have a logged entry for this period:</div>
+                <div>Task ID: {overlapTaskIdLabel(logOverlapEntry)}</div>
+                <div>Task: {overlapTitle(logOverlapEntry)}</div>
+                <div>Time: {formatClockRange(logOverlapEntry.started_at, logOverlapEntry.ended_at)}</div>
+                <div>Status: {STATUS_LABEL[logOverlapEntry.status]}</div>
+                <div style={{ marginTop: 4 }}>Please adjust the start or end time.</div>
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 onClick={handleSubmitManual}
