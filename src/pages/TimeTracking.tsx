@@ -192,6 +192,19 @@ function overlapMessageText(row: EntryRow): string {
   return `Time overlap detected\n\nYou already have a logged entry for this period:\nTask ID: ${overlapTaskIdLabel(row)}\nTask: ${overlapTitle(row)}\nTime: ${formatClockRange(row.started_at, row.ended_at)}\nStatus: ${STATUS_LABEL[row.status]}\n\nPlease adjust the start or end time.`;
 }
 
+// 2026-09-23 (Sandra: "can we hard gate manual plotting time in
+// advance?... Time entries can only be logged for time that has
+// already passed") -- a manual/non-project entry can only cover work
+// that's actually happened, so either edge landing in the future blocks
+// the whole entry (not just clamps it) -- distinct from the existing
+// past-midnight clamp, which only kicks in when END <= START on the
+// same log date.
+function isFutureTimeEntry(startIso: string, endIso: string): boolean {
+  const now = Date.now();
+  return new Date(startIso).getTime() > now || new Date(endIso).getTime() > now;
+}
+const FUTURE_ENTRY_MESSAGE_TEXT = "Future time entry not allowed\n\nTime entries can only be logged for time that has already passed.";
+
 function formatWorkDate(value: string): string {
   const d = new Date(value);
   if (isNaN(d.getTime())) return "—";
@@ -606,6 +619,8 @@ export default function TimeTracking() {
   // so the Add Time modal can render her exact "Time overlap detected"
   // message format (bold heading + field lines) instead of a plain string.
   const [logOverlapEntry, setLogOverlapEntry] = useState<EntryRow | null>(null);
+  // 2026-09-23 (Sandra: hard gate on future-dated manual entries).
+  const [logFutureBlocked, setLogFutureBlocked] = useState(false);
   const [logSaving, setLogSaving] = useState(false);
 
   async function loadAll() {
@@ -731,6 +746,10 @@ export default function TimeTracking() {
       await alert("End time must be after start time.");
       return;
     }
+    if (isFutureTimeEntry(start.toISOString(), end.toISOString())) {
+      await alert(FUTURE_ENTRY_MESSAGE_TEXT);
+      return;
+    }
     const overlap = findOverlappingEntry(entries, row.person_id, start.toISOString(), end.toISOString(), row.id);
     if (overlap) {
       await alert(overlapMessageText(overlap));
@@ -766,6 +785,7 @@ export default function TimeTracking() {
   async function handleSubmitManual() {
     setLogError(null);
     setLogOverlapEntry(null);
+    setLogFutureBlocked(false);
     if (logMode === "non_project") {
       // 2026-09-22 (Sandra: "notes be optional except when Others is
       // selected, where they will be required to specify"). Reason
@@ -787,6 +807,10 @@ export default function TimeTracking() {
       if (end <= start) {
         end = new Date(`${logStartDate}T23:59:59`);
         clampedAtMidnight = true;
+      }
+      if (isFutureTimeEntry(start.toISOString(), end.toISOString())) {
+        setLogFutureBlocked(true);
+        return;
       }
       const overlap = findOverlappingEntry(entries, me?.id ?? "", start.toISOString(), end.toISOString());
       if (overlap) {
@@ -836,6 +860,10 @@ export default function TimeTracking() {
     if (end <= start) {
       end = new Date(`${logStartDate}T23:59:59`);
       clampedAtMidnight = true;
+    }
+    if (isFutureTimeEntry(start.toISOString(), end.toISOString())) {
+      setLogFutureBlocked(true);
+      return;
     }
     const overlap = findOverlappingEntry(entries, me?.id ?? "", start.toISOString(), end.toISOString());
     if (overlap) {
@@ -1559,6 +1587,17 @@ export default function TimeTracking() {
                 );
               })()}
             {logError && <div style={{ color: "var(--danger-text)", fontSize: 11.5, marginBottom: 8 }}>{logError}</div>}
+            {logFutureBlocked && (
+              <div
+                style={{
+                  color: "var(--danger-text)", fontSize: 11.5, marginBottom: 8, padding: "8px 10px",
+                  background: "var(--danger-bg)", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)",
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>Future time entry not allowed</div>
+                <div>Time entries can only be logged for time that has already passed.</div>
+              </div>
+            )}
             {logOverlapEntry && (
               <div
                 style={{
