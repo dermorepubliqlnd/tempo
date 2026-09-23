@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, CornerDownRight, ChevronRight, ChevronDown, Archive, ArchiveRestore, Trash2, Feather, Weight, BicepsFlexed, Flame, AlertTriangle, CalendarClock, CheckCircle2, X, RotateCcw, MessageCircle, Handshake, ShieldCheck, Cpu, Crown, TrendingUp, Wrench, Sparkles, Folder, Lock } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useTableViews } from "../lib/useTableViews";
 import DataTable from "../components/DataTable";
@@ -930,11 +931,6 @@ function reorderedSortValue(list: { id: string; sort_order: number | null }[], d
 // condition) and clears extension_requests, task_effort_changes,
 // time_entries, and task_collaborators with elevated privileges before
 // deleting the tasks -- so RLS can't silently swallow the cleanup again.
-async function deleteTasksAndDependents(ids: string[]): Promise<{ error: string | null }> {
-  if (ids.length === 0) return { error: null };
-  const { error } = await supabase.rpc("delete_tasks_and_dependents", { p_task_ids: ids });
-  return { error: error?.message ?? null };
-}
 
 export default function Projects() {
   const navigate = useNavigate();
@@ -1192,10 +1188,6 @@ export default function Projects() {
   const [extensionTask, setExtensionTask] = useState<TaskWithDepth | null>(null);
   const [extensionProject, setExtensionProject] = useState<ProjectRow | null>(null);
   const [extDetailTask, setExtDetailTask] = useState<TaskWithDepth | null>(null);
-  const [archivedOpen, setArchivedOpen] = useState(false);
-  const [archivedProjects, setArchivedProjects] = useState<ProjectRow[]>([]);
-  const [archivedTasks, setArchivedTasks] = useState<TaskRow[]>([]);
-  const [archivedLoading, setArchivedLoading] = useState(false);
 
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   // Sandra: "align the collapse/expand [group toggle] with the sort and
@@ -1212,26 +1204,8 @@ export default function Projects() {
   const [taskClusterRef, taskClusterHeight] = useStickyOffset<HTMLDivElement>();
 
   const isFullAccess = me?.access_level === "full";
-  const ARCHIVE_RETENTION_DAYS = 30;
-
-  // Best-effort purge: anything archived more than 30 days ago gets
-  // permanently deleted the next time someone with delete rights (the
-  // project's owner or Full Access) loads this page. There's no server-side
-  // cron for this, so it relies on the app being opened regularly.
-  async function purgeExpiredArchives() {
-    const cutoff = new Date(Date.now() - ARCHIVE_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    // Fetch ids first rather than a direct filtered .delete() -- expired
-    // tasks need their extension_requests rows cleared first too (see
-    // deleteTasksAndDependents above), which needs a concrete id list to
-    // target.
-    const { data: expiredTasks } = await supabase.from("tasks").select("id").eq("is_archived", true).lt("archived_at", cutoff);
-    await deleteTasksAndDependents((expiredTasks ?? []).map((t) => t.id));
-    await supabase.from("projects").delete().eq("is_archived", true).lt("archived_at", cutoff);
-  }
-
   async function loadAll() {
     setLoading(true);
-    purgeExpiredArchives();
     const [{ data: projectData }, { data: taskData }, { data: peopleData }, { data: chainPeopleData }, { data: holidayData }, { data: extReqData }, { data: timeEntryData }, { data: noteData }, { data: delSpentData }, { data: workTypeData }, { data: outputTypeData }, { data: projectSourceData }, { data: projectCategoryData }, { data: projectPhaseData }, { data: phaseMappingData }, { data: pendingBaselineData }, { data: projectPlanningTypeData }, { data: projectTypeData }, { data: closeoutData }, { data: baselineApprovalData }, { data: declinedBaselineData }] = await Promise.all([
       supabase.from("projects").select("*").eq("is_archived", false).order("sort_order"),
       supabase.from("tasks").select("*").eq("is_archived", false).order("sort_order"),
@@ -1339,17 +1313,6 @@ export default function Projects() {
     setSelectedTaskIds((prev) => prev.filter((id) => taskIds.has(id)));
     setLoading(false);
     hasLoadedOnce.current = true;
-  }
-
-  async function loadArchived() {
-    setArchivedLoading(true);
-    const [{ data: projectData }, { data: taskData }] = await Promise.all([
-      supabase.from("projects").select("*").eq("is_archived", true).order("archived_at", { ascending: false }),
-      supabase.from("tasks").select("*").eq("is_archived", true).order("archived_at", { ascending: false }),
-    ]);
-    setArchivedProjects((projectData as ProjectRow[]) ?? []);
-    setArchivedTasks((taskData as TaskRow[]) ?? []);
-    setArchivedLoading(false);
   }
 
   useEffect(() => {
@@ -1900,50 +1863,6 @@ export default function Projects() {
     );
   }
 
-  async function restoreProject(id: string) {
-    const { error } = await supabase.from("projects").update({ is_archived: false, archived_at: null }).eq("id", id);
-    if (error) {
-      alert(`Couldn't restore: ${error.message}`);
-      return;
-    }
-    // Bugfix (2026-08-24, found in post-ship audit): this cascade to the
-    // project's own tasks was fire-and-forget -- if it failed, the
-    // project would show as restored/active while its tasks silently
-    // stayed archived (missing from Table/Board/WBS with no visible
-    // error). Now surfaces the failure instead of hiding it.
-    const { error: taskError } = await supabase.from("tasks").update({ is_archived: false, archived_at: null }).eq("project_id", id);
-    if (taskError) {
-      await alert(`Project restored, but its tasks couldn't be restored: ${taskError.message}. Try restoring again, or check the tasks directly.`);
-    }
-    loadArchived();
-    loadAll();
-  }
-
-  async function deleteProjectPermanently(p: ProjectRow) {
-    const ok = await confirm({
-      title: "Delete permanently",
-      message: `Permanently delete "${p.name}"? This can't be undone.`,
-      confirmLabel: "Delete permanently",
-      danger: true,
-    });
-    if (!ok) return;
-    // Deletion archive (2026-08-14c): delete_project_and_dependents
-    // (supabase/policies.sql "Migration 2026-08-14c") replaces the old
-    // two-call sequence (deleteTasksAndDependents then a raw projects
-    // delete) with a single RPC that archives this project's own
-    // PM-overhead points/hours AND each of its tasks' Utilization/Spent
-    // Hrs numbers before anything is actually removed -- same
-    // authorization check as the projects_delete RLS policy, just
-    // replicated server-side since a SECURITY DEFINER function bypasses RLS.
-    const { error } = await supabase.rpc("delete_project_and_dependents", { p_project_id: p.id });
-    if (error) {
-      alert(`Couldn't delete: ${error.message}`);
-      return;
-    }
-    loadArchived();
-    loadAll();
-  }
-
   async function bulkUpdateProjects(patch: Partial<ProjectRow>) {
     const ids = selectedProjectIds;
     if (ids.length === 0) return;
@@ -2000,32 +1919,24 @@ export default function Projects() {
   async function archiveProjects(ids: string[]) {
     if (ids.length === 0) return;
     const childTaskCount = tasks.filter((t) => ids.includes(t.project_id)).length;
-    // Sandra, quality audit 2026-08-20 (UX #2): this button archives, it
-    // doesn't permanently delete -- renamed from "Delete" to "Archive"
-    // (and the confirm copy to match) so it isn't confused with Archived
-    // Items' actually-irreversible "Delete permanently".
+    // phase104 (Sandra: no hard deletes, Archive page = recycle bin): each
+    // project archives server-side as ONE bundle with its tasks and their
+    // time entries, restorable from the Archive page for 90 days.
     const ok = await confirm({
       title: ids.length > 1 ? "Archive projects" : "Archive project",
       message:
         childTaskCount > 0
-          ? `Archive ${ids.length} project${ids.length > 1 ? "s" : ""}? This will also archive ${childTaskCount} task${childTaskCount > 1 ? "s" : ""} in them. Everything can be restored within ${ARCHIVE_RETENTION_DAYS} days unless permanently deleted.`
-          : `Archive ${ids.length > 1 ? `${ids.length} projects` : "this project"}? ${ids.length > 1 ? "They" : "It"} can be restored within ${ARCHIVE_RETENTION_DAYS} days unless permanently deleted.`,
+          ? `Archive ${ids.length} project${ids.length > 1 ? "s" : ""}? This will also archive ${childTaskCount} task${childTaskCount > 1 ? "s" : ""} in them and their time entries. ${ARCHIVE_MOVE_NOTE}`
+          : `Archive ${ids.length > 1 ? `${ids.length} projects` : "this project"}? ${ARCHIVE_MOVE_NOTE}`,
       confirmLabel: "Archive",
     });
     if (!ok) return;
-    const now = new Date().toISOString();
-    const { error } = await supabase.from("projects").update({ is_archived: true, archived_at: now }).in("id", ids);
-    if (error) {
-      alert(`Couldn't archive: ${error.message}`);
-      return;
+    const failures: string[] = [];
+    for (const id of ids) {
+      const { error } = await archiveItem("project", id);
+      if (error) failures.push(`${projects.find((p) => p.id === id)?.name ?? "Project"}: ${error.message}`);
     }
-    // Bugfix (2026-08-24, found in post-ship audit): same cascade gap as
-    // restoreProject above -- a failure here used to leave tasks quietly
-    // active under a project that now shows archived.
-    const { error: taskError } = await supabase.from("tasks").update({ is_archived: true, archived_at: now }).in("project_id", ids);
-    if (taskError) {
-      await alert(`Project${ids.length > 1 ? "s" : ""} archived, but the tasks in ${ids.length > 1 ? "them" : "it"} couldn't be archived: ${taskError.message}. Try again, or check the tasks directly.`);
-    }
+    if (failures.length) await alert(`Couldn't archive:\n${failures.join("\n")}`);
     setSelectedProjectIds((prev) => prev.filter((id) => !ids.includes(id)));
     loadAll();
   }
@@ -2064,45 +1975,6 @@ export default function Projects() {
   // above). Deleting a task is always via checkbox selection + the bulk
   // Delete button (bulkDeleteTasks below) -- there's no separate per-row
   // delete affordance since selecting one row already surfaces Delete.
-  async function restoreTask(id: string) {
-    const { error } = await supabase.from("tasks").update({ is_archived: false, archived_at: null }).eq("id", id);
-    if (error) {
-      alert(`Couldn't restore: ${error.message}`);
-      return;
-    }
-    loadArchived();
-    loadAll();
-  }
-
-  async function deleteTaskPermanently(t: TaskRow) {
-    // Quality audit follow-on (2026-08-20 review, Data Integrity #3):
-    // this used to be one-task-at-a-time and didn't bundle sub-tasks,
-    // unlike bulkDeleteTasks below which correctly does. Not a
-    // corruption risk (a sub-task whose parent no longer exists just
-    // fails to load cleanly) but a confusing dead end -- someone
-    // deleting a parent from Archived Items would find its sub-tasks
-    // stuck there with no parent to restore alongside. A sub-task only
-    // ever ends up archived here as a side effect of its whole project
-    // being archived (tasks have no standalone archive action), so any
-    // live sub-tasks of `t` are already sitting in this same
-    // archivedTasks list -- just find them by parent_task_id.
-    const childIds = archivedTasks.filter((c) => c.parent_task_id === t.id).map((c) => c.id);
-    const allIds = Array.from(new Set([t.id, ...childIds]));
-    const ok = await confirm({
-      title: "Delete permanently",
-      message: `Permanently delete "${t.name}"${childIds.length ? ` (and ${childIds.length} sub-task${childIds.length > 1 ? "s" : ""})` : ""}? This can't be undone.`,
-      confirmLabel: "Delete permanently",
-      danger: true,
-    });
-    if (!ok) return;
-    const { error } = await deleteTasksAndDependents(allIds);
-    if (error) {
-      alert(`Couldn't delete: ${error}`);
-      return;
-    }
-    loadArchived();
-  }
-
   async function bulkUpdateTasks(patch: Partial<TaskRow>) {
     let ids = selectedTaskIds;
     if (ids.length === 0) return;
@@ -2133,20 +2005,27 @@ export default function Projects() {
   async function bulkDeleteTasks() {
     const ids = selectedTaskIds;
     if (ids.length === 0) return;
-    const childIds = tasks.filter((t) => t.parent_task_id && ids.includes(t.parent_task_id)).map((t) => t.id);
-    const allIds = Array.from(new Set([...ids, ...childIds]));
+    // phase104: archive, never hard-delete. Each selected task archives
+    // as one bundle with its sub-tasks + time entries; a selected sub-task
+    // whose parent is also selected rides along in the parent's bundle.
+    const roots = ids.filter((id) => {
+      const parent = tasks.find((t) => t.id === id)?.parent_task_id;
+      return !parent || !ids.includes(parent);
+    });
+    const childIds = tasks.filter((t) => t.parent_task_id && roots.includes(t.parent_task_id) && !ids.includes(t.id)).map((t) => t.id);
     const ok = await confirm({
       title: "Delete tasks",
-      message: `Delete ${ids.length} task${ids.length > 1 ? "s" : ""}${childIds.length ? ` (and ${childIds.length} sub-task${childIds.length > 1 ? "s" : ""})` : ""}? This can't be undone.`,
+      message: `Delete ${ids.length} task${ids.length > 1 ? "s" : ""}${childIds.length ? ` (and ${childIds.length} sub-task${childIds.length > 1 ? "s" : ""})` : ""}? ${ARCHIVE_MOVE_NOTE}`,
       confirmLabel: "Delete",
       danger: true,
     });
     if (!ok) return;
-    const { error } = await deleteTasksAndDependents(allIds);
-    if (error) {
-      alert(`Couldn't delete: ${error}`);
-      return;
+    const failures: string[] = [];
+    for (const id of roots) {
+      const { error } = await archiveItem("task", id);
+      if (error) failures.push(`${tasks.find((t) => t.id === id)?.name ?? "Task"}: ${error.message}`);
     }
+    if (failures.length) alert(`Couldn't delete:\n${failures.join("\n")}`);
     setSelectedTaskIds([]);
     loadAll();
   }
@@ -4898,16 +4777,6 @@ export default function Projects() {
         <div>
           <h1>Projects</h1>
         </div>
-        <button
-          onClick={() => {
-            setArchivedOpen(true);
-            loadArchived();
-          }}
-          style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 10px", fontSize: 11.5, fontWeight: 500, color: "var(--text-secondary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
-        >
-          <ArchiveRestore size={13} />
-          View archived
-        </button>
       </div>
 
       <div className="card" style={{ padding: 0, marginBottom: 20 }}>
@@ -5434,94 +5303,6 @@ export default function Projects() {
           </div>
         )}
       </div>
-
-      {archivedOpen && (
-        <Modal title="Archived items" onClose={() => setArchivedOpen(false)} width={560}>
-          {archivedLoading ? (
-            <p style={{ fontSize: 12.5, color: "var(--muted)" }}>Loading…</p>
-          ) : archivedProjects.length === 0 && archivedTasks.length === 0 ? (
-            <p style={{ fontSize: 12.5, color: "var(--muted)" }}>Nothing archived right now.</p>
-          ) : (
-            <>
-              <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 0 }}>
-                Archived items are permanently deleted {ARCHIVE_RETENTION_DAYS} days after archiving unless restored.
-              </p>
-              {archivedProjects.length > 0 && (
-                <>
-                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3, color: "var(--muted)", margin: "10px 0 4px" }}>
-                    Projects
-                  </div>
-                  {archivedProjects.map((p) => {
-                    const daysLeft = p.archived_at
-                      ? ARCHIVE_RETENTION_DAYS - Math.floor((Date.now() - new Date(p.archived_at).getTime()) / (1000 * 60 * 60 * 24))
-                      : ARCHIVE_RETENTION_DAYS;
-                    return (
-                      <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px", borderBottom: "1px solid var(--border)" }}>
-                        <div>
-                          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>{p.name}</div>
-                          <div style={{ fontSize: 10.5, color: "var(--muted)" }}>{daysLeft > 0 ? `${daysLeft} days left` : "Deleting soon"}</div>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                          <button
-                            onClick={() => restoreProject(p.id)}
-                            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}
-                          >
-                            <ArchiveRestore size={13} />
-                            Restore
-                          </button>
-                          <button
-                            onClick={() => deleteProjectPermanently(p)}
-                            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--danger-text)", background: "none", border: "none", cursor: "pointer" }}
-                          >
-                            <Trash2 size={13} />
-                            Delete permanently
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </>
-              )}
-              {archivedTasks.length > 0 && (
-                <>
-                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3, color: "var(--muted)", margin: "10px 0 4px" }}>
-                    Tasks
-                  </div>
-                  {archivedTasks.map((t) => {
-                    const daysLeft = t.archived_at
-                      ? ARCHIVE_RETENTION_DAYS - Math.floor((Date.now() - new Date(t.archived_at).getTime()) / (1000 * 60 * 60 * 24))
-                      : ARCHIVE_RETENTION_DAYS;
-                    return (
-                      <div key={t.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px", borderBottom: "1px solid var(--border)" }}>
-                        <div>
-                          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>{t.name}</div>
-                          <div style={{ fontSize: 10.5, color: "var(--muted)" }}>{daysLeft > 0 ? `${daysLeft} days left` : "Deleting soon"}</div>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                          <button
-                            onClick={() => restoreTask(t.id)}
-                            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}
-                          >
-                            <ArchiveRestore size={13} />
-                            Restore
-                          </button>
-                          <button
-                            onClick={() => deleteTaskPermanently(t)}
-                            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--danger-text)", background: "none", border: "none", cursor: "pointer" }}
-                          >
-                            <Trash2 size={13} />
-                            Delete permanently
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </>
-              )}
-            </>
-          )}
-        </Modal>
-      )}
 
       {extensionTask && (
         <RequestExtensionModal

@@ -277,6 +277,13 @@ interface Row {
   correctionRow?: CorrectionRequestRowLite;
 }
 
+// phase104: requests on an archived task/project stay out of every list
+// (they come back if the item is restored from the Archive).
+function notOnArchived(r: unknown): boolean {
+  const x = r as { task?: { is_archived?: boolean } | null; project?: { is_archived?: boolean } | null };
+  return !x.task?.is_archived && !x.project?.is_archived;
+}
+
 export default function ApprovalCenter() {
   const { person: me } = useSession();
   const { confirm, alert, dialog: confirmDialog } = useConfirm();
@@ -335,8 +342,8 @@ export default function ApprovalCenter() {
         .from("extension_requests")
         .select(
           `id, requested_new_due_date, request_type, reason_category, reason_notes, created_at, is_manager_initiated,
-           task:tasks!extension_requests_task_id_fkey ( id, name, assignee_id, current_due_date, project_id, project:projects ( id, name, owner_id ) ),
-           project:projects!extension_requests_project_id_fkey ( id, name, owner_id, end_date ),
+           task:tasks!extension_requests_task_id_fkey ( id, name, is_archived, assignee_id, current_due_date, project_id, project:projects ( id, name, owner_id ) ),
+           project:projects!extension_requests_project_id_fkey ( id, name, is_archived, owner_id, end_date ),
            requester:people!extension_requests_requested_by_fkey ( id, name )`
         )
         .eq("status", "Pending")
@@ -350,6 +357,7 @@ export default function ApprovalCenter() {
            person:people!time_entries_person_id_fkey ( id, name )`
         )
         .eq("status", "pending_approval")
+        .eq("is_archived", false)
         .order("started_at", { ascending: false }),
       supabase.from("project_baseline_requests").select("id,project_id,requested_by,requested_at").eq("status", "pending").order("requested_at", { ascending: false }),
       supabase.from("project_closure_requests").select("id,project_id,requested_by,requested_at").eq("status", "pending").order("requested_at", { ascending: false }),
@@ -395,7 +403,7 @@ export default function ApprovalCenter() {
     // per-task request type was removed 2026-08-27 (start dates only
     // change via Re-baseline now); old rows are left in the table but
     // never surfaced anywhere, including here.
-    setExtensions((((extData as unknown as ExtensionRow[]) ?? [])).filter((r) => r.request_type !== "start_date"));
+    setExtensions((((extData as unknown as ExtensionRow[]) ?? [])).filter((r) => r.request_type !== "start_date" && notOnArchived(r)));
     setTimeEntries((teData as unknown as TimeEntryRowLite[]) ?? []);
     setBaselineRequests((blData as BaselineRow[]) ?? []);
     setClosureRequests((clData as ClosureRow[]) ?? []);

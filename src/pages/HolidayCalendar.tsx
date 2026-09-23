@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { InlineText, InlineDate, InlineSelect } from "../components/InlineCell";
 import { useConfirm } from "../lib/useConfirm";
 
@@ -71,12 +72,12 @@ export default function HolidayCalendar() {
   async function remove(h: HolidayRow) {
     const ok = await confirm({
       title: "Delete holiday",
-      message: `Delete "${h.name}" (${h.date})? This can't be undone.`,
+      message: `Delete "${h.name}" (${h.date})? ${ARCHIVE_MOVE_NOTE}`,
       confirmLabel: "Delete",
       danger: true,
     });
     if (!ok) return;
-    const { error } = await supabase.from("holidays").delete().eq("id", h.id);
+    const { error } = await archiveItem("holiday", h.id);
     if (error) {
       window.alert(`Couldn't delete: ${error.message}`);
       return;

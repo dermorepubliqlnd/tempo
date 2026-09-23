@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { ShieldCheck, ShieldOff, Pencil, Check, X, Plus, ArrowUp, ArrowDown, Trash2, CalendarClock, CalendarDays, GripVertical, ChevronRight } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { archiveItem } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_ICON_NAMES, CATEGORY_TONE_NAMES, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 
@@ -395,7 +396,7 @@ export default function SiteSettings() {
 
   async function loadWorkTypes() {
     setWorkTypesLoading(true);
-    const { data } = await supabase.from("work_types").select("id,name,sort_order,is_active,is_fixed_schedule").order("sort_order");
+    const { data } = await supabase.from("work_types").select("id,name,sort_order,is_active,is_fixed_schedule").eq("is_archived", false).order("sort_order");
     setWorkTypes((data as WorkTypeRow[]) ?? []);
     setWorkTypesLoading(false);
   }
@@ -520,11 +521,11 @@ export default function SiteSettings() {
       );
       return;
     }
-    if (!window.confirm(`Delete "${w.name}"? This can't be undone. (Only possible because no task currently uses it -- Work Types in use can't be deleted.)`)) {
+    if (!window.confirm(`Delete "${w.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no task currently uses it -- Work Types in use can't be deleted.)`)) {
       setWorkTypeBusy(false);
       return;
     }
-    const { error } = await supabase.from("work_types").delete().eq("id", w.id);
+    const { error } = await archiveItem("work_type", w.id);
     setWorkTypeBusy(false);
     if (error) {
       window.alert(`Couldn't delete: ${error.message}`);
@@ -535,7 +536,7 @@ export default function SiteSettings() {
 
   async function loadProjectSources() {
     setProjectSourcesLoading(true);
-    const { data } = await supabase.from("project_sources").select("id,name,sort_order,is_active").order("sort_order");
+    const { data } = await supabase.from("project_sources").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
     setProjectSources((data as ProjectSourceRow[]) ?? []);
     setProjectSourcesLoading(false);
   }
@@ -628,11 +629,11 @@ export default function SiteSettings() {
       );
       return;
     }
-    if (!window.confirm(`Delete "${s.name}"? This can't be undone. (Only possible because no project currently uses it -- Sources in use can't be deleted.)`)) {
+    if (!window.confirm(`Delete "${s.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no project currently uses it -- Sources in use can't be deleted.)`)) {
       setProjectSourceBusy(false);
       return;
     }
-    const { error } = await supabase.from("project_sources").delete().eq("id", s.id);
+    const { error } = await archiveItem("project_source", s.id);
     setProjectSourceBusy(false);
     if (error) {
       window.alert(`Couldn't delete: ${error.message}`);
@@ -644,7 +645,7 @@ export default function SiteSettings() {
 
   async function loadProjectPlanningTypes() {
     setProjectPlanningTypesLoading(true);
-    const { data } = await supabase.from("project_planning_types").select("id,name,sort_order,is_active").order("sort_order");
+    const { data } = await supabase.from("project_planning_types").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
     setProjectPlanningTypes((data as ProjectPlanningTypeRow[]) ?? []);
     setProjectPlanningTypesLoading(false);
   }
@@ -733,11 +734,11 @@ export default function SiteSettings() {
       );
       return;
     }
-    if (!window.confirm(`Delete "${t.name}"? This can't be undone. (Only possible because no project currently uses it -- Planning Types in use can't be deleted.)`)) {
+    if (!window.confirm(`Delete "${t.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no project currently uses it -- Planning Types in use can't be deleted.)`)) {
       setProjectPlanningTypeBusy(false);
       return;
     }
-    const { error } = await supabase.from("project_planning_types").delete().eq("id", t.id);
+    const { error } = await archiveItem("project_planning_type", t.id);
     setProjectPlanningTypeBusy(false);
     if (error) {
       window.alert(`Couldn't delete: ${error.message}`);
@@ -748,7 +749,7 @@ export default function SiteSettings() {
 
   async function loadProjectTypes() {
     setProjectTypesLoading(true);
-    const { data } = await supabase.from("project_types").select("id,name,sort_order,is_active").order("sort_order");
+    const { data } = await supabase.from("project_types").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
     setProjectTypes((data as ProjectTypeRow[]) ?? []);
     setProjectTypesLoading(false);
   }
@@ -837,11 +838,11 @@ export default function SiteSettings() {
       );
       return;
     }
-    if (!window.confirm(`Delete "${t.name}"? This can't be undone. (Only possible because no project currently uses it -- Project Types in use can't be deleted.)`)) {
+    if (!window.confirm(`Delete "${t.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no project currently uses it -- Project Types in use can't be deleted.)`)) {
       setProjectTypeBusy(false);
       return;
     }
-    const { error } = await supabase.from("project_types").delete().eq("id", t.id);
+    const { error } = await archiveItem("project_type", t.id);
     setProjectTypeBusy(false);
     if (error) {
       window.alert(`Couldn't delete: ${error.message}`);
@@ -853,7 +854,7 @@ export default function SiteSettings() {
 
   async function loadProjectCategories() {
     setProjectCategoriesLoading(true);
-    const { data } = await supabase.from("project_categories").select("id,name,sort_order,is_active,icon,color").order("sort_order");
+    const { data } = await supabase.from("project_categories").select("id,name,sort_order,is_active,icon,color").eq("is_archived", false).order("sort_order");
     setProjectCategories((data as ProjectCategoryRow[]) ?? []);
     setProjectCategoriesLoading(false);
   }
@@ -965,11 +966,11 @@ export default function SiteSettings() {
       );
       return;
     }
-    if (!window.confirm(`Delete "${c.name}"? This can't be undone. (Only possible because no project currently uses it -- Categories in use can't be deleted.)`)) {
+    if (!window.confirm(`Delete "${c.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no project currently uses it -- Categories in use can't be deleted.)`)) {
       setProjectCategoryBusy(false);
       return;
     }
-    const { error } = await supabase.from("project_categories").delete().eq("id", c.id);
+    const { error } = await archiveItem("project_category", c.id);
     setProjectCategoryBusy(false);
     if (error) {
       window.alert(`Couldn't delete: ${error.message}`);
@@ -981,7 +982,7 @@ export default function SiteSettings() {
 
   async function loadProjectPhases() {
     setProjectPhasesLoading(true);
-    const { data } = await supabase.from("project_phases").select("id,name,sort_order,is_active").order("sort_order");
+    const { data } = await supabase.from("project_phases").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
     setProjectPhases((data as ProjectPhaseRow[]) ?? []);
     setProjectPhasesLoading(false);
   }
@@ -1064,11 +1065,11 @@ export default function SiteSettings() {
       );
       return;
     }
-    if (!window.confirm(`Delete "${ph.name}"? This can't be undone. (Only possible because no project currently uses it -- Phases in use can't be deleted.)`)) {
+    if (!window.confirm(`Delete "${ph.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no project currently uses it -- Phases in use can't be deleted.)`)) {
       setProjectPhaseBusy(false);
       return;
     }
-    const { error } = await supabase.from("project_phases").delete().eq("id", ph.id);
+    const { error } = await archiveItem("project_phase", ph.id);
     setProjectPhaseBusy(false);
     if (error) {
       window.alert(`Couldn't delete: ${error.message}`);
@@ -1114,7 +1115,7 @@ export default function SiteSettings() {
 
   async function loadOutputTypes() {
     setOutputTypesLoading(true);
-    const { data } = await supabase.from("output_types").select("id,name,sort_order,is_active").order("sort_order");
+    const { data } = await supabase.from("output_types").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
     setOutputTypes((data as OutputTypeRow[]) ?? []);
     setOutputTypesLoading(false);
   }
@@ -1207,11 +1208,11 @@ export default function SiteSettings() {
       );
       return;
     }
-    if (!window.confirm(`Delete "${o.name}"? This can't be undone. (Only possible because no task currently uses it -- Output Types in use can't be deleted.)`)) {
+    if (!window.confirm(`Delete "${o.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no task currently uses it -- Output Types in use can't be deleted.)`)) {
       setOutputTypeBusy(false);
       return;
     }
-    const { error } = await supabase.from("output_types").delete().eq("id", o.id);
+    const { error } = await archiveItem("output_type", o.id);
     setOutputTypeBusy(false);
     if (error) {
       window.alert(`Couldn't delete: ${error.message}`);
@@ -1298,7 +1299,7 @@ export default function SiteSettings() {
   // TimeEntryReasonRow's comment).
   async function loadTimeEntryReasons() {
     setTimeEntryReasonsLoading(true);
-    const { data } = await supabase.from("time_entry_reasons").select("id,name,sort_order,is_active").order("sort_order");
+    const { data } = await supabase.from("time_entry_reasons").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
     setTimeEntryReasons((data as TimeEntryReasonRow[]) ?? []);
     setTimeEntryReasonsLoading(false);
   }
@@ -1381,11 +1382,11 @@ export default function SiteSettings() {
       );
       return;
     }
-    if (!window.confirm(`Delete "${r.name}"? This can't be undone. (Only possible because no time entry currently uses it -- Reasons in use can't be deleted.)`)) {
+    if (!window.confirm(`Delete "${r.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no time entry currently uses it -- Reasons in use can't be deleted.)`)) {
       setTimeEntryReasonBusy(false);
       return;
     }
-    const { error } = await supabase.from("time_entry_reasons").delete().eq("id", r.id);
+    const { error } = await archiveItem("time_entry_reason", r.id);
     setTimeEntryReasonBusy(false);
     if (error) {
       window.alert(`Couldn't delete: ${error.message}`);
@@ -1414,7 +1415,7 @@ export default function SiteSettings() {
   // points at this row's id, not its name.
   async function loadNonProjectActivityTypes() {
     setNonProjectActivityTypesLoading(true);
-    const { data } = await supabase.from("non_project_activity_types").select("id,name,sort_order,is_active").order("sort_order");
+    const { data } = await supabase.from("non_project_activity_types").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
     setNonProjectActivityTypes((data as NonProjectActivityTypeRow[]) ?? []);
     setNonProjectActivityTypesLoading(false);
   }
@@ -1521,11 +1522,11 @@ export default function SiteSettings() {
       );
       return;
     }
-    if (!window.confirm(`Delete "${a.name}"? This can't be undone. (Only possible because no time entry currently uses it -- Activity Types in use can't be deleted.)`)) {
+    if (!window.confirm(`Delete "${a.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no time entry currently uses it -- Activity Types in use can't be deleted.)`)) {
       setNonProjectActivityTypeBusy(false);
       return;
     }
-    const { error } = await supabase.from("non_project_activity_types").delete().eq("id", a.id);
+    const { error } = await archiveItem("activity_type", a.id);
     setNonProjectActivityTypeBusy(false);
     if (error) {
       window.alert(`Couldn't delete: ${error.message}`);
@@ -1540,7 +1541,7 @@ export default function SiteSettings() {
   // not an FK -- see BaselineDeclineReasonRow's comment).
   async function loadBaselineDeclineReasons() {
     setBaselineDeclineReasonsLoading(true);
-    const { data } = await supabase.from("baseline_decline_reasons").select("id,name,sort_order,is_active").order("sort_order");
+    const { data } = await supabase.from("baseline_decline_reasons").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
     setBaselineDeclineReasons((data as BaselineDeclineReasonRow[]) ?? []);
     setBaselineDeclineReasonsLoading(false);
   }
@@ -1624,11 +1625,11 @@ export default function SiteSettings() {
       );
       return;
     }
-    if (!window.confirm(`Delete "${r.name}"? This can't be undone. (Only possible because no declined request currently uses it -- Reasons in use can't be deleted.)`)) {
+    if (!window.confirm(`Delete "${r.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no declined request currently uses it -- Reasons in use can't be deleted.)`)) {
       setBaselineDeclineReasonBusy(false);
       return;
     }
-    const { error } = await supabase.from("baseline_decline_reasons").delete().eq("id", r.id);
+    const { error } = await archiveItem("decline_reason", r.id);
     setBaselineDeclineReasonBusy(false);
     if (error) {
       window.alert(`Couldn't delete: ${error.message}`);
@@ -1657,7 +1658,7 @@ export default function SiteSettings() {
   // see TaskCancellationReasonRow's comment).
   async function loadTaskCancellationReasons() {
     setTaskCancellationReasonsLoading(true);
-    const { data } = await supabase.from("task_cancellation_reasons").select("id,name,sort_order,is_active").order("sort_order");
+    const { data } = await supabase.from("task_cancellation_reasons").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
     setTaskCancellationReasons((data as TaskCancellationReasonRow[]) ?? []);
     setTaskCancellationReasonsLoading(false);
   }
@@ -1740,11 +1741,11 @@ export default function SiteSettings() {
       );
       return;
     }
-    if (!window.confirm(`Delete "${r.name}"? This can't be undone. (Only possible because no task currently uses it -- Reasons in use can't be deleted.)`)) {
+    if (!window.confirm(`Delete "${r.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no task currently uses it -- Reasons in use can't be deleted.)`)) {
       setTaskCancellationReasonBusy(false);
       return;
     }
-    const { error } = await supabase.from("task_cancellation_reasons").delete().eq("id", r.id);
+    const { error } = await archiveItem("cancellation_reason", r.id);
     setTaskCancellationReasonBusy(false);
     if (error) {
       window.alert(`Couldn't delete: ${error.message}`);

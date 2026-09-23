@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { InlineText, InlineNumber, InlineSelect, InlineDate, InlineTextArea } from "../components/InlineCell";
@@ -2811,10 +2812,9 @@ export default function WbsPlanning() {
   // treatment).
   async function deleteTask(t: TaskRow & { depth: number }) {
     const childIds = t.depth === 0 ? tasks.filter((x) => x.parent_task_id === t.id).map((x) => x.id) : [];
-    const allIds = [t.id, ...childIds];
     const ok = await confirm({
       title: "Delete task",
-      message: `Delete "${t.name}"${childIds.length ? ` (and ${childIds.length} sub-task${childIds.length > 1 ? "s" : ""})` : ""}? This can't be undone.`,
+      message: `Delete "${t.name}"${childIds.length ? ` (and ${childIds.length} sub-task${childIds.length > 1 ? "s" : ""})` : ""}? ${ARCHIVE_MOVE_NOTE}`,
       confirmLabel: "Delete",
       danger: true,
     });
@@ -2824,7 +2824,9 @@ export default function WbsPlanning() {
     // unsaved edits sitting on a different row.
     const flushed = await flushPendingEdits();
     if (!flushed) return;
-    const { error } = await supabase.rpc("delete_tasks_and_dependents", { p_task_ids: allIds });
+    // phase104: no hard deletes -- archives the task as one bundle with
+    // its sub-tasks and their time entries (restorable from the Archive).
+    const { error } = await archiveItem("task", t.id);
     if (error) {
       await alert(`Couldn't delete: ${error.message}`);
       return;

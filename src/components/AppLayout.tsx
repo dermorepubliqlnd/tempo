@@ -17,6 +17,7 @@ import {
   ChevronRight,
   ClipboardCheck,
   BookOpen,
+  Archive as ArchiveIcon,
   type LucideIcon,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -43,6 +44,7 @@ const mainItems: NavItem[] = [
   // Full Access on their own, same pattern as the page-level content
   // (not the whole page) being conditional elsewhere.
   { to: "/knowledge-base", label: "Knowledge Base", icon: BookOpen },
+  { to: "/archive", label: "Archive", icon: ArchiveIcon },
 ];
 
 const resourcePlanningItems: NavItem[] = [

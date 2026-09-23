@@ -151,6 +151,13 @@ function toneColors(tone: "neutral" | "success" | "warning" | "danger"): { bg?: 
 }
 const WEEKDAY_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+// phase104: requests on an archived task/project stay out of every list
+// (they come back if the item is restored from the Archive).
+function notOnArchived(r: unknown): boolean {
+  const x = r as { task?: { is_archived?: boolean } | null; project?: { is_archived?: boolean } | null };
+  return !x.task?.is_archived && !x.project?.is_archived;
+}
+
 export default function MyDashboard() {
   const { person: me } = useSession();
   const { running, busy: timerBusy, start: startTaskTimer, requestStop } = useTimeTracking();
@@ -254,8 +261,8 @@ export default function MyDashboard() {
         .from("extension_requests")
         .select(
           `id, requested_new_due_date, request_type, created_at,
-           task:tasks!extension_requests_task_id_fkey ( id, name, project_id, project:projects ( id, name, owner_id ) ),
-           project:projects!extension_requests_project_id_fkey ( id, name, owner_id ),
+           task:tasks!extension_requests_task_id_fkey ( id, name, is_archived, project_id, project:projects ( id, name, owner_id ) ),
+           project:projects!extension_requests_project_id_fkey ( id, name, is_archived, owner_id ),
            requester:people!extension_requests_requested_by_fkey ( id, name )`
         )
         .eq("status", "Pending")
@@ -267,6 +274,7 @@ export default function MyDashboard() {
            task:tasks ( id, name, project_id, project:projects ( id, name, owner_id ) )`
         )
         .eq("status", "pending_approval")
+        .eq("is_archived", false)
         .order("started_at", { ascending: false }),
       supabase.from("project_baseline_requests").select("id,project_id,requested_by,requested_at").eq("status", "pending").order("requested_at", { ascending: false }),
       supabase.from("project_closure_requests").select("id,project_id,requested_by,requested_at").eq("status", "pending").order("requested_at", { ascending: false }),
@@ -296,7 +304,7 @@ export default function MyDashboard() {
     setDeletedHours((delHrsData as DeletedHourRow[]) ?? []);
     setOutputTypes((outputTypeData as OutputTypeRow[]) ?? []);
     setMonthEntries((monthEntryData as TimeEntryRow[]) ?? []);
-    setExtensions((((extData as unknown as ExtensionRow[]) ?? [])).filter((r) => r.request_type !== "start_date"));
+    setExtensions((((extData as unknown as ExtensionRow[]) ?? [])).filter((r) => r.request_type !== "start_date" && notOnArchived(r)));
     setPendingTimeEntries((teData as unknown as PendingTimeEntryRow[]) ?? []);
     setBaselineRequests((blData as BaselineRow[]) ?? []);
     setClosureRequests((clData as ClosureRow[]) ?? []);

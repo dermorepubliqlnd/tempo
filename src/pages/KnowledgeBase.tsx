@@ -27,6 +27,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { BookOpen, Plus, Pencil, Trash2, ChevronRight, History, X, Search } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 
@@ -326,12 +327,12 @@ export default function KnowledgeBase() {
   async function deleteEntry(entry: KbEntry) {
     const ok = await confirm({
       title: "Delete entry",
-      message: `Delete "${entry.title}"? This can't be undone.`,
+      message: `Delete "${entry.title}"? ${ARCHIVE_MOVE_NOTE}`,
       confirmLabel: "Delete",
       danger: true,
     });
     if (!ok) return;
-    const { error } = await supabase.from("kb_entries").delete().eq("id", entry.id);
+    const { error } = await archiveItem("kb_entry", entry.id);
     if (error) {
       await alert(`Couldn't delete: ${error.message}`);
       return;
@@ -342,13 +343,15 @@ export default function KnowledgeBase() {
 
   async function deleteCategory(cat: KbCategory) {
     const count = entriesByCategory.get(cat.id)?.length ?? 0;
-    if (count > 0) {
-      await alert(`"${cat.name}" has ${count} ${count === 1 ? "entry" : "entries"} in it. Move or delete those first.`);
-      return;
-    }
-    const ok = await confirm({ title: "Delete category", message: `Delete "${cat.name}"?`, confirmLabel: "Delete", danger: true });
+    // phase104: a category archives as one bundle with its entries.
+    const ok = await confirm({
+      title: "Delete category",
+      message: `Delete "${cat.name}"${count > 0 ? ` and its ${count} ${count === 1 ? "entry" : "entries"}` : ""}? ${ARCHIVE_MOVE_NOTE}`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
     if (!ok) return;
-    const { error } = await supabase.from("kb_categories").delete().eq("id", cat.id);
+    const { error } = await archiveItem("kb_category", cat.id);
     if (error) {
       await alert(`Couldn't delete: ${error.message}`);
       return;

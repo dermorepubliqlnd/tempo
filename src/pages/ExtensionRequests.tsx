@@ -64,6 +64,13 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+// phase104: requests on an archived task/project stay out of every list
+// (they come back if the item is restored from the Archive).
+function notOnArchived(r: unknown): boolean {
+  const x = r as { task?: { is_archived?: boolean } | null; project?: { is_archived?: boolean } | null };
+  return !x.task?.is_archived && !x.project?.is_archived;
+}
+
 export default function ExtensionRequests() {
   const { person: me } = useSession();
   const { dialog: confirmDialog } = useConfirm();
@@ -83,8 +90,8 @@ export default function ExtensionRequests() {
         .from("extension_requests")
         .select(
           `id, requested_new_due_date, request_type, requested_new_start_date, reason_category, reason_notes, status, decided_at, decision_notes, is_manager_initiated, created_at,
-           task:tasks!extension_requests_task_id_fkey ( id, name, assignee_id, original_due_date, current_due_date, start_date_standard, project_id, project:projects ( id, name, owner_id ) ),
-           project:projects!extension_requests_project_id_fkey ( id, name, owner_id, end_date, original_due_date ),
+           task:tasks!extension_requests_task_id_fkey ( id, name, is_archived, assignee_id, original_due_date, current_due_date, start_date_standard, project_id, project:projects ( id, name, owner_id ) ),
+           project:projects!extension_requests_project_id_fkey ( id, name, is_archived, owner_id, end_date, original_due_date ),
            requester:people!extension_requests_requested_by_fkey ( id, name ),
            decider:people!extension_requests_decided_by_fkey ( id, name )`
         )
@@ -98,7 +105,7 @@ export default function ExtensionRequests() {
     // its "Extension Requests" name -- stays scoped to due-date changes
     // only; the underlying rows/column are left in place in Postgres, not
     // dropped.
-    const dueDateOnly = ((reqData as unknown as ExtensionRequestRow[]) ?? []).filter((r) => r.request_type !== "start_date");
+    const dueDateOnly = ((reqData as unknown as ExtensionRequestRow[]) ?? []).filter((r) => r.request_type !== "start_date" && notOnArchived(r));
     setRequests(dueDateOnly);
     setPeople((peopleData as PersonLite[]) ?? []);
     setLoading(false);

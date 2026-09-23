@@ -4,7 +4,8 @@ import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, requestTimeEntryCorrection, cancelTimeEntryCorrection, editPendingManualTimeEntry, deletePendingManualTimeEntry, archiveTimeEntry, unarchiveTimeEntry } from "../lib/timeTracking";
+import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, requestTimeEntryCorrection, cancelTimeEntryCorrection, editPendingManualTimeEntry } from "../lib/timeTracking";
+import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { loggedHoursTier } from "../lib/loggedHoursBands";
 import { expectedHoursForDay } from "../lib/dailyAllocation";
 import { buildHolidayNameMap, nonWorkingDayConfirmMessage, type HolidayNameMap } from "../lib/workingDays";
@@ -1056,28 +1057,17 @@ export default function TimeTracking() {
   async function submitArchive(row: EntryRow, reason: string) {
     const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
     const ok = await confirm({
-      message: `Archive this ${formatDuration(row.duration_minutes)} entry for ${label}? It stays on record but stops counting toward Spent Hrs, Scoped vs Logged, and dashboard totals. You can restore it anytime.`,
+      message: `Archive this ${formatDuration(row.duration_minutes)} entry for ${label}? It stops counting toward Spent Hrs, Productivity and dashboard totals. ${ARCHIVE_MOVE_NOTE}`,
       confirmLabel: "Archive",
       danger: true,
     });
     if (!ok) return;
-    const res = await archiveTimeEntry(row.id, reason.trim() || undefined);
+    const res = await archiveItem("time_entry", row.id, reason.trim() || undefined);
     if (res.error) {
-      await alert(`Couldn't archive this entry: ${res.error}`);
+      await alert(`Couldn't archive this entry: ${res.error.message}`);
       return;
     }
     setArchivingId(null);
-    loadAll();
-  }
-
-  async function submitUnarchive(row: EntryRow) {
-    const ok = await confirm({ message: "Restore this entry? It'll count toward Spent Hrs and other totals again.", confirmLabel: "Restore" });
-    if (!ok) return;
-    const res = await unarchiveTimeEntry(row.id);
-    if (res.error) {
-      await alert(`Couldn't restore this entry: ${res.error}`);
-      return;
-    }
     loadAll();
   }
 
@@ -1132,11 +1122,11 @@ export default function TimeTracking() {
 
   async function handleDeletePending(row: EntryRow) {
     const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
-    const ok = await confirm({ message: `Delete this time entry for ${label}? This can't be undone.`, confirmLabel: "Delete", danger: true });
+    const ok = await confirm({ message: `Delete this time entry for ${label}? ${ARCHIVE_MOVE_NOTE}`, confirmLabel: "Delete", danger: true });
     if (!ok) return;
-    const res = await deletePendingManualTimeEntry(row.id);
+    const res = await archiveItem("time_entry", row.id);
     if (res.error) {
-      await alert(`Couldn't delete this entry: ${res.error}`);
+      await alert(`Couldn't delete this entry: ${res.error.message}`);
       return;
     }
     loadAll();
@@ -1584,7 +1574,6 @@ export default function TimeTracking() {
               // 2026-09-23 (phase63): admin soft-delete for a
               // confirmed/approved entry, reversible.
               const canArchive = isFullAccess && (row.status === "confirmed" || row.status === "approved") && !row.is_archived;
-              const canUnarchive = isFullAccess && row.is_archived;
               const archiving = archivingId === row.id;
               const isNonProject = Boolean(row.activity_type_id);
               const title = isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
@@ -1736,15 +1725,6 @@ export default function TimeTracking() {
                           style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
                         >
                           <FilePen size={13} />
-                        </button>
-                      )}
-                      {canUnarchive && (
-                        <button
-                          onClick={() => submitUnarchive(row)}
-                          title="Restore"
-                          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
-                        >
-                          <RotateCcw size={13} />
                         </button>
                       )}
                       {canEditDelete && !editing && (
