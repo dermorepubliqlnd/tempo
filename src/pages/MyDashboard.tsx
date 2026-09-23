@@ -17,6 +17,7 @@ import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
 import { buildHolidaySet } from "../lib/workingDays";
+import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
 import { colorForPerson } from "../lib/personColors";
 // Reuses Health/Progress straight from Projects.tsx (same convention
 // Dashboard.tsx already follows) so this page's numbers can never drift
@@ -118,16 +119,10 @@ function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
   return ((parts[0]?.[0] ?? "") + (parts[parts.length - 1]?.[0] ?? "")).toUpperCase();
 }
-// Same 7.5h-shift color coding as Scoped vs Logged's Daily Activity view
+// Same logged-hours color coding as Scoped vs Logged's Daily Activity view
 // (HoursOverview.tsx) -- for ACTUAL logged hours, not the assigned/scoped
-// utilization the allocation engine reports.
-function hoursShiftTone(hours: number): "neutral" | "success" | "warning" | "danger" {
-  if (hours <= 0) return "neutral";
-  const ratio = hours / 7.5;
-  if (ratio <= 1) return "success";
-  if (ratio <= 1.33) return "warning";
-  return "danger";
-}
+// utilization the allocation engine reports. See loggedHoursBands.ts for
+// the 6-tier scale (phase64, 2026-09-23).
 function toneColors(tone: "neutral" | "success" | "warning" | "danger"): { bg?: string; fg: string } {
   if (tone === "success") return { bg: "var(--success-bg)", fg: "var(--success-text)" };
   if (tone === "warning") return { bg: "var(--warning-bg)", fg: "var(--warning-text)" };
@@ -642,8 +637,7 @@ export default function MyDashboard() {
                 <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{me.job_title || "Team Member"}</div>
               </div>
               {dailyStats.map((d) => {
-                const tone = hoursShiftTone(d.logged);
-                const colors = toneColors(tone);
+                const colors = loggedHoursTier(d.logged);
                 return (
                   <div key={d.dateStr} style={{ textAlign: "center", background: colors.bg, color: colors.fg, fontWeight: 700, fontSize: 12, padding: "8px 0", borderRadius: "var(--radius-sm)" }}>
                     {d.logged > 0 ? `${d.logged.toFixed(1)}h` : "—"}
@@ -665,6 +659,19 @@ export default function MyDashboard() {
                   {(weekLoggedTotal - weekCapacityTotal).toFixed(1)}h
                 </strong>
               </span>
+            </div>
+            {/* 2026-09-23 (phase64): same 6-tier legend as HoursOverview's
+                Daily Activity view, so the color coding reads the same
+                wherever logged hours show up. */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 10, color: "var(--muted)", marginTop: 10 }}>
+              {LOGGED_HOURS_LEGEND.map(({ range, label, tone }) => (
+                <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <span className={`status-pill ${tone}`} style={{ fontSize: 9.5, padding: "1px 5px", fontWeight: 700 }}>
+                    {range}
+                  </span>
+                  {label}
+                </span>
+              ))}
             </div>
           </div>
 

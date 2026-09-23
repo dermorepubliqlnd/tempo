@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
 import { buildHolidaySet } from "../lib/workingDays";
+import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
 // Same shared allocation engine Utilization.tsx and WbsPlanning.tsx's
 // Utilization snapshot use -- see src/lib/dailyAllocation.ts. Before this,
 // "Scoped" here was a thinner, drifting copy: no PM overhead, no Time Off,
@@ -125,18 +126,11 @@ function toneColors(tone: "neutral" | "success" | "warning" | "danger"): { bg?: 
 
 // Daily Activity color coding (2026-09-18, Sandra: "just show the actual
 // hours logged daily... color code based on a 7.5 shift, lower be green
-// higher be red") -- replaces the scoped-vs-logged coverage ratio for this
-// view only (Scope Fulfillment keeps coverageTone/toneColors above, since
-// it's still comparing logged against scoped). A standard 7.5h shift is
-// the reference point: at/under a full shift is green, moderately over is
-// amber, well over is red.
-function hoursShiftTone(hours: number): "neutral" | "success" | "warning" | "danger" {
-  if (hours <= 0) return "neutral";
-  const ratio = hours / 7.5;
-  if (ratio <= 1) return "success";
-  if (ratio <= 1.33) return "warning";
-  return "danger";
-}
+// higher be red"; refined 2026-09-23, phase64, into loggedHoursBands.ts's
+// 6-tier scale -- see that file for why) -- replaces the scoped-vs-logged
+// coverage ratio for this view only (Scope Fulfillment keeps
+// coverageTone/toneColors above, since it's still comparing logged against
+// scoped).
 
 export default function HoursOverview() {
   const { person: me } = useSession();
@@ -869,8 +863,7 @@ export default function HoursOverview() {
                               // scoped-vs-logged coverage ratio. Scope
                               // Fulfillment is untouched and still compares
                               // logged against scoped.
-                              const tone = view === "grid" ? hoursShiftTone(logged) : coverageTone(scoped, logged);
-                              const colors = toneColors(tone);
+                              const colors = view === "grid" ? loggedHoursTier(logged) : toneColors(coverageTone(scoped, logged));
                               const hasValue = view === "grid" ? logged > 0 : scoped > 0 || logged > 0;
                               const bg = !hasValue ? (weekend || isHoliday ? "var(--hover-bg)" : undefined) : colors.bg;
                               return (
@@ -1068,32 +1061,33 @@ export default function HoursOverview() {
               actual swatches matching coverageTone/toneColors' real
               colors, instead of naming them in prose. */}
           <div style={{ marginTop: 10, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 14, fontSize: 11.5, color: "var(--muted)" }}>
-            {(view === "grid"
-              ? [
-                  { tone: "success" as const, label: "At/under a 7.5h shift" },
-                  { tone: "warning" as const, label: "Up to ~33% over (≤10h)" },
-                  { tone: "danger" as const, label: "Well over a shift (>10h)" },
-                  { tone: "neutral" as const, label: '"–" = nothing logged' },
-                ]
+            {view === "grid"
+              ? LOGGED_HOURS_LEGEND.map(({ range, label, tone }) => (
+                  <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <span className={`status-pill ${tone}`} style={{ fontSize: 10, padding: "1px 6px", fontWeight: 700 }}>
+                      {range}
+                    </span>
+                    {label}
+                  </span>
+                ))
               : [
                   { tone: "success" as const, label: "Logged covers ≥90% of scoped" },
                   { tone: "warning" as const, label: "50–89%" },
                   { tone: "danger" as const, label: "Under 50%" },
                   { tone: "neutral" as const, label: '"–" = nothing scoped or logged' },
-                ]
-            ).map(({ tone, label }) => {
-              const colors = toneColors(tone);
-              return (
-                <span key={tone} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                  <span style={{ width: 10, height: 10, borderRadius: 3, background: colors.bg ?? "var(--hover-bg)", border: `1px solid ${colors.fg}` }} />
-                  {label}
-                </span>
-              );
-            })}
+                ].map(({ tone, label }) => {
+                  const colors = toneColors(tone);
+                  return (
+                    <span key={tone} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: colors.bg ?? "var(--hover-bg)", border: `1px solid ${colors.fg}` }} />
+                      {label}
+                    </span>
+                  );
+                })}
             <span>
               {view === "fulfillment"
                 ? "Logged hours here are re-attributed to the day(s) each task's hours were scoped -- not the day they were actually logged."
-                : "Logged hours always show on the day they were actually worked, even outside a task's scoped window."}
+                : "Logged hours always show on the day they were actually worked, even outside a task's scoped window. A 7.5h shift (±1h) is the reference for “Within expected.”"}
             </span>
           </div>
         </>
