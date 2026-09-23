@@ -914,12 +914,14 @@ export default function TimeTracking() {
   useEffect(() => {
     if (scope === "mine" || !me?.id) return;
     let cancelled = false;
+    // 2026-09-23 (Sandra: "KPI cards follow the selected date/range") --
+    // required hours are fetched for the SELECTED range now, not always
+    // the current week.
+    const [reqStart, reqEnd] = rangeForPreset(datePreset, rangeAnchor, customStart, customEnd);
     async function loadTeamSupervisorData() {
-      const weekStart = toDateInputValue(startOfWeek(new Date()));
-      const weekEnd = toDateInputValue(addDays(startOfWeek(new Date()), 6));
       const [{ data: timers, error: timersErr }, { data: required, error: requiredErr }] = await Promise.all([
         supabase.rpc("get_team_running_timers"),
-        supabase.rpc("get_team_required_hours", { p_start: weekStart, p_end: weekEnd }),
+        supabase.rpc("get_team_required_hours", { p_start: reqStart, p_end: reqEnd }),
       ]);
       if (cancelled) return;
       if (!timersErr) setTeamRunningTimers((timers as TeamRunningTimer[]) ?? []);
@@ -931,7 +933,7 @@ export default function TimeTracking() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [scope, me?.id]);
+  }, [scope, me?.id, datePreset, rangeAnchor, customStart, customEnd]);
 
   // Elapsed-time ticker for Working Now's "42m" / "1h 13m" labels --
   // purely a re-render pulse, doesn't refetch data (that's the 60s poll
@@ -1351,22 +1353,31 @@ export default function TimeTracking() {
   // (My Time), never duplicated into this table.
   const archivedFilteredEntries = scopeFilteredEntries.filter((e) => !e.is_archived && e.status !== "running");
 
-  // 2026-09-23 (Sandra, mockup redesign): Today/This Week KPI cards
-  // always reflect the real current day/week -- unaffected by whatever
-  // range someone's currently browsing in the date-range picker below.
-  const todayKey = toDateInputValue();
-  const thisWeekStartKey = toDateInputValue(startOfWeek(new Date()));
-  const thisWeekEndKey = toDateInputValue(addDays(startOfWeek(new Date()), 6));
+  // 2026-09-23 (Sandra: "make KPI cards follow the selected date/range")
+  // -- the old Today's Logs + This Week cards (always pinned to the real
+  // current day/week) are now ONE "Logged Hours" card driven by the same
+  // selected range as the table, Total Entries, Needs Attention and Timer
+  // Compliance. Same counted statuses as before (finalized only).
   const kpiCountedStatuses = new Set(["confirmed", "approved"]);
-  const todayMinutes = archivedFilteredEntries
-    .filter((e) => toDateInputValue(new Date(e.started_at)) === todayKey && kpiCountedStatuses.has(e.status))
-    .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
-  const thisWeekMinutes = archivedFilteredEntries
+  const [kpiRangeStart, kpiRangeEnd] = rangeForPreset(datePreset, rangeAnchor, customStart, customEnd);
+  const rangeLoggedMinutes = archivedFilteredEntries
     .filter((e) => {
       const key = toDateInputValue(new Date(e.started_at));
-      return key >= thisWeekStartKey && key <= thisWeekEndKey && kpiCountedStatuses.has(e.status);
+      return key >= kpiRangeStart && key <= kpiRangeEnd && kpiCountedStatuses.has(e.status);
     })
     .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
+  // Every Mon-Fri date key in the selected range (weekends carry no
+  // required hours -- same rule the old weekly target used).
+  const rangeWeekdayKeys: string[] = [];
+  {
+    const cur = new Date(`${kpiRangeStart}T00:00:00`);
+    const last = new Date(`${kpiRangeEnd}T00:00:00`);
+    for (let guard = 0; cur <= last && guard < 400; guard++) {
+      const dow = cur.getDay();
+      if (dow !== 0 && dow !== 6) rangeWeekdayKeys.push(toDateInputValue(cur));
+      cur.setDate(cur.getDate() + 1);
+    }
+  }
   // 2026-09-23 (dynamic expected hours, Sandra: "evaluate logged hours
   // against the employee's required working hours for that specific
   // day" -- not a flat daily_capacity_hours assumption every day).
@@ -1381,14 +1392,13 @@ export default function TimeTracking() {
     if (holidayDates.has(dateKey)) return 0;
     return expectedHoursForDay({ id: me.id, daily_capacity_hours: me.daily_capacity_hours }, myAvStatusFor(dateKey));
   }
-  const dailyTargetMinutes = myExpectedHoursFor(todayKey) * 60;
-  // Sum each weekday (Mon-Fri) of the CURRENT week's own expected hours
-  // -- e.g. one half-day + one full time-off day in an otherwise normal
-  // week sums to less than a flat 37.5h, matching Sandra's "7.5*4 + 3.25"
-  // example instead of always assuming a full 5-day week.
-  const weeklyTargetMinutes = [0, 1, 2, 3, 4]
-    .map((i) => myExpectedHoursFor(toDateInputValue(addDays(startOfWeek(new Date()), i))) * 60)
-    .reduce((sum, m) => sum + m, 0);
+  // Sum each weekday of the SELECTED range's own expected hours -- a
+  // half-day or full time-off day (or holiday) lowers the total instead
+  // of assuming a flat 7.5h per day.
+  const rangeTargetMinutes = rangeWeekdayKeys.map((k) => myExpectedHoursFor(k) * 60).reduce((sum, m) => sum + m, 0);
+  // Every weekday in range is approved full-day time off (not a holiday
+  // or weekend) -> show "Time Off" rather than an underworked 0h.
+  const rangeAllTimeOff = rangeWeekdayKeys.length > 0 && rangeWeekdayKeys.every((k) => myAvStatusFor(k) === "off");
 
   // 2026-09-23 (Team Time supervisor view, Sandra: "Team Required Hours
   // must NOT default to 7.5 x team size... sum of each eligible
@@ -1400,12 +1410,9 @@ export default function TimeTracking() {
   // 7.5h x headcount only when the whole team happens to be on a normal
   // schedule that day -- a computed result, not a hardcoded assumption,
   // per her explicit ask.
-  const teamTodayRequiredMinutes = teamRequiredHours
-    .filter((r) => r.date === todayKey)
-    .reduce((sum, r) => sum + r.expected_hours * 60, 0);
-  const teamThisWeekWeekdayKeys = new Set([0, 1, 2, 3, 4].map((i) => toDateInputValue(addDays(startOfWeek(new Date()), i))));
-  const teamWeeklyRequiredMinutes = teamRequiredHours
-    .filter((r) => teamThisWeekWeekdayKeys.has(r.date))
+  const rangeWeekdaySet = new Set(rangeWeekdayKeys);
+  const teamRangeRequiredMinutes = teamRequiredHours
+    .filter((r) => rangeWeekdaySet.has(r.date))
     .reduce((sum, r) => sum + r.expected_hours * 60, 0);
 
   // "N people working now" -- one running timer per person (the app
@@ -2208,10 +2215,8 @@ export default function TimeTracking() {
               logged/finalized hours. */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginTop: 4, marginBottom: 14 }}>
             {(() => {
-              const effectiveTodayTargetMinutes = scope === "mine" ? dailyTargetMinutes : teamTodayRequiredMinutes;
-              const effectiveWeekTargetMinutes = scope === "mine" ? weeklyTargetMinutes : teamWeeklyRequiredMinutes;
-              const todayTier = loggedHoursTier(todayMinutes / 60, effectiveTodayTargetMinutes / 60);
-              const weekTier = loggedHoursTier(thisWeekMinutes / 60, effectiveWeekTargetMinutes / 60);
+              const effectiveRangeTargetMinutes = scope === "mine" ? rangeTargetMinutes : teamRangeRequiredMinutes;
+              const rangeTier = loggedHoursTier(rangeLoggedMinutes / 60, effectiveRangeTargetMinutes / 60);
               const complianceTier =
                 timerCompliancePct === null
                   ? { bg: "var(--hover-bg)", fg: "var(--muted)", tone: "neutral" as const }
@@ -2237,40 +2242,34 @@ export default function TimeTracking() {
                 // today; on Team/All Time it means the ENTIRE visible team
                 // has 0 required hours today (rare, but same principle --
                 // an all-off day shouldn't read as "critically underworked").
-                ...(effectiveTodayTargetMinutes <= 0 && todayMinutes <= 0
+                // Single "Logged Hours" card for the selected range. Time Off
+                // only when every weekday in range is my approved full-day
+                // time off (My Time); a weekend/holiday-only range simply
+                // reads "No hours expected".
+                ...(scope === "mine" && rangeAllTimeOff && rangeLoggedMinutes <= 0
                   ? [
                       {
-                        key: "today",
+                        key: "logged",
                         icon: <Timer size={15} />,
                         tone: "neutral",
                         cardBg: "var(--hover-bg)",
                         cardFg: "var(--muted)",
-                        label: "Today's Logs",
+                        label: "Logged Hours",
                         value: "Time Off",
                       },
                     ]
                   : [
                       {
-                        key: "today",
+                        key: "logged",
                         icon: <Timer size={15} />,
-                        tone: todayTier.tone,
-                        cardBg: todayTier.bg ?? "var(--hover-bg)",
-                        cardFg: todayTier.fg,
-                        label: "Today's Logs",
-                        value: `${(Math.round((todayMinutes / 60) * 100) / 100).toFixed(2)}h`,
-                        caption: effectiveTodayTargetMinutes > 0 ? `of ${(effectiveTodayTargetMinutes / 60).toFixed(2)}h expected` : undefined,
+                        tone: effectiveRangeTargetMinutes > 0 ? rangeTier.tone : "neutral",
+                        cardBg: effectiveRangeTargetMinutes > 0 ? rangeTier.bg ?? "var(--hover-bg)" : "var(--hover-bg)",
+                        cardFg: effectiveRangeTargetMinutes > 0 ? rangeTier.fg : "var(--muted)",
+                        label: "Logged Hours",
+                        value: `${(Math.round((rangeLoggedMinutes / 60) * 100) / 100).toFixed(2)}h`,
+                        caption: effectiveRangeTargetMinutes > 0 ? `of ${(effectiveRangeTargetMinutes / 60).toFixed(2)}h expected` : "No hours expected",
                       },
                     ]),
-                {
-                  key: "week",
-                  icon: <CalendarDays size={15} />,
-                  tone: weekTier.tone,
-                  cardBg: weekTier.bg ?? "var(--hover-bg)",
-                  cardFg: weekTier.fg,
-                  label: "This Week",
-                  value: `${(Math.round((thisWeekMinutes / 60) * 100) / 100).toFixed(2)}h`,
-                  caption: effectiveWeekTargetMinutes > 0 ? `of ${(effectiveWeekTargetMinutes / 60).toFixed(2)}h expected` : undefined,
-                },
                 // 2026-09-23 (Sandra's "Working Now" spec, Active Timers
                 // card): Team/All Time only -- reflects ONLY currently-
                 // running timers (get_team_running_timers), explicitly
@@ -2312,7 +2311,7 @@ export default function TimeTracking() {
                   cardFg: complianceTier.fg,
                   label: "Timer Compliance",
                   value: timerCompliancePct === null ? "—" : `${timerCompliancePct}%`,
-                  caption: "of logs via Timer (target ≥75%)",
+                  caption: timerCompliancePct === null ? "No eligible logs" : "of logs via Timer (target ≥75%)",
                 },
               ];
               return cards.map((card) => {
