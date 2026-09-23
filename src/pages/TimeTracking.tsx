@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { CheckCircle2, XCircle, Clock, ShieldCheck, ChevronRight, Pencil, Timer, Trash2, Archive, RotateCcw } from "lucide-react";
+import { ShieldCheck, ChevronRight, Pencil, Timer, Trash2, Archive, RotateCcw } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, decideTimeEntry, correctTimeEntry, editPendingManualTimeEntry, deletePendingManualTimeEntry, archiveTimeEntry, unarchiveTimeEntry } from "../lib/timeTracking";
+import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, editPendingManualTimeEntry, deletePendingManualTimeEntry, archiveTimeEntry, unarchiveTimeEntry } from "../lib/timeTracking";
 import { useSearchParams } from "react-router-dom";
 
 interface PersonLite {
@@ -287,34 +287,6 @@ function toTimeInputValue(d = new Date()): string {
 // when the person clicks the action button -- so typing never touches
 // TimeTracking's state and never forces a remount.
 
-function RejectNoteBox({ busy, onConfirm, onCancel }: { busy: boolean; onConfirm: (note: string) => void; onCancel: () => void }) {
-  const [note, setNote] = useState("");
-  return (
-    <>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <input
-          type="text"
-          placeholder="Reason for rejecting (required)"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          style={{ flex: "1 1 220px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-        />
-        <button
-          onClick={() => onConfirm(note)}
-          disabled={busy || !note.trim()}
-          style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: note.trim() ? "var(--danger-text)" : "var(--muted)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: note.trim() ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
-        >
-          Confirm reject
-        </button>
-        <button onClick={onCancel} style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
-          Cancel
-        </button>
-      </div>
-      {!note.trim() && <div style={{ fontSize: 10, color: "var(--danger-text)", marginTop: 5 }}>A note is required to reject a time entry.</div>}
-    </>
-  );
-}
-
 function ArchiveForm({ onSubmit, onCancel }: { onSubmit: (reason: string) => void; onCancel: () => void }) {
   const [reason, setReason] = useState("");
   return (
@@ -457,14 +429,6 @@ export default function TimeTracking() {
   const [people, setPeople] = useState<PersonLite[]>([]);
   const [myTasks, setMyTasks] = useState<TaskLite[]>([]);
   const [loading, setLoading] = useState(true);
-  const [decidingId, setDecidingId] = useState<string | null>(null);
-  // 2026-09-22 (Sandra: revamped decision table -- icon-only actions,
-  // rejecting requires a note): which row's inline "why are you
-  // rejecting this" note box is expanded, if any. The note itself lives
-  // in RejectNoteBox's own local state (phase66) -- see the note at the
-  // top of this file about why lifting it here caused a remount-per-
-  // keystroke bug.
-  const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [correctingId, setCorrectingId] = useState<string | null>(null);
   const [archivingId, setArchivingId] = useState<string | null>(null);
   // 2026-09-22 (Sandra: "let's allow the assignee or requestor to delete
@@ -535,56 +499,6 @@ export default function TimeTracking() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.id]);
-
-  // Mirrors can_decide_time_entry() in Postgres: the project owner decides
-  // a manual entry unless the owner logged it themself, in which case it
-  // escalates to the owner's manager. Full Access always can. See
-  // [[project_capaciq_extension_requests]] for the identical rule used by
-  // task-level due-date extensions.
-  function canDecide(row: EntryRow): boolean {
-    if (!me) return false;
-    if (me.access_level === "full") return true;
-    // 2026-09-22: a non-project entry has no project owner to defer to --
-    // authority is the logger's own manager instead (mirrors
-    // can_decide_time_entry's server-side non-project branch, including
-    // the "no one active above me" self-exemption).
-    if (row.activity_type_id) {
-      const logger = people.find((p) => p.id === row.person_id);
-      if (!logger?.reports_to) return row.person_id === me.id;
-      return logger.reports_to === me.id;
-    }
-    const ownerId = row.task?.project?.owner_id;
-    if (!ownerId) return false;
-    const requesterId = row.requested_by;
-    if (ownerId === me.id && requesterId !== ownerId) return true;
-    if (requesterId === ownerId) {
-      const owner = people.find((p) => p.id === ownerId);
-      return owner?.reports_to === me.id;
-    }
-    return false;
-  }
-
-  // 2026-09-22 (Sandra: reject now requires a note) -- the new
-  // DecisionTable's inline reject box IS the confirmation step (type a
-  // reason, then click Confirm reject), so it skips the old modal
-  // confirm() to avoid asking twice; EntriesTable's older inline-note
-  // flow still gets the modal since its note stays optional there.
-  async function decide(row: EntryRow, status: "approved" | "rejected", note?: string) {
-    const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
-    if (status === "rejected" && note === undefined) {
-      const ok = await confirm({ message: `Reject this manual time entry for ${label}?`, confirmLabel: "Reject", danger: true });
-      if (!ok) return;
-    }
-    setDecidingId(row.id);
-    const res = await decideTimeEntry(row.id, status, note?.trim() || null);
-    setDecidingId(null);
-    if (res.error) {
-      await alert(`Couldn't ${status === "approved" ? "approve" : "reject"} this entry: ${res.error}`);
-      return;
-    }
-    setRejectingId(null);
-    loadAll();
-  }
 
   async function submitCorrection(row: EntryRow, v: { hours: string; notes: string; reasonCategory: string; activityTypeId: string }) {
     const hours = parseFloat(v.hours);
@@ -827,26 +741,21 @@ export default function TimeTracking() {
     rejected: projectFilteredEntries.filter((e) => e.status === "rejected").length,
   };
   const filteredEntries = statusFilter === "all" ? projectFilteredEntries : projectFilteredEntries.filter((e) => e.status === statusFilter);
-  const pendingForMe = filteredEntries.filter((e) => e.status === "pending_approval" && canDecide(e));
-  const mine = filteredEntries.filter((e) => e.person_id === me?.id && !pendingForMe.includes(e));
-  const rest = filteredEntries.filter((e) => !pendingForMe.includes(e) && e.person_id !== me?.id);
+  // 2026-09-23 (Sandra: "all approvals will not go to Approval Center
+  // only... My entries would include all approved and all pending
+  // approvals so they can see how many are approved, how many are still
+  // pending") -- Time Tracking no longer has its own decision UI (see
+  // Approval Center instead), so "My entries" is simply every entry of
+  // mine regardless of status, and "Other visible entries" is everyone
+  // else's -- no more carving out a separate pendingForMe bucket first.
+  const mine = filteredEntries.filter((e) => e.person_id === me?.id);
+  const rest = filteredEntries.filter((e) => e.person_id !== me?.id);
 
-  // 2026-09-22 (Sandra: revamp of the "Needs your decision" list into a
-  // real table -- Task/Project, Assignee, Work Date, Time, Duration,
-  // Details, Requested On, Action) -- Action is icon-only (check/x);
-  // rejecting expands an inline note box that's required before the
-  // reject can be confirmed. Only used for pendingForMe -- "My entries"
-  // and "Other visible entries" keep the older EntriesTable card layout
-  // below, since those have no decision to make and carry different
-  // info (status, decided-by, correction workflow).
-  // 2026-09-22 (Sandra: "align the column width of Needs your decision
-  // with My entries -- that has good column sizing") -- both tables are
-  // separate <table> elements with independent auto-width content-based
-  // sizing, so identical headers still drifted out of alignment (e.g.
-  // DecisionTable's Details column was nowrap+ellipsis while
-  // EntriesTable's wraps). A shared colgroup + table-layout: fixed on
-  // both forces the exact same column proportions on both tables
-  // regardless of what their own rows contain.
+  // 2026-09-23 (Sandra: "all approvals will not go to Approval Center
+  // only" -- this page no longer has its own decision UI at all,
+  // Approval Center is the single place decisions happen). Kept for
+  // "My entries"/"Other visible entries" below, which still share this
+  // exact column-width shape.
   const ENTRY_TABLE_COL_WIDTHS = ["18%", "12%", "10%", "12%", "7%", "20%", "11%", "8%", "12%"];
   function EntryTableColGroup() {
     return (
@@ -858,117 +767,15 @@ export default function TimeTracking() {
     );
   }
 
-  function DecisionTable({ rows }: { rows: EntryRow[] }) {
-    if (rows.length === 0) return null;
-    const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
-    const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
-    return (
-      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-          <EntryTableColGroup />
-          <thead>
-            <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
-              <th style={th}>Task / Project</th>
-              <th style={th}>Assignee</th>
-              <th style={th}>Work Date</th>
-              <th style={th}>Time</th>
-              <th style={th}>Duration</th>
-              <th style={th}>Details</th>
-              <th style={th}>Requested On</th>
-              <th style={th}>Status</th>
-              <th style={{ ...th, textAlign: "center" }}>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const busy = decidingId === row.id;
-              const rejecting = rejectingId === row.id;
-              const isNonProject = Boolean(row.activity_type_id);
-              const title = isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
-              const subtitle = isNonProject
-                ? "Non-project"
-                : `${row.task?.project?.name ?? "—"}${row.task?.task_number ? ` · T-${String(row.task.task_number).padStart(4, "0")}` : ""}`;
-              const assigneeName = row.person?.name ?? personName(row.person_id);
-              const details = row.reason_notes?.trim() || row.reason_category || "—";
-              return (
-                <Fragment key={row.id}>
-                  <tr style={{ borderBottom: rejecting ? "none" : "1px solid var(--border)" }}>
-                    <td style={td}>
-                      <div style={{ fontWeight: 700, color: "var(--navy)" }}>{title}</div>
-                      <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{subtitle}</div>
-                    </td>
-                    <td style={td}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span
-                          style={{
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            width: 22, height: 22, borderRadius: "50%",
-                            background: "var(--accent-bg, #eaf2fb)", color: "var(--accent)",
-                            fontSize: 9.5, fontWeight: 700, flexShrink: 0,
-                          }}
-                        >
-                          {initials(assigneeName)}
-                        </span>
-                        {assigneeName}
-                      </div>
-                    </td>
-                    <td style={{ ...td, whiteSpace: "nowrap" }}>{formatWorkDate(row.started_at)}</td>
-                    <td style={{ ...td, whiteSpace: "nowrap" }}>{formatClockRange(row.started_at, row.ended_at)}</td>
-                    <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{formatDuration(row.duration_minutes)}</td>
-                    <td style={{ ...td, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={details !== "—" ? details : undefined}>
-                      {details}
-                    </td>
-                    <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDateTime(row.created_at)}</td>
-                    <td style={{ ...td, whiteSpace: "nowrap" }}>
-                      <span className={`status-pill ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
-                    </td>
-                    <td style={{ ...td, textAlign: "center" }}>
-                      <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
-                        <button
-                          onClick={() => setRejectingId(rejecting ? null : row.id)}
-                          disabled={busy}
-                          title="Reject"
-                          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
-                        >
-                          <XCircle size={14} />
-                        </button>
-                        <button
-                          onClick={() => decide(row, "approved")}
-                          disabled={busy}
-                          title="Approve"
-                          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
-                        >
-                          <CheckCircle2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                  {rejecting && (
-                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
-                        <RejectNoteBox busy={busy} onConfirm={(note) => decide(row, "rejected", note)} onCancel={() => setRejectingId(null)} />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
   // 2026-09-22 (Sandra: "can you make sure that all time entries for
   // approval and done follow the same format as we did earlier") --
-  // "My entries" and "Other visible entries" now use the same 8-column
-  // table shape as DecisionTable (Task/Project, Assignee, Work Date,
-  // Time, Duration, Details, Requested On, Action) instead of the older
-  // card layout. There's no decision to make here, so Action shows the
-  // status pill + who/when it was decided, plus the Correct button
-  // (Full Access only, on a confirmed/approved entry) -- correcting
-  // expands an inline row below, same interaction shape as
-  // DecisionTable's reject-note row.
+  // "My entries" and "Other visible entries" use an 8-column table shape
+  // (Task/Project, Assignee, Work Date, Time, Duration, Details,
+  // Requested On, Action) instead of the older card layout. There's no
+  // decision to make here (see Approval Center for that), so Action
+  // shows the status pill + who/when it was decided, plus the Correct
+  // button (Full Access only, on a confirmed/approved entry) --
+  // correcting expands an inline row below.
   function EntriesTable({ rows }: { rows: EntryRow[] }) {
     if (rows.length === 0) return null;
     const isFullAccess = me?.access_level === "full";
@@ -1496,17 +1303,14 @@ export default function TimeTracking() {
             })}
           </div>
 
+          {/* 2026-09-23 (Sandra: "all approvals will not go to Approval
+              Center only... My entries would include all approved and all
+              pending approvals so they can see how many are approved, how
+              many are still pending") -- decisions happen exclusively in
+              Approval Center now, so this page no longer has its own
+              "Needs your decision" list; My entries below is simply every
+              entry of mine, any status. */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, marginBottom: 8 }}>
-            <Clock size={14} color="var(--warning-text)" />
-            <h2 style={{ margin: 0, fontSize: 13 }}>Needs your decision ({pendingForMe.length})</h2>
-          </div>
-          {pendingForMe.length === 0 ? (
-            <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing waiting on you right now.</p>
-          ) : (
-            <DecisionTable rows={pendingForMe} />
-          )}
-
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 24, marginBottom: 8 }}>
             <ShieldCheck size={14} color="var(--accent)" />
             <h2 style={{ margin: 0, fontSize: 13 }}>My entries ({mine.length})</h2>
           </div>

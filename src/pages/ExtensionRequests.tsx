@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
-import { CheckCircle2, XCircle, Clock, ShieldCheck, BarChart3, ListChecks, Folder, User, Calendar, CalendarClock, ChevronRight } from "lucide-react";
+import { Clock, ShieldCheck, BarChart3, ListChecks, Folder, User, Calendar, CalendarClock, ChevronRight } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
@@ -66,18 +66,11 @@ function initials(name: string): string {
 
 export default function ExtensionRequests() {
   const { person: me } = useSession();
-  const { alert, dialog: confirmDialog } = useConfirm();
+  const { dialog: confirmDialog } = useConfirm();
   const [tab, setTab] = useState<"requests" | "report">("requests");
   const [requests, setRequests] = useState<ExtensionRequestRow[]>([]);
   const [people, setPeople] = useState<PersonLite[]>([]);
   const [loading, setLoading] = useState(true);
-  const [decidingId, setDecidingId] = useState<string | null>(null);
-  const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
-  // 2026-09-22 (Sandra: "match with Time Tracking, check or cross for
-  // actions") -- Reject now expands an inline note row (optional, same
-  // note as before) instead of a window confirm() dialog, same
-  // interaction shape as Time Tracking's DecisionTable.
-  const [rejectingId, setRejectingId] = useState<string | null>(null);
   // Status filter (2026-09-19, Sandra: card-layout mockup + "add metric
   // cards like All request | Pending | approved") -- the metric cards
   // double as the filter, same convention as the Approval Center page.
@@ -115,52 +108,7 @@ export default function ExtensionRequests() {
     loadAll();
   }, []);
 
-  // Mirrors can_decide_extension() in Postgres -- the DB is the real
-  // authority (this only controls whether the Approve/Reject buttons show
-  // up; the RPC re-checks and would reject an unauthorized call anyway).
-  function canDecide(row: ExtensionRequestRow): boolean {
-    if (!me) return false;
-    if (me.access_level === "full") return true;
-
-    // Project-level: ALWAYS escalates to the owner's manager -- there is
-    // no "owner decides" path at all here, unlike task-level below (a
-    // project-wide deadline move is a bigger commitment than one task
-    // slipping).
-    if (row.project) {
-      const ownerId = row.project.owner_id;
-      if (!ownerId) return false;
-      const owner = people.find((p) => p.id === ownerId);
-      return owner?.reports_to === me.id;
-    }
-
-    const ownerId = row.task?.project?.owner_id;
-    if (!ownerId) return false;
-    const requesterId = row.requester?.id;
-    if (ownerId === me.id && requesterId !== ownerId) return true;
-    if (requesterId === ownerId) {
-      const owner = people.find((p) => p.id === ownerId);
-      return owner?.reports_to === me.id;
-    }
-    return false;
-  }
-
   const assigneeName = (id: string | null) => people.find((p) => p.id === id)?.name ?? "\u2014";
-
-  async function decide(row: ExtensionRequestRow, status: "Approved" | "Rejected") {
-    setDecidingId(row.id);
-    const { error } = await supabase.rpc(row.project ? "decide_project_extension_request" : "decide_extension_request", {
-      p_request_id: row.id,
-      p_status: status,
-      p_decision_notes: notesDraft[row.id]?.trim() || null,
-    });
-    setDecidingId(null);
-    if (error) {
-      await alert(`Couldn't ${status === "Approved" ? "approve" : "reject"} this request: ${error.message}`);
-      return;
-    }
-    if (status === "Rejected") setRejectingId(null);
-    loadAll();
-  }
 
   const statusCounts = {
     all: requests.length,
@@ -172,26 +120,20 @@ export default function ExtensionRequests() {
   // card-layout mockup) -- applied before the three groupings below, same
   // convention as the Approval Center page.
   const filteredRequests = statusFilter === "all" ? requests : requests.filter((r) => r.status === statusFilter);
-  const pendingForMe = filteredRequests.filter((r) => r.status === "Pending" && canDecide(r));
+  // 2026-09-23 (Sandra: "all approvals will not go to Approval Center
+  // only" -- remove this page's own decision UI, same change as Time
+  // Tracking) -- no more pendingForMe bucket; just mine vs everyone
+  // else's.
   const mine = filteredRequests.filter((r) => r.requester?.id === me?.id);
-  const rest = filteredRequests.filter((r) => !pendingForMe.includes(r) && r.requester?.id !== me?.id);
+  const rest = filteredRequests.filter((r) => r.requester?.id !== me?.id);
 
-  // Card format (2026-09-19, Sandra: match the Approval Center's card
-  // layout) -- each section (Needs your decision / My requests / Other
-  // visible) renders its own card list instead of a table now; the
-  // grouping itself is unchanged.
-  // 2026-09-22 (Sandra: "for due date extension requests, format to
-  // match Time Tracking, with check or cross for actions") -- rebuilt
-  // from the flex/card layout into a real bordered table, same shape
-  // family as Time Tracking's DecisionTable/EntriesTable and Approval
-  // Center's TimeEntryTable/TaskCompletionTable: Task/Project, Assignee,
-  // Current Deadline, Requested Deadline, Extension, Reason, Requested
-  // On, Status, Action. Action is icon-only (check/x); rejecting expands
-  // an inline optional-note row below, same interaction shape as
-  // DecisionTable's reject box (just not required here -- this page
-  // never required a reject note, only Time Tracking's revamp did, and
-  // that wasn't part of what Sandra asked to match).
-  function RequestsTable({ rows, showDecideActions }: { rows: ExtensionRequestRow[]; showDecideActions: boolean }) {
+  // 2026-09-23 (Sandra: "all approvals will not go to Approval Center
+  // only" -- decisions happen exclusively in Approval Center now, so
+  // this table lost its Action column/reject-note row entirely; it's
+  // read-only everywhere it's used) -- Task/Project, Assignee, Current
+  // Deadline, Requested Deadline, Extension, Reason, Requested On,
+  // Status.
+  function RequestsTable({ rows }: { rows: ExtensionRequestRow[] }) {
     if (rows.length === 0) return null;
     const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
     const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
@@ -208,24 +150,18 @@ export default function ExtensionRequests() {
               <th style={th}>Reason</th>
               <th style={th}>Requested On</th>
               <th style={th}>Status</th>
-              <th style={{ ...th, textAlign: "center" }}>Action</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => {
-              const busy = decidingId === row.id;
-              const rejecting = rejectingId === row.id;
               const isProjectLevel = !!row.project;
               const currentDeadline = row.project ? row.project.end_date : row.task?.current_due_date ?? null;
               const extensionDays = currentDeadline ? daysBetween(currentDeadline, row.requested_new_due_date) : null;
               const assigneeId = isProjectLevel ? null : row.task?.assignee_id ?? null;
               const onBehalf = !isProjectLevel && row.requester && assigneeId && row.requester.id !== assigneeId;
               const primaryName = row.requester?.name ?? (isProjectLevel ? "—" : assigneeName(assigneeId));
-              const noteValue = notesDraft[row.id] ?? "";
-              const canDecideNow = showDecideActions && row.status === "Pending";
               return (
-                <Fragment key={row.id}>
-                  <tr style={{ borderBottom: rejecting ? "none" : "1px solid var(--border)" }}>
+                <tr key={row.id} style={{ borderBottom: "1px solid var(--border)" }}>
                     <td style={td}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <span className={`status-pill ${isProjectLevel ? "accent" : "gold"}`} style={{ fontSize: 9 }}>
@@ -279,60 +215,7 @@ export default function ExtensionRequests() {
                         </div>
                       )}
                     </td>
-                    <td style={{ ...td, textAlign: "center" }}>
-                      {canDecideNow ? (
-                        <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
-                          <button
-                            onClick={() => setRejectingId(rejecting ? null : row.id)}
-                            disabled={busy}
-                            title="Reject"
-                            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
-                          >
-                            <XCircle size={14} />
-                          </button>
-                          <button
-                            onClick={() => decide(row, "Approved")}
-                            disabled={busy}
-                            title="Approve"
-                            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
-                          >
-                            <CheckCircle2 size={14} />
-                          </button>
-                        </div>
-                      ) : (
-                        <span style={{ color: "var(--muted)" }}>—</span>
-                      )}
-                    </td>
-                  </tr>
-                  {rejecting && (
-                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <input
-                            type="text"
-                            placeholder="Add an optional note..."
-                            value={noteValue}
-                            onChange={(e) => setNotesDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                            style={{ flex: "1 1 220px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                          />
-                          <button
-                            onClick={() => decide(row, "Rejected")}
-                            disabled={busy}
-                            style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--danger-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                          >
-                            Confirm reject
-                          </button>
-                          <button
-                            onClick={() => setRejectingId(null)}
-                            style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
+                </tr>
               );
             })}
           </tbody>
@@ -667,23 +550,13 @@ export default function ExtensionRequests() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 20, marginBottom: 8 }}>
-            <Clock size={14} color="var(--warning-text)" />
-            <h2 style={{ margin: 0, fontSize: 13 }}>Needs your decision ({pendingForMe.length})</h2>
-          </div>
-          {pendingForMe.length === 0 ? (
-            <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing waiting on you right now.</p>
-          ) : (
-            <RequestsTable rows={pendingForMe} showDecideActions />
-          )}
-
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 24, marginBottom: 8 }}>
             <ShieldCheck size={14} color="var(--accent)" />
             <h2 style={{ margin: 0, fontSize: 13 }}>My requests ({mine.length})</h2>
           </div>
           {mine.length === 0 ? (
             <p style={{ fontSize: 12, color: "var(--muted)" }}>You haven't requested any extensions.</p>
           ) : (
-            <RequestsTable rows={mine} showDecideActions={false} />
+            <RequestsTable rows={mine} />
           )}
 
           {rest.length > 0 && (
@@ -691,7 +564,7 @@ export default function ExtensionRequests() {
               <div style={{ marginTop: 24, marginBottom: 8 }}>
                 <h2 style={{ margin: 0, fontSize: 13 }}>Other visible requests ({rest.length})</h2>
               </div>
-              <RequestsTable rows={rest} showDecideActions={false} />
+              <RequestsTable rows={rest} />
             </>
           )}
         </>
