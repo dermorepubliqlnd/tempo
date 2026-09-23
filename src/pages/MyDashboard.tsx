@@ -592,10 +592,7 @@ export default function MyDashboard() {
       {myWorkTodayAll.length > 0 && (
         <div className="dash-card">
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
-            <div>
-              <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>My Work Today</h2>
-              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Tasks scheduled to be active today, whether or not they're due today</div>
-            </div>
+            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>My Work Today</h2>
             {myWorkTodayHiddenCount > 0 && (
               <button
                 onClick={() => setShowHiddenToday((v) => !v)}
@@ -615,14 +612,15 @@ export default function MyDashboard() {
           )}
           <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "8px 4px 6px", borderBottom: "1px solid var(--border)" }}>
             <span style={{ flex: "0 0 68px" }}>Task ID</span>
+            <span style={{ flex: "1 1 20%" }}>Task</span>
+            <span style={{ flex: "0 0 92px" }}>Task Status</span>
             <span style={{ flex: "0 0 90px" }}>Tag</span>
-            <span style={{ flex: "1 1 24%" }}>Task</span>
-            <span style={{ flex: "1 1 16%" }}>Project</span>
+            <span style={{ flex: "1 1 14%" }}>Project</span>
             <span style={{ flex: "0 0 82px" }}>Start Date</span>
             <span style={{ flex: "0 0 82px" }}>Due Date</span>
-            <span style={{ flex: "0 0 70px", textAlign: "right" }}>Planned</span>
+            <span style={{ flex: "0 0 90px", textAlign: "right" }}>Estimated Hours</span>
             <span style={{ flex: "0 0 65px", textAlign: "right" }}>Logged</span>
-            <span style={{ flex: "0 0 90px", textAlign: "center" }}>Progress</span>
+            <span style={{ flex: "0 0 90px", textAlign: "right" }}>Hrs Variance</span>
             <span style={{ flex: "0 0 40px", textAlign: "center" }}>Timer</span>
             <span style={{ flex: "0 0 40px", textAlign: "center" }}>Hide</span>
           </div>
@@ -633,12 +631,17 @@ export default function MyDashboard() {
               const isHidden = hiddenTodayIds.has(t.id);
               const isRunningHere = running?.task_id === t.id;
               const timerDisabled = timerBusy || (Boolean(running) && !isRunningHere);
-              const progressPct = TASK_PROGRESS_PCT[t.status ?? ""] ?? 0;
               const tag = workTodayTag(t);
               const logged = loggedHoursForTask(t.id);
+              const variance = hoursVarianceOf(t.estimated_hours, logged);
+              const varianceTone = hoursVarianceTone(variance?.percent ?? null);
               return (
                 <div key={t.id} className="dash-row" style={{ opacity: isHidden ? 0.55 : 1 }}>
                   <span style={{ flex: "0 0 68px", fontSize: 11.5, color: "var(--text-secondary)" }}>T-{String(t.task_number).padStart(4, "0")}</span>
+                  <span style={{ flex: "1 1 20%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>{t.name}</span>
+                  <span style={{ flex: "0 0 92px" }}>
+                    <span className={`status-pill ${myWorkTodayStatusTone(t.status)}`} style={{ fontSize: 9 }}>{t.status ?? "—"}</span>
+                  </span>
                   <span style={{ flex: "0 0 90px" }}>
                     {tag && (
                       <span className={`status-pill ${tag.tone}`} style={{ fontSize: 9 }}>
@@ -646,17 +649,19 @@ export default function MyDashboard() {
                       </span>
                     )}
                   </span>
-                  <span style={{ flex: "1 1 24%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>{t.name}</span>
-                  <span style={{ flex: "1 1 16%", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.project?.name ?? "—"}</span>
+                  <span style={{ flex: "1 1 14%", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.project?.name ?? "—"}</span>
                   <span style={{ flex: "0 0 82px", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.start_date ? formatDate(t.start_date) : "—"}</span>
                   <span style={{ flex: "0 0 82px", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(t.current_due_date)}</span>
-                  <span style={{ flex: "0 0 70px", textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
+                  <span style={{ flex: "0 0 90px", textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
                   <span style={{ flex: "0 0 65px", textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)" }}>{logged > 0 ? `${logged.toFixed(1)}h` : "—"}</span>
-                  <span style={{ flex: "0 0 90px", display: "flex", alignItems: "center", gap: 6, padding: "0 4px" }}>
-                    <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
-                      <div style={{ width: `${progressPct}%`, height: "100%", background: "var(--accent)", borderRadius: 3 }} />
-                    </div>
-                    <span style={{ fontSize: 10.5, color: "var(--muted)", flexShrink: 0 }}>{progressPct}%</span>
+                  <span style={{ flex: "0 0 90px", textAlign: "right" }}>
+                    {variance ? (
+                      <span className={`status-pill ${varianceTone}`} style={{ fontSize: 9 }}>
+                        {variance.hours > 0 ? "+" : ""}{variance.hours}h
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11.5, color: "var(--muted)" }}>—</span>
+                    )}
                   </span>
                   <span style={{ flex: "0 0 40px", textAlign: "center" }}>
                     <button
@@ -972,16 +977,37 @@ export default function MyDashboard() {
   );
 }
 
-// 2026-09-23 (My Work Today "Progress" column): there's no per-task
-// percent field in the schema -- Projects.tsx's own actualProgress() is
-// project-level only, weighting each task by this same factor. Mirrors
-// that convention at the single-task level (Cancelled tasks never reach
-// this table -- isOpenTask excludes them).
-const TASK_PROGRESS_PCT: Record<string, number> = {
-  "Not Started": 0,
-  "In Progress": 50,
-  Done: 100,
-};
+// 2026-09-23 (Sandra: "instead of progress please show hrs variance --
+// this is existing") -- same Est. vs Actual formula Projects.tsx's own
+// Task Hrs Variance column already uses (hoursVarianceOf/
+// hoursVarianceTone there), reimplemented locally here rather than
+// importing a page-local (non-exported) helper from Projects.tsx. Null
+// when there's no estimate to compare against.
+function hoursVarianceOf(estimatedHours: number | null | undefined, spentHours: number): { hours: number; percent: number } | null {
+  if (!estimatedHours) return null;
+  return {
+    hours: Math.round((spentHours - estimatedHours) * 100) / 100,
+    percent: Math.round((spentHours / estimatedHours) * 100),
+  };
+}
+function hoursVarianceTone(percent: number | null): "success" | "warning" | "danger" | "neutral" {
+  if (percent === null) return "neutral";
+  if (percent <= 100) return "success";
+  if (percent <= 125) return "warning";
+  return "danger";
+}
+
+// 2026-09-23 (Task Status column) -- My Work Today already excludes
+// Done/Cancelled tasks (isOpenTask), so in practice this only ever
+// shows "Not Started"/"In Progress"; kept as a simple direct mapping
+// rather than importing Projects.tsx's fuller status-grouping config,
+// which also covers custom/Site-Settings-mapped status labels this
+// page doesn't need to handle.
+function myWorkTodayStatusTone(status: string | null): "success" | "accent" | "neutral" {
+  if (status === "In Progress") return "accent";
+  if (status === "Done") return "success";
+  return "neutral";
+}
 
 const METRIC_COLORS: Record<string, { bg: string; fg: string }> = {
   blue: { bg: "#e5f0fe", fg: "#2f6fed" },
