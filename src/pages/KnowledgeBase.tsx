@@ -284,7 +284,7 @@ function CategoryIcon({ cat, size = 40 }: { cat: KbCategory | undefined; size?: 
 
 function Breadcrumb({ parts }: { parts: { label: string; to?: string }[] }) {
   return (
-    <nav style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)", marginBottom: 10, minWidth: 0, flexWrap: "wrap" }}>
+    <nav style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)", marginBottom: 8, minWidth: 0, flexWrap: "wrap" }}>
       {parts.map((p, i) => (
         <span key={i} style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
           {i > 0 && <ChevronRight size={12} style={{ flexShrink: 0 }} />}
@@ -495,6 +495,20 @@ export default function KnowledgeBase() {
     }
   }
 
+  // 2026-09-24 (Sandra: "make the search global too and appearing in all
+  // pages in the KB") -- every KB page gets the same breadcrumb row with a
+  // compact search box on the right that always searches the WHOLE KB.
+  const topBar = (parts: { label: string; to?: string }[]) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+      <div style={{ minWidth: 0, flex: "1 1 300px" }}>
+        <Breadcrumb parts={parts} />
+      </div>
+      <div style={{ flex: "0 1 340px", minWidth: 240 }}>
+        <SearchBox initial="" placeholder="Search the Knowledge Base..." onSubmit={(v) => runSearch(v)} />
+      </div>
+    </div>
+  );
+
   // Search: title (strongest) > category name > content.
   function searchEntries(query: string, pool: KbEntry[]): KbEntry[] {
     const ql = query.toLowerCase();
@@ -637,7 +651,7 @@ export default function KnowledgeBase() {
       return (
         <div>
           {dialog}
-          <Breadcrumb parts={[{ label: "Knowledge Base", to: "/knowledge-base" }, { label: "Not found" }]} />
+          {topBar([{ label: "Knowledge Base", to: "/knowledge-base" }, { label: "Not found" }])}
           <p style={{ fontSize: 12.5, color: "var(--muted)" }}>This article doesn't exist or was moved to the Archive.</p>
         </div>
       );
@@ -648,7 +662,7 @@ export default function KnowledgeBase() {
     return (
       <div>
         {dialog}
-        <Breadcrumb parts={[{ label: "Knowledge Base", to: "/knowledge-base" }, { label: cat?.name ?? "Topic", to: cat ? `/knowledge-base/category/${cat.id}` : undefined }, { label: entry.title }]} />
+        {topBar([{ label: "Knowledge Base", to: "/knowledge-base" }, { label: cat?.name ?? "Topic", to: cat ? `/knowledge-base/category/${cat.id}` : undefined }, { label: entry.title }])}
         <div className="card" style={{ padding: "22px 28px" }}>
           <div style={{ maxWidth: READING_WIDTH }}>
             {editingEntryId === entry.id ? (
@@ -711,7 +725,7 @@ export default function KnowledgeBase() {
       return (
         <div>
           {dialog}
-          <Breadcrumb parts={[{ label: "Knowledge Base", to: "/knowledge-base" }, { label: "Not found" }]} />
+          {topBar([{ label: "Knowledge Base", to: "/knowledge-base" }, { label: "Not found" }])}
           <p style={{ fontSize: 12.5, color: "var(--muted)" }}>This topic doesn't exist or was moved to the Archive.</p>
         </div>
       );
@@ -721,7 +735,7 @@ export default function KnowledgeBase() {
     return (
       <div>
         {dialog}
-        <Breadcrumb parts={[{ label: "Knowledge Base", to: "/knowledge-base" }, { label: cat.name }]} />
+        {topBar([{ label: "Knowledge Base", to: "/knowledge-base" }, { label: cat.name }])}
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <CategoryIcon cat={cat} size={44} />
