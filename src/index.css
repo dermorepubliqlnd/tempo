@@ -35,10 +35,10 @@
      scale for the logged-hours "Very low"/"Below expected" tiers,
      replacing red/amber there so under-logging and over-logging are no
      longer both painted the same danger color. */
-  --blue-bg: #dbeafe;
-  --blue-text: #1d4ed8;
+  --blue-bg: #bfdbfe;
+  --blue-text: #1e40af;
   --skyblue-bg: #eff6ff;
-  --skyblue-text: #3b82f6;
+  --skyblue-text: #6b9bd8;
   --radius-sm: 3px;
   --radius-md: 8px;
   /* Round 1 of WBS UI redesign (2026-07-29): dedicated radius for

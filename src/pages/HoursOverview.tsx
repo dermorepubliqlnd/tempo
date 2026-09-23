@@ -1,11 +1,22 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon, Download, ArrowDown, ArrowUp } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon, Download } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
 import { buildHolidaySet } from "../lib/workingDays";
 import { expectedHoursForDay } from "../lib/dailyAllocation";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
+// 2026-09-23 (stakeholder review: "keep it subtle -- a legend, not a
+// row of swatch pills") -- small colored dot + label instead of full
+// status-pill chips, matching the "this is effectively a heatmap"
+// framing.
+const LEGEND_DOT_COLOR: Record<string, string> = {
+  blue: "var(--blue-text)",
+  skyblue: "var(--skyblue-text)",
+  success: "var(--success-text)",
+  warning: "var(--warning-text)",
+  danger: "var(--danger-text)",
+};
 import { TASK_STATUS_GROUPED, statusGroupOf } from "../lib/notionOptions";
 import { ownTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, formatHours, type TimeLogStatus } from "../lib/timeTracking";
 import { timingOf, timingRank } from "../lib/taskTiming";
@@ -892,6 +903,21 @@ export default function HoursOverview() {
             </button>
           </div>
 
+          {/* 2026-09-23 (stakeholder review: "add a small legend above
+              the table, beside the filters -- since this is effectively
+              a heatmap, users shouldn't have to infer what each color
+              means") -- moved up from the bottom of the page, and
+              trimmed to just the 5 substantive tiers (Time Off/no-hours-
+              logged are self-explanatory without a swatch). */}
+          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 14, fontSize: 11, color: "var(--muted)", marginBottom: 10 }}>
+            {LOGGED_HOURS_LEGEND.filter((l) => l.tone !== "neutral").map(({ label, tone }) => (
+              <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: LEGEND_DOT_COLOR[tone], flexShrink: 0 }} />
+                {label}
+              </span>
+            ))}
+          </div>
+
           <div ref={gridScrollRef} style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
             <table style={{ borderCollapse: "collapse", width: "max-content" }}>
               <thead>
@@ -1053,14 +1079,6 @@ export default function HoursOverview() {
                                   {hasValue ? (
                                     <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 2 }}>
                                       {logged.toFixed(2)}h
-                                      {/* 2026-09-23 (Sandra: "show an arrow down after the number if it's
-                                          very low, arrow up for significantly above -- visual cue for why
-                                          it's colored the way it is") -- Very Low is blue and Significantly
-                                          Above is red now (see loggedHoursBands.ts's "red only for high,
-                                          blue for low" revision), but the arrows are kept as an extra
-                                          at-a-glance cue on both ends regardless of color. */}
-                                      {colors.key === "very_low" && <ArrowDown size={10} />}
-                                      {colors.key === "excessive" && <ArrowUp size={10} />}
                                     </span>
                                   ) : (
                                     "–"
@@ -1149,20 +1167,8 @@ export default function HoursOverview() {
               </tbody>
             </table>
           </div>
-          {/* 2026-08-26 (Sandra: "can the guide text at the bottom of
-              this page show the color coding instead of just text") --
-              actual swatches matching the real colors, instead of naming
-              them in prose. */}
-          <div style={{ marginTop: 10, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 14, fontSize: 11.5, color: "var(--muted)" }}>
-            {LOGGED_HOURS_LEGEND.map(({ range, label, tone }) => (
-              <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                <span className={`status-pill ${tone}`} style={{ fontSize: 10, padding: "1px 6px", fontWeight: 700 }}>
-                  {range}
-                </span>
-                {label}
-              </span>
-            ))}
-            <span>Logged hours always show on the day they were actually worked, even outside a task's scoped window. A 7.5h shift (±1h) is the reference for “Within expected.”</span>
+          <div style={{ marginTop: 10, fontSize: 11, color: "var(--muted)" }}>
+            Logged hours always show on the day they were actually worked, even outside a task's scoped window. A 7.5h shift (±1h) is the reference for "Within expected."
           </div>
         </>
       ) : (

@@ -11,8 +11,6 @@ import {
   ChevronRight,
   ChevronLeft,
   Calendar,
-  ArrowDown,
-  ArrowUp,
   Play,
   Square,
   Eye,
@@ -24,6 +22,13 @@ import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
 import { buildHolidaySet } from "../lib/workingDays";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
+const LEGEND_DOT_COLOR: Record<string, string> = {
+  blue: "var(--blue-text)",
+  skyblue: "var(--skyblue-text)",
+  success: "var(--success-text)",
+  warning: "var(--warning-text)",
+  danger: "var(--danger-text)",
+};
 import { colorForPerson } from "../lib/personColors";
 import { useTimeTracking } from "../lib/TimeTrackingContext";
 import { parseLocalDate, calendarDaysBetween } from "../lib/taskTiming";
@@ -933,15 +938,8 @@ export default function MyDashboard() {
                       {isFullTimeOff ? (
                         <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Time Off</div>
                       ) : d.logged > 0 ? (
-                        <div style={{ fontSize: 14, fontWeight: 700, color: colors.fg, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 2 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: colors.fg }}>
                           {d.logged.toFixed(1)}h
-                          {/* 2026-09-23 (Sandra: "red only for significantly high
-                              hours, low hours use blue shades") -- Very Low is now
-                              blue and Significantly Above is red; the arrow is kept
-                              on both ends as an extra at-a-glance cue, same as
-                              HoursOverview.tsx's Daily Activity grid. */}
-                          {colors.key === "very_low" && <ArrowDown size={11} />}
-                          {colors.key === "excessive" && <ArrowUp size={11} />}
                         </div>
                       ) : (
                         <div style={{ fontSize: 14, fontWeight: 700, color: colors.fg }}>{"—"}</div>
@@ -966,15 +964,14 @@ export default function MyDashboard() {
                 </strong>
               </span>
             </div>
-            {/* 2026-09-23 (phase64): same 6-tier legend as HoursOverview's
-                Daily Activity view, so the color coding reads the same
-                wherever logged hours show up. */}
+            {/* 2026-09-23 (stakeholder review: "keep it subtle -- a
+                small legend, not swatch pills") -- same dot-style legend
+                as HoursOverview's Daily Activity view now, same colors,
+                same reduced-to-5-tiers set. */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 10, color: "var(--muted)", marginTop: 10 }}>
-              {LOGGED_HOURS_LEGEND.map(({ range, label, tone }) => (
+              {LOGGED_HOURS_LEGEND.filter((l) => l.tone !== "neutral").map(({ label, tone }) => (
                 <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <span className={`status-pill ${tone}`} style={{ fontSize: 9.5, padding: "1px 5px", fontWeight: 700 }}>
-                    {range}
-                  </span>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: LEGEND_DOT_COLOR[tone], flexShrink: 0 }} />
                   {label}
                 </span>
               ))}
