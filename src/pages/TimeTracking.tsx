@@ -441,6 +441,14 @@ export default function TimeTracking() {
   // make it boring") -- same clickable metric-card filter as the
   // Extension Requests and Approval Center pages.
   const [statusFilter, setStatusFilter] = useState<"all" | "pending_approval" | "approved" | "rejected">("all");
+  // 2026-09-23 (Sandra: "My Time / Team Time / All Time" -- reworked the
+  // old flat My entries/Other visible entries split into three scopes
+  // that adapt to who's looking. My Time is everyone's default. Team
+  // Time only appears for someone who manages at least one person
+  // (walking the reports_to chain all the way down, not just direct
+  // reports -- see myTeamIds below). All Time only appears for Full
+  // Access, reusing the same access_level check used everywhere else.
+  const [scope, setScope] = useState<"mine" | "team" | "all">("mine");
 
   // 2026-09-22 (Sandra: non-project time -- meetings, team huddles --
   // shouldn't have to fake a task under a real project): toggle at the
@@ -564,13 +572,16 @@ export default function TimeTracking() {
   }
 
   // A manual entry (project or non-project) still sitting in
-  // pending_approval can be edited or deleted by whoever logged it or
-  // requested it -- Full Access too, same as everything else. The moment
-  // it's decided, this stops applying and only Full Access's Correct
-  // flow above can touch it.
+  // pending_approval, OR already Rejected, can be edited or deleted by
+  // whoever logged it or requested it -- Full Access too, same as
+  // everything else. 2026-09-23 (Sandra: "what happens if it's rejected
+  // -- have the same action as pending") -- editing a Rejected one
+  // resubmits it to pending_approval server-side (phase74_migration.sql
+  // clears the old decision stamp too). Once it's Approved, this stops
+  // applying and only Full Access's Correct flow above can touch it.
   function canEditDeletePending(row: EntryRow): boolean {
     if (!me) return false;
-    if (row.source !== "manual" || row.status !== "pending_approval") return false;
+    if (row.source !== "manual" || (row.status !== "pending_approval" && row.status !== "rejected")) return false;
     return row.person_id === me.id || row.requested_by === me.id || me.access_level === "full";
   }
 
@@ -598,7 +609,7 @@ export default function TimeTracking() {
 
   async function handleDeletePending(row: EntryRow) {
     const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
-    const ok = await confirm({ message: `Delete this pending time entry for ${label}? This can't be undone.`, confirmLabel: "Delete", danger: true });
+    const ok = await confirm({ message: `Delete this time entry for ${label}? This can't be undone.`, confirmLabel: "Delete", danger: true });
     if (!ok) return;
     const res = await deletePendingManualTimeEntry(row.id);
     if (res.error) {
@@ -716,6 +727,37 @@ export default function TimeTracking() {
 
   const personName = (id: string | null) => people.find((p) => p.id === id)?.name ?? "—";
 
+  // Every person who eventually reports up to me, at any depth -- not
+  // just direct reports. Built once from the already-loaded active
+  // `people` list (id/reports_to), same "walk the chain" idea
+  // Approval Center already uses for decision authority, just breadth-
+  // first downward instead of one hop upward.
+  const myTeamIds = useMemo(() => {
+    if (!me) return new Set<string>();
+    const childrenOf = new Map<string, string[]>();
+    for (const p of people) {
+      if (p.reports_to) {
+        const list = childrenOf.get(p.reports_to) ?? [];
+        list.push(p.id);
+        childrenOf.set(p.reports_to, list);
+      }
+    }
+    const result = new Set<string>();
+    const queue = [me.id];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const childId of childrenOf.get(current) ?? []) {
+        if (!result.has(childId)) {
+          result.add(childId);
+          queue.push(childId);
+        }
+      }
+    }
+    return result;
+  }, [me, people]);
+  const isFullAccessPage = me?.access_level === "full";
+  const hasTeam = myTeamIds.size > 0;
+
   // 2026-09-15 (Sandra: "add a filter by project in time tracking") --
   // narrows all three sections (Needs your decision / My entries / Team)
   // down to one project at a time. Reads/writes the ?project= URL param
@@ -734,66 +776,81 @@ export default function TimeTracking() {
   const projectFilteredEntries = filterProjectId
     ? entries.filter((e) => e.task?.project?.id === filterProjectId)
     : entries;
+  // 2026-09-23 (Sandra: "My Time / Team Time / All Time") -- the scope
+  // tab narrows down to a set of people BEFORE the status cards/filter
+  // are computed, so switching tabs re-scopes everything below it (the
+  // KPI cards, the status filter counts, and the table) rather than just
+  // the table rows.
+  const scopeFilteredEntries =
+    scope === "mine"
+      ? projectFilteredEntries.filter((e) => e.person_id === me?.id)
+      : scope === "team"
+      ? projectFilteredEntries.filter((e) => myTeamIds.has(e.person_id))
+      : projectFilteredEntries;
   const statusCounts = {
-    all: projectFilteredEntries.length,
-    pending_approval: projectFilteredEntries.filter((e) => e.status === "pending_approval").length,
-    approved: projectFilteredEntries.filter((e) => e.status === "approved").length,
-    rejected: projectFilteredEntries.filter((e) => e.status === "rejected").length,
+    all: scopeFilteredEntries.length,
+    pending_approval: scopeFilteredEntries.filter((e) => e.status === "pending_approval").length,
+    approved: scopeFilteredEntries.filter((e) => e.status === "approved").length,
+    rejected: scopeFilteredEntries.filter((e) => e.status === "rejected").length,
   };
-  const filteredEntries = statusFilter === "all" ? projectFilteredEntries : projectFilteredEntries.filter((e) => e.status === statusFilter);
-  // 2026-09-23 (Sandra: "all approvals will not go to Approval Center
-  // only... My entries would include all approved and all pending
-  // approvals so they can see how many are approved, how many are still
-  // pending") -- Time Tracking no longer has its own decision UI (see
-  // Approval Center instead), so "My entries" is simply every entry of
-  // mine regardless of status, and "Other visible entries" is everyone
-  // else's -- no more carving out a separate pendingForMe bucket first.
-  const mine = filteredEntries.filter((e) => e.person_id === me?.id);
-  const rest = filteredEntries.filter((e) => e.person_id !== me?.id);
+  const filteredEntries = statusFilter === "all" ? scopeFilteredEntries : scopeFilteredEntries.filter((e) => e.status === statusFilter);
 
-  // 2026-09-23 (Sandra: "all approvals will not go to Approval Center
-  // only" -- this page no longer has its own decision UI at all,
-  // Approval Center is the single place decisions happen). Kept for
-  // "My entries"/"Other visible entries" below, which still share this
-  // exact column-width shape.
-  const ENTRY_TABLE_COL_WIDTHS = ["18%", "12%", "10%", "12%", "7%", "20%", "11%", "8%", "12%"];
-  function EntryTableColGroup() {
+  // 2026-09-23 (Sandra: "task ID as the first column and immovable...
+  // task/project, work date, time, duration, details, source, status,
+  // action") -- rebuilt from the old fixed 9-column shape (which buried
+  // the task number inside the Task/Project cell's subtitle and folded
+  // Source into a small pill there too) into this explicit column list.
+  // Assignee is included but only shown on Team Time/All Time -- on My
+  // Time it's always you, so it'd be dead weight. This is a plain
+  // hand-built table (not the reorderable DataTable), so "immovable"
+  // for Task ID is just the default -- there's no drag-reorder here to
+  // begin with.
+  const ENTRY_TABLE_COL_WIDTHS_WITH_ASSIGNEE = ["8%", "16%", "10%", "9%", "11%", "7%", "17%", "7%", "8%", "7%"];
+  const ENTRY_TABLE_COL_WIDTHS_NO_ASSIGNEE = ["8%", "20%", "10%", "12%", "8%", "20%", "8%", "8%", "6%"];
+  function EntryTableColGroup({ showAssignee }: { showAssignee: boolean }) {
+    const widths = showAssignee ? ENTRY_TABLE_COL_WIDTHS_WITH_ASSIGNEE : ENTRY_TABLE_COL_WIDTHS_NO_ASSIGNEE;
     return (
       <colgroup>
-        {ENTRY_TABLE_COL_WIDTHS.map((w, i) => (
+        {widths.map((w, i) => (
           <col key={i} style={{ width: w }} />
         ))}
       </colgroup>
     );
   }
 
-  // 2026-09-22 (Sandra: "can you make sure that all time entries for
-  // approval and done follow the same format as we did earlier") --
-  // "My entries" and "Other visible entries" use an 8-column table shape
-  // (Task/Project, Assignee, Work Date, Time, Duration, Details,
-  // Requested On, Action) instead of the older card layout. There's no
-  // decision to make here (see Approval Center for that), so Action
-  // shows the status pill + who/when it was decided, plus the Correct
-  // button (Full Access only, on a confirmed/approved entry) --
-  // correcting expands an inline row below.
-  function EntriesTable({ rows }: { rows: EntryRow[] }) {
+  // 2026-09-23 (Sandra: "task ID as the first column and immovable...
+  // task/project, work date, time, duration, details, source, status,
+  // action") -- Task ID is its own column now instead of being buried in
+  // the Task/Project cell's subtitle, and Source (Manual/Timer) is its
+  // own column instead of a small pill there. Assignee only renders on
+  // Team Time/All Time (see showAssignee) -- on My Time it's always you.
+  // There's still no decision to make here (see Approval Center for
+  // that), so Action shows the status pill + who/when it was decided,
+  // plus the Correct button (Full Access only, on a confirmed/approved
+  // entry) -- correcting expands an inline row below. Edit/Delete now
+  // also cover a Rejected entry, not just a Pending one (see
+  // canEditDeletePending) -- editing a Rejected entry resubmits it to
+  // Pending server-side (phase74_migration.sql).
+  function EntriesTable({ rows, showAssignee }: { rows: EntryRow[]; showAssignee: boolean }) {
     if (rows.length === 0) return null;
     const isFullAccess = me?.access_level === "full";
+    const colCount = showAssignee ? 10 : 9;
     const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
     const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
     return (
       <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-          <EntryTableColGroup />
+          <EntryTableColGroup showAssignee={showAssignee} />
           <thead>
             <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Task ID</th>
               <th style={th}>Task / Project</th>
-              <th style={th}>Assignee</th>
+              {showAssignee && <th style={th}>Assignee</th>}
               <th style={th}>Work Date</th>
               <th style={th}>Time</th>
               <th style={th}>Duration</th>
               <th style={th}>Details</th>
-              <th style={th}>Requested On</th>
+              <th style={th}>Source</th>
               <th style={th}>Status</th>
               <th style={{ ...th, textAlign: "center" }}>Action</th>
             </tr>
@@ -811,38 +868,35 @@ export default function TimeTracking() {
               const archiving = archivingId === row.id;
               const isNonProject = Boolean(row.activity_type_id);
               const title = isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
-              const subtitle = isNonProject
-                ? "Non-project"
-                : `${row.task?.project?.name ?? "—"}${row.task?.task_number ? ` · T-${String(row.task.task_number).padStart(4, "0")}` : ""}`;
+              const subtitle = isNonProject ? "Non-project" : row.task?.project?.name ?? "—";
+              const taskIdLabel = row.task?.task_number ? `T-${String(row.task.task_number).padStart(4, "0")}` : "—";
               const assigneeName = row.person?.name ?? personName(row.person_id);
               const details = row.reason_notes?.trim() || row.reason_category || "—";
               return (
                 <Fragment key={row.id}>
                   <tr style={{ borderBottom: correcting || editing || archiving ? "none" : "1px solid var(--border)" }}>
+                    <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{taskIdLabel}</td>
                     <td style={td}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                        <span className="status-pill neutral" style={{ fontSize: 9 }}>
-                          {SOURCE_LABEL[row.source]}
-                        </span>
-                      </div>
-                      <div style={{ fontWeight: 700, color: "var(--navy)", marginTop: 3 }}>{title}</div>
+                      <div style={{ fontWeight: 700, color: "var(--navy)" }}>{title}</div>
                       <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{subtitle}</div>
                     </td>
-                    <td style={td}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span
-                          style={{
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            width: 22, height: 22, borderRadius: "50%",
-                            background: "var(--accent-bg, #eaf2fb)", color: "var(--accent)",
-                            fontSize: 9.5, fontWeight: 700, flexShrink: 0,
-                          }}
-                        >
-                          {initials(assigneeName)}
-                        </span>
-                        {assigneeName}
-                      </div>
-                    </td>
+                    {showAssignee && (
+                      <td style={td}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span
+                            style={{
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              width: 22, height: 22, borderRadius: "50%",
+                              background: "var(--accent-bg, #eaf2fb)", color: "var(--accent)",
+                              fontSize: 9.5, fontWeight: 700, flexShrink: 0,
+                            }}
+                          >
+                            {initials(assigneeName)}
+                          </span>
+                          {assigneeName}
+                        </div>
+                      </td>
+                    )}
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{formatWorkDate(row.started_at)}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
                       {formatClockRange(row.started_at, row.ended_at)}
@@ -861,7 +915,9 @@ export default function TimeTracking() {
                     <td style={{ ...td, maxWidth: 260, whiteSpace: "normal", wordBreak: "break-word" }}>
                       {details}
                     </td>
-                    <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDateTime(row.created_at)}</td>
+                    <td style={{ ...td, whiteSpace: "nowrap" }}>
+                      <span className="status-pill neutral" style={{ fontSize: 9 }}>{SOURCE_LABEL[row.source]}</span>
+                    </td>
                     <td style={{ ...td, minWidth: 140 }}>
                       <span className={`status-pill ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
                       {row.is_archived && (
@@ -947,14 +1003,14 @@ export default function TimeTracking() {
                   </tr>
                   {archiving && (
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
+                      <td colSpan={colCount} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
                         <ArchiveForm onSubmit={(reason) => submitArchive(row, reason)} onCancel={() => setArchivingId(null)} />
                       </td>
                     </tr>
                   )}
                   {canEditDelete && editing && (
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
+                      <td colSpan={colCount} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
                         <EditForm
                           row={row}
                           isNonProject={isNonProject}
@@ -969,7 +1025,7 @@ export default function TimeTracking() {
                   )}
                   {canCorrect && correcting && (
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
+                      <td colSpan={colCount} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
                         <CorrectForm
                           row={row}
                           reasonOptions={reasonOptions}
@@ -1241,6 +1297,44 @@ export default function TimeTracking() {
         <div style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>
       ) : (
         <>
+          {/* 2026-09-23 (Sandra: "My Time / Team Time / All Time" -- a
+              regular employee should primarily see their own time, a
+              manager should be able to see their own time plus whoever's
+              in their reporting chain, and Full Access keeps
+              organization-wide visibility -- but nobody should be
+              dropped into hundreds of unrelated rows by default). Team
+              Time only shows up once someone actually manages people
+              (hasTeam, walked from reports_to); All Time only shows up
+              for Full Access (isFullAccessPage), reusing the exact same
+              access_level check every other admin-only view already
+              uses. My Time is always available and is the default. */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+            {(
+              [
+                { key: "mine" as const, label: "My Time" },
+                ...(hasTeam ? [{ key: "team" as const, label: "Team Time" }] : []),
+                ...(isFullAccessPage ? [{ key: "all" as const, label: "All Time" }] : []),
+              ]
+            ).map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setScope(tab.key)}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "var(--radius-sm)",
+                  border: `1px solid ${scope === tab.key ? "var(--accent)" : "var(--border)"}`,
+                  background: scope === tab.key ? "var(--accent-bg, #eaf2fb)" : "transparent",
+                  fontSize: 12.5,
+                  fontWeight: scope === tab.key ? 600 : 500,
+                  color: scope === tab.key ? "var(--accent)" : "var(--text-secondary)",
+                  cursor: "pointer",
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, marginBottom: 4, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11, color: "var(--muted)" }}>Filter by project</span>
             <div style={{ width: 220 }}>
@@ -1304,29 +1398,22 @@ export default function TimeTracking() {
           </div>
 
           {/* 2026-09-23 (Sandra: "all approvals will not go to Approval
-              Center only... My entries would include all approved and all
-              pending approvals so they can see how many are approved, how
-              many are still pending") -- decisions happen exclusively in
-              Approval Center now, so this page no longer has its own
-              "Needs your decision" list; My entries below is simply every
-              entry of mine, any status. */}
+              Center only" -- decisions happen exclusively in Approval
+              Center now, so this page no longer has its own "Needs your
+              decision" list) -- one table now, scoped by the My
+              Time/Team Time/All Time tab above instead of the old flat
+              My entries/Other visible entries split. Assignee only
+              shows outside My Time, since on My Time it's always you. */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, marginBottom: 8 }}>
             <ShieldCheck size={14} color="var(--accent)" />
-            <h2 style={{ margin: 0, fontSize: 13 }}>My entries ({mine.length})</h2>
+            <h2 style={{ margin: 0, fontSize: 13 }}>
+              {scope === "mine" ? "My entries" : scope === "team" ? "Team entries" : "All entries"} ({filteredEntries.length})
+            </h2>
           </div>
-          {mine.length === 0 ? (
+          {filteredEntries.length === 0 ? (
             <p style={{ fontSize: 12, color: "var(--muted)" }}>No time logged yet.</p>
           ) : (
-            <EntriesTable rows={mine} />
-          )}
-
-          {rest.length > 0 && (
-            <>
-              <div style={{ marginTop: 24, marginBottom: 8 }}>
-                <h2 style={{ margin: 0, fontSize: 13 }}>Other visible entries ({rest.length})</h2>
-              </div>
-              <EntriesTable rows={rest} />
-            </>
+            <EntriesTable rows={filteredEntries} showAssignee={scope !== "mine"} />
           )}
         </>
       )}
