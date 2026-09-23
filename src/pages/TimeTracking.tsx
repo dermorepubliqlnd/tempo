@@ -7,6 +7,7 @@ import { formatDate } from "../lib/formatDate";
 import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, editPendingManualTimeEntry, deletePendingManualTimeEntry, archiveTimeEntry, unarchiveTimeEntry } from "../lib/timeTracking";
 import { loggedHoursTier } from "../lib/loggedHoursBands";
 import { expectedHoursForDay } from "../lib/dailyAllocation";
+import { buildHolidayNameMap, nonWorkingDayConfirmMessage, type HolidayNameMap } from "../lib/workingDays";
 import { useSearchParams } from "react-router-dom";
 import Modal from "../components/Modal";
 
@@ -726,6 +727,7 @@ export default function TimeTracking() {
   // per Phase 81's scope guard), so this is a small, cheap query.
   const [myAvailability, setMyAvailability] = useState<{ date: string; status: "off" | "half_day" }[]>([]);
   const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
+  const [holidayNames, setHolidayNames] = useState<HolidayNameMap>(new Map());
   // 2026-09-23 (Team Time supervisor view) -- Working Now (currently
   // running timers across the caller's team) + Team Required Hours
   // (per-person/day expected hours, for the Today's Logged/This Week
@@ -780,13 +782,14 @@ export default function TimeTracking() {
       me?.id
         ? supabase.from("person_availability").select("date,status").eq("person_id", me.id)
         : Promise.resolve({ data: [] }),
-      supabase.from("holidays").select("date"),
+      supabase.from("holidays").select("date,name"),
     ]);
     setEntries(((entryData as unknown as EntryRow[]) ?? []));
     setPeople((peopleData as PersonLite[]) ?? []);
     setMyTasks((((taskData as unknown as TaskLite[]) ?? [])).filter((t) => t.assignee_id === me?.id));
     setMyAvailability((availabilityData as { date: string; status: "off" | "half_day" }[] | null) ?? []);
     setHolidayDates(new Set(((holidayData as { date: string }[] | null) ?? []).map((h) => h.date)));
+    setHolidayNames(buildHolidayNameMap((holidayData as { date: string; name: string }[] | null) ?? []));
     const reasons = (reasonData as TimeEntryReasonRow[]) ?? [];
     setReasonOptions(reasons);
     const activityTypes = (activityTypeData as NonProjectActivityTypeRow[]) ?? [];
@@ -933,6 +936,10 @@ export default function TimeTracking() {
       await alert(overlapMessageText(overlap));
       return;
     }
+    // 2026-09-23 (Sandra: same weekend/holiday soft check -- an edit can
+    // move a pending entry's date onto a weekend/holiday too).
+    const editWarnMsg = nonWorkingDayConfirmMessage(v.date, holidayNames);
+    if (editWarnMsg && !(await confirm({ message: editWarnMsg, confirmLabel: "Yes, save it" }))) return;
     setEditSaving(true);
     const res = await editPendingManualTimeEntry(row.id, start.toISOString(), end.toISOString(), {
       reasonCategory: row.activity_type_id ? undefined : v.reasonCategory || undefined,
@@ -995,6 +1002,13 @@ export default function TimeTracking() {
         setLogOverlapEntry(overlap);
         return;
       }
+      // 2026-09-23 (Sandra: weekend/holiday soft check, fires every time,
+      // never blocks -- "you're trying to log on a Saturday/weekend/
+      // holiday, are you sure?") -- checked against the date TYPED into
+      // the form, since a manual entry is often backdated rather than
+      // logged for today.
+      const npWarnMsg = nonWorkingDayConfirmMessage(logStartDate, holidayNames);
+      if (npWarnMsg && !(await confirm({ message: npWarnMsg, confirmLabel: "Yes, log it" }))) return;
       setLogSaving(true);
       const res = await submitNonProjectTimeEntry(me?.id ?? "", logActivityTypeId, start.toISOString(), end.toISOString(), logNotes.trim());
       setLogSaving(false);
@@ -1048,6 +1062,11 @@ export default function TimeTracking() {
       setLogOverlapEntry(overlap);
       return;
     }
+    // 2026-09-23 (Sandra: weekend/holiday soft check -- see the matching
+    // comment in the non-project branch above) -- same treatment for
+    // project time.
+    const warnMsg = nonWorkingDayConfirmMessage(logStartDate, holidayNames);
+    if (warnMsg && !(await confirm({ message: warnMsg, confirmLabel: "Yes, log it" }))) return;
     setLogSaving(true);
     const res = await submitManualTimeEntry(logTaskId, start.toISOString(), end.toISOString(), logReasonCategory, logNotes.trim() || logReasonCategory);
     setLogSaving(false);

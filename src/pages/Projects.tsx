@@ -15,6 +15,7 @@ import Modal from "../components/Modal";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import NotesSidebar from "../components/NotesSidebar";
 import { useConfirm } from "../lib/useConfirm";
+import { buildHolidayNameMap, nonWorkingDayConfirmMessage, toISO as toISOWorkingDay, type HolidayNameMap } from "../lib/workingDays";
 import { InlineText, InlineSelect, InlineDate, InlineNumber } from "../components/InlineCell";
 import ProgressCell, { ProgressDisplayToggle } from "../components/ProgressCell";
 import SymbolTextBadge, { SymbolTextDisplayToggle } from "../components/SymbolTextBadge";
@@ -1116,6 +1117,7 @@ export default function Projects() {
   // progress calculation so "working days elapsed" excludes them the same
   // way the Day Planner already does. Stored as "YYYY-MM-DD" strings.
   const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
+  const [holidayNames, setHolidayNames] = useState<HolidayNameMap>(new Map());
 
   const dismissedDoneSuggestionsKey = `${DISMISSED_DONE_SUGGESTIONS_PREFIX}_${me?.id ?? "anon"}`;
   const [dismissedDoneSuggestions, setDismissedDoneSuggestions] = useState<Set<string>>(() =>
@@ -1235,7 +1237,7 @@ export default function Projects() {
       supabase.from("tasks").select("*").eq("is_archived", false).order("sort_order"),
       supabase.from("people").select("id,name,color").eq("is_active", true).order("name"),
       supabase.from("people").select("id,reports_to,is_active"),
-      supabase.from("holidays").select("date"),
+      supabase.from("holidays").select("date,name"),
       supabase
         .from("extension_requests")
         .select("id,task_id,status,requested_new_due_date,reason_category,reason_notes,decided_at,decision_notes,created_at")
@@ -1292,6 +1294,7 @@ export default function Projects() {
     setPeople((peopleData as PersonOption[]) ?? []);
     setChainPeople((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []);
     setHolidayDates(new Set(((holidayData as { date: string }[]) ?? []).map((h) => h.date)));
+    setHolidayNames(buildHolidayNameMap((holidayData as { date: string; name: string }[]) ?? []));
     setExtensionRequests((extReqData as ExtensionRequestLite[]) ?? []);
     setTimeEntries((timeEntryData as TimeEntryRow[]) ?? []);
     setDeletedSpentHours((delSpentData as DeletedSpentHourRow[]) ?? []);
@@ -4174,6 +4177,13 @@ export default function Projects() {
                       const res = await stopRunningTimer();
                       if (res.error) alert(`Couldn't stop timer: ${res.error}`);
                     } else {
+                      // 2026-09-23 (Sandra: same weekend/holiday soft
+                      // check as My Dashboard's Start Timer, now also
+                      // here on the per-task Start button in the Task
+                      // list -- checked against today, the day a timer
+                      // actually logs against.
+                      const warnMsg = nonWorkingDayConfirmMessage(toISOWorkingDay(new Date()), holidayNames);
+                      if (warnMsg && !(await confirm({ message: warnMsg, confirmLabel: "Yes, start" }))) return;
                       const res = await startTaskTimer({ id: t.id, name: t.name });
                       if (res.error) alert(`Couldn't start timer: ${res.error}`);
                     }

@@ -21,7 +21,7 @@ import Modal from "../components/Modal";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { buildHolidaySet } from "../lib/workingDays";
+import { buildHolidaySet, buildHolidayNameMap, nonWorkingDayConfirmMessage } from "../lib/workingDays";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
 const LEGEND_DOT_COLOR: Record<string, string> = {
   blue: "var(--blue-text)",
@@ -64,6 +64,7 @@ interface PersonLite {
 }
 interface HolidayRow {
   date: string;
+  name: string;
 }
 interface AvailabilityRow {
   person_id: string;
@@ -148,7 +149,7 @@ const WEEKDAY_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export default function MyDashboard() {
   const { person: me } = useSession();
   const { running, busy: timerBusy, start: startTaskTimer, requestStop } = useTimeTracking();
-  const { dialog: confirmDialog } = useConfirm();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
 
@@ -226,7 +227,7 @@ export default function MyDashboard() {
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
       supabase.from("projects").select("*").eq("is_archived", false),
       supabase.from("tasks").select("*").eq("is_archived", false),
-      supabase.from("holidays").select("date"),
+      supabase.from("holidays").select("date,name"),
       supabase.from("person_availability").select("person_id,date,status"),
       supabase.from("project_owner_history").select("project_id,person_id,effective_from,effective_to"),
       supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to"),
@@ -296,6 +297,7 @@ export default function MyDashboard() {
   const isFullAccess = me?.access_level === "full";
   const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const holidaySet = useMemo(() => buildHolidaySet(holidays.map((h) => h.date)), [holidays]);
+  const holidayNames = useMemo(() => buildHolidayNameMap(holidays), [holidays]);
   const holidayDateStrings = useMemo(() => new Set(holidays.map((h) => h.date.slice(0, 10))), [holidays]);
   const todayIso = toISO(new Date());
 
@@ -781,6 +783,14 @@ export default function MyDashboard() {
                           const res = await requestStop();
                           if (res.error) alert(`Couldn't stop timer: ${res.error}`);
                         } else {
+                          // 2026-09-23 (Sandra: weekend/holiday soft
+                          // check -- "if timer has started on a weekend
+                          // say it's a weekend -- are you sure you are
+                          // working?") -- never blocks, just a one-click
+                          // confirm, checked against TODAY since that's
+                          // the day a timer actually logs against.
+                          const warnMsg = nonWorkingDayConfirmMessage(todayIso, holidayNames);
+                          if (warnMsg && !(await confirm({ message: warnMsg, confirmLabel: "Yes, start" }))) return;
                           const res = await startTaskTimer({ id: t.id, name: t.name });
                           if (res.error) alert(`Couldn't start timer: ${res.error}`);
                         }
