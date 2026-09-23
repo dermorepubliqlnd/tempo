@@ -236,6 +236,20 @@ export function dailyCapacityHours(person: UtilPersonRow, halfDay: boolean): num
   return person.daily_capacity_hours * (halfDay ? 0.5 : 1);
 }
 
+// 2026-09-23 (dynamic expected hours for logged-hours banding): the one
+// place that turns "what's this person's availability status today" into
+// "how many hours were they actually expected to log" -- off day => 0
+// (Sandra: a full-day approved time off should never read as
+// underworked), half_day => the existing 50% rule (same one
+// Utilization/WBS/capacityScheduler already use, so this number never
+// disagrees with those pages), anything else => the person's normal
+// daily_capacity_hours. Callers pass this into loggedHoursTier as its
+// expectedHours argument instead of assuming a flat 7.5h shift.
+export function expectedHoursForDay(person: UtilPersonRow, status: "off" | "half_day" | null | undefined): number {
+  if (status === "off") return 0;
+  return dailyCapacityHours(person, status === "half_day");
+}
+
 // --- the one entry point every surface uses --------------------------------
 //
 // A tiny factory rather than free functions so the per-task / per-project day

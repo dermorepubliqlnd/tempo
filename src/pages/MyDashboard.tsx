@@ -639,10 +639,20 @@ export default function MyDashboard() {
                 <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{me.job_title || "Team Member"}</div>
               </div>
               {dailyStats.map((d) => {
-                const colors = loggedHoursTier(d.logged);
+                // 2026-09-23 (dynamic expected hours): d.capacity already
+                // accounts for off/half-day/holiday (computed above in
+                // dailyStats using the same expectedHoursForDay/
+                // dailyCapacityHours logic Utilization/WBS use) -- pass it
+                // straight through instead of assuming a flat 7.5h shift,
+                // so a half-day person logging near their reduced target
+                // reads "Within expected" instead of "Very low".
+                const colors = loggedHoursTier(d.logged, d.capacity);
+                const isFullTimeOff = d.off && d.logged <= 0;
                 return (
                   <div key={d.dateStr} style={{ textAlign: "center", background: colors.bg, color: colors.fg, fontWeight: 700, fontSize: 12, padding: "8px 0", borderRadius: "var(--radius-sm)" }}>
-                    {d.logged > 0 ? (
+                    {isFullTimeOff ? (
+                      <span style={{ fontSize: 10.5, fontWeight: 600 }}>Time Off</span>
+                    ) : d.logged > 0 ? (
                       <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 2 }}>
                         {d.logged.toFixed(1)}h
                         {/* 2026-09-23 (Sandra): Very low and Significantly above

@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
 import { buildHolidaySet } from "../lib/workingDays";
+import { expectedHoursForDay } from "../lib/dailyAllocation";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
 import { TASK_STATUS_GROUPED, statusGroupOf } from "../lib/notionOptions";
 import { ownTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, formatHours, type TimeLogStatus } from "../lib/timeTracking";
@@ -393,6 +394,13 @@ export default function HoursOverview() {
 
   function isOffDay(personId: string, dateStr: string): boolean {
     return availability.some((a) => a.person_id === personId && a.date === dateStr && a.status === "off");
+  }
+
+  // 2026-09-23 (dynamic expected hours): full status lookup, not just
+  // the off/not-off boolean above -- needed to tell a half-day (reduced
+  // expected hours) apart from a regular day when banding logged hours.
+  function availabilityStatusFor(personId: string, dateStr: string): "off" | "half_day" | undefined {
+    return availability.find((a) => a.person_id === personId && a.date === dateStr)?.status;
   }
 
   // Scoped side: every non-parent task currently assigned to this person,
@@ -1029,12 +1037,19 @@ export default function HoursOverview() {
                               }
                               // Daily Activity (2026-09-18, Sandra): show
                               // only the actual logged hours here, color
-                              // coded against a 7.5h shift.
-                              const colors = loggedHoursTier(logged);
+                              // coded against this person's ACTUAL
+                              // expected hours for the day -- a regular
+                              // 7.5h day, an approved half-day (reduced),
+                              // or 0 on a full-day time off/holiday
+                              // (2026-09-23 dynamic-expected-hours fix;
+                              // see loggedHoursTier/expectedHoursForDay).
+                              const avStatus = availabilityStatusFor(person.id, dateStr);
+                              const expectedHours = isHoliday ? 0 : expectedHoursForDay(person, avStatus);
+                              const colors = loggedHoursTier(logged, expectedHours);
                               const hasValue = logged > 0;
                               const bg = !hasValue ? (weekend || isHoliday ? "var(--hover-bg)" : undefined) : colors.bg;
                               return (
-                                <td key={i} style={{ ...rollupCellStyle(i), background: bg, color: colors.fg, fontSize: 11.5, fontWeight: 600 }}>
+                                <td key={i} title={avStatus === "half_day" ? "Approved half-day" : undefined} style={{ ...rollupCellStyle(i), background: bg, color: colors.fg, fontSize: 11.5, fontWeight: 600 }}>
                                   {hasValue ? (
                                     <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 2 }}>
                                       {logged.toFixed(2)}h

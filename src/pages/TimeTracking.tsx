@@ -6,6 +6,7 @@ import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
 import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, editPendingManualTimeEntry, deletePendingManualTimeEntry, archiveTimeEntry, unarchiveTimeEntry } from "../lib/timeTracking";
 import { loggedHoursTier } from "../lib/loggedHoursBands";
+import { expectedHoursForDay } from "../lib/dailyAllocation";
 import { useSearchParams } from "react-router-dom";
 import Modal from "../components/Modal";
 
@@ -677,6 +678,14 @@ export default function TimeTracking() {
   const [logStartTime, setLogStartTime] = useState(toTimeInputValue());
   const [logEndTime, setLogEndTime] = useState(toTimeInputValue());
   const [reasonOptions, setReasonOptions] = useState<TimeEntryReasonRow[]>([]);
+  // 2026-09-23 (dynamic expected hours): my own approved half-day/off
+  // days + holidays, so Today's Logs/This Week's "of Xh target" caption
+  // and banding reflect what I was ACTUALLY expected to log today/this
+  // week, not a flat daily_capacity_hours * 5 assumption. Only ever
+  // needed for the current person (these two KPI cards are My Time-only
+  // per Phase 81's scope guard), so this is a small, cheap query.
+  const [myAvailability, setMyAvailability] = useState<{ date: string; status: "off" | "half_day" }[]>([]);
+  const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
   const [logReasonCategory, setLogReasonCategory] = useState("");
   const [logNotes, setLogNotes] = useState("");
   const [logError, setLogError] = useState<string | null>(null);
@@ -690,7 +699,7 @@ export default function TimeTracking() {
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: entryData }, { data: peopleData }, { data: taskData }, { data: reasonData }, { data: activityTypeData }] = await Promise.all([
+    const [{ data: entryData }, { data: peopleData }, { data: taskData }, { data: reasonData }, { data: activityTypeData }, { data: availabilityData }, { data: holidayData }] = await Promise.all([
       supabase
         .from("time_entries")
         .select(
@@ -706,10 +715,16 @@ export default function TimeTracking() {
       supabase.from("tasks").select("id,name,assignee_id,project_id,current_due_date,status,task_number,project:projects(id,name,owner_id,timelines_locked,wbs_status)").eq("is_archived", false),
       supabase.from("time_entry_reasons").select("id,name,is_active").order("sort_order"),
       supabase.from("non_project_activity_types").select("id,name,is_active").order("sort_order"),
+      me?.id
+        ? supabase.from("person_availability").select("date,status").eq("person_id", me.id)
+        : Promise.resolve({ data: [] }),
+      supabase.from("holidays").select("date"),
     ]);
     setEntries(((entryData as unknown as EntryRow[]) ?? []));
     setPeople((peopleData as PersonLite[]) ?? []);
     setMyTasks((((taskData as unknown as TaskLite[]) ?? [])).filter((t) => t.assignee_id === me?.id));
+    setMyAvailability((availabilityData as { date: string; status: "off" | "half_day" }[] | null) ?? []);
+    setHolidayDates(new Set(((holidayData as { date: string }[] | null) ?? []).map((h) => h.date)));
     const reasons = (reasonData as TimeEntryReasonRow[]) ?? [];
     setReasonOptions(reasons);
     const activityTypes = (activityTypeData as NonProjectActivityTypeRow[]) ?? [];
@@ -1057,8 +1072,28 @@ export default function TimeTracking() {
       return key >= thisWeekStartKey && key <= thisWeekEndKey && kpiCountedStatuses.has(e.status);
     })
     .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
-  const dailyTargetMinutes = (me?.daily_capacity_hours ?? 0) * 60;
-  const weeklyTargetMinutes = dailyTargetMinutes * 5;
+  // 2026-09-23 (dynamic expected hours, Sandra: "evaluate logged hours
+  // against the employee's required working hours for that specific
+  // day" -- not a flat daily_capacity_hours assumption every day).
+  // avStatusFor/expected-hours-for-day reuse the exact same
+  // expectedHoursForDay/dailyCapacityHours logic Utilization/WBS/My
+  // Dashboard already use, so this never disagrees with those pages.
+  function myAvStatusFor(dateKey: string): "off" | "half_day" | undefined {
+    return myAvailability.find((a) => a.date === dateKey)?.status;
+  }
+  function myExpectedHoursFor(dateKey: string): number {
+    if (!me) return 0;
+    if (holidayDates.has(dateKey)) return 0;
+    return expectedHoursForDay({ id: me.id, daily_capacity_hours: me.daily_capacity_hours }, myAvStatusFor(dateKey));
+  }
+  const dailyTargetMinutes = myExpectedHoursFor(todayKey) * 60;
+  // Sum each weekday (Mon-Fri) of the CURRENT week's own expected hours
+  // -- e.g. one half-day + one full time-off day in an otherwise normal
+  // week sums to less than a flat 37.5h, matching Sandra's "7.5*4 + 3.25"
+  // example instead of always assuming a full 5-day week.
+  const weeklyTargetMinutes = [0, 1, 2, 3, 4]
+    .map((i) => myExpectedHoursFor(toDateInputValue(addDays(startOfWeek(new Date()), i))) * 60)
+    .reduce((sum, m) => sum + m, 0);
 
   // Date-range browser -- narrows the table + Total Entries/Needs
   // Attention KPIs (Today/This Week above are exempt, see comment).
@@ -1790,9 +1825,13 @@ export default function TimeTracking() {
               // sensitive the same way, so it keeps its own bands on
               // every scope).
               const todayTier =
-                scope === "mine" ? loggedHoursTier(todayMinutes / 60) : { bg: undefined, fg: "var(--navy)", tone: "slate" as const };
+                scope === "mine"
+                  ? loggedHoursTier(todayMinutes / 60, dailyTargetMinutes / 60)
+                  : { bg: undefined, fg: "var(--navy)", tone: "slate" as const };
               const weekTier =
-                scope === "mine" ? loggedHoursTier(thisWeekMinutes / 60 / 5) : { bg: undefined, fg: "var(--navy)", tone: "slate" as const };
+                scope === "mine"
+                  ? loggedHoursTier(thisWeekMinutes / 60, weeklyTargetMinutes / 60)
+                  : { bg: undefined, fg: "var(--navy)", tone: "slate" as const };
               const complianceTier =
                 timerCompliancePct === null
                   ? { bg: "var(--hover-bg)", fg: "var(--muted)", tone: "neutral" as const }
@@ -1811,16 +1850,37 @@ export default function TimeTracking() {
                 cardBg?: string;
                 cardFg?: string;
               }[] = [
-                {
-                  key: "today",
-                  icon: <Timer size={15} />,
-                  tone: todayTier.tone,
-                  cardBg: todayTier.bg ?? "var(--hover-bg)",
-                  cardFg: todayTier.fg,
-                  label: "Today's Logs",
-                  value: `${(Math.round((todayMinutes / 60) * 100) / 100).toFixed(2)}h`,
-                  caption: dailyTargetMinutes > 0 ? `of ${(dailyTargetMinutes / 60).toFixed(2)}h target` : undefined,
-                },
+                // 2026-09-23 (Sandra: "if an employee is on approved full-day
+                // time off, the day should not be evaluated as underworked
+                // ... show 'Time Off' instead of 0h with a red/low status")
+                // -- only meaningful on My Time (this is a single person's
+                // own target); Team/All Time never collapse to this since
+                // dailyTargetMinutes is always MY OWN target regardless of
+                // scope.
+                ...(scope === "mine" && dailyTargetMinutes <= 0 && todayMinutes <= 0
+                  ? [
+                      {
+                        key: "today",
+                        icon: <Timer size={15} />,
+                        tone: "neutral",
+                        cardBg: "var(--hover-bg)",
+                        cardFg: "var(--muted)",
+                        label: "Today's Logs",
+                        value: "Time Off",
+                      },
+                    ]
+                  : [
+                      {
+                        key: "today",
+                        icon: <Timer size={15} />,
+                        tone: todayTier.tone,
+                        cardBg: todayTier.bg ?? "var(--hover-bg)",
+                        cardFg: todayTier.fg,
+                        label: "Today's Logs",
+                        value: `${(Math.round((todayMinutes / 60) * 100) / 100).toFixed(2)}h`,
+                        caption: dailyTargetMinutes > 0 ? `of ${(dailyTargetMinutes / 60).toFixed(2)}h target` : undefined,
+                      },
+                    ]),
                 {
                   key: "week",
                   icon: <CalendarDays size={15} />,
