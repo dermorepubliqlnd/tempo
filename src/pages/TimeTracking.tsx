@@ -5,6 +5,7 @@ import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
 import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, editPendingManualTimeEntry, deletePendingManualTimeEntry, archiveTimeEntry, unarchiveTimeEntry } from "../lib/timeTracking";
+import { loggedHoursTier } from "../lib/loggedHoursBands";
 import { useSearchParams } from "react-router-dom";
 import Modal from "../components/Modal";
 
@@ -102,6 +103,11 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 const SOURCE_LABEL: Record<string, string> = { timer: "Timer", manual: "Manual", legacy: "Legacy" };
+// 2026-09-23 (Sandra: "add colors to the manual and timer - Manual
+// Yellow, Timer Green - to all") -- reuses the existing .status-pill
+// gold/mint tones (already pale-bg/dark-text) rather than inventing a
+// new color pair.
+const SOURCE_TONE: Record<string, string> = { timer: "mint", manual: "gold", legacy: "neutral" };
 
 // 2026-09-15 (Sandra: "I want to see the date and time when logs were
 // logged especially for the manual time entries") -- formatDate() only
@@ -374,6 +380,38 @@ function stepAnchor(preset: "today" | "this_week" | "last_week" | "this_month" |
   }
   return anchor;
 }
+// 2026-09-23 (Sandra: persist filters/sort/grouping preference across
+// refresh). Kept deliberately small/serializable -- rangeAnchor (a Date)
+// and per-session-only things like expandedDateGroups are NOT persisted,
+// so "Today"/"This Week"/etc. always resolve relative to the real
+// current date rather than replaying a stale anchor from days ago.
+interface TimeTrackingPrefs {
+  scope: "mine" | "team" | "all";
+  statusFilter: "all" | "pending_approval" | "approved" | "rejected";
+  sourceFilter: "all" | "manual" | "timer";
+  sortBy: "date_desc" | "date_asc";
+  groupByDate: boolean;
+  datePreset: "today" | "this_week" | "last_week" | "this_month" | "custom";
+  customStart: string;
+  customEnd: string;
+}
+const TT_PREFS_KEY = "capaciq.timeTracking.prefs.v1";
+function loadTimeTrackingPrefs(): Partial<TimeTrackingPrefs> {
+  try {
+    const raw = localStorage.getItem(TT_PREFS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+function saveTimeTrackingPrefs(prefs: TimeTrackingPrefs): void {
+  try {
+    localStorage.setItem(TT_PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    // ignore -- private browsing / blocked storage, nothing to persist to
+  }
+}
+
 function formatRangeLabel(startKey: string, endKey: string): string {
   const s = new Date(startKey + "T00:00:00");
   const e = new Date(endKey + "T00:00:00");
@@ -551,10 +589,18 @@ export default function TimeTracking() {
   // Full-Access-only correction flow for an already-decided entry.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
+  // 2026-09-23 (Sandra: "remember users last option of filters, right
+  // now when i refresh i lose my filters and grouping preference") --
+  // loaded once (lazy useState initializer) and re-saved on every change
+  // below. Wrapped in try/catch since localStorage can throw (private
+  // browsing, blocked storage) -- a failed read/write just means the
+  // page falls back to its normal defaults instead of crashing.
+  const [ttPrefs] = useState<Partial<TimeTrackingPrefs>>(loadTimeTrackingPrefs);
+
   // Status filter (2026-09-19, Sandra: "fix the time tracking page to not
   // make it boring") -- same clickable metric-card filter as the
   // Extension Requests and Approval Center pages.
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending_approval" | "approved" | "rejected">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending_approval" | "approved" | "rejected">(ttPrefs.statusFilter ?? "all");
   // 2026-09-23 (Sandra: "My Time / Team Time / All Time" -- reworked the
   // old flat My entries/Other visible entries split into three scopes
   // that adapt to who's looking. My Time is everyone's default. Team
@@ -562,7 +608,7 @@ export default function TimeTracking() {
   // (walking the reports_to chain all the way down, not just direct
   // reports -- see myTeamIds below). All Time only appears for Full
   // Access, reusing the same access_level check used everywhere else.
-  const [scope, setScope] = useState<"mine" | "team" | "all">("mine");
+  const [scope, setScope] = useState<"mine" | "team" | "all">(ttPrefs.scope ?? "mine");
 
   // 2026-09-23 (Sandra: mockup-driven redesign -- search/filters/sort,
   // date-range browsing, group-by-date, a single Add Time button) --
@@ -570,13 +616,23 @@ export default function TimeTracking() {
   // but now driven by a real <select> in the filter row instead of the
   // old clickable status-count cards (those cards are gone -- replaced
   // by the Today/This Week/Total Entries/Needs Attention KPI row).
-  const [sourceFilter, setSourceFilter] = useState<"all" | "manual" | "timer">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "manual" | "timer">(ttPrefs.sourceFilter ?? "all");
   const [searchText, setSearchText] = useState("");
-  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "duration_desc" | "duration_asc">("date_desc");
-  const [groupByDate, setGroupByDate] = useState(false);
-  const [groupOrder, setGroupOrder] = useState<"newest" | "oldest">("newest");
-  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
-  const [showArchived, setShowArchived] = useState(false);
+  // 2026-09-23 (Sandra: "remove shortest and longest duration in the
+  // sort for all... if grouped by dates, allow sorting by date but
+  // retain the time to be in chronological order" -- duration sort
+  // options removed; this single date_desc/date_asc value now also
+  // drives date-GROUP order when groupByDate is on (see groupedEntries
+  // below), replacing the separate "Newest/Oldest first" pill Sandra
+  // found confusing, since entries WITHIN a group always stay
+  // chronological regardless of this setting).
+  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc">(ttPrefs.sortBy ?? "date_desc");
+  const [groupByDate, setGroupByDate] = useState(ttPrefs.groupByDate ?? false);
+  // 2026-09-23 (Sandra: "auto collapse first then allow expand" for any
+  // grouped-by-date view besides Today) -- a date group's rows are
+  // hidden until its header is clicked; not persisted across reloads
+  // (session-only), unlike the filter/sort/grouping prefs above.
+  const [expandedDateGroups, setExpandedDateGroups] = useState<Set<string>>(new Set());
 
   // Date-range browser (Today/This Week/Last Week/This Month/Custom +
   // prev/next arrows), same idea as a calendar app's range picker.
@@ -586,10 +642,14 @@ export default function TimeTracking() {
   // separate from the Today/This Week KPI cards below, which always
   // reflect the real current day/week regardless of what's being
   // browsed here.
-  const [datePreset, setDatePreset] = useState<"today" | "this_week" | "last_week" | "this_month" | "custom">("this_week");
+  const [datePreset, setDatePreset] = useState<"today" | "this_week" | "last_week" | "this_month" | "custom">(ttPrefs.datePreset ?? "this_week");
   const [rangeAnchor, setRangeAnchor] = useState(() => new Date());
-  const [customStart, setCustomStart] = useState(() => toDateInputValue());
-  const [customEnd, setCustomEnd] = useState(() => toDateInputValue());
+  const [customStart, setCustomStart] = useState(() => ttPrefs.customStart ?? toDateInputValue());
+  const [customEnd, setCustomEnd] = useState(() => ttPrefs.customEnd ?? toDateInputValue());
+
+  useEffect(() => {
+    saveTimeTrackingPrefs({ scope, statusFilter, sourceFilter, sortBy, groupByDate, datePreset, customStart, customEnd });
+  }, [scope, statusFilter, sourceFilter, sortBy, groupByDate, datePreset, customStart, customEnd]);
 
   // Add Time (2026-09-23, Sandra: "let's revert to one button with
   // dropdown so they can select if it's Project or Non project") --
@@ -597,6 +657,11 @@ export default function TimeTracking() {
   // task/Non-project toggle with a single button, a small dropdown to
   // pick the mode, and the same form fields now inside a Modal.
   const [addTimeMenuOpen, setAddTimeMenuOpen] = useState(false);
+  // 2026-09-23 (Sandra: "add a highlight when hovering on the options so
+  // the user can see which one they are selecting") -- inline styles
+  // can't do :hover, so this tracks which dropdown option the pointer is
+  // currently over.
+  const [addTimeHoverMode, setAddTimeHoverMode] = useState<"project" | "non_project" | null>(null);
 
   // 2026-09-22 (Sandra: non-project time -- meetings, team huddles --
   // shouldn't have to fake a task under a real project): toggle at the
@@ -970,7 +1035,11 @@ export default function TimeTracking() {
       : scope === "team"
       ? projectFilteredEntries.filter((e) => myTeamIds.has(e.person_id))
       : projectFilteredEntries;
-  const archivedFilteredEntries = showArchived ? scopeFilteredEntries : scopeFilteredEntries.filter((e) => !e.is_archived);
+  // 2026-09-23 (Sandra: "remove projects filter and more for now" --
+  // removed the More Filters popover, which was the only place an
+  // Archived-visibility toggle lived; archived entries are simply
+  // always hidden here now until that control comes back.
+  const archivedFilteredEntries = scopeFilteredEntries.filter((e) => !e.is_archived);
 
   // 2026-09-23 (Sandra, mockup redesign): Today/This Week KPI cards
   // always reflect the real current day/week -- unaffected by whatever
@@ -1014,6 +1083,14 @@ export default function TimeTracking() {
     approved: dateFilteredEntries.filter((e) => e.status === "approved").length,
     rejected: dateFilteredEntries.filter((e) => e.status === "rejected").length,
   };
+  // 2026-09-23 (Sandra: "add a manual vs timer metric... just one
+  // number, timer compliance") -- % of the currently browsed range's
+  // entries logged via the Timer rather than typed in manually,
+  // matching Total Entries/Needs Attention's population (dateFiltered,
+  // before the Status/Source/search filters below narrow it further).
+  const timerCount = dateFilteredEntries.filter((e) => e.source === "timer").length;
+  const timerCompliancePct = dateFilteredEntries.length > 0 ? Math.round((timerCount / dateFilteredEntries.length) * 100) : null;
+
   const statusFilteredEntries = statusFilter === "all" ? dateFilteredEntries : dateFilteredEntries.filter((e) => e.status === statusFilter);
   const sourceFilteredEntries = sourceFilter === "all" ? statusFilteredEntries : statusFilteredEntries.filter((e) => e.source === sourceFilter);
   const searchLower = searchText.trim().toLowerCase();
@@ -1026,14 +1103,12 @@ export default function TimeTracking() {
           .toLowerCase();
         return haystack.includes(searchLower);
       });
-  // Sort by (2026-09-23) -- when Group by date is on, this only controls
-  // duration ordering within a day (date/time ordering is instead
-  // governed by groupOrder + the always-chronological-within-day rule
-  // below), so "date" sort options are hidden from the dropdown in that
-  // mode (see render).
+  // Sort by (2026-09-23, Sandra: "remove shortest and longest duration in
+  // the sort for all") -- date-only now. When Group by date is on, this
+  // SAME value also drives which end the date groups start from (see
+  // groupedEntries below) -- entries within a group always stay
+  // chronological (AM before PM) regardless of this setting.
   const sortedEntries = [...searchFilteredEntries].sort((a, b) => {
-    if (sortBy === "duration_desc") return (b.duration_minutes ?? 0) - (a.duration_minutes ?? 0);
-    if (sortBy === "duration_asc") return (a.duration_minutes ?? 0) - (b.duration_minutes ?? 0);
     const at = new Date(a.started_at).getTime();
     const bt = new Date(b.started_at).getTime();
     return sortBy === "date_asc" ? at - bt : bt - at;
@@ -1042,10 +1117,12 @@ export default function TimeTracking() {
 
   // Group by date (Sandra: "allow them to group by dates -- always make
   // sure this is either newest to oldest or oldest to newest -- but time
-  // should always be in chronological order from am to PM") -- the
-  // group order (newest/oldest first) is a separate toggle from time
-  // WITHIN a group, which is always ascending (earliest first, i.e. AM
-  // before PM) regardless of groupOrder or the Sort by dropdown above.
+  // should always be in chronological order from am to PM" -- then
+  // later: "if grouped by dates, allow sorting by date but retain the
+  // time to be in chronological order" + "there's another pill for
+  // newest or oldest first after group date that works but remove that,
+  // confusing" -- so the separate group-order toggle is gone; the same
+  // Sort by dropdown above now drives date-group order too).
   const groupedEntries: { dateKey: string; rows: EntryRow[] }[] = [];
   if (groupByDate) {
     const byDate = new Map<string, EntryRow[]>();
@@ -1059,7 +1136,7 @@ export default function TimeTracking() {
       rows.sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
     }
     const keys = Array.from(byDate.keys()).sort();
-    if (groupOrder === "newest") keys.reverse();
+    if (sortBy === "date_desc") keys.reverse();
     for (const key of keys) groupedEntries.push({ dateKey: key, rows: byDate.get(key)! });
   }
 
@@ -1188,7 +1265,7 @@ export default function TimeTracking() {
                       {details}
                     </td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
-                      <span className="status-pill neutral" style={{ fontSize: 9 }}>{SOURCE_LABEL[row.source]}</span>
+                      <span className={`status-pill ${SOURCE_TONE[row.source] ?? "neutral"}`} style={{ fontSize: 9 }}>{SOURCE_LABEL[row.source]}</span>
                     </td>
                     <td style={{ ...td, minWidth: 140 }}>
                       <span className={`status-pill ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
@@ -1353,9 +1430,12 @@ export default function TimeTracking() {
                     setLogMode(mode);
                     setAddTimeMenuOpen(false);
                   }}
+                  onMouseEnter={() => setAddTimeHoverMode(mode)}
+                  onMouseLeave={() => setAddTimeHoverMode((m) => (m === mode ? null : m))}
                   style={{
                     display: "block", width: "100%", textAlign: "left", padding: "10px 14px",
-                    fontSize: 12.5, color: "var(--navy)", background: "none", border: "none", cursor: "pointer",
+                    fontSize: 12.5, color: "var(--navy)", border: "none", cursor: "pointer",
+                    background: addTimeHoverMode === mode ? "var(--hover-bg)" : "none",
                   }}
                 >
                   {mode === "project" ? "Project task" : "Non-project"}
@@ -1681,68 +1761,123 @@ export default function TimeTracking() {
             ))}
           </div>
 
-          {/* 2026-09-23 (Sandra mockup redesign) -- Today/This Week
-              always reflect the real current day/week (no target line
-              shown ON the card per her instruction -- the target/range
-              reads as a caption underneath instead); Total Entries and
+          {/* 2026-09-23 (Sandra mockup redesign, then: "use colors to
+              match how we do it in productivity logs... box filled with
+              the pale color BG too and follow the dark text color
+              scheme") -- Today's Logs/This Week reuse the same 6-tier
+              loggedHoursTier() bands as Daily Activity/My Dashboard (see
+              [[project_capaciq_logged_hours_6tier_bands_2026_09_23]]);
+              This Week has no dedicated weekly scale, so it normalizes
+              to a daily-equivalent (weekly hours / 5 workdays) and
+              reuses the exact same daily thresholds. Total Entries and
               Needs Attention both reflect whatever date range + filters
-              are currently active below. */}
+              are currently active below and keep their previous
+              (unfilled) styling since they aren't an hours/percentage
+              band. Timer Compliance is a 5th card (Sandra: "add a
+              manual vs timer metric... just one number... at least 75%
+              is good") with its own 3-tier percentage scale. */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginTop: 4, marginBottom: 14 }}>
-            {[
-              {
-                key: "today",
-                icon: <Timer size={15} />,
-                tone: "slate",
-                label: "Today's Logs",
-                value: `${(Math.round((todayMinutes / 60) * 100) / 100).toFixed(2)}h`,
-                caption: dailyTargetMinutes > 0 ? `of ${(dailyTargetMinutes / 60).toFixed(2)}h target` : undefined,
-              },
-              {
-                key: "week",
-                icon: <CalendarDays size={15} />,
-                tone: "slate",
-                label: "This Week",
-                value: `${(Math.round((thisWeekMinutes / 60) * 100) / 100).toFixed(2)}h`,
-                caption: weeklyTargetMinutes > 0 ? `of ${(weeklyTargetMinutes / 60).toFixed(2)}h target` : undefined,
-              },
-              {
-                key: "total",
-                icon: <ListChecks size={15} />,
-                tone: "accent",
-                label: "Total Entries",
-                value: String(statusCounts.all),
-                caption: formatRangeLabel(dateRangeStart, dateRangeEnd),
-              },
-              {
-                key: "attention",
-                icon: <AlertCircle size={15} />,
-                tone: needsAttentionCount > 0 ? "warning" : "slate",
-                label: "Needs Attention",
-                value: String(needsAttentionCount),
-                caption: "Pending, awaiting confirmation, or rejected",
-              },
-            ].map((card) => (
-              <div
-                key={card.key}
-                style={{
-                  display: "flex", alignItems: "center", gap: 12,
-                  padding: "14px 16px", borderRadius: 16, border: "1px solid var(--border)",
-                  background: "var(--surface)", boxShadow: "var(--shadow-card, 0 1px 2px rgba(15,41,66,0.04))",
-                }}
-              >
-                <span
-                  className={`status-pill ${card.tone}`}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 12, flexShrink: 0 }}
-                >
-                  {card.icon}
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>{card.label}</div>
-                  <div style={{ fontSize: 19, fontWeight: 700, color: "var(--navy)", lineHeight: 1.2 }}>{card.value}</div>
-                  {card.caption && <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 1 }}>{card.caption}</div>}
-                </div>
-              </div>
-            ))}
+            {(() => {
+              const todayTier = loggedHoursTier(todayMinutes / 60);
+              const weekTier = loggedHoursTier(thisWeekMinutes / 60 / 5);
+              const complianceTier =
+                timerCompliancePct === null
+                  ? { bg: "var(--hover-bg)", fg: "var(--muted)", tone: "neutral" as const }
+                  : timerCompliancePct < 50
+                  ? { bg: "var(--danger-bg)", fg: "var(--danger-text)", tone: "danger" as const }
+                  : timerCompliancePct < 75
+                  ? { bg: "var(--warning-bg)", fg: "var(--warning-text)", tone: "warning" as const }
+                  : { bg: "var(--success-bg)", fg: "var(--success-text)", tone: "success" as const };
+              const cards: {
+                key: string;
+                icon: JSX.Element;
+                tone: string;
+                label: string;
+                value: string;
+                caption?: string;
+                cardBg?: string;
+                cardFg?: string;
+              }[] = [
+                {
+                  key: "today",
+                  icon: <Timer size={15} />,
+                  tone: todayTier.tone,
+                  cardBg: todayTier.bg ?? "var(--hover-bg)",
+                  cardFg: todayTier.fg,
+                  label: "Today's Logs",
+                  value: `${(Math.round((todayMinutes / 60) * 100) / 100).toFixed(2)}h`,
+                  caption: dailyTargetMinutes > 0 ? `of ${(dailyTargetMinutes / 60).toFixed(2)}h target` : undefined,
+                },
+                {
+                  key: "week",
+                  icon: <CalendarDays size={15} />,
+                  tone: weekTier.tone,
+                  cardBg: weekTier.bg ?? "var(--hover-bg)",
+                  cardFg: weekTier.fg,
+                  label: "This Week",
+                  value: `${(Math.round((thisWeekMinutes / 60) * 100) / 100).toFixed(2)}h`,
+                  caption: weeklyTargetMinutes > 0 ? `of ${(weeklyTargetMinutes / 60).toFixed(2)}h target` : undefined,
+                },
+                {
+                  key: "total",
+                  icon: <ListChecks size={15} />,
+                  tone: "accent",
+                  label: "Total Entries",
+                  value: String(statusCounts.all),
+                  caption: formatRangeLabel(dateRangeStart, dateRangeEnd),
+                },
+                {
+                  key: "attention",
+                  icon: <AlertCircle size={15} />,
+                  tone: needsAttentionCount > 0 ? "warning" : "slate",
+                  label: "Needs Attention",
+                  value: String(needsAttentionCount),
+                  caption: "Pending, awaiting confirmation, or rejected",
+                },
+                {
+                  key: "compliance",
+                  icon: <ShieldCheck size={15} />,
+                  tone: complianceTier.tone,
+                  cardBg: complianceTier.bg,
+                  cardFg: complianceTier.fg,
+                  label: "Timer Compliance",
+                  value: timerCompliancePct === null ? "—" : `${timerCompliancePct}%`,
+                  caption: "of logs via Timer (target ≥75%)",
+                },
+              ];
+              return cards.map((card) => {
+                const filled = Boolean(card.cardBg);
+                return (
+                  <div
+                    key={card.key}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 12,
+                      padding: "14px 16px", borderRadius: 16,
+                      border: filled ? "1px solid transparent" : "1px solid var(--border)",
+                      background: filled ? card.cardBg : "var(--surface)",
+                      boxShadow: "var(--shadow-card, 0 1px 2px rgba(15,41,66,0.04))",
+                    }}
+                  >
+                    <span
+                      className={`status-pill ${card.tone}`}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 12, flexShrink: 0,
+                        ...(filled ? { background: "rgba(255,255,255,0.55)", color: card.cardFg } : {}),
+                      }}
+                    >
+                      {card.icon}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 600, color: filled ? card.cardFg : "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>{card.label}</div>
+                      <div style={{ fontSize: 19, fontWeight: 700, color: filled ? card.cardFg : "var(--navy)", lineHeight: 1.2 }}>{card.value}</div>
+                      {card.caption && (
+                        <div style={{ fontSize: 10, color: filled ? card.cardFg : "var(--muted)", opacity: filled ? 0.85 : 1, marginTop: 1 }}>{card.caption}</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
           </div>
 
           {/* Date-range browser -- Today/This Week/Last Week/This
@@ -1765,6 +1900,11 @@ export default function TimeTracking() {
                 onClick={() => {
                   setDatePreset(p.key);
                   setRangeAnchor(new Date());
+                  // 2026-09-23 (Sandra: "remove group by date option in
+                  // Today view" -- grouping by date is meaningless for a
+                  // single day, so force it off going in, not just hide
+                  // the checkbox, in case it was left on from another view.
+                  if (p.key === "today") setGroupByDate(false);
                 }}
                 style={{
                   padding: "6px 12px",
@@ -1817,11 +1957,15 @@ export default function TimeTracking() {
             )}
           </div>
 
-          {/* Filter row -- search, status, source, project, sort, group
-              by date, and a More Filters popover (currently just an
-              Archived-visibility toggle). "You tell me what's works
-              best" (Sandra) -- these mechanics are my call; the KPI
-              definitions above and grouping semantics were hers. */}
+          {/* Filter row -- search, status, source, sort, group by date.
+              "You tell me what's works best" (Sandra) -- these mechanics
+              are my call; the KPI definitions above and grouping
+              semantics were hers. Project filter + More Filters removed
+              for now (Sandra: "remove projects filter and more for now
+              in the My time tracking") -- the underlying `filterProjectId`
+              still works if a project is passed via the URL (e.g. the
+              Spent Hrs cell click-through from elsewhere in the app),
+              there's just no visible control for it here right now. */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <div style={{ position: "relative", flex: "1 1 220px", minWidth: 180, maxWidth: 280 }}>
               <Search size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} />
@@ -1852,14 +1996,6 @@ export default function TimeTracking() {
               <option value="manual">Manual</option>
               <option value="timer">Timer</option>
             </select>
-            <div style={{ width: 190 }}>
-              <SearchSelect
-                placeholder="All projects"
-                value={filterProjectId}
-                onChange={(id) => setSearchParams(id ? { project: id } : {})}
-                options={entryProjectOptions}
-              />
-            </div>
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
@@ -1867,52 +2003,19 @@ export default function TimeTracking() {
             >
               <option value="date_desc">Newest first</option>
               <option value="date_asc">Oldest first</option>
-              <option value="duration_desc">Longest duration</option>
-              <option value="duration_asc">Shortest duration</option>
             </select>
-            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}>
-              <input type="checkbox" checked={groupByDate} onChange={(e) => setGroupByDate(e.target.checked)} />
-              Group by date
-            </label>
-            {groupByDate && (
-              <button
-                onClick={() => setGroupOrder((o) => (o === "newest" ? "oldest" : "newest"))}
-                title="Toggle group order"
-                style={{ fontSize: 11.5, color: "var(--text-secondary)", background: "none", border: "1px solid var(--border)", borderRadius: 10, padding: "6px 10px", cursor: "pointer" }}
-              >
-                {groupOrder === "newest" ? "Newest first" : "Oldest first"}
-              </button>
+            {datePreset !== "today" && (
+              <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}>
+                <input type="checkbox" checked={groupByDate} onChange={(e) => setGroupByDate(e.target.checked)} />
+                Group by date
+              </label>
             )}
-            <div style={{ position: "relative" }}>
-              <button
-                onClick={() => setMoreFiltersOpen((v) => !v)}
-                style={{ fontSize: 11.5, color: "var(--text-secondary)", background: "none", border: "1px solid var(--border)", borderRadius: 10, padding: "7px 10px", cursor: "pointer" }}
-              >
-                More Filters
-              </button>
-              {moreFiltersOpen && (
-                <div
-                  style={{
-                    position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 20,
-                    background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12,
-                    boxShadow: "var(--shadow-card, 0 6px 16px rgba(15,41,66,0.12))", padding: 12, minWidth: 200,
-                  }}
-                >
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}>
-                    <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
-                    Show archived entries
-                  </label>
-                </div>
-              )}
-            </div>
-            {(filterProjectId || searchText || statusFilter !== "all" || sourceFilter !== "all" || showArchived) && (
+            {(searchText || statusFilter !== "all" || sourceFilter !== "all") && (
               <button
                 onClick={() => {
-                  setSearchParams({});
                   setSearchText("");
                   setStatusFilter("all");
                   setSourceFilter("all");
-                  setShowArchived(false);
                 }}
                 style={{ fontSize: 11, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
               >
@@ -1937,15 +2040,44 @@ export default function TimeTracking() {
           {filteredEntries.length === 0 ? (
             <p style={{ fontSize: 12, color: "var(--muted)" }}>No time logged for this range.</p>
           ) : groupByDate ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              {groupedEntries.map((g) => (
-                <div key={g.dateKey}>
-                  <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--navy)", marginBottom: 6 }}>
-                    {formatRangeLabel(g.dateKey, g.dateKey)} <span style={{ fontWeight: 500, color: "var(--muted)" }}>({g.rows.length})</span>
+            // 2026-09-23 (Sandra: "auto collapse first then allow expand
+            // the date header should be the button to click to collapse
+            // and expand, just add a little indication... so the user
+            // knows it can be done") -- collapsed by default; the
+            // chevron next to the date is that indication, and the whole
+            // header row is the click target, not just the icon.
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {groupedEntries.map((g) => {
+                const isExpanded = expandedDateGroups.has(g.dateKey);
+                return (
+                  <div key={g.dateKey}>
+                    <button
+                      onClick={() =>
+                        setExpandedDateGroups((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(g.dateKey)) next.delete(g.dateKey);
+                          else next.add(g.dateKey);
+                          return next;
+                        })
+                      }
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left",
+                        background: "var(--surface-2, #f5f6f8)", border: "1px solid var(--border)", borderRadius: 10,
+                        padding: "8px 12px", fontSize: 11.5, fontWeight: 700, color: "var(--navy)", cursor: "pointer",
+                      }}
+                    >
+                      {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      {formatRangeLabel(g.dateKey, g.dateKey)}
+                      <span style={{ fontWeight: 500, color: "var(--muted)" }}>({g.rows.length})</span>
+                    </button>
+                    {isExpanded && (
+                      <div style={{ marginTop: 6 }}>
+                        <EntriesTable rows={g.rows} showAssignee={scope !== "mine"} />
+                      </div>
+                    )}
                   </div>
-                  <EntriesTable rows={g.rows} showAssignee={scope !== "mine"} />
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <EntriesTable rows={filteredEntries} showAssignee={scope !== "mine"} />
