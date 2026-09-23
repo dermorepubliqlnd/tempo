@@ -283,6 +283,19 @@ export default function ApprovalCenter() {
   const [kindFilter, setKindFilter] = useState<ApprovalKind | null>(null);
   const [search, setSearch] = useState("");
   const [sortNewestFirst, setSortNewestFirst] = useState(true);
+  // 2026-09-23 (Sandra: "when a user expands and approves it goes back
+  // to collapsed, please retain expanded view if the user left it as
+  // is") -- root cause: KindSection was defined AS A COMPONENT INSIDE
+  // this component's own render body, with its `expanded` flag as its
+  // own local state. Every parent re-render (e.g. loadAll() after an
+  // approve/reject) creates a brand-new KindSection function, so React
+  // treats it as a different component type and remounts it -- wiping
+  // local state back to its initial `false`. Same root cause as
+  // [[project_capaciq_archive_lockbypass_and_keystroke_remount_fix_2026_09_23]]'s
+  // EntriesTable/DecisionTable bug. Fix: lift the expand/collapse state
+  // up here (keyed by kind, so each section's state is independent and
+  // survives every re-render), and pass it down as props instead.
+  const [expandedKinds, setExpandedKinds] = useState<Set<ApprovalKind>>(new Set());
 
   async function loadAll() {
     setLoading(true);
@@ -1330,14 +1343,13 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
   // (Extension Requests (1), Time Entries (1), Baselines (2), Task
   // Validations (22)) is a much shorter default view than expanding all
   // 22 task validations immediately.
-  function KindSection({ kind, rows }: { kind: ApprovalKind; rows: Row[] }) {
-    const [expanded, setExpanded] = useState(false);
+  function KindSection({ kind, rows, expanded, onToggle }: { kind: ApprovalKind; rows: Row[]; expanded: boolean; onToggle: () => void }) {
     if (rows.length === 0) return null;
     const meta = KIND_META[kind];
     return (
       <div style={{ marginBottom: 12 }}>
         <button
-          onClick={() => setExpanded((v) => !v)}
+          onClick={onToggle}
           style={{
             display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
             padding: "8px 10px", background: "var(--surface)", border: "1px solid var(--border)",
@@ -1379,7 +1391,20 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
     return (
       <div>
         {KIND_ORDER.map((kind) => (
-          <KindSection key={kind} kind={kind} rows={rows.filter((r) => r.kind === kind)} />
+          <KindSection
+            key={kind}
+            kind={kind}
+            rows={rows.filter((r) => r.kind === kind)}
+            expanded={expandedKinds.has(kind)}
+            onToggle={() =>
+              setExpandedKinds((prev) => {
+                const next = new Set(prev);
+                if (next.has(kind)) next.delete(kind);
+                else next.add(kind);
+                return next;
+              })
+            }
+          />
         ))}
       </div>
     );
