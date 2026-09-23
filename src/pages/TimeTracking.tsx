@@ -732,6 +732,12 @@ export default function TimeTracking() {
   // effect below), mirroring TimeTrackingContext's existing 60s-poll
   // pattern rather than introducing realtime infrastructure.
   const [nowTick, setNowTick] = useState(() => Date.now());
+  // 2026-09-23 (Sandra: "when the user click on the working now header
+  // allow collapse and expand") -- mirrors the date-group header
+  // convention below (whole header row is the click target, chevron is
+  // just the indicator). Defaults open since it's usually a short list
+  // and is the most time-sensitive info on the page.
+  const [workingNowExpanded, setWorkingNowExpanded] = useState(true);
   const [logReasonCategory, setLogReasonCategory] = useState("");
   const [logNotes, setLogNotes] = useState("");
   const [logError, setLogError] = useState<string | null>(null);
@@ -2233,36 +2239,88 @@ export default function TimeTracking() {
               corrected/rejected timers. */}
           {scope !== "mine" && (
             <div style={{ marginTop: 10, marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+              {/* 2026-09-23 (Sandra: "allow collapse and expand when the
+                  user clicks on the Working Now header") -- same
+                  whole-header-row-is-the-click-target + chevron
+                  convention as the date-group headers in the entries
+                  table below. */}
+              <button
+                onClick={() => setWorkingNowExpanded((v) => !v)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left",
+                  background: "none", border: "none", padding: 0, marginBottom: 8, cursor: "pointer",
+                }}
+              >
+                {workingNowExpanded ? <ChevronDown size={13} color="var(--muted)" /> : <ChevronRight size={13} color="var(--muted)" />}
                 <Radio size={14} color="var(--accent)" />
                 <h2 style={{ margin: 0, fontSize: 13 }}>Working Now {teamRunningTimers.length > 0 ? `(${teamRunningTimers.length})` : ""}</h2>
-              </div>
-              {teamRunningTimers.length === 0 ? (
-                <div style={{ padding: "10px 14px", borderRadius: 10, border: "1px dashed var(--border)", fontSize: 12, color: "var(--muted)" }}>
-                  No active timers right now
-                </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {teamRunningTimers.map((t) => (
-                    <div
-                      key={t.entry_id}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 10, padding: "9px 14px",
-                        borderRadius: 10, border: "1px solid var(--border)", background: "var(--success-bg, #eafaf1)",
-                      }}
-                    >
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--success-text, #1c9c63)", flexShrink: 0 }} />
-                      <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", minWidth: 130 }}>{t.person_name}</span>
-                      <span style={{ fontSize: 12, color: "var(--text-secondary)", flex: 1 }}>
-                        {t.task_name ?? "—"}
-                        {t.project_name ? <span style={{ color: "var(--muted)" }}> · {t.project_name}</span> : null}
-                      </span>
-                      <span className="status-pill success" style={{ fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-                        {formatElapsed(t.started_at, nowTick)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+              </button>
+              {workingNowExpanded && (
+                teamRunningTimers.length === 0 ? (
+                  <div style={{ padding: "10px 14px", borderRadius: 10, border: "1px dashed var(--border)", fontSize: 12, color: "var(--muted)" }}>
+                    No active timers right now
+                  </div>
+                ) : (
+                  // 2026-09-23 (Sandra: "replicate how the Team Entries
+                  // table looks... white BG format for Working Now") --
+                  // same table shell (white surface, bordered, uppercase
+                  // muted header row) as EntriesTable, just with a green
+                  // "Running" status pill in the last column instead of
+                  // an Action column (a running timer has no
+                  // correct/archive actions -- those only apply once it
+                  // finalizes into a real entry below).
+                  <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+                      <colgroup>
+                        <col style={{ width: 160 }} />
+                        <col />
+                        <col style={{ width: 110 }} />
+                        <col style={{ width: 110 }} />
+                      </colgroup>
+                      <thead>
+                        <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+                          <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>Assignee</th>
+                          <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>Task / Project</th>
+                          <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" }}>Started</th>
+                          <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, textAlign: "center" }}>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {teamRunningTimers.map((t) => (
+                          <tr key={t.entry_id} style={{ borderBottom: "1px solid var(--border)" }}>
+                            <td style={{ padding: "10px 12px", fontSize: 11.5, verticalAlign: "top" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span
+                                  style={{
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    width: 22, height: 22, borderRadius: "50%",
+                                    background: "var(--accent-bg, #eaf2fb)", color: "var(--accent)",
+                                    fontSize: 9.5, fontWeight: 700, flexShrink: 0,
+                                  }}
+                                >
+                                  {initials(t.person_name)}
+                                </span>
+                                <span style={{ fontWeight: 700, color: "var(--navy)" }}>{t.person_name}</span>
+                              </div>
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: 11.5, verticalAlign: "top" }}>
+                              <div style={{ fontWeight: 700, color: "var(--navy)" }}>{t.task_name ?? "—"}</div>
+                              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{t.project_name ?? "Non-project"}</div>
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top", whiteSpace: "nowrap" }}>
+                              {new Date(t.started_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                            </td>
+                            <td style={{ padding: "10px 12px", verticalAlign: "top", textAlign: "center" }}>
+                              <span className="status-pill success" style={{ fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+                                Running · {formatElapsed(t.started_at, nowTick)}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
               )}
             </div>
           )}
