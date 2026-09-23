@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Folder,
@@ -17,6 +17,7 @@ import {
   EyeOff,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import Modal from "../components/Modal";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
@@ -173,6 +174,9 @@ export default function MyDashboard() {
   // me (tiny dataset) -- filtered down to "hidden_date === today" at
   // render time so this doesn't need to be a query dependency.
   const [hiddenToday, setHiddenToday] = useState<{ task_id: string; hidden_date: string }[]>([]);
+  // 2026-09-23 (Sandra: lightbox for Tasks due today / Overdue tasks --
+  // see AttentionPill below) -- which list is open, or null when closed.
+  const [attentionModal, setAttentionModal] = useState<"due_today" | "overdue" | null>(null);
   // 2026-09-23 (My Work Today "Logged" column, Sandra: "show logged
   // hours against the tasks") -- same confirmed/approved, not-archived
   // definition Projects.tsx's own Spent Hrs column uses, just scoped to
@@ -589,15 +593,58 @@ export default function MyDashboard() {
         <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Items" value={overdueTasks.length} sub="Needs attention" />
       </div>
 
-      {(tasksDueToday.length > 0 || myPendingApprovalsCount > 0 || overdueTasks.length > 0 || daysOverCapacity > 0 || missingLogHours > 0.1) && (
+      {(tasksDueToday.length > 0 || overdueTasks.length > 0 || missingLogHours > 0.1) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
-          {tasksDueToday.length > 0 && <AttentionPill tone="danger" icon={<Calendar size={12} />} value={tasksDueToday.length} label="Tasks due today" to="/projects?assignee=me" />}
-          {myPendingApprovalsCount > 0 && <AttentionPill tone="purple" icon={<ShieldQuestion size={12} />} value={myPendingApprovalsCount} label="Pending approvals" to="/approval-center" />}
-          {overdueTasks.length > 0 && <AttentionPill tone="danger" icon={<AlertTriangle size={12} />} value={overdueTasks.length} label={overdueTasks.length === 1 ? "Overdue task" : "Overdue tasks"} to="/projects?assignee=me" />}
-          {daysOverCapacity > 0 && <AttentionPill tone="gold" icon={<Gauge size={12} />} value={daysOverCapacity} label={daysOverCapacity === 1 ? "Day over capacity" : "Days over capacity"} to="/utilization?person=me" />}
-          {missingLogHours > 0.1 && <AttentionPill tone="accent" icon={<Clock3 size={12} />} value={`${missingLogHours.toFixed(1)}h`} label="Missing logs" to="/time-tracking" />}
+          {/* 2026-09-23 (Sandra: "Pending approvals, remove and use the
+              KPI card" / "Days over capacity remove") -- both trimmed;
+              the KPI row above already covers Pending Approvals (correctly
+              framed "sent by you, awaiting decision") and Overdue Items,
+              so repeating them here was redundant. Tasks due today and
+              Overdue tasks open a lightbox (no real due-today/overdue
+              filter exists yet to route to) listing Task ID/Task/Project.
+              Missing logs now always routes to MY Time specifically
+              (?scope=mine), not whatever Team/All scope was last viewed --
+              same experience for every task/project owner. */}
+          {tasksDueToday.length > 0 && (
+            <AttentionPill tone="danger" icon={<Calendar size={12} />} value={tasksDueToday.length} label="Tasks due today" onClick={() => setAttentionModal("due_today")} />
+          )}
+          {overdueTasks.length > 0 && (
+            <AttentionPill tone="danger" icon={<AlertTriangle size={12} />} value={overdueTasks.length} label={overdueTasks.length === 1 ? "Overdue task" : "Overdue tasks"} onClick={() => setAttentionModal("overdue")} />
+          )}
+          {missingLogHours > 0.1 && (
+            <AttentionPill tone="accent" icon={<Clock3 size={12} />} value={`${missingLogHours.toFixed(1)}h`} label="Missing hours this week" to="/time-tracking?scope=mine" />
+          )}
         </div>
+      )}
+
+      {attentionModal && (
+        <Modal
+          title={attentionModal === "due_today" ? "Tasks due today" : "Overdue tasks"}
+          onClose={() => setAttentionModal(null)}
+        >
+          {(() => {
+            const rows = attentionModal === "due_today" ? tasksDueToday : overdueTasks;
+            return rows.length === 0 ? (
+              <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing here.</p>
+            ) : (
+              <>
+                <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
+                  <span style={{ flex: "0 0 64px" }}>Task ID</span>
+                  <span style={{ flex: "1 1 auto" }}>Task</span>
+                  <span style={{ flex: "0 0 140px" }}>Project</span>
+                </div>
+                {rows.map((t) => (
+                  <div key={t.id} style={{ display: "flex", alignItems: "center", padding: "7px 4px", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+                    <span style={{ flex: "0 0 64px", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>T-{String(t.task_number).padStart(4, "0")}</span>
+                    <span style={{ flex: "1 1 auto", fontWeight: 500 }}>{t.name}</span>
+                    <span style={{ flex: "0 0 140px", color: "var(--text-secondary)" }}>{t.project?.name ?? "—"}</span>
+                  </div>
+                ))}
+              </>
+            );
+          })()}
+        </Modal>
       )}
 
       {/* 2026-09-23 (Sandra: "My Work Today ... helps employees quickly
@@ -816,7 +863,7 @@ export default function MyDashboard() {
           </div>
 
           <div className="dash-card">
-            <SectionHeader title={`My Tasks This Week (${tasksThisWeek.length})`} to="/projects?assignee=me" />
+            <SectionHeader title={`Tasks Due This Week (${tasksThisWeek.length})`} to="/projects?assignee=me" />
             {tasksThisWeek.length === 0 ? (
               <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing due this week.</p>
             ) : (
@@ -1106,16 +1153,52 @@ function MetricCard({ icon, colors, label, value, sub }: { icon: JSX.Element; co
   );
 }
 
-function AttentionPill({ tone, icon, value, label, to }: { tone: string; icon: JSX.Element; value: number | string; label: string; to: string }) {
-  return (
-    <Link
-      to={to}
-      className={`status-pill ${tone}`}
-      style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, padding: "7px 12px", textDecoration: "none" }}
-    >
+// 2026-09-23 (Sandra: pared Needs My Attention down to items that
+// aren't already a KPI card and that route somewhere real) -- Pending
+// approvals and Days over capacity were removed here since the KPI row
+// above already shows them (correctly framed as "sent by you, awaiting
+// decision"). Missing logs still links out (now always to MY Time,
+// never Team/All -- see the ?scope=mine param). Tasks due today/
+// Overdue tasks don't have a real due-today/overdue filter to route to
+// yet, so instead of a broken link they open a lightbox listing the
+// actual tasks (onClick), same pill styling either way.
+function AttentionPill({
+  tone,
+  icon,
+  value,
+  label,
+  to,
+  onClick,
+}: {
+  tone: string;
+  icon: JSX.Element;
+  value: number | string;
+  label: string;
+  to?: string;
+  onClick?: () => void;
+}) {
+  const content = (
+    <>
       {icon}
       <strong>{value}</strong> {label}
-      <ChevronRight size={11} />
+      {(to || onClick) && <ChevronRight size={11} />}
+    </>
+  );
+  const style: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, padding: "7px 12px", textDecoration: "none" };
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={`status-pill ${tone}`} style={{ ...style, border: "none", cursor: "pointer", font: "inherit" }}>
+        {content}
+      </button>
+    );
+  }
+  return to ? (
+    <Link to={to} className={`status-pill ${tone}`} style={style}>
+      {content}
     </Link>
+  ) : (
+    <span className={`status-pill ${tone}`} style={style}>
+      {content}
+    </span>
   );
 }

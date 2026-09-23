@@ -640,7 +640,16 @@ export default function TimeTracking() {
   // (walking the reports_to chain all the way down, not just direct
   // reports -- see myTeamIds below). All Time only appears for Full
   // Access, reusing the same access_level check used everywhere else.
-  const [scope, setScope] = useState<"mine" | "team" | "all">(ttPrefs.scope ?? "mine");
+  // 2026-09-23 (Sandra: "as an end user...I should get end user rank and
+  // file experience...should be the same for everyone" -- My Dashboard's
+  // Missing hours pill was routing here and landing on whatever Team/All
+  // scope was last viewed instead of My Time) -- an explicit ?scope=
+  // param (set once, from the URL at load) always wins over the saved
+  // preference, so a link built as /time-tracking?scope=mine reliably
+  // lands on My Time for every person, regardless of what they'd last
+  // left this page on.
+  const scopeParam = searchParams.get("scope") as "mine" | "team" | "all" | null;
+  const [scope, setScope] = useState<"mine" | "team" | "all">(scopeParam ?? ttPrefs.scope ?? "mine");
 
   // 2026-09-23 (Sandra: mockup-driven redesign -- search/filters/sort,
   // date-range browsing, group-by-date, a single Add Time button) --
