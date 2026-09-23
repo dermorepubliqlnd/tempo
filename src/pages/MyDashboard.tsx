@@ -649,8 +649,18 @@ export default function MyDashboard() {
               const logged = loggedHoursForTask(t.id);
               const variance = hoursVarianceOf(t.estimated_hours, logged);
               const varianceTone = hoursVarianceTone(variance?.percent ?? null);
+              // 2026-09-23 (Sandra: "realy now?? this is completely
+              // misaligned") -- root cause: .dash-row's own CSS has
+              // justify-content:space-between + gap:12px (built for the
+              // 2-3-item My Projects/Pending Approvals rows elsewhere on
+              // this page), which was blowing the fixed-width columns
+              // apart into huge, uneven gaps since they don't fill the
+              // row width -- while the header row above has neither, so
+              // header and data were never going to line up. Overriding
+              // both back to match the header's plain flex-start/no-gap
+              // layout.
               return (
-                <div key={t.id} className="dash-row" style={{ opacity: isHidden ? 0.55 : 1, minWidth: 920 }}>
+                <div key={t.id} className="dash-row" style={{ opacity: isHidden ? 0.55 : 1, minWidth: 920, justifyContent: "flex-start", gap: 0 }}>
                   <span style={{ flex: "0 0 56px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>T-{String(t.task_number).padStart(4, "0")}</span>
                   <span style={{ flex: "0 0 130px", minWidth: 0, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</span>
                   <span style={{ flex: "0 0 92px", textAlign: "center" }}>
