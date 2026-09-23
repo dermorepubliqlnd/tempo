@@ -288,15 +288,22 @@ begin
     end if;
   end if;
 
-  -- Time entries coming back must not overlap live entries.
+  -- Time entries coming back must not overlap anything logged AFTER they
+  -- were archived (overlaps that already existed before archiving are
+  -- historical and don't block putting things back exactly as they were).
   for r in
-    select te.id, te.person_id, te.started_at, te.ended_at
+    select te.id, te.person_id, te.started_at, te.ended_at, te.archived_at
       from time_entries te
      where te.archive_batch_id = v_batch and te.is_archived and te.ended_at is not null
        and te.status in ('pending_confirm','pending_approval','confirmed','approved')
   loop
-    v_conflict := find_time_entry_overlap(r.person_id, r.started_at, r.ended_at,
-                    array(select id from time_entries where archive_batch_id = v_batch));
+    select o.id into v_conflict
+      from time_entries o
+     where o.person_id = r.person_id and not o.is_archived and o.archive_batch_id is distinct from v_batch
+       and o.status in ('pending_confirm','pending_approval','confirmed','approved')
+       and o.created_at > r.archived_at
+       and r.started_at < coalesce(o.ended_at, now()) and o.started_at < r.ended_at
+     limit 1;
     if v_conflict is not null then
       raise exception 'can''t restore: % would overlap %, which is already logged', time_entry_label(r.id), time_entry_label(v_conflict);
     end if;
@@ -482,3 +489,12 @@ select cron.schedule('purge-expired-archive', '30 18 * * *', 'select purge_expir
 -- archive_item/restore_item (restore must go through the batch-aware path).
 revoke execute on function archive_time_entry(uuid, text) from anon, authenticated;
 revoke execute on function unarchive_time_entry(uuid) from anon, authenticated;
+
+-- Functions get EXECUTE granted to PUBLIC by default, so the revokes above
+-- also need PUBLIC (verified live: authenticated still had access).
+revoke execute on function delete_tasks_and_dependents(uuid[]) from public;
+revoke execute on function delete_project_and_dependents(uuid) from public;
+revoke execute on function delete_pending_manual_time_entry(uuid) from public;
+revoke execute on function archive_time_entry(uuid, text) from public;
+revoke execute on function unarchive_time_entry(uuid) from public;
+revoke execute on function archive_set_bypass_flags() from public, anon, authenticated;
