@@ -1167,9 +1167,6 @@ export default function HoursOverview() {
               </tbody>
             </table>
           </div>
-          <div style={{ marginTop: 10, fontSize: 11, color: "var(--muted)" }}>
-            Logged hours always show on the day they were actually worked, even outside a task's scoped window. A 7.5h shift (±1h) is the reference for "Within expected."
-          </div>
         </>
       ) : (
         <>

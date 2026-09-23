@@ -74,3 +74,44 @@ export function workingDaysBetween(start: Date, end: Date, holidays: HolidaySet)
   }
   return days.length ? days : [toISO(end)];
 }
+
+// 2026-09-23 (Sandra: "extra layer... if they log timer on a weekend, say
+// it's a weekend -- are you sure you are working? or if manually logging
+// on a weekend or holiday put an added layer... are you sure" -- fires
+// every time, never blocks, applies to timer starts (My Dashboard +
+// per-task Start in Projects/Tasks) and manual entries incl. non-project,
+// checked against the date being LOGGED FOR (today for a timer, whatever
+// date is typed/backdated for a manual entry -- not always "today"), so
+// the wording below names the actual day rather than assuming "today").
+
+/** date (YYYY-MM-DD) -> holiday name, built from the same `holidays` rows
+ * other pages already fetch (widened to also select `name`). */
+export type HolidayNameMap = Map<string, string>;
+
+export function buildHolidayNameMap(rows: { date: string; name: string }[]): HolidayNameMap {
+  return new Map(rows.map((r) => [r.date.slice(0, 10), r.name]));
+}
+
+/** Returns a ready-to-show confirm message ("**bold**" markdown-lite, per
+ * ConfirmDialog's renderInlineBold) when `dateStr` is a weekend or a
+ * company holiday, or null on an ordinary working day. Holiday wins over
+ * weekend when a holiday happens to fall on one, since naming the holiday
+ * is more useful than just saying "Saturday". Only the day name/holiday
+ * name is bolded (Sandra: "just bold the day or holiday") -- the date
+ * itself stays plain text alongside it so a backdated manual entry (e.g.
+ * logging last Saturday from today) still reads clearly. */
+export function nonWorkingDayConfirmMessage(dateStr: string, holidayNames: HolidayNameMap): string | null {
+  const iso = dateStr.slice(0, 10);
+  const holidayName = holidayNames.get(iso);
+  const d = parseLocalDate(iso);
+  const shortDate = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (holidayName) {
+    return `You're logging time on **${holidayName}** (${shortDate}), a company holiday. Are you sure?`;
+  }
+  const dow = d.getDay();
+  if (dow === 0 || dow === 6) {
+    const dayName = dow === 0 ? "Sunday" : "Saturday";
+    return `You're logging time on a **${dayName}** (${shortDate}) -- a non-working day. Are you sure?`;
+  }
+  return null;
+}
