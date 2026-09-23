@@ -26,6 +26,7 @@ import { buildHolidaySet } from "../lib/workingDays";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
 import { colorForPerson } from "../lib/personColors";
 import { useTimeTracking } from "../lib/TimeTrackingContext";
+import { parseLocalDate, calendarDaysBetween } from "../lib/taskTiming";
 // Reuses Health/Progress straight from Projects.tsx (same convention
 // Dashboard.tsx already follows) so this page's numbers can never drift
 // out of sync with what the Projects table itself shows for a project.
@@ -321,20 +322,22 @@ export default function MyDashboard() {
       .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
     return Math.round((minutes / 60) * 100) / 100;
   }
-  // 2026-09-23 (Sandra: "separate column for tagging -- starts today,
-  // due soon, etc"), a judgment call on the "due soon" threshold: within
-  // the next 3 calendar days (exclusive of today, which is its own
-  // "Due Today" tag). Flag to her if 3 days isn't the window she meant.
-  function workTodayTag(t: (typeof myWorkTodayAll)[number]): { label: string; tone: string } | null {
-    const start = t.start_date?.slice(0, 10);
-    const due = t.current_due_date?.slice(0, 10);
-    if (start === todayIso) return { label: "Starts Today", tone: "accent" };
-    if (due === todayIso) return { label: "Due Today", tone: "warning" };
-    if (due) {
-      const daysOut = Math.round((new Date(due).getTime() - new Date(todayIso).getTime()) / 86400000);
-      if (daysOut > 0 && daysOut <= 3) return { label: "Due Soon", tone: "gold" };
-    }
-    return null;
+  // 2026-09-23 (Sandra, round 3: "replace tagging with timing -- pull
+  // the timing for each task") -- Tag (Starts Today/Due Soon) column
+  // retired in favor of the app's existing "Timing" concept
+  // (Overdue/Due soon/On track), same thresholds as Projects.tsx's own
+  // Timing column and HoursOverview.tsx's Per Task view, via the shared
+  // taskTiming.ts helpers rather than a third copy of this logic. My
+  // Work Today only ever shows open (Not Started/In Progress) tasks --
+  // isOpenTask already excludes Done/Cancelled -- so this only needs
+  // timingOf's to-do/in-progress branch (due-date-vs-today), not the
+  // completed/cancelled ones.
+  function workTodayTiming(t: (typeof myWorkTodayAll)[number]): { label: string; tone: "success" | "warning" | "danger" } {
+    const due = parseLocalDate(t.current_due_date);
+    const daysLeft = calendarDaysBetween(due, new Date());
+    if (daysLeft < 0) return { label: "Overdue", tone: "danger" };
+    if (daysLeft <= 3) return { label: "Due soon", tone: "warning" };
+    return { label: "On track", tone: "success" };
   }
 
   async function hideTaskFromToday(taskId: string, taskName: string) {
@@ -623,13 +626,23 @@ export default function MyDashboard() {
               left-aligned, long-text data) -- centering a header over a
               long left-aligned value is what looked off; short/numeric
               columns stay centered, matching their data. */}
+          {/* 2026-09-23 (Sandra, round 3: "replace tagging with timing...
+              project is too wide... add a gap just to fill the white
+              space minimally") -- Tag column retired for Timing
+              (Overdue/Due soon/On track, shared taskTiming.ts logic).
+              Every column is back to a plain fixed width -- Project no
+              longer flex-grows (that's what made it balloon out with
+              nothing but blank space in it); instead a small 8px gap
+              between every column soaks up the leftover row width
+              evenly, a little at a time, rather than dumping it all
+              into one column. */}
           <div style={{ overflowX: "auto" }}>
-          <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "8px 4px 6px", borderBottom: "1px solid var(--border)", minWidth: 920 }}>
+          <div style={{ display: "flex", gap: 8, fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "8px 4px 6px", borderBottom: "1px solid var(--border)", minWidth: 1040 }}>
             <span style={{ flex: "0 0 56px", textAlign: "center" }}>Task ID</span>
             <span style={{ flex: "0 0 130px", minWidth: 0 }}>Task</span>
             <span style={{ flex: "0 0 92px", textAlign: "center", whiteSpace: "nowrap" }}>Task Status</span>
-            <span style={{ flex: "0 0 84px", textAlign: "center", whiteSpace: "nowrap" }}>Tag</span>
-            <span style={{ flex: "1 1 110px", minWidth: 0 }}>Project</span>
+            <span style={{ flex: "0 0 90px", textAlign: "center", whiteSpace: "nowrap" }}>Timing</span>
+            <span style={{ flex: "0 0 140px", minWidth: 0 }}>Project</span>
             <span style={{ flex: "0 0 72px", textAlign: "center" }}>Start Date</span>
             <span style={{ flex: "0 0 72px", textAlign: "center" }}>Due Date</span>
             <span style={{ flex: "0 0 74px", textAlign: "center", whiteSpace: "nowrap" }}>Est. Hours</span>
@@ -645,7 +658,7 @@ export default function MyDashboard() {
               const isHidden = hiddenTodayIds.has(t.id);
               const isRunningHere = running?.task_id === t.id;
               const timerDisabled = timerBusy || (Boolean(running) && !isRunningHere);
-              const tag = workTodayTag(t);
+              const timing = workTodayTiming(t);
               const logged = loggedHoursForTask(t.id);
               const variance = hoursVarianceOf(t.estimated_hours, logged);
               const varianceTone = hoursVarianceTone(variance?.percent ?? null);
@@ -660,20 +673,16 @@ export default function MyDashboard() {
               // both back to match the header's plain flex-start/no-gap
               // layout.
               return (
-                <div key={t.id} className="dash-row" style={{ opacity: isHidden ? 0.55 : 1, minWidth: 920, justifyContent: "flex-start", gap: 0 }}>
+                <div key={t.id} className="dash-row" style={{ opacity: isHidden ? 0.55 : 1, minWidth: 1040, justifyContent: "flex-start", gap: 8 }}>
                   <span style={{ flex: "0 0 56px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>T-{String(t.task_number).padStart(4, "0")}</span>
                   <span style={{ flex: "0 0 130px", minWidth: 0, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</span>
                   <span style={{ flex: "0 0 92px", textAlign: "center" }}>
                     <span className={`status-pill ${myWorkTodayStatusTone(t.status)}`} style={{ fontSize: 9 }}>{t.status ?? "—"}</span>
                   </span>
-                  <span style={{ flex: "0 0 84px", textAlign: "center" }}>
-                    {tag && (
-                      <span className={`status-pill ${tag.tone}`} style={{ fontSize: 9 }}>
-                        {tag.label}
-                      </span>
-                    )}
+                  <span style={{ flex: "0 0 90px", textAlign: "center" }}>
+                    <span className={`status-pill ${timing.tone}`} style={{ fontSize: 9 }}>{timing.label}</span>
                   </span>
-                  <span style={{ flex: "1 1 110px", minWidth: 0, fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.project?.name ?? "—"}>{t.project?.name ?? "—"}</span>
+                  <span style={{ flex: "0 0 140px", minWidth: 0, fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.project?.name ?? "—"}>{t.project?.name ?? "—"}</span>
                   <span style={{ flex: "0 0 72px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>{t.start_date ? formatDate(t.start_date) : "—"}</span>
                   <span style={{ flex: "0 0 72px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>{formatDate(t.current_due_date)}</span>
                   <span style={{ flex: "0 0 74px", textAlign: "center", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
