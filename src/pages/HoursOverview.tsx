@@ -903,21 +903,6 @@ export default function HoursOverview() {
             </button>
           </div>
 
-          {/* 2026-09-23 (stakeholder review: "add a small legend above
-              the table, beside the filters -- since this is effectively
-              a heatmap, users shouldn't have to infer what each color
-              means") -- moved up from the bottom of the page, and
-              trimmed to just the 5 substantive tiers (Time Off/no-hours-
-              logged are self-explanatory without a swatch). */}
-          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 14, fontSize: 11, color: "var(--muted)", marginBottom: 10 }}>
-            {LOGGED_HOURS_LEGEND.filter((l) => l.tone !== "neutral").map(({ label, tone }) => (
-              <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: LEGEND_DOT_COLOR[tone], flexShrink: 0 }} />
-                {label}
-              </span>
-            ))}
-          </div>
-
           <div ref={gridScrollRef} style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
             <table style={{ borderCollapse: "collapse", width: "max-content" }}>
               <thead>
@@ -1166,6 +1151,17 @@ export default function HoursOverview() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* 2026-09-23 (Sandra: "move it below" -- back under the table,
+              same dot style) */}
+          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 14, fontSize: 11, color: "var(--muted)", marginTop: 10 }}>
+            {LOGGED_HOURS_LEGEND.filter((l) => l.tone !== "neutral").map(({ label, tone }) => (
+              <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: LEGEND_DOT_COLOR[tone], flexShrink: 0 }} />
+                {label}
+              </span>
+            ))}
           </div>
         </>
       ) : (
