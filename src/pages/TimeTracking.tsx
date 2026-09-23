@@ -40,6 +40,8 @@ interface TaskLite {
   current_due_date: string | null;
   status: string | null;
   project: { id: string; name: string; owner_id: string | null; timelines_locked: boolean; wbs_status: string } | null;
+  // Phase 67 (2026-09-23): sequential Task ID, see supabase/phase67_migration.sql.
+  task_number: number;
 }
 
 interface EntryRow {
@@ -504,13 +506,13 @@ export default function TimeTracking() {
           `id, task_id, activity_type_id, person_id, started_at, ended_at, duration_minutes, source, status, requested_by, reason_category, reason_notes, auto_stopped,
            decided_by, decided_at, decision_notes, corrected_by, corrected_at, original_duration_minutes, correction_notes, created_at,
            is_archived, archived_at, archived_by, archive_reason,
-           task:tasks ( id, name, assignee_id, project_id, project:projects ( id, name, owner_id ) ),
+           task:tasks ( id, name, assignee_id, project_id, task_number, project:projects ( id, name, owner_id ) ),
            activity_type:non_project_activity_types ( id, name ),
            person:people!time_entries_person_id_fkey ( id, name )`
         )
         .order("started_at", { ascending: false }),
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
-      supabase.from("tasks").select("id,name,assignee_id,project_id,current_due_date,status,project:projects(id,name,owner_id,timelines_locked,wbs_status)").eq("is_archived", false),
+      supabase.from("tasks").select("id,name,assignee_id,project_id,current_due_date,status,task_number,project:projects(id,name,owner_id,timelines_locked,wbs_status)").eq("is_archived", false),
       supabase.from("time_entry_reasons").select("id,name,is_active").order("sort_order"),
       supabase.from("non_project_activity_types").select("id,name,is_active").order("sort_order"),
     ]);
@@ -883,7 +885,9 @@ export default function TimeTracking() {
               const rejecting = rejectingId === row.id;
               const isNonProject = Boolean(row.activity_type_id);
               const title = isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
-              const subtitle = isNonProject ? "Non-project" : row.task?.project?.name ?? "—";
+              const subtitle = isNonProject
+                ? "Non-project"
+                : `${row.task?.project?.name ?? "—"}${row.task?.task_number ? ` · T-${String(row.task.task_number).padStart(4, "0")}` : ""}`;
               const assigneeName = row.person?.name ?? personName(row.person_id);
               const details = row.reason_notes?.trim() || row.reason_category || "—";
               return (
@@ -1000,7 +1004,9 @@ export default function TimeTracking() {
               const archiving = archivingId === row.id;
               const isNonProject = Boolean(row.activity_type_id);
               const title = isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
-              const subtitle = isNonProject ? "Non-project" : row.task?.project?.name ?? "—";
+              const subtitle = isNonProject
+                ? "Non-project"
+                : `${row.task?.project?.name ?? "—"}${row.task?.task_number ? ` · T-${String(row.task.task_number).padStart(4, "0")}` : ""}`;
               const assigneeName = row.person?.name ?? personName(row.person_id);
               const details = row.reason_notes?.trim() || row.reason_category || "—";
               return (

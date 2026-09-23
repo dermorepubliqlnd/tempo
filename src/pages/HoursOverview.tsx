@@ -69,6 +69,8 @@ interface TaskRow {
   current_due_date: string;
   estimated_hours: number | null;
   is_archived: boolean;
+  // Phase 67 (2026-09-23): sequential Task ID, see supabase/phase67_migration.sql.
+  task_number: number;
 }
 interface TimeEntryRow {
   id: string;
@@ -231,7 +233,7 @@ export default function HoursOverview() {
         supabase.from("projects").select("id,name,is_archived,owner_id,start_date,end_date,wbs_status").eq("is_archived", false),
         supabase
           .from("tasks")
-          .select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived")
+          .select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,task_number")
           .eq("is_archived", false),
         supabase
           .from("time_entries")
@@ -528,6 +530,7 @@ export default function HoursOverview() {
         return {
           id: t.id,
           name: t.name,
+          taskNumber: t.task_number,
           projectId: t.project_id,
           project: proj?.name ?? "—",
           ownerId: t.assignee_id,
@@ -592,8 +595,17 @@ export default function HoursOverview() {
   // grouping just adds a section label column rather than changing which
   // rows are included.
   function exportTaskCsv() {
-    const rows = sortedTaskRows.map((r) => [r.owner, r.project, r.name, r.status ?? "—", r.scoped.toFixed(1), r.logged.toFixed(1), r.variance.toFixed(1)]);
-    const csv = toCsv(["Team Member", "Project", "Task", "Status", "Scoped (h)", "Logged (h)", "Variance (h)"], rows);
+    const rows = sortedTaskRows.map((r) => [
+      r.owner,
+      r.project,
+      r.name,
+      `T-${String(r.taskNumber).padStart(4, "0")}`,
+      r.status ?? "—",
+      r.scoped.toFixed(1),
+      r.logged.toFixed(1),
+      r.variance.toFixed(1),
+    ]);
+    const csv = toCsv(["Team Member", "Project", "Task", "Task ID", "Status", "Scoped (h)", "Logged (h)", "Variance (h)"], rows);
     downloadCsv(csv, `productivity_per_task_${toISO(new Date())}.csv`);
   }
 
@@ -1209,6 +1221,7 @@ export default function HoursOverview() {
                   <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Team Member</th>
                   <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Project</th>
                   <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Task</th>
+                  <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Task ID</th>
                   <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Status</th>
                   <th style={{ textAlign: "right", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Scoped</th>
                   <th style={{ textAlign: "right", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Logged</th>
@@ -1218,7 +1231,7 @@ export default function HoursOverview() {
               <tbody>
                 {sortedTaskRows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>
+                    <td colSpan={8} style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>
                       No tasks with Scoped or Logged hours yet.
                     </td>
                   </tr>
@@ -1229,7 +1242,7 @@ export default function HoursOverview() {
                     return (
                       <Fragment key={group.label}>
                         <tr>
-                          <td colSpan={4} style={{ padding: "6px 13px", fontSize: 11.5, fontWeight: 700, color: "var(--navy)", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
+                          <td colSpan={5} style={{ padding: "6px 13px", fontSize: 11.5, fontWeight: 700, color: "var(--navy)", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
                             {group.label} <span style={{ fontWeight: 500, color: "var(--muted)" }}>({group.rows.length})</span>
                           </td>
                           <td style={{ padding: "6px 13px", textAlign: "right", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>{groupScoped.toFixed(1)}h</td>
@@ -1253,6 +1266,7 @@ export default function HoursOverview() {
                     <td style={{ padding: "8px 13px" }} />
                     <td style={{ padding: "8px 13px" }} />
                     <td style={{ padding: "8px 13px" }} />
+                    <td style={{ padding: "8px 13px" }} />
                     <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>{taskTotals.scoped.toFixed(1)}h</td>
                     <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>{taskTotals.logged.toFixed(1)}h</td>
                     <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>
@@ -1272,6 +1286,7 @@ export default function HoursOverview() {
 type TaskHourRowData = {
   id: string;
   name: string;
+  taskNumber: number;
   projectId: string;
   project: string;
   ownerId: string | null;
@@ -1301,6 +1316,9 @@ function TaskHourRow({ r }: { r: TaskHourRowData }) {
       <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>{r.owner}</td>
       <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>{r.project}</td>
       <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)" }}>{r.name}</td>
+      <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)", fontSize: 11.5 }}>
+        T-{String(r.taskNumber).padStart(4, "0")}
+      </td>
       <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)" }}>
         {r.status ? (
           <span className={`status-pill ${taskStatusTone(statusGroupOf(TASK_STATUS_GROUPED, r.status))}`} style={{ fontSize: 11 }}>
