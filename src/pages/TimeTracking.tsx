@@ -1778,8 +1778,21 @@ export default function TimeTracking() {
               is good") with its own 3-tier percentage scale. */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginTop: 4, marginBottom: 14 }}>
             {(() => {
-              const todayTier = loggedHoursTier(todayMinutes / 60);
-              const weekTier = loggedHoursTier(thisWeekMinutes / 60 / 5);
+              // 2026-09-23: the daily-hours band thresholds assume a
+              // SINGLE person's day/week (they're the same scale
+              // Daily Activity/My Dashboard use per-person) -- applying
+              // them to a Team/All Time aggregate would paint almost
+              // any multi-person total "Significantly above" purely
+              // from headcount, which is misleading rather than
+              // informative. So the band coloring only activates on My
+              // Time; Team/All Time keep a neutral, unfilled look for
+              // these two cards (Timer Compliance isn't headcount-
+              // sensitive the same way, so it keeps its own bands on
+              // every scope).
+              const todayTier =
+                scope === "mine" ? loggedHoursTier(todayMinutes / 60) : { bg: undefined, fg: "var(--navy)", tone: "slate" as const };
+              const weekTier =
+                scope === "mine" ? loggedHoursTier(thisWeekMinutes / 60 / 5) : { bg: undefined, fg: "var(--navy)", tone: "slate" as const };
               const complianceTier =
                 timerCompliancePct === null
                   ? { bg: "var(--hover-bg)", fg: "var(--muted)", tone: "neutral" as const }
