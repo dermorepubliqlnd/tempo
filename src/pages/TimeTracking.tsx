@@ -1568,11 +1568,12 @@ export default function TimeTracking() {
               >
                 <div style={{ fontWeight: 700, marginBottom: 4 }}>Time overlap detected</div>
                 <div>You already have a logged entry for this period:</div>
-                <div>Task ID: {overlapTaskIdLabel(logOverlapEntry)}</div>
-                <div>Task: {overlapTitle(logOverlapEntry)}</div>
-                <div>Time: {formatClockRange(logOverlapEntry.started_at, logOverlapEntry.ended_at)}</div>
-                <div>Status: {STATUS_LABEL[logOverlapEntry.status]}</div>
-                <div style={{ marginTop: 4 }}>Please adjust the start or end time.</div>
+                <div><strong>Task ID:</strong> {overlapTaskIdLabel(logOverlapEntry)}</div>
+                <div><strong>Task:</strong> {overlapTitle(logOverlapEntry)}</div>
+                <div><strong>Time:</strong> {formatClockRange(logOverlapEntry.started_at, logOverlapEntry.ended_at)}</div>
+                <div><strong>Status:</strong> {STATUS_LABEL[logOverlapEntry.status]}</div>
+                <div style={{ borderTop: "1px solid var(--danger-text)", opacity: 0.5, margin: "6px 0" }} />
+                <div>Please adjust the start or end time.</div>
               </div>
             )}
             <div style={{ display: "flex", gap: 8 }}>
