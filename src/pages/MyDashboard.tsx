@@ -315,6 +315,15 @@ export default function MyDashboard() {
   );
   const myWorkTodayHiddenCount = myWorkTodayAll.filter((t) => hiddenTodayIds.has(t.id)).length;
   const myWorkTodayVisible = showHiddenToday ? myWorkTodayAll : myWorkTodayAll.filter((t) => !hiddenTodayIds.has(t.id));
+  // 2026-09-23 (Sandra: "expand the Project column, can the width be
+  // dynamic to fit the project name?") -- each My Work Today row is its
+  // own independent flex container (not a real <table>), so columns
+  // can't auto-fit to content the way table cells do while staying
+  // aligned across rows. Approximated here instead: size the Project
+  // column once, up front, to fit the LONGEST project name currently
+  // visible (~6.3px/char at this font size + a little padding), floored
+  // at the old 140px so a short name doesn't shrink the column too far.
+  const myWorkTodayProjectColWidth = Math.max(140, ...myWorkTodayVisible.map((t) => (t.project?.name?.length ?? 0) * 6.3 + 20));
   function loggedHoursForTask(taskId: string): number {
     const childIds = new Set(tasks.filter((t) => t.parent_task_id === taskId).map((t) => t.id));
     const minutes = myTaskEntries
@@ -637,12 +646,12 @@ export default function MyDashboard() {
               evenly, a little at a time, rather than dumping it all
               into one column. */}
           <div style={{ overflowX: "auto" }}>
-          <div style={{ display: "flex", gap: 8, fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "8px 4px 6px", borderBottom: "1px solid var(--border)", minWidth: 1040 }}>
+          <div style={{ display: "flex", gap: 8, fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "8px 4px 6px", borderBottom: "1px solid var(--border)", minWidth: 900 + myWorkTodayProjectColWidth }}>
             <span style={{ flex: "0 0 56px", textAlign: "center" }}>Task ID</span>
             <span style={{ flex: "0 0 130px", minWidth: 0 }}>Task</span>
             <span style={{ flex: "0 0 92px", textAlign: "center", whiteSpace: "nowrap" }}>Task Status</span>
             <span style={{ flex: "0 0 90px", textAlign: "center", whiteSpace: "nowrap" }}>Timing</span>
-            <span style={{ flex: "0 0 140px", minWidth: 0 }}>Project</span>
+            <span style={{ flex: `0 0 ${myWorkTodayProjectColWidth}px`, minWidth: 0 }}>Project</span>
             <span style={{ flex: "0 0 72px", textAlign: "center" }}>Start Date</span>
             <span style={{ flex: "0 0 72px", textAlign: "center" }}>Due Date</span>
             <span style={{ flex: "0 0 74px", textAlign: "center", whiteSpace: "nowrap" }}>Est. Hours</span>
@@ -673,7 +682,7 @@ export default function MyDashboard() {
               // both back to match the header's plain flex-start/no-gap
               // layout.
               return (
-                <div key={t.id} className="dash-row" style={{ opacity: isHidden ? 0.55 : 1, minWidth: 1040, justifyContent: "flex-start", gap: 8 }}>
+                <div key={t.id} className="dash-row" style={{ opacity: isHidden ? 0.55 : 1, minWidth: 900 + myWorkTodayProjectColWidth, justifyContent: "flex-start", gap: 8 }}>
                   <span style={{ flex: "0 0 56px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>T-{String(t.task_number).padStart(4, "0")}</span>
                   <span style={{ flex: "0 0 130px", minWidth: 0, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</span>
                   <span style={{ flex: "0 0 92px", textAlign: "center" }}>
@@ -682,7 +691,7 @@ export default function MyDashboard() {
                   <span style={{ flex: "0 0 90px", textAlign: "center" }}>
                     <span className={`status-pill ${timing.tone}`} style={{ fontSize: 9 }}>{timing.label}</span>
                   </span>
-                  <span style={{ flex: "0 0 140px", minWidth: 0, fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.project?.name ?? "—"}>{t.project?.name ?? "—"}</span>
+                  <span style={{ flex: `0 0 ${myWorkTodayProjectColWidth}px`, minWidth: 0, fontSize: 11.5, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{t.project?.name ?? "—"}</span>
                   <span style={{ flex: "0 0 72px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>{t.start_date ? formatDate(t.start_date) : "—"}</span>
                   <span style={{ flex: "0 0 72px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>{formatDate(t.current_due_date)}</span>
                   <span style={{ flex: "0 0 74px", textAlign: "center", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
