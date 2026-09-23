@@ -629,7 +629,7 @@ export default function MyDashboard() {
             <span style={{ flex: "0 0 130px", minWidth: 0 }}>Task</span>
             <span style={{ flex: "0 0 92px", textAlign: "center", whiteSpace: "nowrap" }}>Task Status</span>
             <span style={{ flex: "0 0 84px", textAlign: "center", whiteSpace: "nowrap" }}>Tag</span>
-            <span style={{ flex: "0 0 110px", minWidth: 0 }}>Project</span>
+            <span style={{ flex: "1 1 110px", minWidth: 0 }}>Project</span>
             <span style={{ flex: "0 0 72px", textAlign: "center" }}>Start Date</span>
             <span style={{ flex: "0 0 72px", textAlign: "center" }}>Due Date</span>
             <span style={{ flex: "0 0 74px", textAlign: "center", whiteSpace: "nowrap" }}>Est. Hours</span>
@@ -673,7 +673,7 @@ export default function MyDashboard() {
                       </span>
                     )}
                   </span>
-                  <span style={{ flex: "0 0 110px", minWidth: 0, fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.project?.name ?? "—"}>{t.project?.name ?? "—"}</span>
+                  <span style={{ flex: "1 1 110px", minWidth: 0, fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.project?.name ?? "—"}>{t.project?.name ?? "—"}</span>
                   <span style={{ flex: "0 0 72px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>{t.start_date ? formatDate(t.start_date) : "—"}</span>
                   <span style={{ flex: "0 0 72px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>{formatDate(t.current_due_date)}</span>
                   <span style={{ flex: "0 0 74px", textAlign: "center", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
