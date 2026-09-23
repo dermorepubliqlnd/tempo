@@ -6,8 +6,13 @@ import { useSearchParams } from "react-router-dom";
 import { buildHolidaySet } from "../lib/workingDays";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
 import { TASK_STATUS_GROUPED, statusGroupOf } from "../lib/notionOptions";
-import { ownTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, type TimeLogStatus } from "../lib/timeTracking";
+import { ownTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, formatHours, type TimeLogStatus } from "../lib/timeTracking";
 import { toCsv } from "../lib/csv";
+import { formatDate } from "../lib/formatDate";
+import Modal from "../components/Modal";
+import DataTable from "../components/DataTable";
+import { useTableViews } from "../lib/useTableViews";
+import { sortRows, type ColumnDef, type GroupOption, type SortOption } from "../lib/tableTypes";
 // Same shared allocation engine Utilization.tsx and WbsPlanning.tsx's
 // Utilization snapshot use -- see src/lib/dailyAllocation.ts. Before this,
 // "Scoped" here was a thinner, drifting copy: no PM overhead, no Time Off,
@@ -85,6 +90,11 @@ interface TimeEntryRow {
   started_at: string;
   duration_minutes: number | null;
   status: "running" | "pending_confirm" | "confirmed" | "pending_approval" | "approved" | "rejected";
+  // 2026-09-23: needed for the Per Task view's time-log breakdown modal
+  // (Sandra: "clicking on logged hours shows the breakdown of all time
+  // logs") -- Timer vs Manual vs Legacy pill, same as Projects.tsx's own
+  // Time Spent modal.
+  source: "timer" | "manual" | "legacy";
 }
 interface HolidayRow {
   id: string;
@@ -111,6 +121,10 @@ function addDays(d: Date, n: number): Date {
   r.setDate(r.getDate() + n);
   return r;
 }
+// Per Task view (DataTable) default column order -- Task ID first per
+// Sandra's ask (2026-09-23: "put the task ID as the first column").
+const TASK_HOUR_COLUMN_ORDER = ["task_number", "owner", "project", "name", "status", "timeLogStatus", "scoped", "logged", "variance"];
+
 const WEEKDAY_LABEL = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const CELL_W = 74;
 const LABEL_W = 240;
@@ -196,7 +210,6 @@ export default function HoursOverview() {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth() + 1, 0);
   });
-  const [sortBy, setSortBy] = useState<"variance" | "scoped" | "logged" | "name">("variance");
   // 2026-08-26 (Sandra: "allow selection of person to show similar to the
   // utilization snap shot") -- same reusable searchable multi-select
   // already used by WbsPlanning.tsx's Utilization snapshot panel.
@@ -238,7 +251,7 @@ export default function HoursOverview() {
           .eq("is_archived", false),
         supabase
           .from("time_entries")
-          .select("id,task_id,activity_type_id,person_id,started_at,duration_minutes,status,activity_type:non_project_activity_types ( id, name )")
+          .select("id,task_id,activity_type_id,person_id,started_at,duration_minutes,status,source,activity_type:non_project_activity_types ( id, name )")
           .in("status", ["confirmed", "approved"])
           .eq("is_archived", false),
         supabase.from("holidays").select("*"),
@@ -553,7 +566,15 @@ export default function HoursOverview() {
   // single active group/filter reads more clearly than a checklist.
   const [taskFilterPersonId, setTaskFilterPersonId] = useState<string>("");
   const [taskFilterProjectId, setTaskFilterProjectId] = useState<string>("");
-  const [taskGroupBy, setTaskGroupBy] = useState<"none" | "person" | "project">("none");
+  // 2026-09-23 (Sandra: "allow search for task ID") -- matches either the
+  // task's name or its "T-0007" id, case-insensitively, substring or
+  // exact-number.
+  const [taskSearch, setTaskSearch] = useState("");
+  // 2026-09-23 (Sandra: "clicking on logged hours shows the breakdown of
+  // all time logs") -- same modal pattern as Projects.tsx's Spent Hrs
+  // cell (setHoursBreakdownTaskId), just scoped to THIS view's own rows
+  // (leaf tasks only, own entries -- no parent/child rollup here).
+  const [breakdownTaskId, setBreakdownTaskId] = useState<string | null>(null);
 
   const filteredTaskRows = useMemo(() => {
     return taskRows.filter(
@@ -561,41 +582,150 @@ export default function HoursOverview() {
     );
   }, [taskRows, taskFilterPersonId, taskFilterProjectId]);
 
-  const sortedTaskRows = useMemo(() => {
-    const rows = [...filteredTaskRows];
-    if (sortBy === "variance") rows.sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
-    else if (sortBy === "scoped") rows.sort((a, b) => b.scoped - a.scoped);
-    else if (sortBy === "logged") rows.sort((a, b) => b.logged - a.logged);
-    else rows.sort((a, b) => a.name.localeCompare(b.name));
-    return rows;
-  }, [filteredTaskRows, sortBy]);
+  const searchedTaskRows = useMemo(() => {
+    const q = taskSearch.trim().toLowerCase();
+    if (!q) return filteredTaskRows;
+    return filteredTaskRows.filter((r) => {
+      const idStr = `T-${String(r.taskNumber).padStart(4, "0")}`.toLowerCase();
+      return r.name.toLowerCase().includes(q) || idStr.includes(q) || String(r.taskNumber).includes(q);
+    });
+  }, [filteredTaskRows, taskSearch]);
 
-  // Grouped view: same sortedTaskRows order, just bucketed into
-  // Person/Project sections with their own subtotal, instead of one flat
-  // list -- built from sortedTaskRows so within-group ordering still
-  // respects the active Sort by.
-  const groupedTaskRows = useMemo(() => {
-    if (taskGroupBy === "none") return null;
-    const groups = new Map<string, { label: string; rows: typeof sortedTaskRows }>();
-    for (const r of sortedTaskRows) {
-      const key = taskGroupBy === "person" ? r.ownerId ?? "__unassigned" : r.projectId;
-      const label = taskGroupBy === "person" ? r.owner : r.project;
-      if (!groups.has(key)) groups.set(key, { label, rows: [] });
-      groups.get(key)!.rows.push(r);
-    }
-    return Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label));
-  }, [sortedTaskRows, taskGroupBy]);
+  // 2026-09-23 (Sandra: "allow rearranging of columns and resizing") --
+  // reuses the same DataTable/useTableViews machinery Projects.tsx uses
+  // for the Tasks/Projects lists (drag a header to reorder, drag its
+  // right edge to resize, both persisted per-person via person_table_
+  // views) instead of hand-rolling a second copy of that logic. This view
+  // keeps its own simple Sort by/Group by/Team Member/Project selects
+  // (below) rather than pulling in ViewSettingsMenu/ViewFilterPills --
+  // those add board/timeline/status-filter machinery this flat, single-
+  // table view doesn't need; they just write into the same `sorts`/
+  // `groupBy` fields on the view DataTable already reads.
+  const taskHourViews = useTableViews("hours_overview_per_task", me?.id, {
+    viewType: "table",
+    columnOrder: TASK_HOUR_COLUMN_ORDER,
+    hiddenColumns: [],
+    columnWidths: {},
+    groupBy: null,
+    hiddenGroups: [],
+    color: "neutral",
+    showCount: false,
+    sorts: [{ key: "variance", direction: "desc" }],
+  });
+
+  const taskHourSortOptions: SortOption<TaskHourRowData>[] = [
+    { key: "variance", label: "Variance (largest first)", getValue: (r) => Math.abs(r.variance) },
+    { key: "scoped", label: "Scoped hours", getValue: (r) => r.scoped },
+    { key: "logged", label: "Logged hours", getValue: (r) => r.logged },
+    { key: "name", label: "Task name", getValue: (r) => r.name },
+  ];
+
+  const taskHourGroupOptions: GroupOption<TaskHourRowData>[] = [
+    { key: "person", label: "Team Member", getGroup: (r) => r.owner },
+    { key: "project", label: "Project", getGroup: (r) => r.project },
+  ];
+
+  const taskHourColumns: ColumnDef<TaskHourRowData>[] = [
+    {
+      key: "task_number",
+      label: "Task ID",
+      defaultWidth: 90,
+      maxWidth: 110,
+      alwaysVisible: true,
+      render: (r) => <span style={{ color: "var(--text-secondary)", fontSize: 11.5 }}>T-{String(r.taskNumber).padStart(4, "0")}</span>,
+    },
+    { key: "owner", label: "Team Member", defaultWidth: 150, render: (r) => <span style={{ color: "var(--text-secondary)" }}>{r.owner}</span> },
+    { key: "project", label: "Project", defaultWidth: 150, render: (r) => <span style={{ color: "var(--text-secondary)" }}>{r.project}</span> },
+    { key: "name", label: "Task", defaultWidth: 220, render: (r) => <span>{r.name}</span> },
+    {
+      key: "status",
+      label: "Status",
+      defaultWidth: 110,
+      render: (r) =>
+        r.status ? (
+          <span className={`status-pill ${taskStatusTone(statusGroupOf(TASK_STATUS_GROUPED, r.status))}`} style={{ fontSize: 11 }}>
+            {r.status}
+          </span>
+        ) : (
+          "—"
+        ),
+    },
+    {
+      key: "timeLogStatus",
+      label: <span title="Whether every logged time entry for this task has been confirmed/approved, or is still pending">Time Log Status</span>,
+      plainLabel: "Time Log Status",
+      defaultWidth: 130,
+      render: (r) => (
+        <span className={`status-pill ${TIME_LOG_STATUS_TONE[r.timeLogStatus]}`} style={{ fontSize: 11 }}>
+          {TIME_LOG_STATUS_LABEL[r.timeLogStatus]}
+        </span>
+      ),
+    },
+    {
+      key: "scoped",
+      label: "Scoped",
+      defaultWidth: 90,
+      render: (r) => <div style={{ textAlign: "right" }}>{r.scoped.toFixed(1)}h</div>,
+    },
+    {
+      key: "logged",
+      label: "Logged",
+      defaultWidth: 90,
+      alwaysVisible: true,
+      render: (r) => (
+        <div style={{ textAlign: "right" }}>
+          <button
+            onClick={() => setBreakdownTaskId(r.id)}
+            title="See the individual time logs behind this total"
+            disabled={r.logged === 0}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              font: "inherit",
+              color: r.logged > 0 ? "var(--accent)" : "inherit",
+              cursor: r.logged > 0 ? "pointer" : "default",
+              textDecoration: r.logged > 0 ? "underline" : "none",
+              textDecorationColor: r.logged > 0 ? "var(--border)" : undefined,
+              textUnderlineOffset: 2,
+            }}
+          >
+            {r.logged.toFixed(1)}h
+          </button>
+        </div>
+      ),
+    },
+    {
+      key: "variance",
+      label: "Variance",
+      defaultWidth: 100,
+      render: (r) => {
+        const varColor = r.variance > 0.05 ? "var(--danger-text)" : r.variance < -0.05 ? "var(--warning-text)" : "var(--success-text)";
+        return (
+          <div style={{ textAlign: "right", fontWeight: 600, color: varColor }}>
+            {r.variance > 0 ? "+" : ""}
+            {r.variance.toFixed(1)}h
+          </div>
+        );
+      },
+    },
+  ];
+
+  const sortedTaskRows = useMemo(
+    () => sortRows(searchedTaskRows, taskHourViews.activeView.sorts, taskHourSortOptions),
+    [searchedTaskRows, taskHourViews.activeView.sorts]
+  );
 
   const taskTotals = useMemo(
-    () => filteredTaskRows.reduce((acc, r) => ({ scoped: acc.scoped + r.scoped, logged: acc.logged + r.logged }), { scoped: 0, logged: 0 }),
-    [filteredTaskRows]
+    () => searchedTaskRows.reduce((acc, r) => ({ scoped: acc.scoped + r.scoped, logged: acc.logged + r.logged }), { scoped: 0, logged: 0 }),
+    [searchedTaskRows]
   );
 
   // Export to Excel (2026-09-23, Sandra) -- exports exactly what's on
-  // screen: respects the active Sort by/Group by/Team Member/Project
-  // filters (built from sortedTaskRows, same rows the table renders),
-  // grouping just adds a section label column rather than changing which
-  // rows are included.
+  // screen: respects the active Sort by/Group by/Team Member/Project/
+  // search filters (built from sortedTaskRows, same rows the table
+  // renders), grouping just adds a section label column rather than
+  // changing which rows are included.
   function exportTaskCsv() {
     const rows = sortedTaskRows.map((r) => [
       r.owner,
@@ -1174,26 +1304,45 @@ export default function HoursOverview() {
         </>
       ) : (
         <>
-          {/* 2026-08-26 redesign (Sandra): column order Person/Project/
-              Task/Scoped/Logged/Variance (was Task/Project/Owner/...);
-              added Group by + Filter by person/project; table now sits in
-              a proper white card (border+radius) with hover-highlighted
-              rows via .hours-per-task-row instead of bare rows straight on
-              the page's own grey background, which read as "the whole
-              page is grey" against the Day view's much more colorful grid. */}
+          {/* 2026-09-23 redesign (Sandra): ported this table onto the
+              shared DataTable component (same one Projects.tsx uses for
+              Tasks/Projects) so columns can be dragged to reorder and
+              resized -- Task ID/Group by/Sort by/filters stay as plain
+              controls above it rather than pulling in the full
+              ViewSettingsMenu (board/timeline/status-filter machinery
+              this flat single-table view doesn't need). */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+            <input
+              type="text"
+              value={taskSearch}
+              onChange={(e) => setTaskSearch(e.target.value)}
+              placeholder="Search task name or ID (e.g. T-0042)"
+              style={{ fontSize: 12, padding: "5px 8px", width: 210, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+            />
             <label style={{ fontSize: 12, color: "var(--muted)" }}>Sort by</label>
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)} style={{ fontSize: 12, padding: "4px 6px" }}>
-              <option value="variance">Variance (largest first)</option>
-              <option value="scoped">Scoped hours</option>
-              <option value="logged">Logged hours</option>
-              <option value="name">Task name</option>
+            <select
+              value={taskHourViews.activeView.sorts[0]?.key ?? "variance"}
+              onChange={(e) => taskHourViews.updateActiveView({ sorts: [{ key: e.target.value, direction: e.target.value === "name" ? "asc" : "desc" }] })}
+              style={{ fontSize: 12, padding: "4px 6px" }}
+            >
+              {taskHourSortOptions.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
             </select>
             <label style={{ fontSize: 12, color: "var(--muted)", marginLeft: 6 }}>Group by</label>
-            <select value={taskGroupBy} onChange={(e) => setTaskGroupBy(e.target.value as typeof taskGroupBy)} style={{ fontSize: 12, padding: "4px 6px" }}>
+            <select
+              value={taskHourViews.activeView.groupBy ?? "none"}
+              onChange={(e) => taskHourViews.updateActiveView({ groupBy: e.target.value === "none" ? null : e.target.value })}
+              style={{ fontSize: 12, padding: "4px 6px" }}
+            >
               <option value="none">None</option>
-              <option value="person">Team Member</option>
-              <option value="project">Project</option>
+              {taskHourGroupOptions.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
             </select>
             <label style={{ fontSize: 12, color: "var(--muted)", marginLeft: 6 }}>Team Member</label>
             <select value={taskFilterPersonId} onChange={(e) => setTaskFilterPersonId(e.target.value)} style={{ fontSize: 12, padding: "4px 6px" }}>
@@ -1217,73 +1366,105 @@ export default function HoursOverview() {
               <Download size={13} /> Export to Excel
             </button>
           </div>
-          <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)" }}>
-            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Team Member</th>
-                  <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Project</th>
-                  <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Task</th>
-                  <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Task ID</th>
-                  <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Status</th>
-                  <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }} title="Whether every logged time entry for this task has been confirmed/approved, or is still pending">Time Log Status</th>
-                  <th style={{ textAlign: "right", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Scoped</th>
-                  <th style={{ textAlign: "right", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Logged</th>
-                  <th style={{ textAlign: "right", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Variance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedTaskRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>
-                      No tasks with Scoped or Logged hours yet.
+          <div className="data-table-dense">
+            <DataTable
+              columns={taskHourColumns}
+              rows={sortedTaskRows}
+              rowKey={(r) => r.id}
+              view={taskHourViews.activeView}
+              onViewChange={taskHourViews.updateActiveView}
+              groupOptions={taskHourGroupOptions}
+              sortOptions={taskHourSortOptions}
+              emptyLabel="No tasks with Scoped or Logged hours yet."
+              groupFooterRow={(colSpan, group) => {
+                const groupScoped = group.rows.reduce((sum, r) => sum + r.scoped, 0);
+                const groupLogged = group.rows.reduce((sum, r) => sum + r.logged, 0);
+                return (
+                  <>
+                    <td colSpan={Math.max(colSpan - 3, 1)} style={{ padding: "6px 13px", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
+                      Subtotal <span style={{ fontWeight: 500, color: "var(--muted)" }}>({group.rows.length})</span>
                     </td>
-                  </tr>
-                ) : groupedTaskRows ? (
-                  groupedTaskRows.map((group) => {
-                    const groupScoped = group.rows.reduce((sum, r) => sum + r.scoped, 0);
-                    const groupLogged = group.rows.reduce((sum, r) => sum + r.logged, 0);
-                    return (
-                      <Fragment key={group.label}>
-                        <tr>
-                          <td colSpan={6} style={{ padding: "6px 13px", fontSize: 11.5, fontWeight: 700, color: "var(--navy)", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
-                            {group.label} <span style={{ fontWeight: 500, color: "var(--muted)" }}>({group.rows.length})</span>
-                          </td>
-                          <td style={{ padding: "6px 13px", textAlign: "right", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>{groupScoped.toFixed(1)}h</td>
-                          <td style={{ padding: "6px 13px", textAlign: "right", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>{groupLogged.toFixed(1)}h</td>
-                          <td style={{ padding: "6px 13px", background: "var(--bg)", borderBottom: "1px solid var(--border)" }} />
-                        </tr>
-                        {group.rows.map((r) => (
-                          <TaskHourRow key={r.id} r={r} />
-                        ))}
-                      </Fragment>
-                    );
-                  })
-                ) : (
-                  sortedTaskRows.map((r) => <TaskHourRow key={r.id} r={r} />)
-                )}
-              </tbody>
-              {sortedTaskRows.length > 0 && (
-                <tfoot>
-                  <tr>
-                    <td style={{ padding: "8px 13px", fontWeight: 600 }}>Total</td>
-                    <td style={{ padding: "8px 13px" }} />
-                    <td style={{ padding: "8px 13px" }} />
-                    <td style={{ padding: "8px 13px" }} />
-                    <td style={{ padding: "8px 13px" }} />
-                    <td style={{ padding: "8px 13px" }} />
-                    <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>{taskTotals.scoped.toFixed(1)}h</td>
-                    <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>{taskTotals.logged.toFixed(1)}h</td>
-                    <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>
-                      {(taskTotals.logged - taskTotals.scoped > 0 ? "+" : "") + (taskTotals.logged - taskTotals.scoped).toFixed(1)}h
-                    </td>
-                  </tr>
-                </tfoot>
+                    <td style={{ padding: "6px 13px", textAlign: "right", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>{groupScoped.toFixed(1)}h</td>
+                    <td style={{ padding: "6px 13px", textAlign: "right", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>{groupLogged.toFixed(1)}h</td>
+                    <td style={{ background: "var(--bg)", borderBottom: "1px solid var(--border)" }} />
+                  </>
+                );
+              }}
+              footerRow={(colSpan) => (
+                <>
+                  <td colSpan={Math.max(colSpan - 3, 1)} style={{ padding: "8px 13px", fontWeight: 600 }}>
+                    Total
+                  </td>
+                  <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>{taskTotals.scoped.toFixed(1)}h</td>
+                  <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>{taskTotals.logged.toFixed(1)}h</td>
+                  <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>
+                    {(taskTotals.logged - taskTotals.scoped > 0 ? "+" : "") + (taskTotals.logged - taskTotals.scoped).toFixed(1)}h
+                  </td>
+                </>
               )}
-            </table>
+            />
           </div>
         </>
       )}
+
+      {breakdownTaskId &&
+        (() => {
+          const row = taskRows.find((r) => r.id === breakdownTaskId);
+          if (!row) return null;
+          // 2026-09-23 (Sandra: "clicking on logged hours shows the
+          // breakdown of all time logs") -- same shape as Projects.tsx's
+          // Time Spent modal (grouped by person, entries in date order,
+          // source pill per entry), just scoped to this one task's own
+          // entries (this view has no parent/child rollup to combine).
+          const entries = timeEntries
+            .filter((e) => e.task_id === breakdownTaskId)
+            .slice()
+            .sort((a, b) => a.started_at.localeCompare(b.started_at));
+          const byPerson = new Map<string, typeof entries>();
+          for (const e of entries) {
+            if (!byPerson.has(e.person_id)) byPerson.set(e.person_id, []);
+            byPerson.get(e.person_id)!.push(e);
+          }
+          const total = entries.reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0) / 60;
+          const sourceTone: Record<string, string> = { timer: "accent", manual: "neutral", legacy: "neutral" };
+          const sourceLabel: Record<string, string> = { timer: "Timer", manual: "Manual", legacy: "Legacy" };
+          return (
+            <Modal title={`Time spent -- ${row.name}`} onClose={() => setBreakdownTaskId(null)}>
+              {entries.length === 0 ? (
+                <p style={{ fontSize: 12, color: "var(--muted)" }}>No confirmed time logged on this task yet.</p>
+              ) : (
+                <>
+                  {Array.from(byPerson.entries()).map(([personId, personEntries]) => {
+                    const personTotal = personEntries.reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0) / 60;
+                    return (
+                      <div key={personId} style={{ marginBottom: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0 4px", borderBottom: "1px solid var(--border)", fontSize: 12.5, fontWeight: 600 }}>
+                          <span>{allPeople.find((p) => p.id === personId)?.name ?? "Unknown"}</span>
+                          <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatHours(personTotal)}h</span>
+                        </div>
+                        {personEntries.map((e) => (
+                          <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", fontSize: 11.5, color: "var(--text-secondary)" }}>
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              {formatDate(e.started_at)}
+                              <span className={`status-pill ${sourceTone[e.source] ?? "neutral"}`} style={{ fontSize: 9.5, padding: "1px 5px" }}>
+                                {sourceLabel[e.source] ?? e.source}
+                              </span>
+                            </span>
+                            <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatHours((e.duration_minutes ?? 0) / 60)}h</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", fontSize: 12.5, fontWeight: 700 }}>
+                    <span>Total</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatHours(total)}h</span>
+                  </div>
+                </>
+              )}
+            </Modal>
+          );
+        })()}
     </div>
   );
 }
@@ -1314,38 +1495,4 @@ function taskStatusTone(group: "to_do" | "in_progress" | "complete" | "cancelled
   return "neutral";
 }
 
-// Extracted 2026-08-26 so both the flat and grouped render branches of the
-// "Per task" view share one row (was inlined only in the flat branch).
-function TaskHourRow({ r }: { r: TaskHourRowData }) {
-  const varColor = r.variance > 0.05 ? "var(--danger-text)" : r.variance < -0.05 ? "var(--warning-text)" : "var(--success-text)";
-  return (
-    <tr className="hours-per-task-row">
-      <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>{r.owner}</td>
-      <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>{r.project}</td>
-      <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)" }}>{r.name}</td>
-      <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)", fontSize: 11.5 }}>
-        T-{String(r.taskNumber).padStart(4, "0")}
-      </td>
-      <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)" }}>
-        {r.status ? (
-          <span className={`status-pill ${taskStatusTone(statusGroupOf(TASK_STATUS_GROUPED, r.status))}`} style={{ fontSize: 11 }}>
-            {r.status}
-          </span>
-        ) : (
-          "—"
-        )}
-      </td>
-      <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)" }}>
-        <span className={`status-pill ${TIME_LOG_STATUS_TONE[r.timeLogStatus]}`} style={{ fontSize: 11 }}>
-          {TIME_LOG_STATUS_LABEL[r.timeLogStatus]}
-        </span>
-      </td>
-      <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", textAlign: "right" }}>{r.scoped.toFixed(1)}h</td>
-      <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", textAlign: "right" }}>{r.logged.toFixed(1)}h</td>
-      <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", textAlign: "right", fontWeight: 600, color: varColor }}>
-        {r.variance > 0 ? "+" : ""}
-        {r.variance.toFixed(1)}h
-      </td>
-    </tr>
-  );
-}
+
