@@ -1,10 +1,12 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon, Download } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
 import { buildHolidaySet } from "../lib/workingDays";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
+import { TASK_STATUS_GROUPED, statusGroupOf } from "../lib/notionOptions";
+import { toCsv } from "../lib/csv";
 // Same shared allocation engine Utilization.tsx and WbsPlanning.tsx's
 // Utilization snapshot use -- see src/lib/dailyAllocation.ts. Before this,
 // "Scoped" here was a thinner, drifting copy: no PM overhead, no Time Off,
@@ -109,6 +111,34 @@ function addDays(d: Date, n: number): Date {
 const WEEKDAY_LABEL = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const CELL_W = 74;
 const LABEL_W = 240;
+
+// Export to Excel buttons (2026-09-23, Sandra) -- same CSV-via-toCsv()
+// pattern as MaterialsOutput.tsx's "Export to Excel" button (a real .csv,
+// not .xlsx -- Excel opens it natively, no new dependency needed).
+const exportBtnStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  fontSize: 11.5,
+  fontWeight: 600,
+  color: "var(--navy)",
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius-sm)",
+  padding: "5px 10px",
+  background: "var(--surface)",
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
+
+function downloadCsv(csv: string, filename: string) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 function coverageTone(scoped: number, logged: number): "neutral" | "success" | "warning" | "danger" {
   if (scoped <= 0) return logged > 0 ? "success" : "neutral";
@@ -502,6 +532,7 @@ export default function HoursOverview() {
           project: proj?.name ?? "—",
           ownerId: t.assignee_id,
           owner: owner ? (owner.is_active ? owner.name : `${owner.name} (inactive)`) : "Unassigned",
+          status: t.status,
           scoped,
           logged,
           variance: logged - scoped,
@@ -555,6 +586,38 @@ export default function HoursOverview() {
     [filteredTaskRows]
   );
 
+  // Export to Excel (2026-09-23, Sandra) -- exports exactly what's on
+  // screen: respects the active Sort by/Group by/Team Member/Project
+  // filters (built from sortedTaskRows, same rows the table renders),
+  // grouping just adds a section label column rather than changing which
+  // rows are included.
+  function exportTaskCsv() {
+    const rows = sortedTaskRows.map((r) => [r.owner, r.project, r.name, r.status ?? "—", r.scoped.toFixed(1), r.logged.toFixed(1), r.variance.toFixed(1)]);
+    const csv = toCsv(["Team Member", "Project", "Task", "Status", "Scoped (h)", "Logged (h)", "Variance (h)"], rows);
+    downloadCsv(csv, `productivity_per_task_${toISO(new Date())}.csv`);
+  }
+
+  // Same idea for Daily Activity/Scope Fulfillment -- one row per
+  // visible team member x date in the currently selected range/filters,
+  // Scoped + Logged both included regardless of which of the two grid
+  // views is active (Daily Activity's cells only show Logged, but Scoped
+  // is already computed either way and is more useful to have in the
+  // export than to leave out).
+  function exportDailyCsv() {
+    const rows: (string | number)[][] = [];
+    for (const person of visiblePeople) {
+      for (const d of days) {
+        const dateStr = toISO(d);
+        const scoped = scopedPersonTotalFor(person.id, dateStr);
+        const logged = view === "fulfillment" ? fulfillmentPersonTotalFor(person.id, dateStr) : loggedPersonTotalFor(person.id, dateStr);
+        if (scoped <= 0 && logged <= 0) continue;
+        rows.push([person.name, dateStr, scoped.toFixed(1), logged.toFixed(1)]);
+      }
+    }
+    const csv = toCsv(["Team Member", "Date", "Scoped (h)", "Logged (h)"], rows);
+    downloadCsv(csv, `${view === "fulfillment" ? "scope_fulfillment" : "daily_activity"}_${toISO(rangeStart)}_to_${toISO(rangeEnd)}.csv`);
+  }
+
   function rollupCellStyle(i: number): CSSProperties {
     return {
       width: CELL_W,
@@ -580,7 +643,7 @@ export default function HoursOverview() {
 
   return (
     <div>
-      <h1>Scoped vs Logged</h1>
+      <h1>Productivity</h1>
 
       <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
         <button
@@ -712,6 +775,9 @@ export default function HoursOverview() {
                 ))}
               </select>
             )}
+            <button onClick={exportDailyCsv} style={{ ...exportBtnStyle, marginLeft: "auto" }}>
+              <Download size={13} /> Export to Excel
+            </button>
           </div>
 
           <div ref={gridScrollRef} style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
@@ -1132,6 +1198,9 @@ export default function HoursOverview() {
                 </option>
               ))}
             </select>
+            <button onClick={exportTaskCsv} disabled={sortedTaskRows.length === 0} style={{ ...exportBtnStyle, marginLeft: "auto" }}>
+              <Download size={13} /> Export to Excel
+            </button>
           </div>
           <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)" }}>
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
@@ -1140,6 +1209,7 @@ export default function HoursOverview() {
                   <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Team Member</th>
                   <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Project</th>
                   <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Task</th>
+                  <th style={{ textAlign: "left", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Status</th>
                   <th style={{ textAlign: "right", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Scoped</th>
                   <th style={{ textAlign: "right", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Logged</th>
                   <th style={{ textAlign: "right", padding: "8px 13px", color: "var(--muted)", fontWeight: 600, fontSize: 12, borderBottom: "1px solid var(--border)" }}>Variance</th>
@@ -1148,7 +1218,7 @@ export default function HoursOverview() {
               <tbody>
                 {sortedTaskRows.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>
+                    <td colSpan={7} style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>
                       No tasks with Scoped or Logged hours yet.
                     </td>
                   </tr>
@@ -1159,7 +1229,7 @@ export default function HoursOverview() {
                     return (
                       <Fragment key={group.label}>
                         <tr>
-                          <td colSpan={3} style={{ padding: "6px 13px", fontSize: 11.5, fontWeight: 700, color: "var(--navy)", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
+                          <td colSpan={4} style={{ padding: "6px 13px", fontSize: 11.5, fontWeight: 700, color: "var(--navy)", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
                             {group.label} <span style={{ fontWeight: 500, color: "var(--muted)" }}>({group.rows.length})</span>
                           </td>
                           <td style={{ padding: "6px 13px", textAlign: "right", fontSize: 11.5, fontWeight: 700, background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>{groupScoped.toFixed(1)}h</td>
@@ -1180,6 +1250,7 @@ export default function HoursOverview() {
                 <tfoot>
                   <tr>
                     <td style={{ padding: "8px 13px", fontWeight: 600 }}>Total</td>
+                    <td style={{ padding: "8px 13px" }} />
                     <td style={{ padding: "8px 13px" }} />
                     <td style={{ padding: "8px 13px" }} />
                     <td style={{ padding: "8px 13px", textAlign: "right", fontWeight: 600 }}>{taskTotals.scoped.toFixed(1)}h</td>
@@ -1205,10 +1276,21 @@ type TaskHourRowData = {
   project: string;
   ownerId: string | null;
   owner: string;
+  status: string | null;
   scoped: number;
   logged: number;
   variance: number;
 };
+
+// Mirrors Projects.tsx's local statusTone (not exported from there) --
+// same 4-bucket grouping (statusGroupOf/TASK_STATUS_GROUPED) so the pill
+// color here matches Tasks/Projects exactly.
+function taskStatusTone(group: "to_do" | "in_progress" | "complete" | "cancelled" | null): "success" | "warning" | "danger" | "neutral" {
+  if (group === "complete") return "success";
+  if (group === "in_progress") return "warning";
+  if (group === "cancelled") return "danger";
+  return "neutral";
+}
 
 // Extracted 2026-08-26 so both the flat and grouped render branches of the
 // "Per task" view share one row (was inlined only in the flat branch).
@@ -1219,6 +1301,15 @@ function TaskHourRow({ r }: { r: TaskHourRowData }) {
       <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>{r.owner}</td>
       <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>{r.project}</td>
       <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)" }}>{r.name}</td>
+      <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)" }}>
+        {r.status ? (
+          <span className={`status-pill ${taskStatusTone(statusGroupOf(TASK_STATUS_GROUPED, r.status))}`} style={{ fontSize: 11 }}>
+            {r.status}
+          </span>
+        ) : (
+          "—"
+        )}
+      </td>
       <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", textAlign: "right" }}>{r.scoped.toFixed(1)}h</td>
       <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", textAlign: "right" }}>{r.logged.toFixed(1)}h</td>
       <td style={{ padding: "7px 13px", borderBottom: "1px solid var(--border)", textAlign: "right", fontWeight: 600, color: varColor }}>

@@ -47,7 +47,7 @@ const mainItems: NavItem[] = [
 
 const resourcePlanningItems: NavItem[] = [
   { to: "/utilization", label: "Utilization", icon: Gauge },
-  { to: "/hours-overview", label: "Scoped vs Logged", icon: Scale },
+  { to: "/hours-overview", label: "Productivity", icon: Scale },
   { to: "/time-off", label: "Time Off", icon: Palmtree },
 ];
 

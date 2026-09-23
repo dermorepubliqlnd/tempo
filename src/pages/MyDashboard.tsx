@@ -677,7 +677,7 @@ export default function MyDashboard() {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
             <div className="dash-card" style={{ marginBottom: 0 }}>
-              <SectionHeader title="Scoped vs Logged" small="This Month" to="/hours-overview?person=me" />
+              <SectionHeader title="Productivity" small="This Month" to="/hours-overview?person=me" />
               {scopedVsLoggedByProject.length === 0 ? (
                 <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing yet this month.</p>
               ) : (
