@@ -29,6 +29,7 @@ interface TeamRunningTimer {
   person_name: string;
   task_id: string | null;
   task_name: string | null;
+  task_number: number | null;
   project_id: string | null;
   project_name: string | null;
   started_at: string;
@@ -1142,7 +1143,12 @@ export default function TimeTracking() {
   // removed the More Filters popover, which was the only place an
   // Archived-visibility toggle lived; archived entries are simply
   // always hidden here now until that control comes back.
-  const archivedFilteredEntries = scopeFilteredEntries.filter((e) => !e.is_archived);
+  // 2026-09-23 (Sandra: "if a task is running, do not show it in Team
+  // Entries" -- makes sense on My/All Time too: a running entry has no
+  // duration/source/details yet, and now lives exclusively in the new
+  // Working Now section (Team/All Time) or the top single-timer bar
+  // (My Time), never duplicated into this table.
+  const archivedFilteredEntries = scopeFilteredEntries.filter((e) => !e.is_archived && e.status !== "running");
 
   // 2026-09-23 (Sandra, mockup redesign): Today/This Week KPI cards
   // always reflect the real current day/week -- unaffected by whatever
@@ -2269,25 +2275,44 @@ export default function TimeTracking() {
                   // an Action column (a running timer has no
                   // correct/archive actions -- those only apply once it
                   // finalizes into a real entry below).
+                  // 2026-09-23 (Sandra: "Working Now should follow the
+                  // same columns as Team Entries -- Task ID, Task/
+                  // Project, Assignee, Work Date, Time [started, "in
+                  // progress"], Status [Running + elapsed]. No Duration,
+                  // no Details, no Source.") -- same table shell/header
+                  // style as EntriesTable, Duration/Details/Source/
+                  // Action columns dropped since none of them apply to
+                  // an entry that hasn't finalized yet.
                   <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
                       <colgroup>
-                        <col style={{ width: 160 }} />
-                        <col />
-                        <col style={{ width: 110 }} />
-                        <col style={{ width: 110 }} />
+                        <col style={{ width: "8%" }} />
+                        <col style={{ width: "26%" }} />
+                        <col style={{ width: "16%" }} />
+                        <col style={{ width: "14%" }} />
+                        <col style={{ width: "16%" }} />
+                        <col style={{ width: "20%" }} />
                       </colgroup>
                       <thead>
                         <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
-                          <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>Assignee</th>
+                          <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>Task ID</th>
                           <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>Task / Project</th>
-                          <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" }}>Started</th>
-                          <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, textAlign: "center" }}>Status</th>
+                          <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>Assignee</th>
+                          <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" }}>Work Date</th>
+                          <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" }}>Time</th>
+                          <th style={{ padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>Status</th>
                         </tr>
                       </thead>
                       <tbody>
                         {teamRunningTimers.map((t) => (
                           <tr key={t.entry_id} style={{ borderBottom: "1px solid var(--border)" }}>
+                            <td style={{ padding: "10px 12px", fontSize: 11.5, fontWeight: 700, color: "var(--navy)", verticalAlign: "top", whiteSpace: "nowrap" }}>
+                              {t.task_number ? `T-${String(t.task_number).padStart(4, "0")}` : "—"}
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: 11.5, verticalAlign: "top" }}>
+                              <div style={{ fontWeight: 700, color: "var(--navy)" }}>{t.task_name ?? "—"}</div>
+                              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{t.project_name ?? "Non-project"}</div>
+                            </td>
                             <td style={{ padding: "10px 12px", fontSize: 11.5, verticalAlign: "top" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                 <span
@@ -2300,17 +2325,16 @@ export default function TimeTracking() {
                                 >
                                   {initials(t.person_name)}
                                 </span>
-                                <span style={{ fontWeight: 700, color: "var(--navy)" }}>{t.person_name}</span>
+                                {t.person_name}
                               </div>
                             </td>
-                            <td style={{ padding: "10px 12px", fontSize: 11.5, verticalAlign: "top" }}>
-                              <div style={{ fontWeight: 700, color: "var(--navy)" }}>{t.task_name ?? "—"}</div>
-                              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{t.project_name ?? "Non-project"}</div>
+                            <td style={{ padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top", whiteSpace: "nowrap" }}>
+                              {formatWorkDate(t.started_at)}
                             </td>
                             <td style={{ padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top", whiteSpace: "nowrap" }}>
-                              {new Date(t.started_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                              {formatClockRange(t.started_at, null)}
                             </td>
-                            <td style={{ padding: "10px 12px", verticalAlign: "top", textAlign: "center" }}>
+                            <td style={{ padding: "10px 12px", verticalAlign: "top" }}>
                               <span className="status-pill success" style={{ fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap" }}>
                                 Running · {formatElapsed(t.started_at, nowTick)}
                               </span>

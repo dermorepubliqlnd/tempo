@@ -137,3 +137,25 @@ language sql stable security definer as $$
     and (my_access_level() = 'full' or is_in_reports_to_subtree(my_person_id(), p.id))
 $$;
 grant execute on function get_team_required_hours(date, date) to authenticated;
+
+-- Fix 2: Working Now needs the Task ID (task_number, "T-0027" style) to
+-- match Team Entries' own first column (Sandra: "Working Now should
+-- follow the same columns as Team Entries -- Task ID, Task/Project,
+-- Assignee, Work Date, Time, Status"). Re-adding task_number to the
+-- return shape.
+create or replace function get_team_running_timers() returns table (
+  entry_id uuid, person_id uuid, person_name text, task_id uuid, task_name text, task_number integer,
+  project_id uuid, project_name text, started_at timestamptz
+)
+language sql stable security definer as $$
+  select te.id, te.person_id, p.name, te.task_id, t.name, t.task_number, t.project_id, pr.name, te.started_at
+  from time_entries te
+  join people p on p.id = te.person_id
+  left join tasks t on t.id = te.task_id
+  left join projects pr on pr.id = t.project_id
+  where te.status = 'running'
+    and te.person_id <> my_person_id()
+    and (my_access_level() = 'full' or is_in_reports_to_subtree(my_person_id(), te.person_id))
+  order by te.started_at asc;
+$$;
+grant execute on function get_team_running_timers() to authenticated;
