@@ -271,6 +271,181 @@ function toTimeInputValue(d = new Date()): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// 2026-09-23 (phase66, live bug: "type one letter then the next key
+// press routes to the bottom of the page") -- EntriesTable/DecisionTable
+// are defined INSIDE TimeTracking's render body, so every keystroke that
+// updated a lifted draft (notesDraft/correctDraft/editDraft/archiveNotes)
+// re-rendered TimeTracking, which redefined those tables as brand-new
+// function values -- React saw a different component `type` on every
+// keystroke and remounted the whole table, dropping input focus (the
+// very next keystroke then fell through to the page itself, and the
+// browser's default spacebar/arrow-key handling on a focus-less document
+// scrolled it to the bottom). Fix: each inline edit form below owns its
+// OWN local draft state and only reports upward via onSubmit/onConfirm
+// when the person clicks the action button -- so typing never touches
+// TimeTracking's state and never forces a remount.
+
+function RejectNoteBox({ busy, onConfirm, onCancel }: { busy: boolean; onConfirm: (note: string) => void; onCancel: () => void }) {
+  const [note, setNote] = useState("");
+  return (
+    <>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <input
+          type="text"
+          placeholder="Reason for rejecting (required)"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          style={{ flex: "1 1 220px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+        />
+        <button
+          onClick={() => onConfirm(note)}
+          disabled={busy || !note.trim()}
+          style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: note.trim() ? "var(--danger-text)" : "var(--muted)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: note.trim() ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
+        >
+          Confirm reject
+        </button>
+        <button onClick={onCancel} style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
+          Cancel
+        </button>
+      </div>
+      {!note.trim() && <div style={{ fontSize: 10, color: "var(--danger-text)", marginTop: 5 }}>A note is required to reject a time entry.</div>}
+    </>
+  );
+}
+
+function ArchiveForm({ onSubmit, onCancel }: { onSubmit: (reason: string) => void; onCancel: () => void }) {
+  const [reason, setReason] = useState("");
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <input
+        type="text"
+        placeholder="Reason (optional)"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        style={{ flex: "1 1 220px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+      />
+      <button
+        onClick={() => onSubmit(reason)}
+        style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--danger-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+      >
+        Archive
+      </button>
+      <button onClick={onCancel} style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+function EditForm({
+  row,
+  isNonProject,
+  reasonOptions,
+  nonProjectActivityTypes,
+  saving,
+  onSubmit,
+  onCancel,
+}: {
+  row: EntryRow;
+  isNonProject: boolean;
+  reasonOptions: TimeEntryReasonRow[];
+  nonProjectActivityTypes: NonProjectActivityTypeRow[];
+  saving: boolean;
+  onSubmit: (v: { date: string; startTime: string; endTime: string; reasonCategory: string; activityTypeId: string; notes: string }) => void;
+  onCancel: () => void;
+}) {
+  const start = new Date(row.started_at);
+  const end = row.ended_at ? new Date(row.ended_at) : start;
+  const [date, setDate] = useState(toDateInputValue(start));
+  const [startTime, setStartTime] = useState(toTimeInputValue(start));
+  const [endTime, setEndTime] = useState(toTimeInputValue(end));
+  const [reasonCategory, setReasonCategory] = useState(row.reason_category ?? "");
+  const [activityTypeId, setActivityTypeId] = useState(row.activity_type_id ?? "");
+  const [notes, setNotes] = useState(row.reason_notes ?? "");
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
+      <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
+      <span style={{ fontSize: 11.5, color: "var(--muted)" }}>to</span>
+      <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
+      {isNonProject ? (
+        <select value={activityTypeId} onChange={(e) => setActivityTypeId(e.target.value)} style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+          {nonProjectActivityTypes.filter((a) => a.is_active || a.id === activityTypeId).map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+      ) : (
+        <select value={reasonCategory} onChange={(e) => setReasonCategory(e.target.value)} style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+          <option value="">No reason</option>
+          {reasonOptions.filter((r) => r.is_active || r.name === reasonCategory).map((r) => (
+            <option key={r.id} value={r.name}>{r.name}</option>
+          ))}
+        </select>
+      )}
+      <input type="text" placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ flex: "1 1 160px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
+      <button
+        onClick={() => onSubmit({ date, startTime, endTime, reasonCategory, activityTypeId, notes })}
+        disabled={saving}
+        style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+      >
+        Save changes
+      </button>
+      <button onClick={onCancel} style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+function CorrectForm({
+  row,
+  reasonOptions,
+  nonProjectActivityTypes,
+  onSubmit,
+  onCancel,
+}: {
+  row: EntryRow;
+  reasonOptions: TimeEntryReasonRow[];
+  nonProjectActivityTypes: NonProjectActivityTypeRow[];
+  onSubmit: (v: { hours: string; notes: string; reasonCategory: string; activityTypeId: string }) => void;
+  onCancel: () => void;
+}) {
+  const [hours, setHours] = useState(String(Math.round(((row.duration_minutes ?? 0) / 60) * 100) / 100));
+  const [notes, setNotes] = useState("");
+  const [reasonCategory, setReasonCategory] = useState(row.reason_category ?? "");
+  const [activityTypeId, setActivityTypeId] = useState(row.activity_type_id ?? "");
+  const isNonProject = Boolean(row.activity_type_id);
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <input type="number" step="0.25" placeholder="Corrected hours" value={hours} onChange={(e) => setHours(e.target.value)} style={{ width: 110, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
+      {isNonProject ? (
+        <select value={activityTypeId} onChange={(e) => setActivityTypeId(e.target.value)} style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+          {nonProjectActivityTypes.filter((a) => a.is_active || a.id === activityTypeId).map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+      ) : (
+        <select value={reasonCategory} onChange={(e) => setReasonCategory(e.target.value)} style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+          <option value="">No reason</option>
+          {reasonOptions.filter((r) => r.is_active || r.name === reasonCategory).map((r) => (
+            <option key={r.id} value={r.name}>{r.name}</option>
+          ))}
+        </select>
+      )}
+      <input type="text" placeholder="Correction notes" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ flex: "1 1 160px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
+      <button
+        onClick={() => onSubmit({ hours, notes, reasonCategory, activityTypeId })}
+        style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+      >
+        Save correction
+      </button>
+      <button onClick={onCancel} style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 export default function TimeTracking() {
   const { person: me } = useSession();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -281,24 +456,20 @@ export default function TimeTracking() {
   const [myTasks, setMyTasks] = useState<TaskLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [decidingId, setDecidingId] = useState<string | null>(null);
-  const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
   // 2026-09-22 (Sandra: revamped decision table -- icon-only actions,
   // rejecting requires a note): which row's inline "why are you
-  // rejecting this" note box is expanded, if any.
+  // rejecting this" note box is expanded, if any. The note itself lives
+  // in RejectNoteBox's own local state (phase66) -- see the note at the
+  // top of this file about why lifting it here caused a remount-per-
+  // keystroke bug.
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [correctingId, setCorrectingId] = useState<string | null>(null);
-  const [correctDraft, setCorrectDraft] = useState<{ hours: string; notes: string; reasonCategory: string; activityTypeId: string }>({ hours: "", notes: "", reasonCategory: "", activityTypeId: "" });
   const [archivingId, setArchivingId] = useState<string | null>(null);
-  const [archiveNotes, setArchiveNotes] = useState("");
   // 2026-09-22 (Sandra: "let's allow the assignee or requestor to delete
   // or make changes with the manual time entry log" while it's still
-  // pending_approval) -- separate from correctingId/correctDraft above,
-  // which is the Full-Access-only correction flow for an already-decided
-  // entry.
+  // pending_approval) -- separate from correctingId above, which is the
+  // Full-Access-only correction flow for an already-decided entry.
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<{ date: string; startTime: string; endTime: string; reasonCategory: string; activityTypeId: string; notes: string }>({
-    date: "", startTime: "", endTime: "", reasonCategory: "", activityTypeId: "", notes: "",
-  });
   const [editSaving, setEditSaving] = useState(false);
   // Status filter (2026-09-19, Sandra: "fix the time tracking page to not
   // make it boring") -- same clickable metric-card filter as the
@@ -396,14 +567,14 @@ export default function TimeTracking() {
   // reason, then click Confirm reject), so it skips the old modal
   // confirm() to avoid asking twice; EntriesTable's older inline-note
   // flow still gets the modal since its note stays optional there.
-  async function decide(row: EntryRow, status: "approved" | "rejected", skipConfirm = false) {
+  async function decide(row: EntryRow, status: "approved" | "rejected", note?: string) {
     const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
-    if (status === "rejected" && !skipConfirm) {
+    if (status === "rejected" && note === undefined) {
       const ok = await confirm({ message: `Reject this manual time entry for ${label}?`, confirmLabel: "Reject", danger: true });
       if (!ok) return;
     }
     setDecidingId(row.id);
-    const res = await decideTimeEntry(row.id, status, notesDraft[row.id]?.trim() || null);
+    const res = await decideTimeEntry(row.id, status, note?.trim() || null);
     setDecidingId(null);
     if (res.error) {
       await alert(`Couldn't ${status === "approved" ? "approve" : "reject"} this entry: ${res.error}`);
@@ -413,8 +584,8 @@ export default function TimeTracking() {
     loadAll();
   }
 
-  async function submitCorrection(row: EntryRow) {
-    const hours = parseFloat(correctDraft.hours);
+  async function submitCorrection(row: EntryRow, v: { hours: string; notes: string; reasonCategory: string; activityTypeId: string }) {
+    const hours = parseFloat(v.hours);
     if (!hours || hours <= 0) {
       await alert("Enter a corrected duration greater than zero.");
       return;
@@ -431,9 +602,9 @@ export default function TimeTracking() {
     const res = await correctTimeEntry(
       row.id,
       Math.round(hours * 60),
-      correctDraft.notes.trim() || "Corrected by Full Access",
-      isNonProject ? undefined : correctDraft.reasonCategory || undefined,
-      isNonProject ? correctDraft.activityTypeId || undefined : undefined
+      v.notes.trim() || "Corrected by Full Access",
+      isNonProject ? undefined : v.reasonCategory || undefined,
+      isNonProject ? v.activityTypeId || undefined : undefined
     );
     if (res.error) {
       await alert(`Couldn't correct this entry: ${res.error}`);
@@ -448,12 +619,7 @@ export default function TimeTracking() {
   // soft-delete for a confirmed/approved entry. Excluded from every
   // hour rollup once archived; the row itself and its trail stay
   // visible here for audit.
-  function openArchive(row: EntryRow) {
-    setArchiveNotes("");
-    setArchivingId(row.id);
-  }
-
-  async function submitArchive(row: EntryRow) {
+  async function submitArchive(row: EntryRow, reason: string) {
     const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
     const ok = await confirm({
       message: `Archive this ${formatDuration(row.duration_minutes)} entry for ${label}? It stays on record but stops counting toward Spent Hrs, Scoped vs Logged, and dashboard totals. You can restore it anytime.`,
@@ -461,7 +627,7 @@ export default function TimeTracking() {
       danger: true,
     });
     if (!ok) return;
-    const res = await archiveTimeEntry(row.id, archiveNotes.trim() || undefined);
+    const res = await archiveTimeEntry(row.id, reason.trim() || undefined);
     if (res.error) {
       await alert(`Couldn't archive this entry: ${res.error}`);
       return;
@@ -492,32 +658,18 @@ export default function TimeTracking() {
     return row.person_id === me.id || row.requested_by === me.id || me.access_level === "full";
   }
 
-  function openEdit(row: EntryRow) {
-    const start = new Date(row.started_at);
-    const end = row.ended_at ? new Date(row.ended_at) : start;
-    setEditDraft({
-      date: toDateInputValue(start),
-      startTime: toTimeInputValue(start),
-      endTime: toTimeInputValue(end),
-      reasonCategory: row.reason_category ?? "",
-      activityTypeId: row.activity_type_id ?? "",
-      notes: row.reason_notes ?? "",
-    });
-    setEditingId(row.id);
-  }
-
-  async function submitEdit(row: EntryRow) {
-    const start = new Date(`${editDraft.date}T${editDraft.startTime}`);
-    const end = new Date(`${editDraft.date}T${editDraft.endTime}`);
+  async function submitEdit(row: EntryRow, v: { date: string; startTime: string; endTime: string; reasonCategory: string; activityTypeId: string; notes: string }) {
+    const start = new Date(`${v.date}T${v.startTime}`);
+    const end = new Date(`${v.date}T${v.endTime}`);
     if (end <= start) {
       await alert("End time must be after start time.");
       return;
     }
     setEditSaving(true);
     const res = await editPendingManualTimeEntry(row.id, start.toISOString(), end.toISOString(), {
-      reasonCategory: row.activity_type_id ? undefined : editDraft.reasonCategory || undefined,
-      activityTypeId: row.activity_type_id ? editDraft.activityTypeId || undefined : undefined,
-      notes: editDraft.notes,
+      reasonCategory: row.activity_type_id ? undefined : v.reasonCategory || undefined,
+      activityTypeId: row.activity_type_id ? v.activityTypeId || undefined : undefined,
+      notes: v.notes,
     });
     setEditSaving(false);
     if (res.error) {
@@ -734,7 +886,6 @@ export default function TimeTracking() {
               const subtitle = isNonProject ? "Non-project" : row.task?.project?.name ?? "—";
               const assigneeName = row.person?.name ?? personName(row.person_id);
               const details = row.reason_notes?.trim() || row.reason_category || "—";
-              const noteValue = notesDraft[row.id] ?? "";
               return (
                 <Fragment key={row.id}>
                   <tr style={{ borderBottom: rejecting ? "none" : "1px solid var(--border)" }}>
@@ -791,31 +942,7 @@ export default function TimeTracking() {
                   {rejecting && (
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
                       <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <input
-                            type="text"
-                            placeholder="Reason for rejecting (required)"
-                            value={noteValue}
-                            onChange={(e) => setNotesDraft((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                            style={{ flex: "1 1 220px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                          />
-                          <button
-                            onClick={() => decide(row, "rejected", true)}
-                            disabled={busy || !noteValue.trim()}
-                            style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: noteValue.trim() ? "var(--danger-text)" : "var(--muted)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: noteValue.trim() ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
-                          >
-                            Confirm reject
-                          </button>
-                          <button
-                            onClick={() => setRejectingId(null)}
-                            style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                        {!noteValue.trim() && (
-                          <div style={{ fontSize: 10, color: "var(--danger-text)", marginTop: 5 }}>A note is required to reject a time entry.</div>
-                        )}
+                        <RejectNoteBox busy={busy} onConfirm={(note) => decide(row, "rejected", note)} onCancel={() => setRejectingId(null)} />
                       </td>
                     </tr>
                   )}
@@ -958,15 +1085,7 @@ export default function TimeTracking() {
                         <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
                           {canCorrect && (
                             <button
-                              onClick={() => {
-                                setCorrectingId(row.id);
-                                setCorrectDraft({
-                                  hours: String(Math.round(((row.duration_minutes ?? 0) / 60) * 100) / 100),
-                                  notes: "",
-                                  reasonCategory: row.reason_category ?? "",
-                                  activityTypeId: row.activity_type_id ?? "",
-                                });
-                              }}
+                              onClick={() => setCorrectingId(row.id)}
                               title="Correct"
                               style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
                             >
@@ -975,7 +1094,7 @@ export default function TimeTracking() {
                           )}
                           {canArchive && (
                             <button
-                              onClick={() => openArchive(row)}
+                              onClick={() => setArchivingId(row.id)}
                               title="Archive"
                               style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--danger-text)", background: "none", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
                             >
@@ -996,7 +1115,7 @@ export default function TimeTracking() {
                       {canEditDelete && !editing && (
                         <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
                           <button
-                            onClick={() => openEdit(row)}
+                            onClick={() => setEditingId(row.id)}
                             title="Edit"
                             style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
                           >
@@ -1016,169 +1135,35 @@ export default function TimeTracking() {
                   {archiving && (
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
                       <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <input
-                            type="text"
-                            placeholder="Reason (optional)"
-                            value={archiveNotes}
-                            onChange={(e) => setArchiveNotes(e.target.value)}
-                            style={{ flex: "1 1 220px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                          />
-                          <button
-                            onClick={() => submitArchive(row)}
-                            style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--danger-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                          >
-                            Archive
-                          </button>
-                          <button
-                            onClick={() => setArchivingId(null)}
-                            style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
+                        <ArchiveForm onSubmit={(reason) => submitArchive(row, reason)} onCancel={() => setArchivingId(null)} />
                       </td>
                     </tr>
                   )}
                   {canEditDelete && editing && (
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
                       <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <input
-                            type="date"
-                            value={editDraft.date}
-                            onChange={(e) => setEditDraft((d) => ({ ...d, date: e.target.value }))}
-                            style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                          />
-                          <input
-                            type="time"
-                            value={editDraft.startTime}
-                            onChange={(e) => setEditDraft((d) => ({ ...d, startTime: e.target.value }))}
-                            style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                          />
-                          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>to</span>
-                          <input
-                            type="time"
-                            value={editDraft.endTime}
-                            onChange={(e) => setEditDraft((d) => ({ ...d, endTime: e.target.value }))}
-                            style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                          />
-                          {isNonProject ? (
-                            <select
-                              value={editDraft.activityTypeId}
-                              onChange={(e) => setEditDraft((d) => ({ ...d, activityTypeId: e.target.value }))}
-                              style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                            >
-                              {nonProjectActivityTypes
-                                .filter((a) => a.is_active || a.id === editDraft.activityTypeId)
-                                .map((a) => (
-                                  <option key={a.id} value={a.id}>
-                                    {a.name}
-                                  </option>
-                                ))}
-                            </select>
-                          ) : (
-                            <select
-                              value={editDraft.reasonCategory}
-                              onChange={(e) => setEditDraft((d) => ({ ...d, reasonCategory: e.target.value }))}
-                              style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                            >
-                              <option value="">No reason</option>
-                              {reasonOptions
-                                .filter((r) => r.is_active || r.name === editDraft.reasonCategory)
-                                .map((r) => (
-                                  <option key={r.id} value={r.name}>
-                                    {r.name}
-                                  </option>
-                                ))}
-                            </select>
-                          )}
-                          <input
-                            type="text"
-                            placeholder="Notes"
-                            value={editDraft.notes}
-                            onChange={(e) => setEditDraft((d) => ({ ...d, notes: e.target.value }))}
-                            style={{ flex: "1 1 160px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                          />
-                          <button
-                            onClick={() => submitEdit(row)}
-                            disabled={editSaving}
-                            style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                          >
-                            Save changes
-                          </button>
-                          <button
-                            onClick={() => setEditingId(null)}
-                            style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
+                        <EditForm
+                          row={row}
+                          isNonProject={isNonProject}
+                          reasonOptions={reasonOptions}
+                          nonProjectActivityTypes={nonProjectActivityTypes}
+                          saving={editSaving}
+                          onSubmit={(v) => submitEdit(row, v)}
+                          onCancel={() => setEditingId(null)}
+                        />
                       </td>
                     </tr>
                   )}
                   {canCorrect && correcting && (
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
                       <td colSpan={9} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <input
-                            type="number"
-                            step="0.25"
-                            placeholder="Corrected hours"
-                            value={correctDraft.hours}
-                            onChange={(e) => setCorrectDraft((d) => ({ ...d, hours: e.target.value }))}
-                            style={{ width: 110, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                          />
-                          {row.activity_type_id ? (
-                            <select
-                              value={correctDraft.activityTypeId}
-                              onChange={(e) => setCorrectDraft((d) => ({ ...d, activityTypeId: e.target.value }))}
-                              style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                            >
-                              {nonProjectActivityTypes
-                                .filter((a) => a.is_active || a.id === correctDraft.activityTypeId)
-                                .map((a) => (
-                                  <option key={a.id} value={a.id}>
-                                    {a.name}
-                                  </option>
-                                ))}
-                            </select>
-                          ) : (
-                            <select
-                              value={correctDraft.reasonCategory}
-                              onChange={(e) => setCorrectDraft((d) => ({ ...d, reasonCategory: e.target.value }))}
-                              style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                            >
-                              <option value="">No reason</option>
-                              {reasonOptions
-                                .filter((r) => r.is_active || r.name === correctDraft.reasonCategory)
-                                .map((r) => (
-                                  <option key={r.id} value={r.name}>
-                                    {r.name}
-                                  </option>
-                                ))}
-                            </select>
-                          )}
-                          <input
-                            type="text"
-                            placeholder="Correction notes"
-                            value={correctDraft.notes}
-                            onChange={(e) => setCorrectDraft((d) => ({ ...d, notes: e.target.value }))}
-                            style={{ flex: "1 1 160px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                          />
-                          <button
-                            onClick={() => submitCorrection(row)}
-                            style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                          >
-                            Save correction
-                          </button>
-                          <button
-                            onClick={() => setCorrectingId(null)}
-                            style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
+                        <CorrectForm
+                          row={row}
+                          reasonOptions={reasonOptions}
+                          nonProjectActivityTypes={nonProjectActivityTypes}
+                          onSubmit={(v) => submitCorrection(row, v)}
+                          onCancel={() => setCorrectingId(null)}
+                        />
                       </td>
                     </tr>
                   )}

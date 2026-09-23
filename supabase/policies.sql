@@ -1005,6 +1005,7 @@ begin
     raise exception 'this entry is already archived';
   end if;
 
+  perform set_config('app.bypass_time_entry_lock', 'on', true);
   update time_entries
     set is_archived = true,
         archived_at = now(),
@@ -1033,6 +1034,7 @@ begin
     raise exception 'this entry is not archived';
   end if;
 
+  perform set_config('app.bypass_time_entry_lock', 'on', true);
   update time_entries
     set is_archived = false,
         archived_at = null,
