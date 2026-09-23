@@ -277,6 +277,13 @@ export interface TaskRow {
   // before this phase.
   created_at: string;
   created_by: string | null;
+  // Phase 67 (2026-09-23, Sandra): "add task ids ... If deleted hard or
+  // soft, no need to recycle the number to not break sequence." Stable,
+  // sequence-backed integer (see supabase/phase67_migration.sql), same
+  // treatment as projects.project_number (Project ID) -- read-only,
+  // assigned once by the DB, never reused (a hard-deleted or archived
+  // task just leaves a gap, by design).
+  task_number: number;
 }
 
 // Lightweight projection of extension_requests, fetched alongside
@@ -339,7 +346,7 @@ const TASK_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["project", "timing_variance_days",
 // own Calendar view doesn't support grouping either -- confirmed with
 // Sandra, not building it).
 const TASK_CALENDAR_DEFAULT_HIDDEN_COLUMNS = ["status", "timing", "validated_completion_date", "validated_by", "actual_completion_date", "estimated_hours", "time_spent_hours", "timing_variance_days", "hours_variance", "hours_variance_pct", "work_type", "output_type", "output_count"];
-const TASK_COLUMN_ORDER = ["name", "project", "assignee", "status", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "effort", "timing_variance_days", "due_date_ext", "work_type", "output_type", "output_count", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
+const TASK_COLUMN_ORDER = ["name", "task_number", "project", "assignee", "status", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "effort", "timing_variance_days", "due_date_ext", "work_type", "output_type", "output_count", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
 
 // "Fun, not corporate" icons for Task Effort (Sandra's request) — a light
 // feather for quick work, a weight plate for a moderate lift, and a flexed
@@ -4289,6 +4296,18 @@ export default function Projects() {
         },
       },
       {
+        // Phase 67 (2026-09-23, Sandra: "add task ids ... leaving it up
+        // to you to assign IDs to all task existing") -- read-only, no
+        // edit path anywhere (assigned once by the DB, see task_number in
+        // supabase/phase67_migration.sql), same treatment as Projects'
+        // own Project ID column.
+        key: "task_number",
+        label: "Task ID",
+        defaultWidth: 90,
+        maxWidth: 110,
+        render: (t) => <span>T-{String(t.task_number).padStart(4, "0")}</span>,
+      },
+      {
         // Phase 51 (2026-09-21, Sandra): "Created At" -- read-only, no
         // edit path (auto-stamped on insert, see phase51_migration.sql),
         // same treatment as Projects' own "Created" column.
@@ -4618,6 +4637,7 @@ export default function Projects() {
       label: "Due Date Ext.",
       getValue: (t) => ["No Extension", "Requested", "Rejected", "Extended"].indexOf(dueDateExtStatus(t).label),
     },
+    { key: "task_number", label: "Task ID", getValue: (t) => t.task_number },
     { key: "created_at", label: "Created", getValue: (t) => new Date(t.created_at).getTime() },
     { key: "created_by", label: "Created By", getValue: (t) => ownerName(t.created_by) },
   ];
@@ -4633,7 +4653,9 @@ export default function Projects() {
     // 2 = 2026-09-21: new Created/Created By columns inserted at the end
     // -- without this bump, anyone with an already-saved "default" view
     // never sees them at all.
-    columnOrderVersion: 2,
+    // 3 = 2026-09-23: new Task ID column inserted right after Name -- same
+    // reasoning as bump 2.
+    columnOrderVersion: 3,
     hiddenColumns: [],
     columnWidths: {},
     groupBy: "project",
