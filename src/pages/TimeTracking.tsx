@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ShieldCheck, ChevronRight, ChevronLeft, ChevronDown, Pencil, Timer, Trash2, Archive, RotateCcw, Plus, Search, X, CalendarDays, AlertCircle, ListChecks } from "lucide-react";
+import { ShieldCheck, ChevronRight, ChevronLeft, ChevronDown, Pencil, Timer, Trash2, Archive, RotateCcw, Plus, Search, X, CalendarDays, AlertCircle, ListChecks, Radio } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
@@ -14,6 +14,36 @@ interface PersonLite {
   id: string;
   name: string;
   reports_to: string | null;
+}
+
+// 2026-09-23 (Team Time supervisor view, Sandra's "Working Now" spec) --
+// shape returned by the new get_team_running_timers() RPC
+// (supabase/phase85_migration.sql). Flat/display-ready (already joined
+// to people/tasks/projects server-side) so no extra client-side lookups
+// are needed, and SECURITY DEFINER-scoped to the caller's own
+// reports_to subtree (or everyone, for Full Access) -- never the whole
+// org for a regular supervisor.
+interface TeamRunningTimer {
+  entry_id: string;
+  person_id: string;
+  person_name: string;
+  task_id: string | null;
+  task_name: string | null;
+  project_id: string | null;
+  project_name: string | null;
+  started_at: string;
+}
+
+// Shape returned by get_team_required_hours() -- one row per
+// person/day in the requested range, already applying the same
+// off(0)/holiday(0)/half-day(50%)/full-rate rule as
+// expectedHoursForDay, and the same visibility scoping as above.
+interface TeamRequiredHoursRow {
+  person_id: string;
+  person_name: string;
+  date: string;
+  is_holiday: boolean;
+  expected_hours: number;
 }
 
 // Time Logging Reasons (Phase 37, 2026-09-03) -- admin-configurable via
@@ -686,6 +716,22 @@ export default function TimeTracking() {
   // per Phase 81's scope guard), so this is a small, cheap query.
   const [myAvailability, setMyAvailability] = useState<{ date: string; status: "off" | "half_day" }[]>([]);
   const [holidayDates, setHolidayDates] = useState<Set<string>>(new Set());
+  // 2026-09-23 (Team Time supervisor view) -- Working Now (currently
+  // running timers across the caller's team) + Team Required Hours
+  // (per-person/day expected hours, for the Today's Logged/This Week
+  // KPI cards' denominators on the Team/All Time tabs). Both come from
+  // new SECURITY DEFINER RPCs (see supabase/phase85_migration.sql) so
+  // visibility is enforced server-side, not just by hiding UI -- see
+  // [[project_capaciq_time_tracking_bands_compliance_and_prefs_2026_09_23]]
+  // for why Team/All Time never reuse the single-person daily bands.
+  const [teamRunningTimers, setTeamRunningTimers] = useState<TeamRunningTimer[]>([]);
+  const [teamRequiredHours, setTeamRequiredHours] = useState<TeamRequiredHoursRow[]>([]);
+  // Ticks every 30s purely to re-render Working Now's elapsed-time
+  // labels ("42m", "1h 13m") without needing a fresh network fetch --
+  // the actual timer LIST is refreshed separately (see the polling
+  // effect below), mirroring TimeTrackingContext's existing 60s-poll
+  // pattern rather than introducing realtime infrastructure.
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [logReasonCategory, setLogReasonCategory] = useState("");
   const [logNotes, setLogNotes] = useState("");
   const [logError, setLogError] = useState<string | null>(null);
@@ -741,6 +787,42 @@ export default function TimeTracking() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.id]);
+
+  // 2026-09-23 (Team Time supervisor view) -- Working Now + Team
+  // Required Hours only matter once someone is actually looking at the
+  // Team/All Time tab, so this stays idle (no requests, no polling) on
+  // My Time. Refetches every 60s while active -- the same lightweight
+  // polling cadence TimeTrackingContext already uses for the single-
+  // person timer indicator, rather than adding realtime subscriptions.
+  useEffect(() => {
+    if (scope === "mine" || !me?.id) return;
+    let cancelled = false;
+    async function loadTeamSupervisorData() {
+      const weekStart = toDateInputValue(startOfWeek(new Date()));
+      const weekEnd = toDateInputValue(addDays(startOfWeek(new Date()), 6));
+      const [{ data: timers, error: timersErr }, { data: required, error: requiredErr }] = await Promise.all([
+        supabase.rpc("get_team_running_timers"),
+        supabase.rpc("get_team_required_hours", { p_start: weekStart, p_end: weekEnd }),
+      ]);
+      if (cancelled) return;
+      if (!timersErr) setTeamRunningTimers((timers as TeamRunningTimer[]) ?? []);
+      if (!requiredErr) setTeamRequiredHours((required as TeamRequiredHoursRow[]) ?? []);
+    }
+    loadTeamSupervisorData();
+    const interval = window.setInterval(loadTeamSupervisorData, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [scope, me?.id]);
+
+  // Elapsed-time ticker for Working Now's "42m" / "1h 13m" labels --
+  // purely a re-render pulse, doesn't refetch data (that's the 60s poll
+  // above).
+  useEffect(() => {
+    const interval = window.setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   async function submitCorrection(row: EntryRow, v: { hours: string; notes: string; reasonCategory: string; activityTypeId: string }) {
     const hours = parseFloat(v.hours);
@@ -1094,6 +1176,37 @@ export default function TimeTracking() {
   const weeklyTargetMinutes = [0, 1, 2, 3, 4]
     .map((i) => myExpectedHoursFor(toDateInputValue(addDays(startOfWeek(new Date()), i))) * 60)
     .reduce((sum, m) => sum + m, 0);
+
+  // 2026-09-23 (Team Time supervisor view, Sandra: "Team Required Hours
+  // must NOT default to 7.5 x team size... sum of each eligible
+  // member's actual required hours for that day") -- teamRequiredHours
+  // already excludes me (see the SQL fix appended to
+  // supabase/phase85_migration.sql) and is already scoped server-side
+  // to my reports_to subtree (or everyone, for Full Access), so this is
+  // a plain sum, not a re-filter. Today's figure naturally reduces to
+  // 7.5h x headcount only when the whole team happens to be on a normal
+  // schedule that day -- a computed result, not a hardcoded assumption,
+  // per her explicit ask.
+  const teamTodayRequiredMinutes = teamRequiredHours
+    .filter((r) => r.date === todayKey)
+    .reduce((sum, r) => sum + r.expected_hours * 60, 0);
+  const teamThisWeekWeekdayKeys = new Set([0, 1, 2, 3, 4].map((i) => toDateInputValue(addDays(startOfWeek(new Date()), i))));
+  const teamWeeklyRequiredMinutes = teamRequiredHours
+    .filter((r) => teamThisWeekWeekdayKeys.has(r.date))
+    .reduce((sum, r) => sum + r.expected_hours * 60, 0);
+
+  // "N people working now" -- one running timer per person (the app
+  // enforces a single global timer per person via a DB partial unique
+  // index), so entry count and person count are always equal; kept as a
+  // separate dedupe here anyway in case that constraint ever loosens.
+  const teamWorkingNowCount = new Set(teamRunningTimers.map((t) => t.person_id)).size;
+
+  function formatElapsed(startedAt: string, nowMs: number): string {
+    const mins = Math.max(0, Math.round((nowMs - new Date(startedAt).getTime()) / 60000));
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return h > 0 ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
+  }
 
   // Date-range browser -- narrows the table + Total Entries/Needs
   // Attention KPIs (Today/This Week above are exempt, see comment).
@@ -1796,42 +1909,32 @@ export default function TimeTracking() {
             ))}
           </div>
 
-          {/* 2026-09-23 (Sandra mockup redesign, then: "use colors to
-              match how we do it in productivity logs... box filled with
-              the pale color BG too and follow the dark text color
-              scheme") -- Today's Logs/This Week reuse the same 6-tier
-              loggedHoursTier() bands as Daily Activity/My Dashboard (see
-              [[project_capaciq_logged_hours_6tier_bands_2026_09_23]]);
-              This Week has no dedicated weekly scale, so it normalizes
-              to a daily-equivalent (weekly hours / 5 workdays) and
-              reuses the exact same daily thresholds. Total Entries and
-              Needs Attention both reflect whatever date range + filters
-              are currently active below and keep their previous
-              (unfilled) styling since they aren't an hours/percentage
-              band. Timer Compliance is a 5th card (Sandra: "add a
-              manual vs timer metric... just one number... at least 75%
-              is good") with its own 3-tier percentage scale. */}
+          {/* 2026-09-23 (Sandra mockup redesign, then Team Time
+              supervisor view) -- Today's Logs/This Week reuse the same
+              6-tier loggedHoursTier() bands as Daily Activity/My
+              Dashboard. On My Time the denominator is my own real
+              expected hours (dailyTargetMinutes/weeklyTargetMinutes);
+              on Team/All Time it's now the REAL sum of the team's
+              required hours for the day/week (teamTodayRequiredMinutes/
+              teamWeeklyRequiredMinutes, from get_team_required_hours --
+              see [[project_capaciq_time_tracking_bands_compliance_and_prefs_2026_09_23]]
+              for why this replaces the earlier "always neutral on
+              Team/All Time" guard: that guard existed because the old
+              denominator was always MY OWN target regardless of scope,
+              which made any multi-person total look artificially
+              "significantly above" -- now that the denominator scales
+              with the team too, the ratio is genuinely meaningful and
+              can be banded like any other scope. Total Entries/Needs
+              Attention/Timer Compliance are unchanged. Active Timers is
+              a new card, Team/All Time only (Sandra's "Working Now"
+              spec) -- reflects ONLY currently-running timers, not
+              logged/finalized hours. */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginTop: 4, marginBottom: 14 }}>
             {(() => {
-              // 2026-09-23: the daily-hours band thresholds assume a
-              // SINGLE person's day/week (they're the same scale
-              // Daily Activity/My Dashboard use per-person) -- applying
-              // them to a Team/All Time aggregate would paint almost
-              // any multi-person total "Significantly above" purely
-              // from headcount, which is misleading rather than
-              // informative. So the band coloring only activates on My
-              // Time; Team/All Time keep a neutral, unfilled look for
-              // these two cards (Timer Compliance isn't headcount-
-              // sensitive the same way, so it keeps its own bands on
-              // every scope).
-              const todayTier =
-                scope === "mine"
-                  ? loggedHoursTier(todayMinutes / 60, dailyTargetMinutes / 60)
-                  : { bg: undefined, fg: "var(--navy)", tone: "slate" as const };
-              const weekTier =
-                scope === "mine"
-                  ? loggedHoursTier(thisWeekMinutes / 60, weeklyTargetMinutes / 60)
-                  : { bg: undefined, fg: "var(--navy)", tone: "slate" as const };
+              const effectiveTodayTargetMinutes = scope === "mine" ? dailyTargetMinutes : teamTodayRequiredMinutes;
+              const effectiveWeekTargetMinutes = scope === "mine" ? weeklyTargetMinutes : teamWeeklyRequiredMinutes;
+              const todayTier = loggedHoursTier(todayMinutes / 60, effectiveTodayTargetMinutes / 60);
+              const weekTier = loggedHoursTier(thisWeekMinutes / 60, effectiveWeekTargetMinutes / 60);
               const complianceTier =
                 timerCompliancePct === null
                   ? { bg: "var(--hover-bg)", fg: "var(--muted)", tone: "neutral" as const }
@@ -1853,11 +1956,11 @@ export default function TimeTracking() {
                 // 2026-09-23 (Sandra: "if an employee is on approved full-day
                 // time off, the day should not be evaluated as underworked
                 // ... show 'Time Off' instead of 0h with a red/low status")
-                // -- only meaningful on My Time (this is a single person's
-                // own target); Team/All Time never collapse to this since
-                // dailyTargetMinutes is always MY OWN target regardless of
-                // scope.
-                ...(scope === "mine" && dailyTargetMinutes <= 0 && todayMinutes <= 0
+                // -- applies on any scope now: on My Time it means I'm off
+                // today; on Team/All Time it means the ENTIRE visible team
+                // has 0 required hours today (rare, but same principle --
+                // an all-off day shouldn't read as "critically underworked").
+                ...(effectiveTodayTargetMinutes <= 0 && todayMinutes <= 0
                   ? [
                       {
                         key: "today",
@@ -1878,7 +1981,7 @@ export default function TimeTracking() {
                         cardFg: todayTier.fg,
                         label: "Today's Logs",
                         value: `${(Math.round((todayMinutes / 60) * 100) / 100).toFixed(2)}h`,
-                        caption: dailyTargetMinutes > 0 ? `of ${(dailyTargetMinutes / 60).toFixed(2)}h target` : undefined,
+                        caption: effectiveTodayTargetMinutes > 0 ? `of ${(effectiveTodayTargetMinutes / 60).toFixed(2)}h expected` : undefined,
                       },
                     ]),
                 {
@@ -1889,8 +1992,25 @@ export default function TimeTracking() {
                   cardFg: weekTier.fg,
                   label: "This Week",
                   value: `${(Math.round((thisWeekMinutes / 60) * 100) / 100).toFixed(2)}h`,
-                  caption: weeklyTargetMinutes > 0 ? `of ${(weeklyTargetMinutes / 60).toFixed(2)}h target` : undefined,
+                  caption: effectiveWeekTargetMinutes > 0 ? `of ${(effectiveWeekTargetMinutes / 60).toFixed(2)}h expected` : undefined,
                 },
+                // 2026-09-23 (Sandra's "Working Now" spec, Active Timers
+                // card): Team/All Time only -- reflects ONLY currently-
+                // running timers (get_team_running_timers), explicitly
+                // NOT counted into Today's Logged until each one stops
+                // and finalizes into a real entry.
+                ...(scope !== "mine"
+                  ? [
+                      {
+                        key: "activeTimers",
+                        icon: <Radio size={15} />,
+                        tone: teamWorkingNowCount > 0 ? "success" : "slate",
+                        label: "Active Timers",
+                        value: String(teamWorkingNowCount),
+                        caption: teamWorkingNowCount > 0 ? `${teamWorkingNowCount} people working now` : "No one currently tracking",
+                      },
+                    ]
+                  : []),
                 {
                   key: "total",
                   icon: <ListChecks size={15} />,
@@ -2096,6 +2216,56 @@ export default function TimeTracking() {
               </button>
             )}
           </div>
+
+          {/* 2026-09-23 (Team Time supervisor view, Sandra's "Working
+              Now" spec) -- currently-running timers across the visible
+              team, placed above the entries table per her explicit
+              ordering ("before confirmed/approved, pending logs").
+              Reuses the SAME time_entries rows the rest of the app
+              already tracks (via get_team_running_timers, a thin
+              SECURITY DEFINER view over time_entries where
+              status='running') -- no separate "supervisor timer"
+              dataset. A running timer's in-progress duration is
+              deliberately NOT part of Today's Logged above; it only
+              counts once it stops and finalizes into a real entry
+              (disappearing from here and appearing in the table below),
+              which avoids inflating totals from abandoned/auto-stopped/
+              corrected/rejected timers. */}
+          {scope !== "mine" && (
+            <div style={{ marginTop: 10, marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                <Radio size={14} color="var(--accent)" />
+                <h2 style={{ margin: 0, fontSize: 13 }}>Working Now {teamRunningTimers.length > 0 ? `(${teamRunningTimers.length})` : ""}</h2>
+              </div>
+              {teamRunningTimers.length === 0 ? (
+                <div style={{ padding: "10px 14px", borderRadius: 10, border: "1px dashed var(--border)", fontSize: 12, color: "var(--muted)" }}>
+                  No active timers right now
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {teamRunningTimers.map((t) => (
+                    <div
+                      key={t.entry_id}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10, padding: "9px 14px",
+                        borderRadius: 10, border: "1px solid var(--border)", background: "var(--success-bg, #eafaf1)",
+                      }}
+                    >
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--success-text, #1c9c63)", flexShrink: 0 }} />
+                      <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", minWidth: 130 }}>{t.person_name}</span>
+                      <span style={{ fontSize: 12, color: "var(--text-secondary)", flex: 1 }}>
+                        {t.task_name ?? "—"}
+                        {t.project_name ? <span style={{ color: "var(--muted)" }}> · {t.project_name}</span> : null}
+                      </span>
+                      <span className="status-pill success" style={{ fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+                        {formatElapsed(t.started_at, nowTick)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 2026-09-23 (Sandra: "all approvals will not go to Approval
               Center only" -- decisions happen exclusively in Approval
