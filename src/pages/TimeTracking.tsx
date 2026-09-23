@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ShieldCheck, ChevronRight, Pencil, Timer, Trash2, Archive, RotateCcw } from "lucide-react";
+import { ShieldCheck, ChevronRight, ChevronLeft, ChevronDown, Pencil, Timer, Trash2, Archive, RotateCcw, Plus, Search, X, CalendarDays, AlertCircle, ListChecks } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
 import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, editPendingManualTimeEntry, deletePendingManualTimeEntry, archiveTimeEntry, unarchiveTimeEntry } from "../lib/timeTracking";
 import { useSearchParams } from "react-router-dom";
+import Modal from "../components/Modal";
 
 interface PersonLite {
   id: string;
@@ -277,6 +278,68 @@ function toTimeInputValue(d = new Date()): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// Date-range browser helpers (2026-09-23). Monday-start week, matching
+// the 5-day (Mon-Fri) workweek daily_capacity_hours is meant to cover.
+function startOfWeek(d: Date): Date {
+  const r = new Date(d);
+  const day = r.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  r.setDate(r.getDate() + diff);
+  r.setHours(0, 0, 0, 0);
+  return r;
+}
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+function endOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+// Given a preset + anchor date, returns the [start, end] local date keys
+// (YYYY-MM-DD, inclusive) that preset covers.
+function rangeForPreset(preset: "today" | "this_week" | "last_week" | "this_month" | "custom", anchor: Date, customStart: string, customEnd: string): [string, string] {
+  if (preset === "custom") return [customStart, customEnd];
+  if (preset === "today") return [toDateInputValue(anchor), toDateInputValue(anchor)];
+  if (preset === "this_week") {
+    const s = startOfWeek(anchor);
+    return [toDateInputValue(s), toDateInputValue(addDays(s, 6))];
+  }
+  if (preset === "last_week") {
+    const s = addDays(startOfWeek(anchor), -7);
+    return [toDateInputValue(s), toDateInputValue(addDays(s, 6))];
+  }
+  // this_month
+  return [toDateInputValue(startOfMonth(anchor)), toDateInputValue(endOfMonth(anchor))];
+}
+// Steps the anchor by one preset-unit (day/week/month) in either
+// direction, used by the range browser's < > arrows.
+function stepAnchor(preset: "today" | "this_week" | "last_week" | "this_month" | "custom", anchor: Date, dir: 1 | -1): Date {
+  if (preset === "today") return addDays(anchor, dir);
+  if (preset === "this_week" || preset === "last_week") return addDays(anchor, dir * 7);
+  if (preset === "this_month") {
+    const r = new Date(anchor);
+    r.setMonth(r.getMonth() + dir);
+    return r;
+  }
+  return anchor;
+}
+function formatRangeLabel(startKey: string, endKey: string): string {
+  const s = new Date(startKey + "T00:00:00");
+  const e = new Date(endKey + "T00:00:00");
+  const sameYear = s.getFullYear() === e.getFullYear();
+  const sameMonth = sameYear && s.getMonth() === e.getMonth();
+  if (startKey === endKey) {
+    return s.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  }
+  const startLabel = s.toLocaleDateString(undefined, sameMonth ? { month: "short", day: "numeric" } : { month: "short", day: "numeric" });
+  const endLabel = e.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return `${startLabel} – ${endLabel}`;
+}
+
 // 2026-09-23 (phase66, live bug: "type one letter then the next key
 // press routes to the bottom of the page") -- EntriesTable/DecisionTable
 // are defined INSIDE TimeTracking's render body, so every keystroke that
@@ -453,6 +516,40 @@ export default function TimeTracking() {
   // reports -- see myTeamIds below). All Time only appears for Full
   // Access, reusing the same access_level check used everywhere else.
   const [scope, setScope] = useState<"mine" | "team" | "all">("mine");
+
+  // 2026-09-23 (Sandra: mockup-driven redesign -- search/filters/sort,
+  // date-range browsing, group-by-date, a single Add Time button) --
+  // Source/search/sort/grouping are new; statusFilter above is reused
+  // but now driven by a real <select> in the filter row instead of the
+  // old clickable status-count cards (those cards are gone -- replaced
+  // by the Today/This Week/Total Entries/Needs Attention KPI row).
+  const [sourceFilter, setSourceFilter] = useState<"all" | "manual" | "timer">("all");
+  const [searchText, setSearchText] = useState("");
+  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "duration_desc" | "duration_asc">("date_desc");
+  const [groupByDate, setGroupByDate] = useState(false);
+  const [groupOrder, setGroupOrder] = useState<"newest" | "oldest">("newest");
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+
+  // Date-range browser (Today/This Week/Last Week/This Month/Custom +
+  // prev/next arrows), same idea as a calendar app's range picker.
+  // datePreset drives which range function applies to rangeAnchor;
+  // clicking a preset button resets the anchor to today, the arrows
+  // step the anchor by that preset's unit (day/week/month). This is
+  // separate from the Today/This Week KPI cards below, which always
+  // reflect the real current day/week regardless of what's being
+  // browsed here.
+  const [datePreset, setDatePreset] = useState<"today" | "this_week" | "last_week" | "this_month" | "custom">("this_week");
+  const [rangeAnchor, setRangeAnchor] = useState(() => new Date());
+  const [customStart, setCustomStart] = useState(() => toDateInputValue());
+  const [customEnd, setCustomEnd] = useState(() => toDateInputValue());
+
+  // Add Time (2026-09-23, Sandra: "let's revert to one button with
+  // dropdown so they can select if it's Project or Non project") --
+  // replaces the old always-visible "Log time" card + inline Project
+  // task/Non-project toggle with a single button, a small dropdown to
+  // pick the mode, and the same form fields now inside a Modal.
+  const [addTimeMenuOpen, setAddTimeMenuOpen] = useState(false);
 
   // 2026-09-22 (Sandra: non-project time -- meetings, team huddles --
   // shouldn't have to fake a task under a real project): toggle at the
@@ -791,13 +888,98 @@ export default function TimeTracking() {
       : scope === "team"
       ? projectFilteredEntries.filter((e) => myTeamIds.has(e.person_id))
       : projectFilteredEntries;
+  const archivedFilteredEntries = showArchived ? scopeFilteredEntries : scopeFilteredEntries.filter((e) => !e.is_archived);
+
+  // 2026-09-23 (Sandra, mockup redesign): Today/This Week KPI cards
+  // always reflect the real current day/week -- unaffected by whatever
+  // range someone's currently browsing in the date-range picker below.
+  const todayKey = toDateInputValue();
+  const thisWeekStartKey = toDateInputValue(startOfWeek(new Date()));
+  const thisWeekEndKey = toDateInputValue(addDays(startOfWeek(new Date()), 6));
+  const kpiCountedStatuses = new Set(["confirmed", "approved"]);
+  const todayMinutes = archivedFilteredEntries
+    .filter((e) => toDateInputValue(new Date(e.started_at)) === todayKey && kpiCountedStatuses.has(e.status))
+    .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
+  const thisWeekMinutes = archivedFilteredEntries
+    .filter((e) => {
+      const key = toDateInputValue(new Date(e.started_at));
+      return key >= thisWeekStartKey && key <= thisWeekEndKey && kpiCountedStatuses.has(e.status);
+    })
+    .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
+  const dailyTargetMinutes = (me?.daily_capacity_hours ?? 0) * 60;
+  const weeklyTargetMinutes = dailyTargetMinutes * 5;
+
+  // Date-range browser -- narrows the table + Total Entries/Needs
+  // Attention KPIs (Today/This Week above are exempt, see comment).
+  const [dateRangeStart, dateRangeEnd] = rangeForPreset(datePreset, rangeAnchor, customStart, customEnd);
+  const dateFilteredEntries = archivedFilteredEntries.filter((e) => {
+    const key = toDateInputValue(new Date(e.started_at));
+    return key >= dateRangeStart && key <= dateRangeEnd;
+  });
+
+  // Needs Attention (Sandra: "combination of those not approved yet or
+  // rejected -- anything except approved/confirmed, so they can see if
+  // there's anything that's not been approved yet") -- everything still
+  // in flight: awaiting the person's own confirmation, awaiting
+  // approval, or rejected. Confirmed/approved are both "done" (just via
+  // different lifecycles for timer vs manual entries), so neither counts.
+  const needsAttentionStatuses = new Set(["pending_confirm", "pending_approval", "rejected"]);
+  const needsAttentionCount = dateFilteredEntries.filter((e) => needsAttentionStatuses.has(e.status)).length;
+
   const statusCounts = {
-    all: scopeFilteredEntries.length,
-    pending_approval: scopeFilteredEntries.filter((e) => e.status === "pending_approval").length,
-    approved: scopeFilteredEntries.filter((e) => e.status === "approved").length,
-    rejected: scopeFilteredEntries.filter((e) => e.status === "rejected").length,
+    all: dateFilteredEntries.length,
+    pending_approval: dateFilteredEntries.filter((e) => e.status === "pending_approval").length,
+    approved: dateFilteredEntries.filter((e) => e.status === "approved").length,
+    rejected: dateFilteredEntries.filter((e) => e.status === "rejected").length,
   };
-  const filteredEntries = statusFilter === "all" ? scopeFilteredEntries : scopeFilteredEntries.filter((e) => e.status === statusFilter);
+  const statusFilteredEntries = statusFilter === "all" ? dateFilteredEntries : dateFilteredEntries.filter((e) => e.status === statusFilter);
+  const sourceFilteredEntries = sourceFilter === "all" ? statusFilteredEntries : statusFilteredEntries.filter((e) => e.source === sourceFilter);
+  const searchLower = searchText.trim().toLowerCase();
+  const searchFilteredEntries = !searchLower
+    ? sourceFilteredEntries
+    : sourceFilteredEntries.filter((e) => {
+        const haystack = [e.task?.name, e.task?.project?.name, e.activity_type?.name, e.reason_notes, e.reason_category, e.person?.name]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(searchLower);
+      });
+  // Sort by (2026-09-23) -- when Group by date is on, this only controls
+  // duration ordering within a day (date/time ordering is instead
+  // governed by groupOrder + the always-chronological-within-day rule
+  // below), so "date" sort options are hidden from the dropdown in that
+  // mode (see render).
+  const sortedEntries = [...searchFilteredEntries].sort((a, b) => {
+    if (sortBy === "duration_desc") return (b.duration_minutes ?? 0) - (a.duration_minutes ?? 0);
+    if (sortBy === "duration_asc") return (a.duration_minutes ?? 0) - (b.duration_minutes ?? 0);
+    const at = new Date(a.started_at).getTime();
+    const bt = new Date(b.started_at).getTime();
+    return sortBy === "date_asc" ? at - bt : bt - at;
+  });
+  const filteredEntries = sortedEntries;
+
+  // Group by date (Sandra: "allow them to group by dates -- always make
+  // sure this is either newest to oldest or oldest to newest -- but time
+  // should always be in chronological order from am to PM") -- the
+  // group order (newest/oldest first) is a separate toggle from time
+  // WITHIN a group, which is always ascending (earliest first, i.e. AM
+  // before PM) regardless of groupOrder or the Sort by dropdown above.
+  const groupedEntries: { dateKey: string; rows: EntryRow[] }[] = [];
+  if (groupByDate) {
+    const byDate = new Map<string, EntryRow[]>();
+    for (const e of filteredEntries) {
+      const key = toDateInputValue(new Date(e.started_at));
+      const list = byDate.get(key) ?? [];
+      list.push(e);
+      byDate.set(key, list);
+    }
+    for (const rows of byDate.values()) {
+      rows.sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
+    }
+    const keys = Array.from(byDate.keys()).sort();
+    if (groupOrder === "newest") keys.reverse();
+    for (const key of keys) groupedEntries.push({ dateKey: key, rows: byDate.get(key)! });
+  }
 
   // 2026-09-23 (Sandra: "task ID as the first column and immovable...
   // task/project, work date, time, duration, details, source, status,
@@ -1056,16 +1238,62 @@ export default function TimeTracking() {
   return (
     <div>
       {confirmDialog}
-      <h1>Time Tracking</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <h1 style={{ margin: 0 }}>Time Tracking</h1>
+        {/* 2026-09-23 (Sandra: "let's revert to one button with dropdown
+            so they can select if it's Project or Non project") -- a
+            single Add Time button replaces the old always-visible Log
+            time card; picking a mode from the dropdown opens the same
+            form (unchanged fields/handlers) inside a Modal. */}
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={() => setAddTimeMenuOpen((v) => !v)}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              fontSize: 12.5, fontWeight: 600, color: "#fff", background: "var(--accent)",
+              border: "none", borderRadius: 999, padding: "9px 16px", cursor: "pointer",
+            }}
+          >
+            <Plus size={14} /> Add Time <ChevronDown size={13} />
+          </button>
+          {addTimeMenuOpen && (
+            <div
+              style={{
+                position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 20,
+                background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12,
+                boxShadow: "var(--shadow-card, 0 6px 16px rgba(15,41,66,0.12))", minWidth: 170, overflow: "hidden",
+              }}
+            >
+              {(["project", "non_project"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => {
+                    setLogMode(mode);
+                    setAddTimeMenuOpen(false);
+                  }}
+                  style={{
+                    display: "block", width: "100%", textAlign: "left", padding: "10px 14px",
+                    fontSize: 12.5, color: "var(--navy)", background: "none", border: "none", cursor: "pointer",
+                  }}
+                >
+                  {mode === "project" ? "Project task" : "Non-project"}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
-      <div style={{ marginTop: 14, marginBottom: 18 }}>
-        <div className="card" style={{ padding: 14, maxWidth: 480 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10, color: "var(--navy)" }}>Log time</div>
-            {/* 2026-09-22 (Sandra: non-project time -- meetings, team
-                huddles -- shouldn't need a fake task under a real
-                project). This toggle swaps Project/Task for a single
-                Activity Type picker; date/start/end, notes and the
-                approval lifecycle stay the same either way. */}
+      {logMode && (
+        <Modal
+          title={logMode === "project" ? "Log time — Project task" : "Log time — Non-project"}
+          onClose={() => {
+            setLogMode(null);
+            setLogProjectId("");
+            setLogTaskId("");
+          }}
+          width={480}
+        >
             <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
               {(["project", "non_project"] as const).map((mode) => (
                 <button
@@ -1298,8 +1526,8 @@ export default function TimeTracking() {
             </div>
               </>
             )}
-        </div>
-      </div>
+        </Modal>
+      )}
 
       {loading ? (
         <div style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>
@@ -1343,9 +1571,178 @@ export default function TimeTracking() {
             ))}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, marginBottom: 4, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>Filter by project</span>
-            <div style={{ width: 220 }}>
+          {/* 2026-09-23 (Sandra mockup redesign) -- Today/This Week
+              always reflect the real current day/week (no target line
+              shown ON the card per her instruction -- the target/range
+              reads as a caption underneath instead); Total Entries and
+              Needs Attention both reflect whatever date range + filters
+              are currently active below. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginTop: 4, marginBottom: 14 }}>
+            {[
+              {
+                key: "today",
+                icon: <Timer size={15} />,
+                tone: "slate",
+                label: "Today's Logs",
+                value: `${(Math.round((todayMinutes / 60) * 100) / 100).toFixed(2)}h`,
+                caption: dailyTargetMinutes > 0 ? `of ${(dailyTargetMinutes / 60).toFixed(2)}h target` : undefined,
+              },
+              {
+                key: "week",
+                icon: <CalendarDays size={15} />,
+                tone: "slate",
+                label: "This Week",
+                value: `${(Math.round((thisWeekMinutes / 60) * 100) / 100).toFixed(2)}h`,
+                caption: weeklyTargetMinutes > 0 ? `of ${(weeklyTargetMinutes / 60).toFixed(2)}h target` : undefined,
+              },
+              {
+                key: "total",
+                icon: <ListChecks size={15} />,
+                tone: "accent",
+                label: "Total Entries",
+                value: String(statusCounts.all),
+                caption: formatRangeLabel(dateRangeStart, dateRangeEnd),
+              },
+              {
+                key: "attention",
+                icon: <AlertCircle size={15} />,
+                tone: needsAttentionCount > 0 ? "warning" : "slate",
+                label: "Needs Attention",
+                value: String(needsAttentionCount),
+                caption: "Pending, awaiting confirmation, or rejected",
+              },
+            ].map((card) => (
+              <div
+                key={card.key}
+                style={{
+                  display: "flex", alignItems: "center", gap: 12,
+                  padding: "14px 16px", borderRadius: 16, border: "1px solid var(--border)",
+                  background: "var(--surface)", boxShadow: "var(--shadow-card, 0 1px 2px rgba(15,41,66,0.04))",
+                }}
+              >
+                <span
+                  className={`status-pill ${card.tone}`}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 12, flexShrink: 0 }}
+                >
+                  {card.icon}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>{card.label}</div>
+                  <div style={{ fontSize: 19, fontWeight: 700, color: "var(--navy)", lineHeight: 1.2 }}>{card.value}</div>
+                  {card.caption && <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 1 }}>{card.caption}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Date-range browser -- Today/This Week/Last Week/This
+              Month/Custom presets + step arrows; narrows Total
+              Entries/Needs Attention above and the table below (Today/
+              This Week KPI cards are exempt, they always track the real
+              calendar). */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            {(
+              [
+                { key: "today" as const, label: "Today" },
+                { key: "this_week" as const, label: "This Week" },
+                { key: "last_week" as const, label: "Last Week" },
+                { key: "this_month" as const, label: "This Month" },
+                { key: "custom" as const, label: "Custom" },
+              ]
+            ).map((p) => (
+              <button
+                key={p.key}
+                onClick={() => {
+                  setDatePreset(p.key);
+                  setRangeAnchor(new Date());
+                }}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 999,
+                  border: `1px solid ${datePreset === p.key ? "var(--accent)" : "var(--border)"}`,
+                  background: datePreset === p.key ? "var(--accent-bg, #eaf2fb)" : "transparent",
+                  fontSize: 11.5,
+                  fontWeight: datePreset === p.key ? 600 : 500,
+                  color: datePreset === p.key ? "var(--accent)" : "var(--text-secondary)",
+                  cursor: "pointer",
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+            {datePreset === "custom" ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 4 }}>
+                <input
+                  type="date"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  style={{ fontSize: 11.5, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 8 }}
+                />
+                <span style={{ color: "var(--muted)", fontSize: 11.5 }}>to</span>
+                <input
+                  type="date"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  style={{ fontSize: 11.5, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 8 }}
+                />
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
+                <button
+                  onClick={() => setRangeAnchor((a) => stepAnchor(datePreset, a, -1))}
+                  style={{ display: "flex", padding: 4, border: "1px solid var(--border)", borderRadius: 8, background: "none", cursor: "pointer", color: "var(--text-secondary)" }}
+                >
+                  <ChevronLeft size={13} />
+                </button>
+                <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", minWidth: 130, textAlign: "center" }}>
+                  {formatRangeLabel(dateRangeStart, dateRangeEnd)}
+                </span>
+                <button
+                  onClick={() => setRangeAnchor((a) => stepAnchor(datePreset, a, 1))}
+                  style={{ display: "flex", padding: 4, border: "1px solid var(--border)", borderRadius: 8, background: "none", cursor: "pointer", color: "var(--text-secondary)" }}
+                >
+                  <ChevronRight size={13} />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Filter row -- search, status, source, project, sort, group
+              by date, and a More Filters popover (currently just an
+              Archived-visibility toggle). "You tell me what's works
+              best" (Sandra) -- these mechanics are my call; the KPI
+              definitions above and grouping semantics were hers. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            <div style={{ position: "relative", flex: "1 1 220px", minWidth: 180, maxWidth: 280 }}>
+              <Search size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} />
+              <input
+                type="text"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="Search task, project, details…"
+                style={{ width: "100%", fontSize: 12, padding: "7px 9px 7px 28px", border: "1px solid var(--border)", borderRadius: 10, boxSizing: "border-box" }}
+              />
+            </div>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+              style={{ fontSize: 12, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 10 }}
+            >
+              <option value="all">All Statuses</option>
+              <option value="pending_approval">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as typeof sourceFilter)}
+              style={{ fontSize: 12, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 10 }}
+            >
+              <option value="all">All Sources</option>
+              <option value="manual">Manual</option>
+              <option value="timer">Timer</option>
+            </select>
+            <div style={{ width: 190 }}>
               <SearchSelect
                 placeholder="All projects"
                 value={filterProjectId}
@@ -1353,56 +1750,65 @@ export default function TimeTracking() {
                 options={entryProjectOptions}
               />
             </div>
-            {filterProjectId && (
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              style={{ fontSize: 12, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 10 }}
+            >
+              <option value="date_desc">Newest first</option>
+              <option value="date_asc">Oldest first</option>
+              <option value="duration_desc">Longest duration</option>
+              <option value="duration_asc">Shortest duration</option>
+            </select>
+            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}>
+              <input type="checkbox" checked={groupByDate} onChange={(e) => setGroupByDate(e.target.checked)} />
+              Group by date
+            </label>
+            {groupByDate && (
               <button
-                onClick={() => setSearchParams({})}
-                title="Clear project filter"
-                style={{ fontSize: 11, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+                onClick={() => setGroupOrder((o) => (o === "newest" ? "oldest" : "newest"))}
+                title="Toggle group order"
+                style={{ fontSize: 11.5, color: "var(--text-secondary)", background: "none", border: "1px solid var(--border)", borderRadius: 10, padding: "6px 10px", cursor: "pointer" }}
               >
-                Clear
+                {groupOrder === "newest" ? "Newest first" : "Oldest first"}
               </button>
             )}
-          </div>
-
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12, marginBottom: 8 }}>
-            {(
-              [
-                { key: "all" as const, label: "All Entries", tone: "slate", value: statusCounts.all },
-                { key: "pending_approval" as const, label: "Pending", tone: "warning", value: statusCounts.pending_approval },
-                { key: "approved" as const, label: "Approved", tone: "success", value: statusCounts.approved },
-                { key: "rejected" as const, label: "Rejected", tone: "danger", value: statusCounts.rejected },
-              ]
-            ).map((card) => {
-              const active = statusFilter === card.key;
-              return (
-                <button
-                  key={card.key}
-                  onClick={() => setStatusFilter((prev) => (prev === card.key ? "all" : card.key))}
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={() => setMoreFiltersOpen((v) => !v)}
+                style={{ fontSize: 11.5, color: "var(--text-secondary)", background: "none", border: "1px solid var(--border)", borderRadius: 10, padding: "7px 10px", cursor: "pointer" }}
+              >
+                More Filters
+              </button>
+              {moreFiltersOpen && (
+                <div
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    flex: "1 1 200px",
-                    minWidth: 180,
-                    textAlign: "left",
-                    padding: "12px 14px",
-                    borderRadius: "var(--radius)",
-                    border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
-                    background: "var(--surface)",
-                    cursor: "pointer",
+                    position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 20,
+                    background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12,
+                    boxShadow: "var(--shadow-card, 0 6px 16px rgba(15,41,66,0.12))", padding: 12, minWidth: 200,
                   }}
                 >
-                  <span className={`status-pill ${card.tone}`} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: 10, flexShrink: 0 }}>
-                    <Timer size={14} />
-                  </span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--navy)" }}>{card.label}</div>
-                    <div style={{ fontSize: 19, fontWeight: 700, color: "var(--navy)", lineHeight: 1.15 }}>{card.value}</div>
-                  </div>
-                  <ChevronRight size={15} style={{ color: "var(--muted)", flexShrink: 0 }} />
-                </button>
-              );
-            })}
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-secondary)", cursor: "pointer" }}>
+                    <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+                    Show archived entries
+                  </label>
+                </div>
+              )}
+            </div>
+            {(filterProjectId || searchText || statusFilter !== "all" || sourceFilter !== "all" || showArchived) && (
+              <button
+                onClick={() => {
+                  setSearchParams({});
+                  setSearchText("");
+                  setStatusFilter("all");
+                  setSourceFilter("all");
+                  setShowArchived(false);
+                }}
+                style={{ fontSize: 11, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+              >
+                Reset filters
+              </button>
+            )}
           </div>
 
           {/* 2026-09-23 (Sandra: "all approvals will not go to Approval
@@ -1419,7 +1825,18 @@ export default function TimeTracking() {
             </h2>
           </div>
           {filteredEntries.length === 0 ? (
-            <p style={{ fontSize: 12, color: "var(--muted)" }}>No time logged yet.</p>
+            <p style={{ fontSize: 12, color: "var(--muted)" }}>No time logged for this range.</p>
+          ) : groupByDate ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {groupedEntries.map((g) => (
+                <div key={g.dateKey}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--navy)", marginBottom: 6 }}>
+                    {formatRangeLabel(g.dateKey, g.dateKey)} <span style={{ fontWeight: 500, color: "var(--muted)" }}>({g.rows.length})</span>
+                  </div>
+                  <EntriesTable rows={g.rows} showAssignee={scope !== "mine"} />
+                </div>
+              ))}
+            </div>
           ) : (
             <EntriesTable rows={filteredEntries} showAssignee={scope !== "mine"} />
           )}
