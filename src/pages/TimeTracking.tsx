@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ShieldCheck, ChevronRight, ChevronLeft, ChevronDown, Pencil, Timer, Trash2, Archive, RotateCcw, Plus, Search, X, CalendarDays, AlertCircle, ListChecks, Radio } from "lucide-react";
+import { ShieldCheck, ChevronRight, ChevronLeft, ChevronDown, Pencil, Timer, Trash2, Archive, RotateCcw, Plus, Search, X, CalendarDays, AlertCircle, ListChecks, Radio, FilePen } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, editPendingManualTimeEntry, deletePendingManualTimeEntry, archiveTimeEntry, unarchiveTimeEntry } from "../lib/timeTracking";
+import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, requestTimeEntryCorrection, cancelTimeEntryCorrection, editPendingManualTimeEntry, deletePendingManualTimeEntry, archiveTimeEntry, unarchiveTimeEntry } from "../lib/timeTracking";
 import { loggedHoursTier } from "../lib/loggedHoursBands";
 import { expectedHoursForDay } from "../lib/dailyAllocation";
 import { buildHolidayNameMap, nonWorkingDayConfirmMessage, type HolidayNameMap } from "../lib/workingDays";
@@ -101,6 +101,11 @@ interface EntryRow {
   corrected_at: string | null;
   original_duration_minutes: number | null;
   correction_notes: string | null;
+  // 2026-09-23 (phase102): corrections change start/end now -- the
+  // pre-correction window is kept here (first correction wins).
+  original_started_at: string | null;
+  original_ended_at: string | null;
+  correction_requested_by: string | null;
   created_at: string;
   // 2026-09-23 (phase63): admin soft-delete, reversible, excluded from
   // every hour rollup.
@@ -115,6 +120,25 @@ interface EntryRow {
   task: TaskLite | null;
   activity_type: { id: string; name: string } | null;
   person: { id: string; name: string } | null;
+}
+
+// 2026-09-23 (phase102, phase 2): employee-initiated correction request
+// on their own confirmed/approved entry, decided in the Approval Center.
+interface CorrectionRequestRow {
+  id: string;
+  entry_id: string;
+  requested_by: string;
+  current_started_at: string;
+  current_ended_at: string;
+  proposed_started_at: string;
+  proposed_ended_at: string;
+  proposed_activity_type_id: string | null;
+  reason: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_notes: string | null;
+  created_at: string;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -216,6 +240,38 @@ function findOverlappingEntry(entries: EntryRow[], personId: string, startIso: s
     if (s < re && rs < e) return row;
   }
   return null;
+}
+// 2026-09-23 (phase102): every conflicting entry, not just the first --
+// a correction that widens an entry can run into more than one.
+function findAllOverlappingEntries(entries: EntryRow[], personId: string, startIso: string, endIso: string, excludeId?: string): EntryRow[] {
+  const s = new Date(startIso).getTime();
+  const e = new Date(endIso).getTime();
+  return entries.filter((row) => {
+    if (row.person_id !== personId || row.id === excludeId || row.is_archived) return false;
+    if (!OVERLAP_BLOCKING_STATUSES.has(row.status)) return false;
+    const rs = new Date(row.started_at).getTime();
+    const re = row.ended_at ? new Date(row.ended_at).getTime() : Date.now();
+    return s < re && rs < e;
+  });
+}
+// Why a conflicting entry can't simply be trimmed to fit (mirrors
+// apply_time_entry_correction's server-side rules) -- null = trimmable.
+function untrimmableReason(row: EntryRow, startIso: string, endIso: string): string | null {
+  if (row.status !== "confirmed" && row.status !== "approved") return "it's still pending -- the owner can edit it directly";
+  const s = new Date(startIso).getTime();
+  const e = new Date(endIso).getTime();
+  const rs = new Date(row.started_at).getTime();
+  const re = row.ended_at ? new Date(row.ended_at).getTime() : Date.now();
+  if (rs >= s && re <= e) return "it sits entirely inside the corrected time -- archive or adjust it first";
+  if (rs < s && re > e) return "it fully surrounds the corrected time -- trimming would split it";
+  return null;
+}
+function trimmedRangeText(row: EntryRow, startIso: string, endIso: string): string {
+  const rs = new Date(row.started_at).getTime();
+  const s = new Date(startIso).getTime();
+  return rs < s
+    ? formatClockRange(row.started_at, startIso)
+    : formatClockRange(endIso, row.ended_at);
 }
 function overlapTaskIdLabel(row: EntryRow): string {
   return row.task?.task_number
@@ -556,51 +612,87 @@ function EditForm({
   );
 }
 
-function CorrectForm({
+// 2026-09-23 (phase102, Sandra: "should correction update start and end
+// time instead of add/subtract duration?") -- one form, two modes:
+//   - "correct": Full Access fixes a confirmed/approved entry directly.
+//   - "request": the entry's owner proposes new times + a reason; it
+//     goes to the Approval Center.
+// Both edit date + start + end (duration is derived); notes/reason are
+// required. Reason Category (project) / Activity Type (non-project) stay
+// correctable in "correct" mode, same branch as before (phase63).
+function CorrectionForm({
   row,
+  mode,
   reasonOptions,
   nonProjectActivityTypes,
   onSubmit,
   onCancel,
 }: {
   row: EntryRow;
+  mode: "correct" | "request";
   reasonOptions: TimeEntryReasonRow[];
   nonProjectActivityTypes: NonProjectActivityTypeRow[];
-  onSubmit: (v: { hours: string; notes: string; reasonCategory: string; activityTypeId: string }) => void;
+  onSubmit: (v: { date: string; startTime: string; endTime: string; notes: string; reasonCategory: string; activityTypeId: string }) => void;
   onCancel: () => void;
 }) {
-  const [hours, setHours] = useState(String(Math.round(((row.duration_minutes ?? 0) / 60) * 100) / 100));
+  const start = new Date(row.started_at);
+  const end = row.ended_at ? new Date(row.ended_at) : start;
+  const [date, setDate] = useState(toDateInputValue(start));
+  const [startTime, setStartTime] = useState(toTimeInputValue(start));
+  const [endTime, setEndTime] = useState(toTimeInputValue(end));
   const [notes, setNotes] = useState("");
   const [reasonCategory, setReasonCategory] = useState(row.reason_category ?? "");
   const [activityTypeId, setActivityTypeId] = useState(row.activity_type_id ?? "");
   const isNonProject = Boolean(row.activity_type_id);
+  const inputStyle: CSSProperties = { fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" };
+  const previewStart = new Date(`${date}T${startTime}`);
+  const previewEnd = new Date(`${date}T${endTime}`);
+  const previewMinutes = isNaN(previewStart.getTime()) || isNaN(previewEnd.getTime()) ? null : Math.round((previewEnd.getTime() - previewStart.getTime()) / 60000);
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-      <input type="number" step="0.25" placeholder="Corrected hours" value={hours} onChange={(e) => setHours(e.target.value)} style={{ width: 110, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
-      {isNonProject ? (
-        <select value={activityTypeId} onChange={(e) => setActivityTypeId(e.target.value)} style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
-          {nonProjectActivityTypes.filter((a) => a.is_active || a.id === activityTypeId).map((a) => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </select>
-      ) : (
-        <select value={reasonCategory} onChange={(e) => setReasonCategory(e.target.value)} style={{ width: 150, fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
-          <option value="">No reason</option>
-          {reasonOptions.filter((r) => r.is_active || r.name === reasonCategory).map((r) => (
-            <option key={r.id} value={r.name}>{r.name}</option>
-          ))}
-        </select>
-      )}
-      <input type="text" placeholder="Correction notes" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ flex: "1 1 160px", fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
-      <button
-        onClick={() => onSubmit({ hours, notes, reasonCategory, activityTypeId })}
-        style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
-      >
-        Save correction
-      </button>
-      <button onClick={onCancel} style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
-        Cancel
-      </button>
+    <div>
+      <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 6 }}>
+        {mode === "correct" ? "Correct the actual start and end time" : "Propose the correct start and end time"} — currently{" "}
+        <strong>{formatClockRange(row.started_at, row.ended_at)}</strong> ({formatDuration(row.duration_minutes)})
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+        <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={inputStyle} />
+        <span style={{ fontSize: 11.5, color: "var(--muted)" }}>to</span>
+        <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={inputStyle} />
+        <span style={{ fontSize: 11, fontWeight: 700, color: previewMinutes !== null && previewMinutes > 0 ? "var(--navy)" : "var(--danger-text)", minWidth: 48 }}>
+          {previewMinutes !== null && previewMinutes > 0 ? `= ${formatDuration(previewMinutes)}` : "—"}
+        </span>
+        {isNonProject ? (
+          <select value={activityTypeId} onChange={(e) => setActivityTypeId(e.target.value)} style={{ ...inputStyle, width: 150 }}>
+            {nonProjectActivityTypes.filter((a) => a.is_active || a.id === activityTypeId).map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+        ) : mode === "correct" ? (
+          <select value={reasonCategory} onChange={(e) => setReasonCategory(e.target.value)} style={{ ...inputStyle, width: 150 }}>
+            <option value="">No reason</option>
+            {reasonOptions.filter((r) => r.is_active || r.name === reasonCategory).map((r) => (
+              <option key={r.id} value={r.name}>{r.name}</option>
+            ))}
+          </select>
+        ) : null}
+        <input
+          type="text"
+          placeholder={mode === "correct" ? "Correction reason (required)" : "Why does this need correcting? (required)"}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          style={{ ...inputStyle, flex: "1 1 200px" }}
+        />
+        <button
+          onClick={() => onSubmit({ date, startTime, endTime, notes, reasonCategory, activityTypeId })}
+          style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          {mode === "correct" ? "Save correction" : "Submit request"}
+        </button>
+        <button onClick={onCancel} style={{ fontSize: 11.5, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
@@ -615,6 +707,9 @@ export default function TimeTracking() {
   const [myTasks, setMyTasks] = useState<TaskLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [correctingId, setCorrectingId] = useState<string | null>(null);
+  // 2026-09-23 (phase102, phase 2): owner-initiated correction requests.
+  const [requestingId, setRequestingId] = useState<string | null>(null);
+  const [correctionRequests, setCorrectionRequests] = useState<CorrectionRequestRow[]>([]);
   const [archivingId, setArchivingId] = useState<string | null>(null);
   // 2026-09-22 (Sandra: "let's allow the assignee or requestor to delete
   // or make changes with the manual time entry log" while it's still
@@ -763,12 +858,13 @@ export default function TimeTracking() {
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: entryData }, { data: peopleData }, { data: taskData }, { data: reasonData }, { data: activityTypeData }, { data: availabilityData }, { data: holidayData }] = await Promise.all([
+    const [{ data: entryData }, { data: peopleData }, { data: taskData }, { data: reasonData }, { data: activityTypeData }, { data: availabilityData }, { data: holidayData }, { data: correctionRequestData }] = await Promise.all([
       supabase
         .from("time_entries")
         .select(
           `id, task_id, activity_type_id, person_id, started_at, ended_at, duration_minutes, source, status, requested_by, reason_category, reason_notes, auto_stopped,
            decided_by, decided_at, decision_notes, corrected_by, corrected_at, original_duration_minutes, correction_notes, created_at,
+           original_started_at, original_ended_at, correction_requested_by,
            is_archived, archived_at, archived_by, archive_reason, non_project_entry_number,
            task:tasks ( id, name, assignee_id, project_id, task_number, project:projects ( id, name, owner_id ) ),
            activity_type:non_project_activity_types ( id, name ),
@@ -783,7 +879,9 @@ export default function TimeTracking() {
         ? supabase.from("person_availability").select("date,status").eq("person_id", me.id)
         : Promise.resolve({ data: [] }),
       supabase.from("holidays").select("date,name"),
+      supabase.from("time_entry_correction_requests").select("*").order("created_at", { ascending: false }),
     ]);
+    setCorrectionRequests((correctionRequestData as CorrectionRequestRow[] | null) ?? []);
     setEntries(((entryData as unknown as EntryRow[]) ?? []));
     setPeople((peopleData as PersonLite[]) ?? []);
     setMyTasks((((taskData as unknown as TaskLite[]) ?? [])).filter((t) => t.assignee_id === me?.id));
@@ -843,33 +941,108 @@ export default function TimeTracking() {
     return () => window.clearInterval(interval);
   }, []);
 
-  async function submitCorrection(row: EntryRow, v: { hours: string; notes: string; reasonCategory: string; activityTypeId: string }) {
-    const hours = parseFloat(v.hours);
-    if (!hours || hours <= 0) {
-      await alert("Enter a corrected duration greater than zero.");
+  // Shared client-side gate for both correction modes -- same rules as a
+  // fresh entry (end after start, nothing in the future, weekend/holiday
+  // soft confirm). Returns the ISO window, or null if blocked/cancelled.
+  async function validateCorrectionWindow(v: { date: string; startTime: string; endTime: string; notes: string }): Promise<{ startIso: string; endIso: string } | null> {
+    const start = new Date(`${v.date}T${v.startTime}`);
+    const end = new Date(`${v.date}T${v.endTime}`);
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) {
+      await alert("End time must be after start time.");
+      return null;
+    }
+    if (isFutureTimeEntry(start.toISOString(), end.toISOString())) {
+      await alert(FUTURE_ENTRY_MESSAGE_TEXT);
+      return null;
+    }
+    if (!v.notes.trim()) {
+      await alert("Please add a reason for the correction.");
+      return null;
+    }
+    const warn = nonWorkingDayConfirmMessage(v.date, holidayNames);
+    if (warn && !(await confirm({ message: warn, confirmLabel: "Yes, continue" }))) return null;
+    return { startIso: start.toISOString(), endIso: end.toISOString() };
+  }
+
+  // 2026-09-23 (phase102): Full Access correction by start/end. If the
+  // new window runs into other entries of the same person, offer to trim
+  // them to fit (only finalized ones, only at an edge -- see
+  // untrimmableReason). Anything that can't be trimmed blocks with the
+  // usual overlap message.
+  async function submitCorrection(row: EntryRow, v: { date: string; startTime: string; endTime: string; notes: string; reasonCategory: string; activityTypeId: string }) {
+    const win = await validateCorrectionWindow(v);
+    if (!win) return;
+    const { startIso, endIso } = win;
+    const conflicts = findAllOverlappingEntries(entries, row.person_id, startIso, endIso, row.id);
+    const blocked = conflicts.map((c) => ({ c, why: untrimmableReason(c, startIso, endIso) })).find((x) => x.why);
+    if (blocked) {
+      await alert(`${overlapMessageText(blocked.c)}\n\nThis entry can't be trimmed automatically: ${blocked.why}.`);
       return;
     }
-    const ok = await confirm({
-      message: `Correct this entry to ${hours}h? The original value (${formatDuration(row.duration_minutes)}) stays on record.`,
-      confirmLabel: "Correct",
-    });
+    let message = `Correct this entry to **${formatClockRange(startIso, endIso)}** (${formatDuration(Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000))})?\n\nWas: ${formatClockRange(row.started_at, row.ended_at)} (${formatDuration(row.duration_minutes)}). The original stays on record.`;
+    if (conflicts.length > 0) {
+      message =
+        `**Time overlap detected**\n\nThe corrected time runs into ${conflicts.length === 1 ? "another entry" : `${conflicts.length} other entries`}. They'll be trimmed to fit:\n` +
+        conflicts.map((c) => `• **${overlapTaskIdLabel(c)}** ${overlapTitle(c)}: ${formatClockRange(c.started_at, c.ended_at)} → ${trimmedRangeText(c, startIso, endIso)}`).join("\n") +
+        `\n\n` + message;
+    }
+    const ok = await confirm({ message, confirmLabel: conflicts.length > 0 ? "Trim & correct" : "Correct" });
     if (!ok) return;
-    // 2026-09-23 (phase63): a non-project entry's correctable field is
-    // its Activity Type, not Reason -- Reason was never asked of the
-    // person for these in the first place (see handleSubmitManual).
     const isNonProject = Boolean(row.activity_type_id);
-    const res = await correctTimeEntry(
-      row.id,
-      Math.round(hours * 60),
-      v.notes.trim() || "Corrected by Full Access",
-      isNonProject ? undefined : v.reasonCategory || undefined,
-      isNonProject ? v.activityTypeId || undefined : undefined
-    );
+    const res = await correctTimeEntry(row.id, startIso, endIso, v.notes.trim(), {
+      reasonCategory: isNonProject ? undefined : v.reasonCategory || undefined,
+      activityTypeId: isNonProject ? v.activityTypeId || undefined : undefined,
+      trimEntryIds: conflicts.map((c) => c.id),
+    });
     if (res.error) {
       await alert(`Couldn't correct this entry: ${res.error}`);
       return;
     }
     setCorrectingId(null);
+    loadAll();
+  }
+
+  // Phase 2 (phase102): the entry's owner requests a correction. No
+  // trimming here -- an overlap means the request is blocked and the
+  // person picks a free window (or asks for the other entry to be fixed
+  // too). Approval re-validates server-side.
+  async function submitCorrectionRequest(row: EntryRow, v: { date: string; startTime: string; endTime: string; notes: string; reasonCategory: string; activityTypeId: string }) {
+    const win = await validateCorrectionWindow(v);
+    if (!win) return;
+    const overlap = findOverlappingEntry(entries, row.person_id, win.startIso, win.endIso, row.id);
+    if (overlap) {
+      await alert(overlapMessageText(overlap));
+      return;
+    }
+    const isNonProject = Boolean(row.activity_type_id);
+    const ok = await confirm({
+      message: `Request a correction to **${formatClockRange(win.startIso, win.endIso)}**?\n\nWas: ${formatClockRange(row.started_at, row.ended_at)} (${formatDuration(row.duration_minutes)}). Your approver will review it in the Approval Center.`,
+      confirmLabel: "Submit request",
+    });
+    if (!ok) return;
+    const res = await requestTimeEntryCorrection(
+      row.id,
+      win.startIso,
+      win.endIso,
+      v.notes.trim(),
+      isNonProject && v.activityTypeId && v.activityTypeId !== row.activity_type_id ? v.activityTypeId : undefined
+    );
+    if (res.error) {
+      await alert(`Couldn't submit this request: ${res.error}`);
+      return;
+    }
+    setRequestingId(null);
+    loadAll();
+  }
+
+  async function handleCancelCorrectionRequest(req: CorrectionRequestRow) {
+    const ok = await confirm({ message: "Cancel this correction request?", confirmLabel: "Cancel request", danger: true });
+    if (!ok) return;
+    const res = await cancelTimeEntryCorrection(req.id);
+    if (res.error) {
+      await alert(`Couldn't cancel: ${res.error}`);
+      return;
+    }
     loadAll();
   }
 
@@ -1392,6 +1565,13 @@ export default function TimeTracking() {
             {rows.map((row) => {
               const canCorrect = isFullAccess && (row.status === "confirmed" || row.status === "approved") && !row.is_archived;
               const correcting = correctingId === row.id;
+              // 2026-09-23 (phase102, phase 2): the entry's owner (when not
+              // Full Access -- they'd just Correct) can request a
+              // correction on their own finalized entry.
+              const pendingRequest = correctionRequests.find((r) => r.entry_id === row.id && r.status === "pending") ?? null;
+              const lastClosedRequest = correctionRequests.find((r) => r.entry_id === row.id && r.status === "rejected") ?? null;
+              const canRequest = !isFullAccess && row.person_id === me?.id && (row.status === "confirmed" || row.status === "approved") && !row.is_archived && !pendingRequest;
+              const requesting = requestingId === row.id;
               const canEditDelete = canEditDeletePending(row);
               const editing = editingId === row.id;
               // 2026-09-23 (phase63): admin soft-delete for a
@@ -1411,7 +1591,7 @@ export default function TimeTracking() {
               const details = row.reason_notes?.trim() || row.reason_category || "—";
               return (
                 <Fragment key={row.id}>
-                  <tr style={{ borderBottom: correcting || editing || archiving ? "none" : "1px solid var(--border)" }}>
+                  <tr style={{ borderBottom: correcting || editing || archiving || requesting ? "none" : "1px solid var(--border)" }}>
                     <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{taskIdLabel}</td>
                     <td style={td}>
                       <div style={{ fontWeight: 700, color: "var(--navy)" }}>{title}</div>
@@ -1437,6 +1617,11 @@ export default function TimeTracking() {
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{formatWorkDate(row.started_at)}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
                       {formatClockRange(row.started_at, row.ended_at)}
+                      {row.corrected_at && row.original_started_at && (row.original_started_at !== row.started_at || row.original_ended_at !== row.ended_at) && (
+                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2, textDecoration: "line-through" }} title="Original time before correction">
+                          {formatClockRange(row.original_started_at, row.original_ended_at)}
+                        </div>
+                      )}
                       {row.auto_stopped && (
                         <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>Auto-stopped after being idle</div>
                       )}
@@ -1470,13 +1655,41 @@ export default function TimeTracking() {
                       )}
                       {row.corrected_at && (
                         <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>
-                          {row.original_duration_minutes !== row.duration_minutes ? (
+                          {row.original_started_at && (row.original_started_at !== row.started_at || row.original_ended_at !== row.ended_at) ? (
+                            <>Corrected from {formatClockRange(row.original_started_at, row.original_ended_at)} ({formatDuration(row.original_duration_minutes)}) to {formatClockRange(row.started_at, row.ended_at)} ({formatDuration(row.duration_minutes)}) by </>
+                          ) : row.original_duration_minutes !== row.duration_minutes ? (
                             <>Corrected from {formatDuration(row.original_duration_minutes)} to {formatDuration(row.duration_minutes)} by </>
                           ) : (
-                            <>Reason corrected by </>
+                            <>Details corrected by </>
                           )}
                           {personName(row.corrected_by)} on {formatDate(row.corrected_at)}
+                          {row.correction_requested_by && <> (requested by {personName(row.correction_requested_by)})</>}
                           {row.correction_notes && <> — "{row.correction_notes}"</>}
+                        </div>
+                      )}
+                      {pendingRequest && (
+                        <div style={{ marginTop: 4 }}>
+                          <span className="status-pill gold" style={{ fontSize: 9, padding: "1px 5px" }}>Correction requested</span>
+                          <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3 }}>
+                            Proposed {formatClockRange(pendingRequest.proposed_started_at, pendingRequest.proposed_ended_at)} — "{pendingRequest.reason}"
+                            {pendingRequest.requested_by === me?.id && (
+                              <>
+                                {" · "}
+                                <button
+                                  onClick={() => handleCancelCorrectionRequest(pendingRequest)}
+                                  style={{ fontSize: 9.5, color: "var(--danger-text)", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+                                >
+                                  Cancel request
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {!pendingRequest && lastClosedRequest && row.person_id === me?.id && (!row.corrected_at || new Date(lastClosedRequest.decided_at ?? 0) > new Date(row.corrected_at)) && (
+                        <div style={{ fontSize: 9.5, color: "var(--danger-text)", marginTop: 4 }}>
+                          Correction request rejected by {personName(lastClosedRequest.decided_by)} on {formatDate(lastClosedRequest.decided_at)}
+                          {lastClosedRequest.decision_notes && <> — "{lastClosedRequest.decision_notes}"</>}
                         </div>
                       )}
                       {row.is_archived && (
@@ -1508,6 +1721,15 @@ export default function TimeTracking() {
                             </button>
                           )}
                         </div>
+                      )}
+                      {canRequest && !requesting && (
+                        <button
+                          onClick={() => setRequestingId(row.id)}
+                          title="Request correction"
+                          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--accent)", background: "none", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+                        >
+                          <FilePen size={13} />
+                        </button>
                       )}
                       {canUnarchive && (
                         <button
@@ -1563,12 +1785,27 @@ export default function TimeTracking() {
                   {canCorrect && correcting && (
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
                       <td colSpan={colCount} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
-                        <CorrectForm
+                        <CorrectionForm
                           row={row}
+                          mode="correct"
                           reasonOptions={reasonOptions}
                           nonProjectActivityTypes={nonProjectActivityTypes}
                           onSubmit={(v) => submitCorrection(row, v)}
                           onCancel={() => setCorrectingId(null)}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  {canRequest && requesting && (
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td colSpan={colCount} style={{ padding: "8px 12px 12px", background: "var(--surface-2, #f8f9fb)" }}>
+                        <CorrectionForm
+                          row={row}
+                          mode="request"
+                          reasonOptions={reasonOptions}
+                          nonProjectActivityTypes={nonProjectActivityTypes}
+                          onSubmit={(v) => submitCorrectionRequest(row, v)}
+                          onCancel={() => setRequestingId(null)}
                         />
                       </td>
                     </tr>

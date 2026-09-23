@@ -16,12 +16,13 @@ import {
   User,
   Calendar,
   RefreshCw,
+  FilePen,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { decideTimeEntry, formatDuration } from "../lib/timeTracking";
+import { decideTimeEntry, decideTimeEntryCorrection, formatDuration } from "../lib/timeTracking";
 
 // Approval Center (2026-09-18, Sandra: "create an approval center page
 // under main... where all things for approval should show like extension
@@ -100,6 +101,30 @@ interface TimeEntryRowLite {
   } | null;
   activity_type: { id: string; name: string } | null;
   person: { id: string; name: string } | null;
+}
+
+// 2026-09-23 (phase102, phase 2): an employee's request to correct the
+// start/end of their own confirmed/approved time entry.
+interface CorrectionRequestRowLite {
+  id: string;
+  entry_id: string;
+  requested_by: string;
+  current_started_at: string;
+  current_ended_at: string;
+  proposed_started_at: string;
+  proposed_ended_at: string;
+  proposed_activity_type_id: string | null;
+  reason: string;
+  created_at: string;
+  entry: {
+    id: string;
+    task_id: string | null;
+    activity_type_id: string | null;
+    non_project_entry_number: number | null;
+    task: { id: string; name: string; task_number: number | null; project: { id: string; name: string; owner_id: string | null } | null } | null;
+    activity_type: { id: string; name: string } | null;
+  } | null;
+  requester: { id: string; name: string } | null;
 }
 
 interface BaselineRow {
@@ -195,7 +220,7 @@ function initials(name: string): string {
 // (the summary cards) and the color-coded pill/icon, kept separate from
 // typeLabel so the two extension sub-labels ("Task extension" / "Project
 // timeline extension") still filter and color together as one type.
-type ApprovalKind = "extension" | "time" | "baseline" | "closure" | "task_completion";
+type ApprovalKind = "extension" | "time" | "correction" | "baseline" | "closure" | "task_completion";
 
 // Same tone names index.css already defines for .status-pill.<tone> --
 // reused here for the summary-card icon squares too, so a request's
@@ -203,6 +228,7 @@ type ApprovalKind = "extension" | "time" | "baseline" | "closure" | "task_comple
 const KIND_META: Record<ApprovalKind, { label: string; pluralLabel: string; tone: string; icon: JSX.Element }> = {
   extension: { label: "Task Extension", pluralLabel: "Extension Requests", tone: "gold", icon: <CalendarClock size={13} /> },
   time: { label: "Time Entry", pluralLabel: "Time Entries", tone: "accent", icon: <Timer size={13} /> },
+  correction: { label: "Time Correction", pluralLabel: "Time Corrections", tone: "skyblue", icon: <FilePen size={13} /> },
   baseline: { label: "Baseline Approval", pluralLabel: "Baselines", tone: "purple", icon: <ShieldCheck size={13} /> },
   closure: { label: "Project Close Request", pluralLabel: "Project Close Requests", tone: "mint", icon: <FolderCheck size={13} /> },
   task_completion: { label: "Task Completion", pluralLabel: "Task Validations", tone: "success", icon: <ListChecks size={13} /> },
@@ -248,6 +274,7 @@ interface Row {
   // rows carry the project id so BaselineTable's Action button can link
   // straight to that project's WBS Planning page.
   linkProjectId?: string;
+  correctionRow?: CorrectionRequestRowLite;
 }
 
 export default function ApprovalCenter() {
@@ -262,6 +289,7 @@ export default function ApprovalCenter() {
   const [baselineRequests, setBaselineRequests] = useState<BaselineRow[]>([]);
   const [closureRequests, setClosureRequests] = useState<ClosureRow[]>([]);
   const [taskCompletions, setTaskCompletions] = useState<TaskCompletionRow[]>([]);
+  const [correctionRequests, setCorrectionRequests] = useState<CorrectionRequestRowLite[]>([]);
   // 2026-09-22 (Sandra: Scoped vs Logged Hours column) -- a lightweight
   // fetch of just the fields ownHoursFor needs, same
   // confirmed/approved-only scope Spent Hrs itself uses on Projects.tsx.
@@ -299,7 +327,7 @@ export default function ApprovalCenter() {
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: peopleData }, { data: chainPeopleData }, { data: projectData }, { data: extData }, { data: teData }, { data: blData }, { data: clData }, { data: tcData }, { data: allTeData }, { data: parentIdData }] = await Promise.all([
+    const [{ data: peopleData }, { data: chainPeopleData }, { data: projectData }, { data: extData }, { data: teData }, { data: blData }, { data: clData }, { data: tcData }, { data: allTeData }, { data: parentIdData }, { data: corrData }] = await Promise.all([
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
       supabase.from("people").select("id,reports_to,is_active"),
       supabase.from("projects").select("id,name,owner_id,wbs_status"),
@@ -348,7 +376,19 @@ export default function ApprovalCenter() {
       // Fetching every distinct parent_task_id lets the row-builder
       // below skip any task that IS a parent.
       supabase.from("tasks").select("parent_task_id").eq("is_archived", false).not("parent_task_id", "is", null),
+      supabase
+        .from("time_entry_correction_requests")
+        .select(
+          `id, entry_id, requested_by, current_started_at, current_ended_at, proposed_started_at, proposed_ended_at, proposed_activity_type_id, reason, created_at,
+           entry:time_entries ( id, task_id, activity_type_id, non_project_entry_number,
+             task:tasks ( id, name, task_number, project:projects ( id, name, owner_id ) ),
+             activity_type:non_project_activity_types ( id, name ) ),
+           requester:people!time_entry_correction_requests_requested_by_fkey ( id, name )`
+        )
+        .eq("status", "pending")
+        .order("created_at", { ascending: false }),
     ]);
+    setCorrectionRequests((corrData as unknown as CorrectionRequestRowLite[]) ?? []);
     setPeople((peopleData as PersonLite[]) ?? []);
     setProjects((projectData as ProjectLite[]) ?? []);
     // Same start_date-request filter ExtensionRequests.tsx applies -- that
@@ -503,6 +543,31 @@ export default function ApprovalCenter() {
     setDecidingKey(null);
     if (res.error) {
       await alert(`Couldn't ${status === "approved" ? "approve" : "reject"} this entry: ${res.error}`);
+      return;
+    }
+    loadAll();
+  }
+
+  // Mirrors can_decide_time_entry_correction (phase102): nobody decides
+  // their own request (except top-of-chain), Full Access, the project
+  // owner (project entry, owner isn't the requester), or the requester's
+  // nearest active manager.
+  function canDecideCorrection(row: CorrectionRequestRowLite): boolean {
+    if (!me) return false;
+    if (row.requested_by === me.id) return nearestActiveManager(row.requested_by) === null;
+    if (isFullAccess) return true;
+    const ownerId = row.entry?.task?.project?.owner_id ?? null;
+    if (row.entry?.task_id && ownerId && ownerId !== row.requested_by && ownerId === me.id) return true;
+    return nearestActiveManager(row.requested_by) === me.id;
+  }
+
+  async function decideCorrection(row: CorrectionRequestRowLite, decision: "approved" | "rejected") {
+    const key = `corr-${row.id}`;
+    setDecidingKey(key);
+    const res = await decideTimeEntryCorrection(row.id, decision, notesDraft[key]?.trim() || null);
+    setDecidingKey(null);
+    if (res.error) {
+      await alert(`Couldn't ${decision === "approved" ? "approve" : "reject"} this correction: ${res.error}`);
       return;
     }
     loadAll();
@@ -796,6 +861,29 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
       });
     });
 
+    correctionRequests.forEach((row) => {
+      const key = `corr-${row.id}`;
+      const isNonProject = Boolean(row.entry?.activity_type_id);
+      const canDecide = canDecideCorrection(row);
+      rows.push({
+        key,
+        kind: "correction",
+        typeLabel: "Time Correction",
+        subject: isNonProject ? row.entry?.activity_type?.name ?? "Non-project" : row.entry?.task?.name ?? "Untitled task",
+        context: isNonProject ? "Non-project" : row.entry?.task?.project?.name ?? "—",
+        requestedByName: row.requester?.name ?? personName(row.requested_by),
+        requestedAt: row.created_at,
+        reasonCategory: null,
+        reasonNotes: row.reason,
+        extraLine: null,
+        canDecide,
+        action: canDecide ? (
+          <DecideButtons rowKey={key} onApprove={() => decideCorrection(row, "approved")} onReject={() => decideCorrection(row, "rejected")} />
+        ) : null,
+        correctionRow: row,
+      });
+    });
+
     baselineRequests.forEach((row) => {
       const key = `baseline-${row.id}`;
       const proj = projectById.get(row.project_id);
@@ -874,16 +962,17 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
 
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensions, timeEntries, baselineRequests, closureRequests, taskCompletions, allTimeEntries, parentTaskIds, chainPeople, people, projects, me]);
+  }, [extensions, timeEntries, correctionRequests, baselineRequests, closureRequests, taskCompletions, allTimeEntries, parentTaskIds, chainPeople, people, projects, me]);
 
   const counts = {
     extension: extensions.length,
     time: timeEntries.length,
+    correction: correctionRequests.length,
     baseline: baselineRequests.length,
     closure: closureRequests.length,
     task_completion: taskCompletions.filter((t) => !parentTaskIds.has(t.id)).length,
   };
-  const totalPending = counts.extension + counts.time + counts.baseline + counts.closure + counts.task_completion;
+  const totalPending = counts.extension + counts.time + counts.correction + counts.baseline + counts.closure + counts.task_completion;
 
   const visibleRows = useMemo(() => {
     let rows = kindFilter ? allRows.filter((r) => r.kind === kindFilter) : allRows;
@@ -1110,6 +1199,81 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
   // Reported Completion, Confirm Completion Date, Action -- see
   // ValidateActionCells above for what the last two mean and why
   // they're split into two cells instead of one combined block.
+  // 2026-09-23 (phase102, phase 2): Current vs Proposed side by side so
+  // the approver sees exactly what changes, plus the net hours delta.
+  function CorrectionTable({ rows }: { rows: Row[] }) {
+    const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
+    const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
+    const mins = (a: string, b: string) => Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000);
+    return (
+      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)", marginBottom: 10 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Task ID</th>
+              <th style={th}>Task / Project</th>
+              <th style={th}>Requested By</th>
+              <th style={th}>Work Date</th>
+              <th style={th}>Current</th>
+              <th style={th}>Proposed</th>
+              <th style={th}>Change</th>
+              <th style={th}>Reason</th>
+              <th style={th}>Requested On</th>
+              <th style={{ ...th, textAlign: "center" }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const c = row.correctionRow!;
+              const cur = mins(c.current_started_at, c.current_ended_at);
+              const prop = mins(c.proposed_started_at, c.proposed_ended_at);
+              const delta = prop - cur;
+              const idLabel = c.entry?.task?.task_number
+                ? `T-${String(c.entry.task.task_number).padStart(4, "0")}`
+                : c.entry?.non_project_entry_number
+                ? `NP-${String(c.entry.non_project_entry_number).padStart(4, "0")}`
+                : "—";
+              return (
+                <tr key={row.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{idLabel}</td>
+                  <td style={td}>
+                    <div style={{ fontWeight: 700, color: "var(--navy)" }}>{row.subject}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{row.context}</div>
+                  </td>
+                  <td style={td}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: "50%", background: "var(--accent-bg, #eaf2fb)", color: "var(--accent)", fontSize: 9.5, fontWeight: 700, flexShrink: 0 }}>
+                        {initials(row.requestedByName)}
+                      </span>
+                      {row.requestedByName}
+                    </div>
+                  </td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{formatWorkDate(c.proposed_started_at)}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap", color: "var(--muted)" }}>
+                    {formatClockRange(c.current_started_at, c.current_ended_at)}
+                    <div style={{ fontSize: 10 }}>{formatDuration(cur)}</div>
+                  </td>
+                  <td style={{ ...td, whiteSpace: "nowrap", fontWeight: 700, color: "var(--navy)" }}>
+                    {formatClockRange(c.proposed_started_at, c.proposed_ended_at)}
+                    <div style={{ fontSize: 10, fontWeight: 400 }}>{formatDuration(prop)}</div>
+                  </td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>
+                    <span className={`status-pill ${delta > 0 ? "gold" : delta < 0 ? "skyblue" : "neutral"}`} style={{ fontSize: 9.5 }}>
+                      {delta === 0 ? "Same hours" : `${delta > 0 ? "+" : "−"}${formatDuration(Math.abs(delta))}`}
+                    </span>
+                  </td>
+                  <td style={{ ...td, maxWidth: 220, whiteSpace: "normal", wordBreak: "break-word" }}>{c.reason}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDateTime(c.created_at)}</td>
+                  <td style={{ ...td, textAlign: "center" }}>{row.action ?? <span style={{ color: "var(--muted)" }}>—</span>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
   function TaskCompletionTable({ rows }: { rows: Row[] }) {
     const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
     const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
@@ -1365,6 +1529,8 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         {expanded &&
           (kind === "time" ? (
             <TimeEntryTable rows={rows} />
+          ) : kind === "correction" ? (
+            <CorrectionTable rows={rows} />
           ) : kind === "task_completion" ? (
             <TaskCompletionTable rows={rows} />
           ) : kind === "extension" ? (
@@ -1382,7 +1548,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
   // the page reads consistently top to bottom regardless of what's
   // currently pending. Sections with 0 matching rows just don't render
   // (KindSection returns null).
-  const KIND_ORDER: ApprovalKind[] = ["extension", "time", "baseline", "closure", "task_completion"];
+  const KIND_ORDER: ApprovalKind[] = ["extension", "time", "correction", "baseline", "closure", "task_completion"];
 
   function RequestList({ rows, emptyLabel }: { rows: Row[]; emptyLabel: string }) {
     if (rows.length === 0) {
@@ -1423,6 +1589,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         <AllRequestsSummaryCard />
         <SummaryCard kind="extension" />
         <SummaryCard kind="time" />
+        <SummaryCard kind="correction" />
         <SummaryCard kind="baseline" />
         <SummaryCard kind="closure" />
         <SummaryCard kind="task_completion" />

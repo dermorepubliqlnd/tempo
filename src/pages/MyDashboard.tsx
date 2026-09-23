@@ -115,6 +115,11 @@ interface BaselineRow {
   requested_by: string | null;
   requested_at: string;
 }
+interface MyCorrectionRequest {
+  id: string;
+  created_at: string;
+  entry: { id: string; task: { id: string; name: string; project: { id: string; name: string } | null } | null; activity_type: { id: string; name: string } | null } | null;
+}
 interface ClosureRow {
   id: string;
   project_id: string;
@@ -168,6 +173,7 @@ export default function MyDashboard() {
   const [pendingTimeEntries, setPendingTimeEntries] = useState<PendingTimeEntryRow[]>([]);
   const [baselineRequests, setBaselineRequests] = useState<BaselineRow[]>([]);
   const [closureRequests, setClosureRequests] = useState<ClosureRow[]>([]);
+  const [myCorrectionRequests, setMyCorrectionRequests] = useState<MyCorrectionRequest[]>([]);
 
   // 2026-09-23 (My Work Today, "Hide from Today"): a per-person-per-day
   // dismissal, kept in its own small table (task_daily_hidden) so it
@@ -223,6 +229,7 @@ export default function MyDashboard() {
       { data: clData },
       { data: hiddenData },
       { data: myTaskEntryData },
+      { data: myCorrData },
     ] = await Promise.all([
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
       supabase.from("projects").select("*").eq("is_archived", false),
@@ -267,7 +274,16 @@ export default function MyDashboard() {
       me
         ? supabase.from("time_entries").select("task_id,duration_minutes").eq("person_id", me.id).eq("is_archived", false).in("status", ["confirmed", "approved"])
         : Promise.resolve({ data: [] as { task_id: string | null; duration_minutes: number | null }[] }),
+      // 2026-09-23 (phase102): my pending time-correction requests.
+      me
+        ? supabase
+            .from("time_entry_correction_requests")
+            .select("id, created_at, entry:time_entries ( id, task:tasks ( id, name, project:projects ( id, name ) ), activity_type:non_project_activity_types ( id, name ) )")
+            .eq("requested_by", me.id)
+            .eq("status", "pending")
+        : Promise.resolve({ data: [] }),
     ]);
+    setMyCorrectionRequests((myCorrData as unknown as MyCorrectionRequest[] | null) ?? []);
 
     setPeople((peopleData as PersonLite[]) ?? []);
     setProjects((projectData as ProjectRow[]) ?? []);
@@ -495,9 +511,9 @@ export default function MyDashboard() {
   const myPendingTimeEntries = pendingTimeEntries.filter((r) => r.person_id === me?.id);
   const myPendingBaseline = baselineRequests.filter((r) => r.requested_by === me?.id);
   const myPendingClosure = closureRequests.filter((r) => r.requested_by === me?.id);
-  const myPendingApprovalsCount = myPendingExtensions.length + myPendingTimeEntries.length + myPendingBaseline.length + myPendingClosure.length;
+  const myPendingApprovalsCount = myPendingExtensions.length + myPendingTimeEntries.length + myPendingBaseline.length + myPendingClosure.length + myCorrectionRequests.length;
 
-  type SubmittedItem = { key: string; label: string; project: string; date: string; kind: "extension" | "time" | "baseline" | "closure"; to: string };
+  type SubmittedItem = { key: string; label: string; project: string; date: string; kind: "extension" | "time" | "correction" | "baseline" | "closure"; to: string };
   const mySubmittedItems: SubmittedItem[] = [
     ...myPendingExtensions.map((r) => ({
       key: `ext-${r.id}`,
@@ -513,6 +529,14 @@ export default function MyDashboard() {
       project: r.task?.project?.name ?? "—",
       date: r.started_at,
       kind: "time" as const,
+      to: "/time-tracking",
+    })),
+    ...myCorrectionRequests.map((r) => ({
+      key: `corr-${r.id}`,
+      label: `Time correction: ${r.entry?.task?.name ?? r.entry?.activity_type?.name ?? "entry"}`,
+      project: r.entry?.task?.project?.name ?? "Non-project",
+      date: r.created_at,
+      kind: "correction" as const,
       to: "/time-tracking",
     })),
     ...myPendingBaseline.map((r) => ({

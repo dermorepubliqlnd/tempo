@@ -278,24 +278,64 @@ export async function submitNonProjectTimeEntry(
   return { id: data as unknown as string };
 }
 
-// reasonCategory: pass a new category name to also correct it alongside
-// the duration (Sandra, 2026-09-03: "allow correction on reason... for
-// full access only") -- omit/undefined leaves the entry's existing
-// reason_category untouched (see correct_time_entry's p_reason_category
-// default null + coalesce in policies.sql).
+// 2026-09-23 (phase102, Sandra: "should correction update start and end
+// time instead of adding/subtracting duration?") -- corrections now set
+// a new START/END; duration is always derived server-side, so the
+// overlap check (timestamps) and every rollup (duration) can't disagree.
+// trimEntryIds: other finalized entries of the same person the
+// corrector chose to shorten so the corrected interval fits (see
+// apply_time_entry_correction in phase102_migration.sql).
 export async function correctTimeEntry(
   entryId: string,
-  durationMinutes: number,
+  startedAt: string,
+  endedAt: string,
   notes: string,
-  reasonCategory?: string,
-  activityTypeId?: string
+  opts: { reasonCategory?: string; activityTypeId?: string; trimEntryIds?: string[] } = {}
 ): Promise<{ error?: string }> {
   const { error } = await supabase.rpc("correct_time_entry", {
     p_entry_id: entryId,
-    p_duration_minutes: durationMinutes,
+    p_started_at: startedAt,
+    p_ended_at: endedAt,
     p_notes: notes,
-    p_reason_category: reasonCategory ?? null,
+    p_reason_category: opts.reasonCategory ?? null,
+    p_activity_type_id: opts.activityTypeId ?? null,
+    p_trim_entry_ids: opts.trimEntryIds ?? [],
+  });
+  if (error) return { error: error.message };
+  return {};
+}
+
+// Phase 2 (phase102): employee-initiated correction requests on their
+// own confirmed/approved entry, decided in the Approval Center.
+export async function requestTimeEntryCorrection(
+  entryId: string,
+  startedAt: string,
+  endedAt: string,
+  reason: string,
+  activityTypeId?: string
+): Promise<{ id?: string; error?: string }> {
+  const { data, error } = await supabase.rpc("request_time_entry_correction", {
+    p_entry_id: entryId,
+    p_started_at: startedAt,
+    p_ended_at: endedAt,
+    p_reason: reason,
     p_activity_type_id: activityTypeId ?? null,
+  });
+  if (error) return { error: error.message };
+  return { id: data as unknown as string };
+}
+
+export async function cancelTimeEntryCorrection(requestId: string): Promise<{ error?: string }> {
+  const { error } = await supabase.rpc("cancel_time_entry_correction", { p_request_id: requestId });
+  if (error) return { error: error.message };
+  return {};
+}
+
+export async function decideTimeEntryCorrection(requestId: string, decision: "approved" | "rejected", notes: string | null): Promise<{ error?: string }> {
+  const { error } = await supabase.rpc("decide_time_entry_correction", {
+    p_request_id: requestId,
+    p_decision: decision,
+    p_notes: notes,
   });
   if (error) return { error: error.message };
   return {};
