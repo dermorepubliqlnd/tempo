@@ -610,26 +610,31 @@ export default function MyDashboard() {
               </button>
             </div>
           )}
-          {/* 2026-09-23 (Sandra: "fix your columns... center align the
-              column headers... task column is too wide, you're
-              crunching the rest to the right") -- Task/Project switched
-              from an unbounded flex-grow (which was eating almost all
-              the row width) to a capped, ellipsis-truncated column;
-              every other column got an explicit width so the row lays
-              out predictably instead of everything downstream getting
-              squeezed. Headers are centered; data cells keep their own
-              natural alignment (text left, numbers right). */}
-          <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "8px 4px 6px", borderBottom: "1px solid var(--border)" }}>
-            <span style={{ flex: "0 0 60px", textAlign: "center" }}>Task ID</span>
-            <span style={{ flex: "1 1 150px", minWidth: 0, textAlign: "center" }}>Task</span>
-            <span style={{ flex: "0 0 88px", textAlign: "center" }}>Task Status</span>
-            <span style={{ flex: "0 0 88px", textAlign: "center" }}>Tag</span>
-            <span style={{ flex: "1 1 110px", minWidth: 0, textAlign: "center" }}>Project</span>
-            <span style={{ flex: "0 0 78px", textAlign: "center" }}>Start Date</span>
-            <span style={{ flex: "0 0 78px", textAlign: "center" }}>Due Date</span>
-            <span style={{ flex: "0 0 78px", textAlign: "center" }}>Estimated Hours</span>
-            <span style={{ flex: "0 0 60px", textAlign: "center" }}>Logged</span>
-            <span style={{ flex: "0 0 170px", textAlign: "center" }}>Hrs Variance</span>
+          {/* 2026-09-23 (Sandra, round 2: "it's ugly... task column too
+              wide... task status header overlapping the tag column, not
+              centered with the list below it... cut the hrs variance bar
+              in half") -- switched every column to a fixed pixel width
+              (no flex-grow at all -- growth is what let Task balloon)
+              inside a horizontally-scrollable wrapper. Task Status/Tag
+              headers got `whiteSpace: nowrap` -- they were wrapping onto
+              a second line at their old width, which is what made them
+              look like they were bleeding into the next column. Task/
+              Project headers went back to left-aligned (matching their
+              left-aligned, long-text data) -- centering a header over a
+              long left-aligned value is what looked off; short/numeric
+              columns stay centered, matching their data. */}
+          <div style={{ overflowX: "auto" }}>
+          <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "8px 4px 6px", borderBottom: "1px solid var(--border)", minWidth: 920 }}>
+            <span style={{ flex: "0 0 56px", textAlign: "center" }}>Task ID</span>
+            <span style={{ flex: "0 0 130px", minWidth: 0 }}>Task</span>
+            <span style={{ flex: "0 0 92px", textAlign: "center", whiteSpace: "nowrap" }}>Task Status</span>
+            <span style={{ flex: "0 0 84px", textAlign: "center", whiteSpace: "nowrap" }}>Tag</span>
+            <span style={{ flex: "0 0 110px", minWidth: 0 }}>Project</span>
+            <span style={{ flex: "0 0 72px", textAlign: "center" }}>Start Date</span>
+            <span style={{ flex: "0 0 72px", textAlign: "center" }}>Due Date</span>
+            <span style={{ flex: "0 0 74px", textAlign: "center", whiteSpace: "nowrap" }}>Est. Hours</span>
+            <span style={{ flex: "0 0 56px", textAlign: "center" }}>Logged</span>
+            <span style={{ flex: "0 0 90px", textAlign: "center" }}>Hrs Variance</span>
             <span style={{ flex: "0 0 40px", textAlign: "center" }}>Timer</span>
             <span style={{ flex: "0 0 40px", textAlign: "center" }}>Hide</span>
           </div>
@@ -645,32 +650,29 @@ export default function MyDashboard() {
               const variance = hoursVarianceOf(t.estimated_hours, logged);
               const varianceTone = hoursVarianceTone(variance?.percent ?? null);
               return (
-                <div key={t.id} className="dash-row" style={{ opacity: isHidden ? 0.55 : 1 }}>
-                  <span style={{ flex: "0 0 60px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>T-{String(t.task_number).padStart(4, "0")}</span>
-                  <span style={{ flex: "1 1 150px", minWidth: 0, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</span>
-                  <span style={{ flex: "0 0 88px", textAlign: "center" }}>
+                <div key={t.id} className="dash-row" style={{ opacity: isHidden ? 0.55 : 1, minWidth: 920 }}>
+                  <span style={{ flex: "0 0 56px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>T-{String(t.task_number).padStart(4, "0")}</span>
+                  <span style={{ flex: "0 0 130px", minWidth: 0, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</span>
+                  <span style={{ flex: "0 0 92px", textAlign: "center" }}>
                     <span className={`status-pill ${myWorkTodayStatusTone(t.status)}`} style={{ fontSize: 9 }}>{t.status ?? "—"}</span>
                   </span>
-                  <span style={{ flex: "0 0 88px", textAlign: "center" }}>
+                  <span style={{ flex: "0 0 84px", textAlign: "center" }}>
                     {tag && (
                       <span className={`status-pill ${tag.tone}`} style={{ fontSize: 9 }}>
                         {tag.label}
                       </span>
                     )}
                   </span>
-                  <span style={{ flex: "1 1 110px", minWidth: 0, fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.project?.name ?? "—"}>{t.project?.name ?? "—"}</span>
-                  <span style={{ flex: "0 0 78px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>{t.start_date ? formatDate(t.start_date) : "—"}</span>
-                  <span style={{ flex: "0 0 78px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>{formatDate(t.current_due_date)}</span>
-                  <span style={{ flex: "0 0 78px", textAlign: "center", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
-                  <span style={{ flex: "0 0 60px", textAlign: "center", fontSize: 11.5, color: "var(--text-secondary)" }}>{logged > 0 ? `${logged.toFixed(1)}h` : "—"}</span>
-                  {/* 2026-09-23 (Sandra: "for hrs variance show the progress
-                      bar for visual, we have space") -- same bar markup as
-                      My Projects' Progress column, colored by the variance
-                      tone (green under/at estimate, amber moderately over,
-                      red significantly over) and capped visually at 150% so
-                      one wildly-over task doesn't blow out the bar; the
-                      exact +/-Xh figure stays next to it as a pill. */}
-                  <span style={{ flex: "0 0 170px", display: "flex", alignItems: "center", gap: 6, padding: "0 4px" }}>
+                  <span style={{ flex: "0 0 110px", minWidth: 0, fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.project?.name ?? "—"}>{t.project?.name ?? "—"}</span>
+                  <span style={{ flex: "0 0 72px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>{t.start_date ? formatDate(t.start_date) : "—"}</span>
+                  <span style={{ flex: "0 0 72px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>{formatDate(t.current_due_date)}</span>
+                  <span style={{ flex: "0 0 74px", textAlign: "center", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
+                  <span style={{ flex: "0 0 56px", textAlign: "center", fontSize: 11.5, color: "var(--text-secondary)" }}>{logged > 0 ? `${logged.toFixed(1)}h` : "—"}</span>
+                  {/* 2026-09-23 (Sandra, round 2: "cut the progress bar in
+                      half") -- column halved from 170px to 90px; bar still
+                      color-coded by variance tone and capped at 150%, +/-Xh
+                      pill stays alongside it. */}
+                  <span style={{ flex: "0 0 90px", display: "flex", alignItems: "center", gap: 5, padding: "0 4px" }}>
                     {variance ? (
                       <>
                         <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
@@ -737,6 +739,7 @@ export default function MyDashboard() {
               );
             })
           )}
+          </div>
         </div>
       )}
 
