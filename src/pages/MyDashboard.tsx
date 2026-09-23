@@ -935,10 +935,11 @@ export default function MyDashboard() {
                       ) : d.logged > 0 ? (
                         <div style={{ fontSize: 14, fontWeight: 700, color: colors.fg, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 2 }}>
                           {d.logged.toFixed(1)}h
-                          {/* 2026-09-23 (Sandra): Very low and Significantly above
-                              share the same danger-red -- the arrow tells the two
-                              apart at a glance, same as HoursOverview.tsx's Daily
-                              Activity grid. */}
+                          {/* 2026-09-23 (Sandra: "red only for significantly high
+                              hours, low hours use blue shades") -- Very Low is now
+                              blue and Significantly Above is red; the arrow is kept
+                              on both ends as an extra at-a-glance cue, same as
+                              HoursOverview.tsx's Daily Activity grid. */}
                           {colors.key === "very_low" && <ArrowDown size={11} />}
                           {colors.key === "excessive" && <ArrowUp size={11} />}
                         </div>

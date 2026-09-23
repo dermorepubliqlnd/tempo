@@ -1055,10 +1055,10 @@ export default function HoursOverview() {
                                       {logged.toFixed(2)}h
                                       {/* 2026-09-23 (Sandra: "show an arrow down after the number if it's
                                           very low, arrow up for significantly above -- visual cue for why
-                                          it's red") -- Very low and Significantly above deliberately share
-                                          the same danger-red (see loggedHoursBands.ts), so the arrow is
-                                          what tells the two apart at a glance instead of needing the
-                                          legend. */}
+                                          it's colored the way it is") -- Very Low is blue and Significantly
+                                          Above is red now (see loggedHoursBands.ts's "red only for high,
+                                          blue for low" revision), but the arrows are kept as an extra
+                                          at-a-glance cue on both ends regardless of color. */}
                                       {colors.key === "very_low" && <ArrowDown size={10} />}
                                       {colors.key === "excessive" && <ArrowUp size={10} />}
                                     </span>

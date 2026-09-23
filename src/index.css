@@ -30,6 +30,15 @@
      above). Same pale-bg + darker-text pattern as every other tone here. */
   --orange-bg: #fdf0e2;
   --orange-text: #b5651d;
+  /* 2026-09-23 (Sandra: "use red only for significantly high hours, not
+     low hours -- low hours should use blue shades") -- two-step blue
+     scale for the logged-hours "Very low"/"Below expected" tiers,
+     replacing red/amber there so under-logging and over-logging are no
+     longer both painted the same danger color. */
+  --blue-bg: #dbeafe;
+  --blue-text: #1d4ed8;
+  --skyblue-bg: #eff6ff;
+  --skyblue-text: #3b82f6;
   --radius-sm: 3px;
   --radius-md: 8px;
   /* Round 1 of WBS UI redesign (2026-07-29): dedicated radius for
@@ -886,6 +895,8 @@ tr:hover .add-subtask-btn { opacity: 1; }
 .status-pill.mint { background: #eef8f2; color: #3f9d6e; }
 .status-pill.slate { background: #e4e8ee; color: #5b6472; }
 .status-pill.orange { background: var(--orange-bg); color: var(--orange-text); }
+.status-pill.blue { background: var(--blue-bg); color: var(--blue-text); }
+.status-pill.skyblue { background: var(--skyblue-bg); color: var(--skyblue-text); }
 
 /* Inline select cells: no visible chevron/border until the cell is actively
    being edited, so a full table of data doesn't turn into a wall of dropdown

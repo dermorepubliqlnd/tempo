@@ -1,51 +1,33 @@
-// Sandra's 6-tier logged-hours band system (phase64, 2026-09-23), replacing
-// the old 4-tier hoursShiftTone (neutral/success/warning/danger) that lived
-// duplicated in HoursOverview.tsx (Daily Activity) and MyDashboard.tsx (My
-// Logged Hours This Week). The old bands had a real bug, not just a look
-// Sandra wanted changed: `ratio <= 1` covered EVERYTHING from a bare 0.1h up
-// to a full 7.5h shift as "success" (green) -- so someone who logged almost
-// nothing on a work day read exactly the same as someone who logged a full
-// shift. Splitting the "at or under a shift" range into Very low / Below
-// expected / Within expected fixes that, and mirrors the same reasoning as
-// utilizationBands.ts's 6-tier split (High vs Full).
+// Logged-hours band system for a standard 7.5-hour workday, shared by
+// every place logged hours are shown or evaluated -- Daily Activity
+// (HoursOverview.tsx), My Logged Hours This Week + My Work Today
+// (MyDashboard.tsx), and the Today's Logs/This Week KPI cards
+// (TimeTracking.tsx). Centralized here specifically so all of those
+// stay in sync automatically -- see the "How to apply" note at the
+// bottom of this file's history in memory for why that matters.
 //
-// "-- / Off" (no hours expected or none logged yet) is intentionally NOT
-// part of this scale -- callers keep deciding that case themselves (a
-// weekend/holiday/day-off cell, or simply hasValue===false for a day
-// nothing's been logged on yet), same as before. This module only tiers
-// hours>0.
+// 2026-09-23 (Sandra's "Time Log Status Colors" brief) -- REVISES the
+// earlier same-red-both-extremes design: "use red only for
+// significantly high hours, not low hours -- low hours should use blue
+// shades so users can immediately distinguish under-logging from
+// overwork" and "do not label low hours as unproductive, this is only
+// a comparison of logged hours vs expected hours." Both callers'
+// up/down arrow cues are UNCHANGED (still `colors.key === "very_low"` /
+// `"excessive"`) and already render in `currentColor`/`colors.fg`, so
+// they automatically pick up whatever font color each tier uses here --
+// no separate arrow-color logic needed.
 //
-// Sandra explicitly asked for the SAME red family on both extremes ("the
-// numbers themselves tell the approver whether the issue is too little or
-// too much") -- Very low and Significantly above both resolve to
-// --danger-bg/--danger-text.
-
-export interface HoursTier {
-  key: string;
-  label: string;
-  bg?: string;
-  fg: string;
-  tone: "neutral" | "danger" | "warning" | "success" | "orange";
-}
-
-// 2026-09-23 (dynamic expected hours): `loggedHoursTier` used to assume
-// every day is a flat 7.5h shift, hardcoding the tier thresholds as raw
-// hour counts. That broke the moment a person had an approved half-day
-// or full-day time off -- e.g. someone on a half-day (3.75h expected)
-// who logged 2.8h read as "Very low" against the full 7.5h scale, when
-// really they were AT expected for their actual day. `expectedHours` is
-// now a required second input (the caller supplies the person's real
-// expected hours for that specific day -- see
-// `expectedHoursForDay`/`dailyCapacityHours` in dailyAllocation.ts,
-// already the one shared source of truth for half-day/off-day capacity
-// used by Utilization/WBS/My Dashboard). Internally this normalizes to
-// a percentage-of-expected ratio and applies the SAME percentage bands
-// regardless of shift length, so a half-day and a full day read
-// consistently. The five-tier percentage bands below are Sandra's
-// explicit spec (2026-09-23): <50% / 50-84% / 85-113% / 114-133% / >133%
-// -- these replace the earlier hand-picked hour cutoffs (3.75/6.5/8.5/10
-// against an implicit 7.5h), which worked out to almost the same ratios
-// by coincidence but weren't expressed as percentages.
+// `expectedHours` is a required second input (the caller's own
+// expectedHoursForDay/dailyCapacityHours result) so this is always a
+// percentage-of-expected ratio, never a hardcoded 7.5h assumption --
+// that's also what makes weekly/multi-day views proportional for free:
+// pass a week's total logged hours against its own total expected
+// hours (sum of each scheduled day's own expected hours, e.g. 3
+// scheduled days -> 3 x 7.5h, not a flat 37.5h) and the exact same
+// bands apply. Sandra's own example -- a normal 5-day week's "Within
+// Expected" range of 32.5-42.5h (+/-1h/day) -- is exactly this ratio
+// system already: 32.5/37.5 = 86.67%, 42.5/37.5 = 113.33%, the same
+// boundary fractions as the single-day 6.5h/8.5h cutoffs below.
 //
 // `expectedHours <= 0` means a full-day approved time off (or a
 // holiday) -- Sandra: "the day should not be evaluated as underworked
@@ -55,36 +37,46 @@ export interface HoursTier {
 // short-circuits before the ratio math runs at all, and the caller
 // decides whether to print "Time Off" or the actual hours (rare: still
 // logging hours on a day marked off).
-export function loggedHoursTier(hours: number, expectedHours: number): HoursTier {
-  if (expectedHours <= 0) return { key: "time_off", label: "Time Off", fg: "var(--muted)", tone: "neutral" };
-  if (hours <= 0) return { key: "off", label: "— / Off", fg: "var(--muted)", tone: "neutral" };
-  const pct = hours / expectedHours;
-  if (pct < 0.5) return { key: "very_low", label: "Very low", bg: "var(--danger-bg)", fg: "var(--danger-text)", tone: "danger" };
-  if (pct < 0.85) return { key: "below", label: "Below expected", bg: "var(--warning-bg)", fg: "var(--warning-text)", tone: "warning" };
-  if (pct <= 1.13) return { key: "expected", label: "Within expected", bg: "var(--success-bg)", fg: "var(--success-text)", tone: "success" };
-  if (pct <= 1.33) return { key: "above", label: "Above expected", bg: "var(--orange-bg)", fg: "var(--orange-text)", tone: "orange" };
-  return { key: "excessive", label: "Significantly above", bg: "var(--danger-bg)", fg: "var(--danger-text)", tone: "danger" };
+
+export interface HoursTier {
+  key: string;
+  label: string;
+  bg?: string;
+  fg: string;
+  tone: "neutral" | "danger" | "warning" | "success" | "blue" | "skyblue";
 }
 
-// Legend for the bottom of the Daily Activity table / My Logged Hours card.
-// Ranges shown here are for a REGULAR 7.5h day, as a reference -- the
-// actual tiering (loggedHoursTier) is percentage-of-expected, so an
-// approved half-day or reduced day is judged against its own smaller
-// expected-hours figure using these same percentage cutoffs, not
-// against 7.5h. "Time Off" is its own row: a full-day approved time
-// off day is never colored red/amber/green (see loggedHoursTier).
-// 2026-09-23 (Sandra: "remove the expected work [percentages] ... let's
-// stick with Very Low, Below, Within, Above, Significantly Above --
-// remove the arrows in the legend too, having it in the display works
-// and is straightforward") -- plain labels only, no % breakdown; arrow
-// icons stay on the actual day cells (HoursOverview/MyDashboard) but are
-// no longer duplicated in the legend itself.
+// Boundary fractions of expected hours, expressed as exact ratios of
+// Sandra's 7.5h-day example (3.75/7.5, 6.5/7.5, 8.5/7.5, 10/7.5) so the
+// same cutoffs hold at ANY expected-hours figure, not just 7.5h.
+const VERY_LOW_MAX = 0.5; // <3.75h of a 7.5h day
+const BELOW_MAX = 6.5 / 7.5; // <6.5h -- Below Expected upper edge
+const WITHIN_MAX = 8.5 / 7.5; // <=8.5h -- Within Expected upper edge
+const ABOVE_MAX = 10 / 7.5; // <=10h -- Above Expected upper edge
+
+export function loggedHoursTier(hours: number, expectedHours: number): HoursTier {
+  if (expectedHours <= 0) return { key: "time_off", label: "Not Evaluated", fg: "var(--muted)", tone: "neutral" };
+  if (hours <= 0) return { key: "off", label: "— / Off", fg: "var(--muted)", tone: "neutral" };
+  const pct = hours / expectedHours;
+  if (pct < VERY_LOW_MAX) return { key: "very_low", label: "Very Low", bg: "var(--blue-bg)", fg: "var(--blue-text)", tone: "blue" };
+  if (pct < BELOW_MAX) return { key: "below", label: "Below Expected", bg: "var(--skyblue-bg)", fg: "var(--skyblue-text)", tone: "skyblue" };
+  if (pct <= WITHIN_MAX) return { key: "expected", label: "Within Expected", bg: "var(--success-bg)", fg: "var(--success-text)", tone: "success" };
+  if (pct <= ABOVE_MAX) return { key: "above", label: "Above Expected", bg: "var(--warning-bg)", fg: "var(--warning-text)", tone: "warning" };
+  return { key: "excessive", label: "Significantly Above", bg: "var(--danger-bg)", fg: "var(--danger-text)", tone: "danger" };
+}
+
+// Legend for the bottom of the Daily Activity table / My Logged Hours
+// card. Ranges shown here are for a REGULAR 7.5h day, as a reference --
+// the actual tiering (loggedHoursTier) is percentage-of-expected, so an
+// approved half-day or reduced day (or a multi-day week) is judged
+// against its own expected-hours figure using these same percentage
+// cutoffs, not against a flat 7.5h/37.5h assumption.
 export const LOGGED_HOURS_LEGEND = [
-  { range: "Time Off", label: "Time Off", tone: "neutral" as const },
+  { range: "Time Off", label: "Not Evaluated", tone: "neutral" as const },
   { range: "— / Off", label: "No hours logged", tone: "neutral" as const },
-  { range: "<3.75h", label: "Very low", tone: "danger" as const },
-  { range: "3.75–6.37h", label: "Below expected", tone: "warning" as const },
-  { range: "6.38–8.47h", label: "Within expected", tone: "success" as const },
-  { range: "8.48–9.97h", label: "Above expected", tone: "orange" as const },
-  { range: ">9.97h", label: "Significantly above", tone: "danger" as const },
+  { range: "<3.75h", label: "Very Low", tone: "blue" as const },
+  { range: "3.75–6.49h", label: "Below Expected", tone: "skyblue" as const },
+  { range: "6.5–8.5h", label: "Within Expected", tone: "success" as const },
+  { range: "8.51–10h", label: "Above Expected", tone: "warning" as const },
+  { range: ">10h", label: "Significantly Above", tone: "danger" as const },
 ];
