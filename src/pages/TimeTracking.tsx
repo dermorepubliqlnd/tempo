@@ -946,7 +946,13 @@ export default function TimeTracking() {
     const [reqStart, reqEnd] = rangeForPreset(datePreset, rangeAnchor, customStart, customEnd);
     async function loadTeamSupervisorData() {
       const [{ data: timers, error: timersErr }, { data: required, error: requiredErr }] = await Promise.all([
-        supabase.rpc("get_team_running_timers"),
+        // 2026-09-25 (phase119) -- Working Now is scoped per tab: Team
+        // Time = my reporting line only (even for Full Access), All Time
+        // = org-wide incl. my own timer. Falls back to the old RPC if
+        // the phase119 SQL hasn't been applied yet.
+        supabase.rpc("get_running_timers", { p_scope: scope }).then(async (res) =>
+          res.error ? await supabase.rpc("get_team_running_timers") : res
+        ),
         supabase.rpc("get_team_required_hours", { p_start: reqStart, p_end: reqEnd }),
       ]);
       if (cancelled) return;
@@ -2654,6 +2660,9 @@ export default function TimeTracking() {
                                   {initials(t.person_name)}
                                 </span>
                                 {t.person_name}
+                                {t.person_id === me?.id && (
+                                  <span style={{ fontSize: 10.5, color: "var(--muted)", fontWeight: 600 }}>(You)</span>
+                                )}
                               </div>
                             </td>
                             <td style={{ padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top", whiteSpace: "nowrap" }}>
