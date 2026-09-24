@@ -4056,7 +4056,13 @@ export default function Projects() {
               >
                 {formatHours(hours)}
               </button>
-              {isMine && !t.is_archived && (
+              {/* 2026-09-24 (Sandra: "start button and follow-up button
+                  should never show at the same time"): a Done task shows
+                  ONLY the follow-up (+) button -- no greyed-out Start. The
+                  timer comes back only if the task is reopened (status
+                  leaves Done). A timer already running on a task that
+                  flipped to Done still shows its Stop button. */}
+              {isMine && !t.is_archived && (t.status !== "Done" || isRunningHere) && (
                 <button
                   onClick={async () => {
                     if (isRunningHere) {
