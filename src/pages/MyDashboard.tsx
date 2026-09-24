@@ -949,11 +949,13 @@ export default function MyDashboard() {
           {myProjects.length > 0 && (
           <div className="dash-card">
             <SectionHeader title={`My Projects (${myProjects.length})`} to="/projects?owner=me" />
-            {/* One grid for header + rows: ID/WBS/Health/Progress/End hug
-                their content; Project takes the rest. */}
-            <div style={{ display: "grid", gridTemplateColumns: "max-content minmax(120px, 1fr) max-content max-content max-content max-content", columnGap: 16, alignItems: "center" }}>
+            {/* One grid for header + rows. All columns `auto`: sized to content,
+                then leftover width is added EQUALLY to every column (Sandra:
+                no single long gap after Project). Spacing via right padding,
+                not column-gap, so row borders stay continuous. */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(6, auto)", alignItems: "center" }}>
               {["ID", "Project", "WBS Status", "Health", "Progress", "End Date"].map((h, i) => (
-                <span key={h} style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 0 6px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", textAlign: i === 3 ? "center" : i === 5 ? "right" : "left" }}>{h}</span>
+                <span key={h} style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: `0 ${i === 5 ? 0 : 16}px 6px 0`, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", textAlign: i === 3 ? "center" : i === 5 ? "right" : "left" }}>{h}</span>
               ))}
               {myProjects.slice(0, 6).map((p) => {
                 const health = healthOf(p, tasks, holidayDateStrings);
@@ -963,7 +965,7 @@ export default function MyDashboard() {
                 const wbsMeta = closureRequested
                   ? { label: "Closure Requested", hint: "Closure has been requested and is waiting for approval.", color: "var(--warning-text, #b45309)", bg: "var(--warning-bg, #fff7ed)", border: "#f3dfb8" }
                   : wbsStatusMetaFor(p.wbs_status, baselinePending);
-                const cell: CSSProperties = { padding: "9px 0", borderBottom: "1px solid var(--border)", cursor: "pointer", minWidth: 0 };
+                const cell: CSSProperties = { padding: "9px 16px 9px 0", borderBottom: "1px solid var(--border)", cursor: "pointer", minWidth: 0, alignSelf: "stretch", display: "flex", alignItems: "center" };
                 const go = () => navigate(`/projects/${p.id}/wbs`);
                 return (
                   <div key={p.id} className="dash-grid-row" style={{ display: "contents" }}>
@@ -978,7 +980,7 @@ export default function MyDashboard() {
                         {wbsMeta?.label ?? p.wbs_status}
                       </span>
                     </span>
-                    <span onClick={go} style={{ ...cell, textAlign: "center" }}>
+                    <span onClick={go} style={{ ...cell, justifyContent: "center" }}>
                       <span className={`status-pill ${health.tone}`} style={{ fontSize: 9.5, whiteSpace: "nowrap" }}>{health.label.toUpperCase()}</span>
                     </span>
                     <span onClick={go} style={{ ...cell, display: "flex", alignItems: "center", gap: 6 }}>
@@ -987,7 +989,7 @@ export default function MyDashboard() {
                       </div>
                       <span style={{ fontSize: 11, color: "var(--muted)", width: 32, textAlign: "right" }}>{progress === null ? "—" : `${Math.round(progress)}%`}</span>
                     </span>
-                    <span onClick={go} style={{ ...cell, textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{formatDate(p.end_date)}</span>
+                    <span onClick={go} style={{ ...cell, paddingRight: 0, justifyContent: "flex-end", fontSize: 11.5, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{formatDate(p.end_date)}</span>
                   </div>
                 );
               })}
