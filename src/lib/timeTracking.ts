@@ -13,6 +13,8 @@ export type TimeEntryStatus = "running" | "pending_confirm" | "confirmed" | "pen
 
 export interface TimeEntryRow {
   id: string;
+  // 2026-09-24 (phase113): permanent Time Log ID number, shown "TL-0001".
+  entry_number?: number | null;
   // 2026-09-22: nullable now that non-project time entries exist --
   // exactly one of task_id/activity_type_id is set, never both, never
   // neither (enforced by a DB check constraint). See
@@ -415,4 +417,10 @@ export async function submitFollowUpTimeEntry(
   });
   if (error) return { error: error.message };
   return { id: data as unknown as string };
+}
+
+// 2026-09-24 (phase113, Sandra: "add time log entry IDs -- apply to all
+// instances"): every time entry's permanent ID, e.g. "TL-0042".
+export function timeLogId(n: number | null | undefined): string {
+  return n ? `TL-${String(n).padStart(4, "0")}` : "—";
 }

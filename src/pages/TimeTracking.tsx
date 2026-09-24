@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { FOLLOW_UP_REASON_LABEL, type FollowUpReason, formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, requestTimeEntryCorrection, cancelTimeEntryCorrection, editPendingManualTimeEntry } from "../lib/timeTracking";
+import { FOLLOW_UP_REASON_LABEL, type FollowUpReason, timeLogId, formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, requestTimeEntryCorrection, cancelTimeEntryCorrection, editPendingManualTimeEntry } from "../lib/timeTracking";
 import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { loggedHoursTier } from "../lib/loggedHoursBands";
 import { expectedHoursForDay } from "../lib/dailyAllocation";
@@ -121,6 +121,7 @@ interface EntryRow {
   // (activity_type_id set), same padding convention as task_number's
   // "T-0007" -- displayed "NP-0007". Always null on a project-task entry.
   non_project_entry_number: number | null;
+  entry_number: number | null;
   task: TaskLite | null;
   activity_type: { id: string; name: string } | null;
   person: { id: string; name: string } | null;
@@ -288,7 +289,7 @@ function overlapTitle(row: EntryRow): string {
   return row.activity_type_id ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
 }
 function overlapMessageText(row: EntryRow): string {
-  return `Time overlap detected\n\nYou already have a logged entry for this period:\nTask ID: ${overlapTaskIdLabel(row)}\nTask: ${overlapTitle(row)}\nTime: ${formatClockRange(row.started_at, row.ended_at)}\nStatus: ${STATUS_LABEL[row.status]}\n\nPlease adjust the start or end time.`;
+  return `Time overlap detected\n\nYou already have a logged entry for this period:\nLog ID: ${timeLogId(row.entry_number)}\nTask ID: ${overlapTaskIdLabel(row)}\nTask: ${overlapTitle(row)}\nTime: ${formatClockRange(row.started_at, row.ended_at)}\nStatus: ${STATUS_LABEL[row.status]}\n\nPlease adjust the start or end time.`;
 }
 
 // 2026-09-23 (Sandra: "can we hard gate manual plotting time in
@@ -869,7 +870,7 @@ export default function TimeTracking() {
           `id, task_id, activity_type_id, person_id, started_at, ended_at, duration_minutes, source, status, requested_by, reason_category, reason_notes, auto_stopped,
            decided_by, decided_at, decision_notes, corrected_by, corrected_at, original_duration_minutes, correction_notes, created_at,
            original_started_at, original_ended_at, correction_requested_by, is_follow_up, follow_up_reason,
-           is_archived, archived_at, archived_by, archive_reason, non_project_entry_number,
+           is_archived, archived_at, archived_by, archive_reason, non_project_entry_number, entry_number,
            task:tasks ( id, name, assignee_id, project_id, task_number, project:projects ( id, name, owner_id ) ),
            activity_type:non_project_activity_types ( id, name ),
            person:people!time_entries_person_id_fkey ( id, name )`
@@ -1458,7 +1459,7 @@ export default function TimeTracking() {
   const searchFilteredEntries = !searchLower
     ? sourceFilteredEntries
     : sourceFilteredEntries.filter((e) => {
-        const haystack = [e.task?.name, e.task?.project?.name, e.activity_type?.name, e.reason_notes, e.reason_category, e.person?.name]
+        const haystack = [timeLogId(e.entry_number), e.task?.name, e.task?.project?.name, e.activity_type?.name, e.reason_notes, e.reason_category, e.person?.name]
           .filter(Boolean)
           .join(" ")
           .toLowerCase();
@@ -1511,8 +1512,8 @@ export default function TimeTracking() {
   // hand-built table (not the reorderable DataTable), so "immovable"
   // for Task ID is just the default -- there's no drag-reorder here to
   // begin with.
-  const ENTRY_TABLE_COL_WIDTHS_WITH_ASSIGNEE = ["8%", "16%", "10%", "9%", "11%", "7%", "17%", "7%", "8%", "7%"];
-  const ENTRY_TABLE_COL_WIDTHS_NO_ASSIGNEE = ["8%", "20%", "10%", "12%", "8%", "20%", "8%", "8%", "6%"];
+  const ENTRY_TABLE_COL_WIDTHS_WITH_ASSIGNEE = ["7%", "7%", "15%", "9%", "9%", "10%", "6%", "15%", "6%", "9%", "7%"];
+  const ENTRY_TABLE_COL_WIDTHS_NO_ASSIGNEE = ["7%", "7%", "18%", "10%", "11%", "7%", "19%", "7%", "8%", "6%"];
   function EntryTableColGroup({ showAssignee }: { showAssignee: boolean }) {
     const widths = showAssignee ? ENTRY_TABLE_COL_WIDTHS_WITH_ASSIGNEE : ENTRY_TABLE_COL_WIDTHS_NO_ASSIGNEE;
     return (
@@ -1550,7 +1551,7 @@ export default function TimeTracking() {
   function renderEntriesTable({ rows, showAssignee }: { rows: EntryRow[]; showAssignee: boolean }) {
     if (rows.length === 0) return null;
     const isFullAccess = me?.access_level === "full";
-    const colCount = showAssignee ? 10 : 9;
+    const colCount = showAssignee ? 11 : 10;
     const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
     const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
     return (
@@ -1559,6 +1560,7 @@ export default function TimeTracking() {
           <EntryTableColGroup showAssignee={showAssignee} />
           <thead>
             <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Log ID</th>
               <th style={th}>Task ID</th>
               <th style={th}>Task / Project</th>
               {showAssignee && <th style={th}>Assignee</th>}
@@ -1601,6 +1603,7 @@ export default function TimeTracking() {
               return (
                 <Fragment key={row.id}>
                   <tr style={{ borderBottom: correcting || editing || archiving || requesting ? "none" : "1px solid var(--border)" }}>
+                    <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{timeLogId(row.entry_number)}</td>
                     <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{taskIdLabel}</td>
                     <td style={td}>
                       <div style={{ fontWeight: 700, color: "var(--navy)" }}>{title}</div>
@@ -2119,6 +2122,7 @@ export default function TimeTracking() {
               >
                 <div style={{ fontWeight: 700, marginBottom: 4 }}>Time overlap detected</div>
                 <div>You already have a logged entry for this period:</div>
+                <div><strong>Log ID:</strong> {timeLogId(logOverlapEntry.entry_number)}</div>
                 <div><strong>Task ID:</strong> {overlapTaskIdLabel(logOverlapEntry)}</div>
                 <div><strong>Task:</strong> {overlapTitle(logOverlapEntry)}</div>
                 <div><strong>Time:</strong> {formatClockRange(logOverlapEntry.started_at, logOverlapEntry.ended_at)}</div>

@@ -40,7 +40,7 @@ const WBS_STATUS_TONES: Record<WbsStatus, string> = {
   changed_after_baseline: "gold",
   closed: "neutral",
 };
-import { rollupHoursFor, ownHoursFor, formatHours, rollupTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, type TimeEntryRow, type TimeLogStatus } from "../lib/timeTracking";
+import { rollupHoursFor, ownHoursFor, formatHours, timeLogId, rollupTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, type TimeEntryRow, type TimeLogStatus } from "../lib/timeTracking";
 import { parseLocalDate, calendarDaysBetween, timingOf, timingVarianceDays, timingRank } from "../lib/taskTiming";
 // Deletion history archive (2026-08-14c): a permanently-deleted task's own
 // logged Spent Hrs are archived (supabase/policies.sql "Migration
@@ -5421,6 +5421,7 @@ export default function Projects() {
                       {personEntries.map((e) => (
                         <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", fontSize: 11.5, color: "var(--text-secondary)" }}>
                           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontWeight: 700, color: "var(--navy)" }}>{timeLogId(e.entry_number)}</span>
                             {formatDate(e.started_at)}
                             <span className={`status-pill ${sourceTone[e.source] ?? "neutral"}`} style={{ fontSize: 9.5, padding: "1px 5px" }}>
                               {sourceLabel[e.source] ?? e.source}

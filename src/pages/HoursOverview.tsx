@@ -18,7 +18,7 @@ const LEGEND_DOT_COLOR: Record<string, string> = {
   danger: "var(--danger-text)",
 };
 import { TASK_STATUS_GROUPED, statusGroupOf } from "../lib/notionOptions";
-import { ownTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, formatHours, type TimeLogStatus } from "../lib/timeTracking";
+import { ownTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, formatHours, timeLogId, type TimeLogStatus } from "../lib/timeTracking";
 import { timingOf, timingRank } from "../lib/taskTiming";
 import { toCsv } from "../lib/csv";
 import { formatDate } from "../lib/formatDate";
@@ -99,6 +99,7 @@ interface TaskRow {
 }
 interface TimeEntryRow {
   id: string;
+  entry_number?: number | null;
   // 2026-09-22: null on a non-project entry (Meeting/Admin/Coaching/etc.
   // logged via the Activity Type picker instead of a task) -- see
   // activity_type below.
@@ -253,7 +254,7 @@ export default function HoursOverview() {
           .eq("is_archived", false),
         supabase
           .from("time_entries")
-          .select("id,task_id,activity_type_id,person_id,started_at,duration_minutes,status,source,activity_type:non_project_activity_types ( id, name )")
+          .select("id,entry_number,task_id,activity_type_id,person_id,started_at,duration_minutes,status,source,activity_type:non_project_activity_types ( id, name )")
           .in("status", ["confirmed", "approved"])
           .eq("is_archived", false),
         supabase.from("holidays").select("*"),
@@ -1309,6 +1310,7 @@ export default function HoursOverview() {
                         {personEntries.map((e) => (
                           <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", fontSize: 11.5, color: "var(--text-secondary)" }}>
                             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontWeight: 700, color: "var(--navy)" }}>{timeLogId(e.entry_number)}</span>
                               {formatDate(e.started_at)}
                               <span className={`status-pill ${sourceTone[e.source] ?? "neutral"}`} style={{ fontSize: 9.5, padding: "1px 5px" }}>
                                 {sourceLabel[e.source] ?? e.source}

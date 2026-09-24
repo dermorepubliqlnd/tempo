@@ -22,7 +22,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { decideTimeEntry, decideTimeEntryCorrection, formatDuration, FOLLOW_UP_REASON_LABEL, type FollowUpReason } from "../lib/timeTracking";
+import { decideTimeEntry, decideTimeEntryCorrection, formatDuration, FOLLOW_UP_REASON_LABEL, timeLogId, type FollowUpReason } from "../lib/timeTracking";
 
 // Approval Center (2026-09-18, Sandra: "create an approval center page
 // under main... where all things for approval should show like extension
@@ -95,6 +95,8 @@ interface TimeEntryRowLite {
   reason_notes: string | null;
   is_follow_up?: boolean;
   follow_up_reason?: string | null;
+  entry_number?: number | null;
+  non_project_entry_number?: number | null;
   task: {
     id: string;
     name: string;
@@ -123,6 +125,7 @@ interface CorrectionRequestRowLite {
     task_id: string | null;
     activity_type_id: string | null;
     non_project_entry_number: number | null;
+    entry_number?: number | null;
     task: { id: string; name: string; task_number: number | null; project: { id: string; name: string; owner_id: string | null } | null } | null;
     activity_type: { id: string; name: string } | null;
   } | null;
@@ -152,6 +155,7 @@ interface ClosureRow {
 interface TaskCompletionRow {
   id: string;
   name: string;
+  task_number?: number | null;
   assignee_id: string | null;
   project_id: string;
   parent_task_id: string | null;
@@ -277,6 +281,9 @@ interface Row {
   // straight to that project's WBS Planning page.
   linkProjectId?: string;
   correctionRow?: CorrectionRequestRowLite;
+  // phase113: Time Log ID + Task ID labels for time-entry rows.
+  logId?: string;
+  taskIdLabel?: string;
 }
 
 // phase104: requests on an archived task/project stay out of every list
@@ -466,8 +473,8 @@ export default function ApprovalCenter() {
       supabase
         .from("time_entries")
         .select(
-          `id, task_id, activity_type_id, person_id, started_at, ended_at, created_at, duration_minutes, requested_by, reason_category, reason_notes, is_follow_up, follow_up_reason,
-           task:tasks ( id, name, project_id, project:projects ( id, name, owner_id ) ),
+          `id, entry_number, non_project_entry_number, task_id, activity_type_id, person_id, started_at, ended_at, created_at, duration_minutes, requested_by, reason_category, reason_notes, is_follow_up, follow_up_reason,
+           task:tasks ( id, name, task_number, project_id, project:projects ( id, name, owner_id ) ),
            activity_type:non_project_activity_types ( id, name ),
            person:people!time_entries_person_id_fkey ( id, name )`
         )
@@ -479,7 +486,7 @@ export default function ApprovalCenter() {
       supabase
         .from("tasks")
         .select(
-          `id, name, assignee_id, project_id, parent_task_id, current_due_date, actual_completion_date, submitted_on, estimated_hours,
+          `id, name, task_number, assignee_id, project_id, parent_task_id, current_due_date, actual_completion_date, submitted_on, estimated_hours,
            project:projects ( id, name, owner_id, wbs_status )`
         )
         .eq("status", "Done")
@@ -503,7 +510,7 @@ export default function ApprovalCenter() {
         .from("time_entry_correction_requests")
         .select(
           `id, entry_id, requested_by, current_started_at, current_ended_at, proposed_started_at, proposed_ended_at, proposed_activity_type_id, reason, created_at,
-           entry:time_entries ( id, task_id, activity_type_id, non_project_entry_number,
+           entry:time_entries ( id, entry_number, task_id, activity_type_id, non_project_entry_number,
              task:tasks ( id, name, task_number, project:projects ( id, name, owner_id ) ),
              activity_type:non_project_activity_types ( id, name ) ),
            requester:people!time_entry_correction_requests_requested_by_fkey ( id, name )`
@@ -869,6 +876,12 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         workEndedAt: row.ended_at,
         durationMinutes: row.duration_minutes,
         loggedOnAt: row.created_at,
+        logId: timeLogId(row.entry_number),
+        taskIdLabel: (row.task as { task_number?: number | null } | null)?.task_number
+          ? `T-${String((row.task as { task_number?: number | null }).task_number).padStart(4, "0")}`
+          : row.non_project_entry_number
+          ? `NP-${String(row.non_project_entry_number).padStart(4, "0")}`
+          : "—",
         canDecide: canDecideTimeEntry(row),
         action: canDecideTimeEntry(row) ? (
           <DecideButtons onApprove={() => decideTime(row, "approved")} onReject={(n) => decideTime(row, "rejected", n)} />
@@ -1156,6 +1169,8 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Log ID</th>
+              <th style={th}>Task ID</th>
               <th style={th}>Task / Project</th>
               <th style={th}>Assignee</th>
               <th style={th}>Work Date</th>
@@ -1172,6 +1187,8 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
               const details = isFollowUp ? row.reasonNotes?.trim() || "—" : row.reasonNotes?.trim() || row.reasonCategory || "—";
               return (
                 <tr key={row.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{row.logId ?? "—"}</td>
+                  <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{row.taskIdLabel ?? "—"}</td>
                   <td style={td}>
                     <div style={{ fontWeight: 700, color: "var(--navy)" }}>{row.subject}</div>
                     <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{row.context}</div>
@@ -1231,6 +1248,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Log ID</th>
               <th style={th}>Task ID</th>
               <th style={th}>Task / Project</th>
               <th style={th}>Requested By</th>
@@ -1256,6 +1274,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
                 : "—";
               return (
                 <tr key={row.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{timeLogId(c.entry?.entry_number)}</td>
                   <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{idLabel}</td>
                   <td style={td}>
                     <div style={{ fontWeight: 700, color: "var(--navy)" }}>{row.subject}</div>
@@ -1303,6 +1322,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Task ID</th>
               <th style={th}>Task / Project</th>
               <th style={th}>Assignee</th>
               <th style={th}>Due Date</th>
@@ -1317,6 +1337,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
               if (!tc) return null;
               return (
                 <tr key={row.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{tc.task_number ? `T-${String(tc.task_number).padStart(4, "0")}` : "—"}</td>
                   <td style={td}>
                     <div style={{ fontWeight: 700, color: "var(--navy)" }}>{row.subject}</div>
                     <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{row.context}</div>
