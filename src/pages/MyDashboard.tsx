@@ -164,17 +164,13 @@ function notOnArchived(r: unknown): boolean {
 // size to their ACTUAL content (max-content / fit-content caps) and line up
 // across rows. Content packs left with a uniform gap; the single 1fr spacer
 // before Actions takes whatever is left so Actions stays at the right edge.
+// v4 (Sandra: "big gap again"): no spacer column. Every data column is
+// minmax(max-content, 1fr), so leftover width is shared EQUALLY across all
+// columns instead of piling up in one gap before Actions. Task/Project
+// cells carry a maxWidth so long names cap their max-content size.
 const MWT_COLUMNS = [
-  "max-content",        // Task ID
-  "fit-content(260px)", // Task
-  "max-content",        // Status
-  "max-content",        // Timing
-  "fit-content(320px)", // Project
-  "max-content",        // Dates (one line)
-  "max-content",        // Hours
-  "max-content",        // Remaining / Variance
-  "minmax(0, 1fr)",     // spacer
-  "max-content",        // Actions
+  ...Array(8).fill("minmax(max-content, 1fr)"), // Task ID, Task, Status, Timing, Project, Dates, Hours, Remaining
+  "max-content",                                // Actions
 ];
 const MWT_GRID: CSSProperties = { display: "grid", gridTemplateColumns: MWT_COLUMNS.join(" "), alignItems: "stretch" };
 const MWT_GAP = 28;
@@ -828,10 +824,10 @@ export default function MyDashboard() {
               a uniform 16px column gap does the separating. */}
           <div style={{ overflowX: "auto" }}>
             <div style={MWT_GRID}>
-              {["Task ID", "Task", "Status", "Timing", "Project", "Dates", "Hours (Logged / Est.)", "Remaining / Variance", "", "Actions"].map((h, i, arr) => (
+              {["Task ID", "Task", "Status", "Timing", "Project", "Dates", "Hours (Logged / Est.)", "Remaining / Variance", "Actions"].map((h, i, arr) => (
                 <span
                   key={`h${i}`}
-                  style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap", textAlign: i === arr.length - 1 ? "right" : "left", padding: `8px ${i === arr.length - 1 || i === arr.length - 2 ? 0 : MWT_GAP}px 6px 0`, borderBottom: "1px solid var(--border)" }}
+                  style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap", textAlign: i === arr.length - 1 ? "right" : "left", padding: `8px ${i === arr.length - 1 ? 0 : MWT_GAP}px 6px 0`, borderBottom: "1px solid var(--border)" }}
                 >
                   {h}
                 </span>
@@ -854,7 +850,7 @@ export default function MyDashboard() {
                 <div key={t.id} style={{ display: "contents" }}>
                   <div style={{ ...td, fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap" }}>T-{String(t.task_number).padStart(4, "0")}</div>
                   <div style={td}>
-                    <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</div>
+                    <div style={{ maxWidth: 260, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</div>
                   </div>
                   <div style={{ ...td, alignItems: "flex-start" }}>
                     <span className={`status-pill ${myWorkTodayStatusTone(t.status)}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span>
@@ -863,7 +859,7 @@ export default function MyDashboard() {
                     <span className={`status-pill ${timing.tone}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{timing.label}</span>
                   </div>
                   <div style={{ ...td, color: "var(--text-secondary)" }} title={t.project?.name ?? undefined}>
-                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{t.project?.name ?? "—"}</div>
+                    <div style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{t.project?.name ?? "—"}</div>
                   </div>
                   <div style={{ ...td, color: "var(--text-secondary)", fontSize: 11.5, whiteSpace: "nowrap" }}>
                     {t.start_date ? formatDate(t.start_date) : "—"} → {formatDate(t.current_due_date)}
@@ -898,7 +894,6 @@ export default function MyDashboard() {
                       <span style={{ fontSize: 11.5, color: "var(--muted)" }}>—</span>
                     )}
                   </div>
-                  <div style={{ ...td, paddingRight: 0 }} />
                   <div style={{ ...td, paddingRight: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
                     <button
                       onClick={async () => {
