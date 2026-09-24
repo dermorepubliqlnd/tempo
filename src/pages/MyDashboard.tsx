@@ -165,11 +165,12 @@ function notOnArchived(r: unknown): boolean {
 // across rows. Content packs left with a uniform gap; the single 1fr spacer
 // before Actions takes whatever is left so Actions stays at the right edge.
 // v4 (Sandra: "big gap again"): no spacer column. Every data column is
-// minmax(max-content, 1fr), so leftover width is shared EQUALLY across all
+// `auto`: sized to its content, then the grid's default stretch adds the SAME
+// extra width to each auto track, so leftover space is spread evenly between
 // columns instead of piling up in one gap before Actions. Task/Project
 // cells carry a maxWidth so long names cap their max-content size.
 const MWT_COLUMNS = [
-  ...Array(8).fill("minmax(max-content, 1fr)"), // Task ID, Task, Status, Timing, Project, Dates, Hours, Remaining
+  ...Array(8).fill("auto"), // Task ID, Task, Status, Timing, Project, Dates, Hours, Remaining
   "max-content",                                // Actions
 ];
 const MWT_GRID: CSSProperties = { display: "grid", gridTemplateColumns: MWT_COLUMNS.join(" "), alignItems: "stretch" };
