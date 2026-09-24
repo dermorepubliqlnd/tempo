@@ -215,6 +215,8 @@ export interface ProjectRow {
   // ProjectRow interface, so it needs the field added here too for the
   // project-name button's title={p.description || ...} to type-check.
   description: string | null;
+  // phase114: stamped when status becomes Completed (ready-to-close reminders).
+  completed_at?: string | null;
 }
 
 export interface TaskRow {
@@ -1378,10 +1380,32 @@ export default function Projects() {
   // into Phase (see nextPhaseForStatus's own doc comment for the exact
   // rules) -- always go through this helper on a Status change rather than
   // writing { status } alone, so Phase never drifts out of sync with it.
+  // 2026-09-24 (phase114, Sandra: "make sure all tasks are done before a
+  // project can be tagged Completed"): open = any non-parent, non-archived
+  // task that isn't Done or Cancelled. Mirrors enforce_project_complete_guard.
+  function openTasksOf(projectId: string): TaskRow[] {
+    return tasks.filter(
+      (t) => t.project_id === projectId && !t.is_archived && t.status !== "Done" && t.status !== "Cancelled" && !hasChildren(t.id)
+    );
+  }
+  function completeBlockedMessage(p: ProjectRow, open: TaskRow[]): string {
+    const lines = open
+      .slice(0, 8)
+      .map((t) => `• ${t.task_number ? `T-${String(t.task_number).padStart(4, "0")} ` : ""}${t.name} (${t.status ?? "no status"})`);
+    return `**Can't mark "${p.name}" Completed yet**\n\n${open.length} task${open.length === 1 ? " is" : "s are"} still open:\n${lines.join("\n")}${open.length > 8 ? `\n…and ${open.length - 8} more` : ""}\n\nFinish them, or cancel the ones that are no longer needed, then set the project to Completed.`;
+  }
+
   function changeProjectStatus(p: ProjectRow, newStatus: string | null) {
     if (p.wbs_status === "draft") {
       alert(`"${p.name}" hasn't started yet -- Status stays "Not Started" until Start Project is run on its WBS page.`);
       return;
+    }
+    if (newStatus === "Completed" && projectStatusOf(p) !== "Completed") {
+      const open = openTasksOf(p.id);
+      if (open.length > 0) {
+        alert(completeBlockedMessage(p, open));
+        return;
+      }
     }
     updateProject(p.id, { status: newStatus, phase: newStatus ? nextPhaseForStatusLive(p.phase, newStatus) : p.phase });
   }
@@ -1896,6 +1920,17 @@ export default function Projects() {
   async function bulkChangeProjectStatus(newStatus: string | null) {
     const ids = selectedProjectIds;
     if (ids.length === 0) return;
+    if (newStatus === "Completed") {
+      const blocked = projects.filter((p) => ids.includes(p.id) && projectStatusOf(p) !== "Completed" && openTasksOf(p.id).length > 0);
+      if (blocked.length > 0) {
+        alert(
+          `**Can't mark ${blocked.length === 1 ? "this project" : `${blocked.length} projects`} Completed yet** -- they still have open tasks:\n` +
+            blocked.map((p) => `• ${p.name}: ${openTasksOf(p.id).length} open`).join("\n") +
+            `\n\nFinish or cancel those tasks first. Nothing was changed.`
+        );
+        return;
+      }
+    }
     const skippedDraft = projects.some((p) => ids.includes(p.id) && p.wbs_status === "draft");
     const targets = projects.filter((p) => ids.includes(p.id) && p.wbs_status !== "draft");
     if (targets.length === 0) {
@@ -2689,6 +2724,12 @@ export default function Projects() {
               >
                 {meta?.label ?? p.wbs_status}
               </span>
+              {/* phase114: Completed but not closed yet -> nudge to close. */}
+              {p.status === "Completed" && p.wbs_status !== "closed" && p.wbs_status !== "draft" && (
+                <span className="status-pill gold" style={{ fontSize: 10 }} title="Project is Completed -- review the WBS and request closure">
+                  Ready to close
+                </span>
+              )}
               {/* Sandra, 2026-07-29: removed the separate "WBS" button --
                   the Project name cell (Round 21) already navigates to
                   /projects/:id/wbs, so this was a duplicate affordance. */}
@@ -3314,7 +3355,11 @@ export default function Projects() {
                 onClick={async () => {
                   const ok = await confirm({
                     title: "Uncancel task",
-                    message: `Restore "${t.name}" to In Progress? This clears its cancellation reason and puts it back into scheduling.`,
+                    message:
+                      `Restore "${t.name}" to In Progress? This clears its cancellation reason and puts it back into scheduling.` +
+                      (projects.find((pp) => pp.id === t.project_id)?.status === "Completed"
+                        ? `\n\n**This project is marked Completed.** Restoring this task moves the project back to In Progress.`
+                        : ""),
                     confirmLabel: "Uncancel",
                   });
                   if (!ok) return;
@@ -3711,7 +3756,11 @@ export default function Projects() {
           async function doReopen() {
             const ok = await confirm({
               title: "Reopen task",
-              message: `Reopen "${t.name}"? This clears its validation${locked ? " and lock" : ""} and sets Status back to In Progress, unlocking its fields for editing again.`,
+              message:
+                `Reopen "${t.name}"? This clears its validation${locked ? " and lock" : ""} and sets Status back to In Progress, unlocking its fields for editing again.` +
+                (projects.find((pp) => pp.id === t.project_id)?.status === "Completed"
+                  ? `\n\n**This project is marked Completed.** Reopening this task means Actual Progress drops below 100% and the project moves back to In Progress.`
+                  : ""),
               confirmLabel: "Reopen",
               cancelLabel: "Cancel",
               emphasizeCancel: locked,

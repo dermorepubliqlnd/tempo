@@ -1022,6 +1022,12 @@ export default function Dashboard() {
     };
   }, [allProjectStarts, closeouts]);
 
+  const staleCompleted = filteredProjects
+    .filter((p) => p.status === "Completed" && p.wbs_status !== "closed" && p.wbs_status !== "draft" && p.completed_at)
+    .map((p) => ({ p, days: Math.floor((Date.now() - new Date(p.completed_at as string).getTime()) / 86400000) }))
+    .filter((x) => x.days >= 14)
+    .sort((a, b) => b.days - a.days);
+
   const needsAttention = useMemo(() => {
     const baselinePending = baselineReqs.filter((r) => r.status === "pending" && filteredProjectIds.has(r.project_id)).length;
     const extPending = extReqs.filter((r) => r.status === "Pending").length; // extension requests aren't project-scoped in this projection
@@ -1285,6 +1291,28 @@ export default function Dashboard() {
           <AttentionChip icon={<Ban size={24} />} tone="danger" count={needsAttention.overdue} label="Overdue" to="/projects" />
           <AttentionChip icon={<CalendarClock size={24} />} tone="accent" count={needsAttention.dueSoon} label="Due in next 7 days" to="/projects" />
         </div>
+        {/* phase114 (Sandra): projects marked Completed 14+ days ago whose
+            WBS still isn't closed -- a follow-up list for supervisors. */}
+        {staleCompleted.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--warning-text)", marginBottom: 6 }}>
+              Completed 14+ days ago but not closed ({staleCompleted.length})
+            </div>
+            {staleCompleted.map((x) => (
+              <div key={x.p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderTop: "1px solid var(--border)", fontSize: 12 }}>
+                <span style={{ flex: "0 0 60px", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+                  {x.p.project_number ? `P-${String(x.p.project_number).padStart(4, "0")}` : "—"}
+                </span>
+                <span style={{ flex: "1 1 auto", fontWeight: 600, color: "var(--navy)" }}>{x.p.name}</span>
+                <span style={{ flex: "0 0 160px", color: "var(--text-secondary)" }}>{ownerName(x.p.owner_id)}</span>
+                <span style={{ flex: "0 0 110px", color: "var(--warning-text)" }}>Completed {x.days}d ago</span>
+                <Link to={`/projects/${x.p.id}/wbs`} style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+                  Review WBS →
+                </Link>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Active Projects table */}

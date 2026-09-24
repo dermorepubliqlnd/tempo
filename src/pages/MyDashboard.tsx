@@ -194,7 +194,7 @@ export default function MyDashboard() {
   const [hiddenToday, setHiddenToday] = useState<{ task_id: string; hidden_date: string }[]>([]);
   // 2026-09-23 (Sandra: lightbox for Tasks due today / Overdue tasks --
   // see AttentionPill below) -- which list is open, or null when closed.
-  const [attentionModal, setAttentionModal] = useState<"due_today" | "overdue" | null>(null);
+  const [attentionModal, setAttentionModal] = useState<"due_today" | "overdue" | "ready_to_close" | "completed_open" | null>(null);
   // 2026-09-23 (My Work Today "Logged" column, Sandra: "show logged
   // hours against the tasks") -- same confirmed/approved, not-archived
   // definition Projects.tsx's own Spent Hrs column uses, just scoped to
@@ -569,6 +569,22 @@ export default function MyDashboard() {
     })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+  // phase114 (Sandra: "remind the project owner -- you have a project
+  // that's Completed and at 100%, please review your WBS and close it").
+  const parentTaskIdSet = new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
+  const leafTasksOf = (projectId: string) => tasks.filter((t) => t.project_id === projectId && !parentTaskIdSet.has(t.id));
+  const myCompletedProjects = projects.filter((p) => p.owner_id === me?.id && p.status === "Completed" && p.wbs_status !== "closed" && p.wbs_status !== "draft");
+  const completedOpenProjects = myCompletedProjects
+    .map((p) => ({ p, open: leafTasksOf(p.id).filter((t) => t.status !== "Done" && t.status !== "Cancelled") }))
+    .filter((x) => x.open.length > 0);
+  const readyToCloseProjects = myCompletedProjects
+    .filter((p) => !completedOpenProjects.some((x) => x.p.id === p.id))
+    .map((p) => ({
+      p,
+      unvalidated: leafTasksOf(p.id).filter((t) => t.status === "Done" && !t.validated_completion_date).length,
+      days: p.completed_at ? Math.max(0, Math.floor((Date.now() - new Date(p.completed_at).getTime()) / 86400000)) : null,
+    }));
+
   if (loading || !me) return <p style={{ padding: 20, color: "var(--muted)" }}>Loading…</p>;
 
   const greetingHour = new Date().getHours();
@@ -631,7 +647,7 @@ export default function MyDashboard() {
         <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Items" value={overdueTasks.length} sub="Needs attention" />
       </div>
 
-      {(tasksDueToday.length > 0 || overdueTasks.length > 0 || missingLogHours > 0.1) && (
+      {(tasksDueToday.length > 0 || overdueTasks.length > 0 || missingLogHours > 0.1 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
           {/* 2026-09-23 (Sandra: "Pending approvals, remove and use the
@@ -653,10 +669,50 @@ export default function MyDashboard() {
           {missingLogHours > 0.1 && (
             <AttentionPill tone="accent" icon={<Clock3 size={12} />} value={`${missingLogHours.toFixed(1)}h`} label="Missing hours this week" to="/time-tracking?scope=mine" />
           )}
+          {readyToCloseProjects.length > 0 && (
+            <AttentionPill tone="success" icon={<CheckCircle2 size={12} />} value={readyToCloseProjects.length} label={readyToCloseProjects.length === 1 ? "Project ready to close" : "Projects ready to close"} onClick={() => setAttentionModal("ready_to_close")} />
+          )}
+          {completedOpenProjects.length > 0 && (
+            <AttentionPill tone="warning" icon={<AlertTriangle size={12} />} value={completedOpenProjects.length} label={completedOpenProjects.length === 1 ? "Completed project has open tasks" : "Completed projects have open tasks"} onClick={() => setAttentionModal("completed_open")} />
+          )}
         </div>
       )}
 
-      {attentionModal && (
+      {(attentionModal === "ready_to_close" || attentionModal === "completed_open") && (
+        <Modal
+          title={attentionModal === "ready_to_close" ? "Projects ready to close" : "Completed projects with open tasks"}
+          onClose={() => setAttentionModal(null)}
+        >
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 0 }}>
+            {attentionModal === "ready_to_close"
+              ? "These projects are marked Completed and every task is Done or Cancelled. Review the WBS and request closure. Any Done task still awaiting validation has to be validated first."
+              : "These projects are marked Completed but still have open tasks. Finish or cancel those tasks, or set the project back to In Progress."}
+          </p>
+          {(attentionModal === "ready_to_close" ? readyToCloseProjects : completedOpenProjects).map((x) => (
+            <div key={x.p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 4px", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+              <span style={{ flex: "0 0 64px", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+                {x.p.project_number ? `P-${String(x.p.project_number).padStart(4, "0")}` : "—"}
+              </span>
+              <span style={{ flex: "1 1 auto", fontWeight: 600, color: "var(--navy)" }}>{x.p.name}</span>
+              <span style={{ flex: "0 0 auto", color: "var(--text-secondary)" }}>
+                {"open" in x
+                  ? `${x.open.length} open task${x.open.length === 1 ? "" : "s"}`
+                  : [
+                      x.days !== null ? `Completed ${x.days === 0 ? "today" : `${x.days}d ago`}` : null,
+                      x.unvalidated > 0 ? `${x.unvalidated} awaiting validation` : "All validated",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+              </span>
+              <Link to={`/projects/${x.p.id}/wbs`} style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+                Review WBS →
+              </Link>
+            </div>
+          ))}
+        </Modal>
+      )}
+
+      {(attentionModal === "due_today" || attentionModal === "overdue") && (
         <Modal
           title={attentionModal === "due_today" ? "Tasks due today" : "Overdue tasks"}
           onClose={() => setAttentionModal(null)}
