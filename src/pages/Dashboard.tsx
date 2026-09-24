@@ -1027,11 +1027,30 @@ export default function Dashboard() {
     };
   }, [allProjectStarts, closeouts]);
 
-  const staleCompleted = filteredProjects
-    .filter((p) => p.status === "Completed" && p.wbs_status !== "closed" && p.wbs_status !== "draft" && p.completed_at)
-    .map((p) => ({ p, days: Math.floor((Date.now() - new Date(p.completed_at as string).getTime()) / 86400000) }))
-    .filter((x) => x.days >= 14)
-    .sort((a, b) => b.days - a.days);
+  // phase114/115 (Sandra: "incorporate the project owner reminders and
+  // completion flags in the Team Dashboard too"): same three flags the
+  // owner sees on My Dashboard, for every project in the current filter.
+  const completionFlags = useMemo(() => {
+    const parentIds = new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
+    const leaf = (pid: string) => tasks.filter((t) => t.project_id === pid && !parentIds.has(t.id) && !t.is_archived);
+    const live = filteredProjects.filter((p) => p.wbs_status !== "closed" && p.wbs_status !== "draft");
+    const openTasks = live
+      .filter((p) => p.status === "Completed")
+      .map((p) => ({ p, n: leaf(p.id).filter((t) => t.status !== "Done" && t.status !== "Cancelled").length }))
+      .filter((x) => x.n > 0);
+    const openIds = new Set(openTasks.map((x) => x.p.id));
+    const readyToClose = live
+      .filter((p) => p.status === "Completed" && !openIds.has(p.id))
+      .map((p) => ({
+        p,
+        days: p.completed_at ? Math.floor((Date.now() - new Date(p.completed_at).getTime()) / 86400000) : null,
+        unvalidated: leaf(p.id).filter((t) => t.status === "Done" && !t.validated_completion_date).length,
+      }))
+      .sort((a, b) => (b.days ?? 0) - (a.days ?? 0));
+    const workComplete = live.filter((p) => p.status !== "Completed" && p.status !== "Cancelled" && actualProgress(p.id, tasks) === 100);
+    return { openTasks, readyToClose, workComplete };
+  }, [filteredProjects, tasks]);
+  const completionFlagCount = completionFlags.openTasks.length + completionFlags.readyToClose.length + completionFlags.workComplete.length;
 
   const needsAttention = useMemo(() => {
     const baselinePending = baselineReqs.filter((r) => r.status === "pending" && filteredProjectIds.has(r.project_id)).length;
@@ -1296,22 +1315,40 @@ export default function Dashboard() {
           <AttentionChip icon={<Ban size={24} />} tone="danger" count={needsAttention.overdue} label="Overdue" to="/projects" />
           <AttentionChip icon={<CalendarClock size={24} />} tone="accent" count={needsAttention.dueSoon} label="Due in next 7 days" to="/projects" />
         </div>
-        {/* phase114 (Sandra): projects marked Completed 14+ days ago whose
-            WBS still isn't closed -- a follow-up list for supervisors. */}
-        {staleCompleted.length > 0 && (
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--warning-text)", marginBottom: 6 }}>
-              Completed 14+ days ago but not closed ({staleCompleted.length})
-            </div>
-            {staleCompleted.map((x) => (
-              <div key={x.p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderTop: "1px solid var(--border)", fontSize: 12 }}>
+        {/* phase114/115: project completion flags (same as the owner's
+            My Dashboard reminders), for everyone using this dashboard. */}
+        {completionFlagCount > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>Project completion ({completionFlagCount})</div>
+            {(
+              [
+                ...completionFlags.openTasks.map((x) => ({
+                  key: `o-${x.p.id}`, p: x.p, tone: "warning", flag: "Completed – open tasks",
+                  detail: `${x.n} open task${x.n === 1 ? "" : "s"}`, urgent: true,
+                })),
+                ...completionFlags.workComplete.map((p) => ({
+                  key: `w-${p.id}`, p, tone: "success", flag: "Work complete",
+                  detail: "All tasks done -- set Status to Completed", urgent: false,
+                })),
+                ...completionFlags.readyToClose.map((x) => ({
+                  key: `r-${x.p.id}`, p: x.p, tone: "gold", flag: "Ready to close",
+                  detail: [
+                    x.days !== null ? `Completed ${x.days === 0 ? "today" : `${x.days}d ago`}` : null,
+                    x.unvalidated > 0 ? `${x.unvalidated} awaiting validation` : null,
+                  ].filter(Boolean).join(" · ") || "Review WBS and request closure",
+                  urgent: (x.days ?? 0) >= 14,
+                })),
+              ] as { key: string; p: ProjectRow; tone: string; flag: string; detail: string; urgent: boolean }[]
+            ).map((r) => (
+              <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderTop: "1px solid var(--border)", fontSize: 12 }}>
                 <span style={{ flex: "0 0 60px", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
-                  {x.p.project_number ? `P-${String(x.p.project_number).padStart(4, "0")}` : "—"}
+                  {r.p.project_number ? `P-${String(r.p.project_number).padStart(4, "0")}` : "—"}
                 </span>
-                <span style={{ flex: "1 1 auto", fontWeight: 600, color: "var(--navy)" }}>{x.p.name}</span>
-                <span style={{ flex: "0 0 160px", color: "var(--text-secondary)" }}>{ownerName(x.p.owner_id)}</span>
-                <span style={{ flex: "0 0 110px", color: "var(--warning-text)" }}>Completed {x.days}d ago</span>
-                <Link to={`/projects/${x.p.id}/wbs`} style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+                <span style={{ flex: "1 1 auto", fontWeight: 600, color: "var(--navy)" }}>{r.p.name}</span>
+                <span style={{ flex: "0 0 150px", color: "var(--text-secondary)" }}>{ownerName(r.p.owner_id)}</span>
+                <span className={`status-pill ${r.tone}`} style={{ flex: "0 0 auto", fontSize: 10 }}>{r.flag}</span>
+                <span style={{ flex: "0 0 220px", color: r.urgent ? "var(--warning-text)" : "var(--text-secondary)", fontWeight: r.urgent ? 600 : 400 }}>{r.detail}</span>
+                <Link to={`/projects/${r.p.id}/wbs`} style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
                   Review WBS →
                 </Link>
               </div>
