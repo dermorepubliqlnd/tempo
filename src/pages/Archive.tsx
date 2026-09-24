@@ -38,13 +38,14 @@ const TYPE_FILTERS: { key: TypeFilter; label: string }[] = [
   { key: "task", label: "Tasks" },
   { key: "time_entry", label: "Time Entries" },
   { key: "kb", label: "Knowledge Base" },
-  { key: "holiday", label: "Holidays" },
+  { key: "holiday", label: "Time off & holidays" },
   { key: "settings", label: "Settings" },
 ];
 
 function filterGroup(kind: ArchiveKind): TypeFilter {
   if (kind === "project" || kind === "task" || kind === "time_entry" || kind === "holiday") return kind;
   if (kind === "kb_category" || kind === "kb_entry") return "kb";
+  if (kind === "time_off") return "holiday";
   return "settings";
 }
 
