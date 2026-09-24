@@ -939,7 +939,7 @@ export default function MyDashboard() {
                     time"), and a compact fixed-width progress bar. */}
                 <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
                   <span style={{ flex: "1 1 auto", minWidth: 0 }}>Project</span>
-                  <span style={{ flex: "0 0 150px" }}>Health</span>
+                  <span style={{ flex: "0 0 150px", textAlign: "center" }}>Health</span>
                   <span style={{ flex: "0 0 130px" }}>Progress</span>
                   <span style={{ flex: "0 0 80px", textAlign: "right" }}>End Date</span>
                 </div>
@@ -949,7 +949,7 @@ export default function MyDashboard() {
                   return (
                     <div key={p.id} className="dash-row" onClick={() => navigate(`/projects/${p.id}/wbs`)} style={{ display: "flex", alignItems: "center", gap: 12 }}>
                       <span style={{ flex: "1 1 auto", minWidth: 0, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>{p.name}</span>
-                      <span style={{ flex: "0 0 150px" }}>
+                      <span style={{ flex: "0 0 150px", textAlign: "center" }}>
                         <span className={`status-pill ${health.tone}`} style={{ fontSize: 9.5, whiteSpace: "nowrap" }}>
                           {health.label.toUpperCase()}
                         </span>
