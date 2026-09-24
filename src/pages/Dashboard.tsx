@@ -1320,7 +1320,8 @@ export default function Dashboard() {
         {completionFlagCount > 0 && (
           <div style={{ marginTop: 16 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>Project completion ({completionFlagCount})</div>
-            {(
+            {(() => {
+              const rows = (
               [
                 ...completionFlags.openTasks.map((x) => ({
                   key: `o-${x.p.id}`, p: x.p, tone: "warning", flag: "Completed – open tasks",
@@ -1339,20 +1340,50 @@ export default function Dashboard() {
                   urgent: (x.days ?? 0) >= 14,
                 })),
               ] as { key: string; p: ProjectRow; tone: string; flag: string; detail: string; urgent: boolean }[]
-            ).map((r) => (
-              <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderTop: "1px solid var(--border)", fontSize: 12 }}>
-                <span style={{ flex: "0 0 60px", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
-                  {r.p.project_number ? `P-${String(r.p.project_number).padStart(4, "0")}` : "—"}
-                </span>
-                <span style={{ flex: "1 1 auto", fontWeight: 600, color: "var(--navy)" }}>{r.p.name}</span>
-                <span style={{ flex: "0 0 150px", color: "var(--text-secondary)" }}>{ownerName(r.p.owner_id)}</span>
-                <span className={`status-pill ${r.tone}`} style={{ flex: "0 0 auto", fontSize: 10 }}>{r.flag}</span>
-                <span style={{ flex: "0 0 220px", color: r.urgent ? "var(--warning-text)" : "var(--text-secondary)", fontWeight: r.urgent ? 600 : 400 }}>{r.detail}</span>
-                <Link to={`/projects/${r.p.id}/wbs`} style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
-                  Review WBS →
-                </Link>
-              </div>
-            ))}
+              );
+              const th: React.CSSProperties = { padding: "7px 10px", fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, textAlign: "left", whiteSpace: "nowrap", borderBottom: "1px solid var(--border)" };
+              const td: React.CSSProperties = { padding: "7px 10px", fontSize: 12, borderBottom: "1px solid var(--border)", verticalAlign: "middle" };
+              return (
+                <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+                  <colgroup>
+                    <col style={{ width: 80 }} />
+                    <col />
+                    <col style={{ width: 170 }} />
+                    <col style={{ width: 190 }} />
+                    <col style={{ width: 260 }} />
+                    <col style={{ width: 110 }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th style={th}>Project ID</th>
+                      <th style={th}>Project</th>
+                      <th style={th}>Owner</th>
+                      <th style={th}>Flag</th>
+                      <th style={th}>Details</th>
+                      <th style={{ ...th, textAlign: "right" }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.key}>
+                        <td style={{ ...td, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{r.p.project_number ? `P-${String(r.p.project_number).padStart(4, "0")}` : "—"}</td>
+                        <td style={{ ...td, fontWeight: 600, color: "var(--navy)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.p.name}>{r.p.name}</td>
+                        <td style={{ ...td, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ownerName(r.p.owner_id)}</td>
+                        <td style={td}>
+                          <span className={`status-pill ${r.tone}`} style={{ fontSize: 10, whiteSpace: "nowrap" }}>{r.flag}</span>
+                        </td>
+                        <td style={{ ...td, color: r.urgent ? "var(--warning-text)" : "var(--text-secondary)", fontWeight: r.urgent ? 600 : 400 }}>{r.detail}</td>
+                        <td style={{ ...td, textAlign: "right" }}>
+                          <Link to={`/projects/${r.p.id}/wbs`} style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none", whiteSpace: "nowrap" }}>
+                            Review WBS →
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              );
+            })()}
           </div>
         )}
       </div>
