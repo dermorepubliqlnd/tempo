@@ -933,30 +933,34 @@ export default function MyDashboard() {
               <p style={{ fontSize: 12, color: "var(--muted)" }}>You don't own any active projects.</p>
             ) : (
               <>
-                <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
-                  <span style={{ flex: "1 1 40%" }}>Project</span>
-                  <span style={{ flex: "0 0 110px" }}>Health</span>
-                  <span style={{ flex: "1 1 30%" }}>Progress</span>
-                  <span style={{ flex: "0 0 90px", textAlign: "right" }}>End Date</span>
+                {/* 2026-09-24 (Sandra: "fix alignment, reduce the progress
+                    bar"): fixed column widths shared by header + rows, a
+                    wider no-wrap Health column (labels like "Completed on
+                    time"), and a compact fixed-width progress bar. */}
+                <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
+                  <span style={{ flex: "1 1 auto", minWidth: 0 }}>Project</span>
+                  <span style={{ flex: "0 0 150px" }}>Health</span>
+                  <span style={{ flex: "0 0 130px" }}>Progress</span>
+                  <span style={{ flex: "0 0 80px", textAlign: "right" }}>End Date</span>
                 </div>
                 {myProjects.slice(0, 6).map((p) => {
                   const health = healthOf(p, tasks, holidayDateStrings);
                   const progress = actualProgress(p.id, tasks);
                   return (
-                    <div key={p.id} className="dash-row" onClick={() => navigate(`/projects/${p.id}/wbs`)}>
-                      <span style={{ flex: "1 1 40%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>{p.name}</span>
-                      <span style={{ flex: "0 0 110px" }}>
-                        <span className={`status-pill ${health.tone}`} style={{ fontSize: 9.5 }}>
+                    <div key={p.id} className="dash-row" onClick={() => navigate(`/projects/${p.id}/wbs`)} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <span style={{ flex: "1 1 auto", minWidth: 0, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>{p.name}</span>
+                      <span style={{ flex: "0 0 150px" }}>
+                        <span className={`status-pill ${health.tone}`} style={{ fontSize: 9.5, whiteSpace: "nowrap" }}>
                           {health.label.toUpperCase()}
                         </span>
                       </span>
-                      <span style={{ flex: "1 1 30%", display: "flex", alignItems: "center", gap: 8 }}>
-                        <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
+                      <span style={{ flex: "0 0 130px", display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ flex: "0 0 90px", height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
                           <div style={{ width: `${progress ?? 0}%`, height: "100%", background: "var(--accent)", borderRadius: 3 }} />
                         </div>
-                        <span style={{ fontSize: 11, color: "var(--muted)", flexShrink: 0 }}>{progress === null ? "—" : `${Math.round(progress)}%`}</span>
+                        <span style={{ fontSize: 11, color: "var(--muted)", flexShrink: 0, width: 32, textAlign: "right" }}>{progress === null ? "—" : `${Math.round(progress)}%`}</span>
                       </span>
-                      <span style={{ flex: "0 0 90px", textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(p.end_date)}</span>
+                      <span style={{ flex: "0 0 80px", textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(p.end_date)}</span>
                     </div>
                   );
                 })}
