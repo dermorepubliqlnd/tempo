@@ -56,3 +56,31 @@ export async function restoreItem(kind: ArchiveKind, id: string): Promise<{ erro
   const { error } = await supabase.rpc("restore_item", { p_kind: kind, p_id: id });
   return { error: error ? { message: error.message } : null };
 }
+
+// phase117 (2026-09-24, Sandra): tasks can be deleted by the task owner,
+// the project owner, or anyone above either of them in the reporting line;
+// projects by the project owner or anyone above them (Full Access always).
+// Checked BEFORE the confirm dialog so people see who to reach out to
+// instead of a failed delete. archive_item enforces the same rule
+// server-side. If the check RPC isn't available yet, nothing is blocked
+// here and the server stays the gate.
+export async function splitByArchivePermission(
+  kind: "project" | "task",
+  ids: string[]
+): Promise<{ allowed: string[]; blocked: { id: string; message: string }[] }> {
+  const allowed: string[] = [];
+  const blocked: { id: string; message: string }[] = [];
+  const results = await Promise.all(ids.map((id) => supabase.rpc("archive_block_reason", { p_kind: kind, p_id: id })));
+  results.forEach((res, i) => {
+    if (!res.error && typeof res.data === "string" && res.data) blocked.push({ id: ids[i], message: res.data });
+    else allowed.push(ids[i]);
+  });
+  return { allowed, blocked };
+}
+
+export function blockedDeleteMessage(blocked: { message: string }[], allowedCount: number): string {
+  const lines = blocked.length === 1 ? blocked[0].message : blocked.map((b) => `- ${b.message}`).join("\n");
+  const head = blocked.length === 1 ? "" : `${blocked.length} of the selected items can't be deleted by you:\n`;
+  const tail = allowedCount > 0 ? `\n\nThe other ${allowedCount} can still be deleted -- you'll be asked to confirm next.` : "";
+  return head + lines + tail;
+}

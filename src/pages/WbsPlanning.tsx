@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
+import { archiveItem, ARCHIVE_MOVE_NOTE, splitByArchivePermission } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { InlineText, InlineNumber, InlineSelect, InlineDate, InlineTextArea } from "../components/InlineCell";
@@ -2825,6 +2825,12 @@ export default function WbsPlanning() {
   // never soft-archived -- only Projects get the 30-day archive/restore
   // treatment).
   async function deleteTask(t: TaskRow & { depth: number }) {
+    // phase117: flag it (with who to contact) if this person can't delete it.
+    const { blocked } = await splitByArchivePermission("task", [t.id]);
+    if (blocked.length) {
+      await alert({ title: "You can't delete this", message: blocked[0].message });
+      return;
+    }
     const childIds = t.depth === 0 ? tasks.filter((x) => x.parent_task_id === t.id).map((x) => x.id) : [];
     const ok = await confirm({
       title: "Delete task",

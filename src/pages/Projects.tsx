@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, CornerDownRight, ChevronRight, ChevronDown, Archive, ArchiveRestore, Trash2, Feather, Weight, BicepsFlexed, Flame, AlertTriangle, CalendarClock, CheckCircle2, X, RotateCcw, MessageCircle, Handshake, ShieldCheck, Cpu, Crown, TrendingUp, Wrench, Sparkles, Folder, Lock } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
+import { splitByArchivePermission, blockedDeleteMessage, archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useTableViews } from "../lib/useTableViews";
 import DataTable from "../components/DataTable";
@@ -1992,8 +1992,14 @@ export default function Projects() {
   // those three views had no delete/archive affordance at all -- only
   // Table view's toolbar did). Confirmation copy pluralizes correctly for
   // either a bulk selection or a single card.
-  async function archiveProjects(ids: string[]) {
-    if (ids.length === 0) return;
+  async function archiveProjects(requestedIds: string[]) {
+    if (requestedIds.length === 0) return;
+    // phase117: flag projects this person can't delete, with who to contact.
+    const { allowed: ids, blocked } = await splitByArchivePermission("project", requestedIds);
+    if (blocked.length) {
+      await alert({ title: "You can't delete this", message: blockedDeleteMessage(blocked, ids.length) });
+      if (ids.length === 0) return;
+    }
     const childTaskCount = tasks.filter((t) => ids.includes(t.project_id)).length;
     // phase104 (Sandra: no hard deletes, Archive page = recycle bin): each
     // project archives server-side as ONE bundle with its tasks and their
@@ -2079,8 +2085,13 @@ export default function Projects() {
   }
 
   async function bulkDeleteTasks() {
-    const ids = selectedTaskIds;
-    if (ids.length === 0) return;
+    if (selectedTaskIds.length === 0) return;
+    // phase117: flag tasks this person can't delete, with who to contact.
+    const { allowed: ids, blocked } = await splitByArchivePermission("task", selectedTaskIds);
+    if (blocked.length) {
+      await alert({ title: "You can't delete this", message: blockedDeleteMessage(blocked, ids.length) });
+      if (ids.length === 0) return;
+    }
     // phase104: archive, never hard-delete. Each selected task archives
     // as one bundle with its sub-tasks + time entries; a selected sub-task
     // whose parent is also selected rides along in the parent's bundle.
