@@ -9,9 +9,9 @@ import { useSession } from "./useSession";
 //   - Full Access                       -> everything except Baseline
 //   - can_approve_rebaseline            -> Baseline approvals
 //   - can_approve_closures              -> Project close
-//   - owns an active project            -> extensions, time entries,
-//                                          corrections, task validation on it
-//   - has an active direct report       -> manager-chain approvals
+//   - has an active direct report       -> every reporting-line approval
+//     (extensions, time entries, corrections, task validation) -- phase112
+//     removed project-owner approval rights
 // Returns null while loading so callers don't flash the tab.
 export function useApprovalAuthority(): boolean | null {
   const { person: me } = useSession();
@@ -28,16 +28,10 @@ export function useApprovalAuthority(): boolean | null {
         setHas(true);
         return;
       }
-      const [{ count: ownedCount }, { count: reportCount }] = await Promise.all([
-        supabase
-          .from("projects")
-          .select("id", { count: "exact", head: true })
-          .eq("owner_id", me.id)
-          .eq("is_archived", false)
-          .neq("wbs_status", "closed"),
-        supabase.from("people").select("id", { count: "exact", head: true }).eq("reports_to", me.id).eq("is_active", true),
-      ]);
-      if (!cancelled) setHas((ownedCount ?? 0) > 0 || (reportCount ?? 0) > 0);
+      // phase112: project ownership no longer grants approval rights --
+      // only having someone in your reporting line does.
+      const { count: reportCount } = await supabase.from("people").select("id", { count: "exact", head: true }).eq("reports_to", me.id).eq("is_active", true);
+      if (!cancelled) setHas((reportCount ?? 0) > 0);
     }
     check();
     return () => {

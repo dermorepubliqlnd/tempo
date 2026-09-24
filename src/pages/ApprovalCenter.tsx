@@ -540,47 +540,21 @@ export default function ApprovalCenter() {
   // Mirrors can_decide_extension() -- identical logic to
   // ExtensionRequests.tsx's canDecide.
   function canDecideExtension(row: ExtensionRow): boolean {
+    // phase112: requester's reporting line (Immediate Supervisor or anyone
+    // above), or Full Access -- project owners no longer approve.
     if (!me) return false;
     if (isFullAccess) return true;
-    if (row.project) {
-      const ownerId = row.project.owner_id;
-      if (!ownerId) return false;
-      const owner = people.find((p) => p.id === ownerId);
-      return owner?.reports_to === me.id;
-    }
-    const ownerId = row.task?.project?.owner_id ?? null;
-    if (!ownerId) return false;
-    const requesterId = row.requester?.id ?? null;
-    if (ownerId === me.id && requesterId !== ownerId) return true;
-    if (requesterId === ownerId) {
-      const owner = people.find((p) => p.id === ownerId);
-      return owner?.reports_to === me.id;
-    }
-    return false;
+    return isApproverFor(row.requester?.id ?? null);
   }
 
   // Mirrors can_decide_time_entry() -- identical logic to
   // TimeTracking.tsx's canDecide.
   function canDecideTimeEntry(row: TimeEntryRowLite): boolean {
+    // phase112: the person whose time it is -- their reporting line, or
+    // Full Access (project, non-project and follow-up entries alike).
     if (!me) return false;
     if (isFullAccess) return true;
-    // 2026-09-22: a non-project entry has no project owner to defer to --
-    // authority is the logger's own manager chain instead (same
-    // nearestActiveManager helper task validation already uses,
-    // including its "no one active above me" self-exemption).
-    if (row.activity_type_id) {
-      const mgr = nearestActiveManager(row.person_id);
-      return mgr === me.id || (mgr === null && row.person_id === me.id);
-    }
-    const ownerId = row.task?.project?.owner_id ?? null;
-    if (!ownerId) return false;
-    const requesterId = row.requested_by;
-    if (ownerId === me.id && requesterId !== ownerId) return true;
-    if (requesterId === ownerId) {
-      const owner = people.find((p) => p.id === ownerId);
-      return owner?.reports_to === me.id;
-    }
-    return false;
+    return isApproverFor(row.person_id);
   }
 
   // Baseline decisions are STRICTLY gated on can_approve_rebaseline --
@@ -618,6 +592,23 @@ export default function ApprovalCenter() {
     return null;
   }
 
+  // phase112 (Sandra: "all approvals route to the immediate supervisor,
+  // following hierarchy -- skip level if the supervisor is out"): true if
+  // I sit anywhere above personId in the Reports-to chain. Mirrors
+  // is_approver_for() in phase112_migration.sql (the authoritative gate).
+  function isApproverFor(personId: string | null): boolean {
+    if (!me || !personId) return false;
+    if (personId === me.id) return nearestActiveManager(me.id) === null;
+    let current = chainPeople.find((p) => p.id === personId)?.reports_to ?? null;
+    let depth = 0;
+    while (current && depth < 20) {
+      if (current === me.id) return true;
+      current = chainPeople.find((p) => p.id === current)?.reports_to ?? null;
+      depth += 1;
+    }
+    return false;
+  }
+
   // Mirrors canValidateTask() in Projects.tsx / validate_task_completion
   // (phase48/49_migration.sql): the assignee's immediate manager, a
   // skip-level fallback if the immediate manager is inactive, Full
@@ -625,17 +616,13 @@ export default function ApprovalCenter() {
   // exemption (only when there's genuinely no active manager anywhere
   // above the assignee) and the same project-closed lockout.
   function canDecideTaskCompletion(row: TaskCompletionRow): boolean {
+    // phase112: assignee's reporting line or Full Access (project-owner
+    // branch removed); own work only when nobody active is above you.
     if (!me) return false;
     if (row.project?.wbs_status === "closed") return false;
-    if (row.assignee_id && row.assignee_id === me.id) {
-      return nearestActiveManager(row.assignee_id) === null;
-    }
+    if (row.assignee_id && row.assignee_id === me.id) return nearestActiveManager(row.assignee_id) === null;
     if (isFullAccess) return true;
-    if (row.project?.owner_id === me.id) return true;
-    if (!row.assignee_id) return false;
-    const immediateManager = chainPeople.find((p) => p.id === row.assignee_id)?.reports_to ?? null;
-    if (immediateManager === me.id) return true;
-    return nearestActiveManager(row.assignee_id) === me.id;
+    return isApproverFor(row.assignee_id);
   }
 
   // 2026-09-22: the old modal confirm() for "Reject ...?" is gone -- the
@@ -676,12 +663,12 @@ export default function ApprovalCenter() {
   // owner (project entry, owner isn't the requester), or the requester's
   // nearest active manager.
   function canDecideCorrection(row: CorrectionRequestRowLite): boolean {
+    // phase112: requester's reporting line or Full Access; never your own
+    // (except top of chain).
     if (!me) return false;
     if (row.requested_by === me.id) return nearestActiveManager(row.requested_by) === null;
     if (isFullAccess) return true;
-    const ownerId = row.entry?.task?.project?.owner_id ?? null;
-    if (row.entry?.task_id && ownerId && ownerId !== row.requested_by && ownerId === me.id) return true;
-    return nearestActiveManager(row.requested_by) === me.id;
+    return isApproverFor(row.requested_by);
   }
 
   async function decideCorrection(row: CorrectionRequestRowLite, decision: "approved" | "rejected", note: string | null = null) {

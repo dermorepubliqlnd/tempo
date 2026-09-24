@@ -1452,22 +1452,29 @@ export default function Projects() {
   // against who the assignee was). Hard self-check up front, before any
   // other authority branch, so it can never be bypassed by an
   // otherwise-legitimate role.
+  // phase112 (2026-09-24): approvals follow the reporting line only --
+  // the assignee's Immediate Supervisor or anyone above them, or Full
+  // Access. Project owners no longer validate. Mirrors is_approver_for().
+  function isInApprovalChainOf(personId: string | null): boolean {
+    if (!me?.id || !personId) return false;
+    let current = chainPeople.find((p) => p.id === personId)?.reports_to ?? null;
+    let depth = 0;
+    while (current && depth < 20) {
+      if (current === me.id) return true;
+      current = chainPeople.find((p) => p.id === current)?.reports_to ?? null;
+      depth += 1;
+    }
+    return false;
+  }
+
   function canValidateTask(t: TaskRow): boolean {
     if (isProjectClosed(t.project_id)) return false;
     if (t.assignee_id && t.assignee_id === me?.id) {
-      // 2026-09-08 (Sandra: "allow me to validate my own [tasks] since I
-      // have no one up"): NOT a blanket Full-Access exemption -- narrower,
-      // matches the rule's own spirit ("only the one up should validate")
-      // by only firing when there's genuinely nobody active anywhere
-      // above this person to defer to. See validate_task_completion
-      // (phase48_migration.sql) for the authoritative server-side twin.
+      // Own work: only when nobody active sits above you.
       return nearestActiveManagerClient(t.assignee_id) === null;
     }
-    if (canManageTasksIn(t.project_id)) return true;
-    if (!t.assignee_id || !me?.id) return false;
-    const immediateManager = chainPeople.find((p) => p.id === t.assignee_id)?.reports_to ?? null;
-    if (immediateManager === me.id) return true;
-    return nearestActiveManagerClient(t.assignee_id) === me.id;
+    if (isFullAccess) return true;
+    return isInApprovalChainOf(t.assignee_id);
   }
 
   // QA fix (2026-08-21): reopening a validated task was Full-Access-only
@@ -1485,10 +1492,7 @@ export default function Projects() {
   function canReopenTask(t: TaskRow): boolean {
     if (isProjectClosed(t.project_id)) return false;
     if (isFullAccess) return true;
-    if (!t.assignee_id || !me?.id) return false;
-    const immediateManager = chainPeople.find((p) => p.id === t.assignee_id)?.reports_to ?? null;
-    if (immediateManager === me.id) return true;
-    return nearestActiveManagerClient(t.assignee_id) === me.id;
+    return isInApprovalChainOf(t.assignee_id);
   }
 
   // 2026-09-03 (Sandra): opened up project creation + visibility to
