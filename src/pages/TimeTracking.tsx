@@ -815,6 +815,19 @@ export default function TimeTracking() {
   // Activity Type picker instead. Everything else (date/start/end,
   // notes, the pending_approval lifecycle) is unchanged.
   const [logMode, setLogMode] = useState<"project" | "non_project" | null>(null);
+  // 2026-09-24: My Dashboard's Add Time button links here with
+  // ?add=project|non_project -- open that form once, then drop the param
+  // so a refresh doesn't reopen it.
+  useEffect(() => {
+    const add = searchParams.get("add");
+    if (add === "project" || add === "non_project") {
+      setLogMode(add);
+      const next = new URLSearchParams(searchParams);
+      next.delete("add");
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [nonProjectActivityTypes, setNonProjectActivityTypes] = useState<NonProjectActivityTypeRow[]>([]);
   const [logActivityTypeId, setLogActivityTypeId] = useState("");
   const [logProjectId, setLogProjectId] = useState("");

@@ -15,6 +15,8 @@ import {
   Square,
   Eye,
   EyeOff,
+  Plus,
+  ChevronDown,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import Modal from "../components/Modal";
@@ -225,6 +227,7 @@ export default function MyDashboard() {
   // Week picker (2026-09-19, mockup's top-right date range) -- Monday-
   // start work week, navigable, drives every "This Week" card/widget.
   // "This Month" widgets stay fixed to the current calendar month.
+  const [addTimeMenuOpen, setAddTimeMenuOpen] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
   const weekStart = useMemo(() => {
     const d = new Date();
@@ -621,6 +624,40 @@ export default function MyDashboard() {
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          {/* 2026-09-24 (Sandra): Add Time shortcut. Same Project task /
+              Non-project choice as Time Tracking; opens that page's own Log
+              time form (via ?add=) so all the overlap/cap/holiday checks stay
+              in one place. */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setAddTimeMenuOpen((v) => !v)}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: 999, padding: "9px 16px", cursor: "pointer", whiteSpace: "nowrap" }}
+            >
+              <Plus size={14} /> Add Time <ChevronDown size={13} />
+            </button>
+            {addTimeMenuOpen && (
+              <>
+                <div onClick={() => setAddTimeMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 19 }} />
+                <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 20, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, boxShadow: "var(--shadow-card, 0 6px 16px rgba(15,41,66,0.12))", minWidth: 170, overflow: "hidden" }}>
+                  {(["project", "non_project"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      className="dash-menu-item"
+                      onClick={() => {
+                        setAddTimeMenuOpen(false);
+                        navigate(`/time-tracking?add=${mode}`);
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-bg)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", fontSize: 12.5, color: "var(--navy)", border: "none", cursor: "pointer", background: "none" }}
+                    >
+                      {mode === "project" ? "Project task" : "Non-project"}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 4, border: "1px solid var(--border)", borderRadius: "var(--radius-md)", padding: "7px 12px", background: "var(--surface)", boxShadow: "var(--shadow-card)" }}>
             <button onClick={() => setWeekOffset((v) => v - 1)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex" }}>
               <ChevronLeft size={14} style={{ color: "var(--muted)" }} />
