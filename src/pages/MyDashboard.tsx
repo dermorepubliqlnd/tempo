@@ -791,23 +791,53 @@ export default function MyDashboard() {
               between every column soaks up the leftover row width
               evenly, a little at a time, rather than dumping it all
               into one column. */}
+          {/* 2026-09-24 (Sandra: "use the horizontal space better, reduce
+              the blank area on the right") -- a real table spanning the
+              full card: Task (name + ID) and Project are the flexible
+              columns (Project widest), Dates and Hours are combined into
+              one column each, the variance reads "Xh remaining" / "Xh
+              over" instead of a signed number, and the Start/Stop + Hide
+              icon buttons sit right-aligned. UI only -- the same timer and
+              hide handlers as before. */}
           <div style={{ overflowX: "auto" }}>
-          <div style={{ display: "flex", gap: 8, fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "8px 4px 6px", borderBottom: "1px solid var(--border)", minWidth: 900 + myWorkTodayProjectColWidth }}>
-            <span style={{ flex: "0 0 56px", textAlign: "center" }}>Task ID</span>
-            <span style={{ flex: "0 0 130px", minWidth: 0 }}>Task</span>
-            <span style={{ flex: "0 0 92px", textAlign: "center", whiteSpace: "nowrap" }}>Task Status</span>
-            <span style={{ flex: "0 0 90px", textAlign: "center", whiteSpace: "nowrap" }}>Timing</span>
-            <span style={{ flex: `0 0 ${myWorkTodayProjectColWidth}px`, minWidth: 0 }}>Project</span>
-            <span style={{ flex: "0 0 72px", textAlign: "center" }}>Start Date</span>
-            <span style={{ flex: "0 0 72px", textAlign: "center" }}>Due Date</span>
-            <span style={{ flex: "0 0 74px", textAlign: "center", whiteSpace: "nowrap" }}>Est. Hours</span>
-            <span style={{ flex: "0 0 56px", textAlign: "center" }}>Logged</span>
-            <span style={{ flex: "0 0 90px", textAlign: "center" }}>Hrs Variance</span>
-            <span style={{ flex: "0 0 40px", textAlign: "center" }}>Timer</span>
-            <span style={{ flex: "0 0 40px", textAlign: "center" }}>Hide</span>
-          </div>
+            <table style={{ width: "100%", minWidth: 980, borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: "22%" }} />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 96 }} />
+                <col />
+                <col style={{ width: 150 }} />
+                <col style={{ width: 150 }} />
+                <col style={{ width: 140 }} />
+                <col style={{ width: 84 }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  {["Task", "Status", "Timing", "Project", "Dates", "Hours (Logged / Est.)", "Remaining / Variance", "Actions"].map((h, i) => (
+                    <th
+                      key={h}
+                      style={{
+                        padding: "8px 8px 6px",
+                        fontSize: 10,
+                        fontWeight: 600,
+                        color: "var(--muted)",
+                        textTransform: "uppercase",
+                        letterSpacing: 0.3,
+                        whiteSpace: "nowrap",
+                        textAlign: i === 7 ? "right" : "left",
+                        borderBottom: "1px solid var(--border)",
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
           {myWorkTodayVisible.length === 0 ? (
-            <p style={{ fontSize: 12, color: "var(--muted)", padding: "10px 4px" }}>Nothing left to show -- everything scheduled for today is hidden.</p>
+            <tr>
+              <td colSpan={8} style={{ fontSize: 12, color: "var(--muted)", padding: "10px 8px" }}>Nothing left to show -- everything scheduled for today is hidden.</td>
+            </tr>
           ) : (
             myWorkTodayVisible.map((t) => {
               const isHidden = hiddenTodayIds.has(t.id);
@@ -817,70 +847,65 @@ export default function MyDashboard() {
               const logged = loggedHoursForTask(t.id);
               const variance = hoursVarianceOf(t.estimated_hours, logged);
               const varianceTone = hoursVarianceTone(variance?.percent ?? null);
-              // 2026-09-23 (Sandra: "realy now?? this is completely
-              // misaligned") -- root cause: .dash-row's own CSS has
-              // justify-content:space-between + gap:12px (built for the
-              // 2-3-item My Projects/Pending Approvals rows elsewhere on
-              // this page), which was blowing the fixed-width columns
-              // apart into huge, uneven gaps since they don't fill the
-              // row width -- while the header row above has neither, so
-              // header and data were never going to line up. Overriding
-              // both back to match the header's plain flex-start/no-gap
-              // layout.
+              const td: CSSProperties = { padding: "10px 8px", borderBottom: "1px solid var(--border)", verticalAlign: "middle", fontSize: 12 };
+              const iconBtn: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: "var(--radius-sm)", border: "none", cursor: "pointer", padding: 0 };
               return (
-                <div key={t.id} className="dash-row" style={{ opacity: isHidden ? 0.55 : 1, minWidth: 900 + myWorkTodayProjectColWidth, justifyContent: "flex-start", gap: 8 }}>
-                  <span style={{ flex: "0 0 56px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>T-{String(t.task_number).padStart(4, "0")}</span>
-                  <span style={{ flex: "0 0 130px", minWidth: 0, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</span>
-                  <span style={{ flex: "0 0 92px", textAlign: "center" }}>
-                    <span className={`status-pill ${myWorkTodayStatusTone(t.status)}`} style={{ fontSize: 9 }}>{t.status ?? "—"}</span>
-                  </span>
-                  <span style={{ flex: "0 0 90px", textAlign: "center" }}>
-                    <span className={`status-pill ${timing.tone}`} style={{ fontSize: 9 }}>{timing.label}</span>
-                  </span>
-                  <span style={{ flex: `0 0 ${myWorkTodayProjectColWidth}px`, minWidth: 0, fontSize: 11.5, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{t.project?.name ?? "—"}</span>
-                  <span style={{ flex: "0 0 72px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>{t.start_date ? formatDate(t.start_date) : "—"}</span>
-                  <span style={{ flex: "0 0 72px", fontSize: 11.5, color: "var(--text-secondary)", textAlign: "center" }}>{formatDate(t.current_due_date)}</span>
-                  <span style={{ flex: "0 0 74px", textAlign: "center", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
-                  <span style={{ flex: "0 0 56px", textAlign: "center", fontSize: 11.5, color: "var(--text-secondary)" }}>{logged > 0 ? `${logged.toFixed(1)}h` : "—"}</span>
-                  {/* 2026-09-23 (Sandra, round 2: "cut the progress bar in
-                      half") -- column halved from 170px to 90px; bar still
-                      color-coded by variance tone and capped at 150%, +/-Xh
-                      pill stays alongside it. */}
-                  <span style={{ flex: "0 0 90px", display: "flex", alignItems: "center", gap: 5, padding: "0 4px" }}>
-                    {variance ? (
-                      <>
-                        <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
+                <tr key={t.id} style={{ opacity: isHidden ? 0.55 : 1 }}>
+                  <td style={td}>
+                    <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</div>
+                    <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>T-{String(t.task_number).padStart(4, "0")}</div>
+                  </td>
+                  <td style={td}>
+                    <span className={`status-pill ${myWorkTodayStatusTone(t.status)}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span>
+                  </td>
+                  <td style={td}>
+                    <span className={`status-pill ${timing.tone}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{timing.label}</span>
+                  </td>
+                  <td style={{ ...td, color: "var(--text-secondary)" }} title={t.project?.name ?? undefined}>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{t.project?.name ?? "—"}</div>
+                  </td>
+                  <td style={{ ...td, color: "var(--text-secondary)", fontSize: 11.5, lineHeight: 1.4 }}>
+                    <div>{t.start_date ? formatDate(t.start_date) : "—"} →</div>
+                    <div>{formatDate(t.current_due_date)}</div>
+                  </td>
+                  <td style={td}>
+                    <div style={{ fontSize: 12 }}>
+                      <strong style={{ color: "var(--navy)" }}>{logged > 0 ? `${logged.toFixed(1)}h` : "0h"}</strong>
+                      <span style={{ color: "var(--muted)" }}> / {t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
+                    </div>
+                    {variance && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                        <div style={{ flex: "0 0 90px", height: 5, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
                           <div
                             style={{
-                              width: `${Math.min(Math.max(variance.percent, 0), 150)}%`,
+                              width: `${Math.min(Math.max(variance.percent, 0), 100)}%`,
                               height: "100%",
                               borderRadius: 3,
-                              background:
-                                varianceTone === "success" ? "var(--success-text)" : varianceTone === "warning" ? "var(--warning-text)" : "var(--danger-text)",
+                              background: varianceTone === "success" ? "var(--accent)" : varianceTone === "warning" ? "var(--warning-text)" : "var(--danger-text)",
                             }}
                           />
                         </div>
-                        <span className={`status-pill ${varianceTone}`} style={{ fontSize: 9, flexShrink: 0 }}>
-                          {variance.hours > 0 ? "+" : ""}{variance.hours}h
-                        </span>
-                      </>
+                        <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{variance.percent}%</span>
+                      </div>
+                    )}
+                  </td>
+                  <td style={td}>
+                    {variance ? (
+                      <span className={`status-pill ${variance.hours <= 0 ? "success" : varianceTone}`} style={{ fontSize: 10, whiteSpace: "nowrap" }}>
+                        {variance.hours <= 0 ? `${Math.abs(variance.hours).toFixed(1)}h remaining` : `${variance.hours.toFixed(1)}h over`}
+                      </span>
                     ) : (
                       <span style={{ fontSize: 11.5, color: "var(--muted)" }}>—</span>
                     )}
-                  </span>
-                  <span style={{ flex: "0 0 40px", textAlign: "center" }}>
+                  </td>
+                  <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
                     <button
                       onClick={async () => {
                         if (isRunningHere) {
                           const res = await requestStop();
                           if (res.error) alert(`Couldn't stop timer: ${res.error}`);
                         } else {
-                          // 2026-09-23 (Sandra: weekend/holiday soft
-                          // check -- "if timer has started on a weekend
-                          // say it's a weekend -- are you sure you are
-                          // working?") -- never blocks, just a one-click
-                          // confirm, checked against TODAY since that's
-                          // the day a timer actually logs against.
+                          // Weekend/holiday soft check (never blocks), checked against TODAY.
                           const warnMsg = nonWorkingDayConfirmMessage(todayIso, holidayNames);
                           if (warnMsg && !(await confirm({ message: warnMsg, confirmLabel: "Yes, start" }))) return;
                           const res = await startTaskTimer({ id: t.id, name: t.name });
@@ -890,13 +915,7 @@ export default function MyDashboard() {
                       disabled={timerDisabled}
                       title={isRunningHere ? "Stop timer" : running ? `Stop the timer running on "${running.task_name}" first` : "Start timer"}
                       style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: 22,
-                        height: 22,
-                        borderRadius: "var(--radius-sm)",
-                        border: "none",
+                        ...iconBtn,
                         background: isRunningHere ? "var(--danger-text)" : "var(--accent)",
                         color: "#fff",
                         cursor: timerDisabled ? "default" : "pointer",
@@ -905,22 +924,22 @@ export default function MyDashboard() {
                     >
                       {isRunningHere ? <Square size={11} fill="currentColor" /> : <Play size={11} fill="currentColor" />}
                     </button>
-                  </span>
-                  <span style={{ flex: "0 0 40px", textAlign: "center" }}>
                     {isHidden ? (
-                      <button onClick={() => unhideTaskFromToday(t.id)} title="Restore to My Work Today" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", padding: 4 }}>
-                        <EyeOff size={14} />
+                      <button onClick={() => unhideTaskFromToday(t.id)} title="Restore to My Work Today" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--accent)" }}>
+                        <EyeOff size={13} />
                       </button>
                     ) : (
-                      <button onClick={() => hideTaskFromToday(t.id, t.name)} title="Hide this task for today" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", padding: 4 }}>
-                        <Eye size={14} />
+                      <button onClick={() => hideTaskFromToday(t.id, t.name)} title="Hide task for today" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--muted)" }}>
+                        <Eye size={13} />
                       </button>
                     )}
-                  </span>
-                </div>
+                  </td>
+                </tr>
               );
             })
           )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
