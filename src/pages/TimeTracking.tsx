@@ -953,7 +953,12 @@ export default function TimeTracking() {
         supabase.rpc("get_running_timers", { p_scope: scope }).then(async (res) =>
           res.error ? await supabase.rpc("get_team_running_timers") : res
         ),
-        supabase.rpc("get_team_required_hours", { p_start: reqStart, p_end: reqEnd }),
+        // 2026-09-25 (phase120) -- required hours scoped the same way:
+        // Team = reporting line only (even Full Access), All = everyone
+        // incl. me. Falls back to the old RPC if phase120 isn't applied.
+        supabase.rpc("get_required_hours", { p_start: reqStart, p_end: reqEnd, p_scope: scope }).then(async (res) =>
+          res.error ? await supabase.rpc("get_team_required_hours", { p_start: reqStart, p_end: reqEnd }) : res
+        ),
       ]);
       if (cancelled) return;
       if (!timersErr) setTeamRunningTimers((timers as TeamRunningTimer[]) ?? []);
@@ -1445,8 +1450,11 @@ export default function TimeTracking() {
   // schedule that day -- a computed result, not a hardcoded assumption,
   // per her explicit ask.
   const rangeWeekdaySet = new Set(rangeWeekdayKeys);
+  // 2026-09-25 -- also follow the Team Member filter, so the target
+  // matches the logged hours when only some people are selected.
   const teamRangeRequiredMinutes = teamRequiredHours
     .filter((r) => rangeWeekdaySet.has(r.date))
+    .filter((r) => filterMemberIds.length === 0 || filterMemberIds.includes(r.person_id))
     .reduce((sum, r) => sum + r.expected_hours * 60, 0);
 
   // "N people working now" -- one running timer per person (the app
