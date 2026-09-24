@@ -14,6 +14,7 @@ import ViewTabs from "../components/ViewTabs";
 import ViewSettingsMenu, { ViewFilterPills } from "../components/ViewSettingsMenu";
 import Modal from "../components/Modal";
 import RequestExtensionModal from "../components/RequestExtensionModal";
+import FollowUpTimeModal from "../components/FollowUpTimeModal";
 import NotesSidebar from "../components/NotesSidebar";
 import { useConfirm } from "../lib/useConfirm";
 import { buildHolidayNameMap, nonWorkingDayConfirmMessage, toISO as toISOWorkingDay, type HolidayNameMap } from "../lib/workingDays";
@@ -1105,6 +1106,8 @@ export default function Projects() {
   // Per-person Spent Hrs breakdown popup (2026-08-14) -- which task's
   // breakdown modal (if any) is currently open.
   const [hoursBreakdownTaskId, setHoursBreakdownTaskId] = useState<string | null>(null);
+  // 2026-09-24 (phase110): "Log follow-up time" on a Done task.
+  const [followUpTask, setFollowUpTask] = useState<{ id: string; name: string; onBehalfOf: string | null } | null>(null);
   const [timeEntries, setTimeEntries] = useState<TimeEntryRow[]>([]);
   const [deletedSpentHours, setDeletedSpentHours] = useState<DeletedSpentHourRow[]>([]);
   const { running, busy: timerBusy, start: startTaskTimer, requestStop: stopRunningTimer, version: timeTrackingVersion } = useTimeTracking();
@@ -4106,6 +4109,27 @@ export default function Projects() {
                   {isRunningHere ? <Square size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" />}
                 </button>
               )}
+              {/* 2026-09-24 (phase110): follow-up time on a Done task --
+                  assignee, or Full Access on their behalf. Not on parent
+                  tasks, closed projects, or unlocked baselines. */}
+              {t.status === "Done" &&
+                !t.is_archived &&
+                !(t._depth === 0 && hasChildren(t.id)) &&
+                !isProjectClosed(t.project_id) &&
+                isProjectLocked(t.project_id) &&
+                t.assignee_id &&
+                (isMine || me?.access_level === "full") && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFollowUpTask({ id: t.id, name: t.name, onBehalfOf: isMine ? null : people.find((p) => p.id === t.assignee_id)?.name ?? "the assignee" });
+                    }}
+                    title={isMine ? "Log follow-up time (task stays Done)" : "Log follow-up time on the assignee's behalf"}
+                    style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, flexShrink: 0, background: "none", border: "1px dashed var(--accent)", borderRadius: "var(--radius-sm)", color: "var(--accent)", cursor: "pointer", padding: 0 }}
+                  >
+                    <Plus size={12} />
+                  </button>
+                )}
             </div>
           );
         },
@@ -5303,6 +5327,20 @@ export default function Projects() {
           </div>
         )}
       </div>
+
+      {followUpTask && (
+        <FollowUpTimeModal
+          taskId={followUpTask.id}
+          taskName={followUpTask.name}
+          onBehalfOf={followUpTask.onBehalfOf}
+          onClose={() => setFollowUpTask(null)}
+          onSaved={async () => {
+            setFollowUpTask(null);
+            await alert("Follow-up time submitted. It'll count toward the task once approved in the Approval Center.");
+            loadAll();
+          }}
+        />
+      )}
 
       {extensionTask && (
         <RequestExtensionModal

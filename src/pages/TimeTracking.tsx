@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, requestTimeEntryCorrection, cancelTimeEntryCorrection, editPendingManualTimeEntry } from "../lib/timeTracking";
+import { FOLLOW_UP_REASON_LABEL, type FollowUpReason, formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, requestTimeEntryCorrection, cancelTimeEntryCorrection, editPendingManualTimeEntry } from "../lib/timeTracking";
 import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { loggedHoursTier } from "../lib/loggedHoursBands";
 import { expectedHoursForDay } from "../lib/dailyAllocation";
@@ -107,6 +107,9 @@ interface EntryRow {
   original_started_at: string | null;
   original_ended_at: string | null;
   correction_requested_by: string | null;
+  // 2026-09-24 (phase110): follow-up time on a Done task.
+  is_follow_up: boolean;
+  follow_up_reason: FollowUpReason | null;
   created_at: string;
   // 2026-09-23 (phase63): admin soft-delete, reversible, excluded from
   // every hour rollup.
@@ -865,7 +868,7 @@ export default function TimeTracking() {
         .select(
           `id, task_id, activity_type_id, person_id, started_at, ended_at, duration_minutes, source, status, requested_by, reason_category, reason_notes, auto_stopped,
            decided_by, decided_at, decision_notes, corrected_by, corrected_at, original_duration_minutes, correction_notes, created_at,
-           original_started_at, original_ended_at, correction_requested_by,
+           original_started_at, original_ended_at, correction_requested_by, is_follow_up, follow_up_reason,
            is_archived, archived_at, archived_by, archive_reason, non_project_entry_number,
            task:tasks ( id, name, assignee_id, project_id, task_number, project:projects ( id, name, owner_id ) ),
            activity_type:non_project_activity_types ( id, name ),
@@ -1631,6 +1634,13 @@ export default function TimeTracking() {
                       )}
                     </td>
                     <td style={{ ...td, maxWidth: 260, whiteSpace: "normal", wordBreak: "break-word" }}>
+                      {row.is_follow_up && (
+                        <div style={{ marginBottom: 3 }}>
+                          <span className="status-pill gold" style={{ fontSize: 9, padding: "1px 5px" }} title="Extra time logged after the task was marked Done">
+                            Follow-up{row.follow_up_reason ? ` · ${FOLLOW_UP_REASON_LABEL[row.follow_up_reason]}` : ""}
+                          </span>
+                        </div>
+                      )}
                       {details}
                     </td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>

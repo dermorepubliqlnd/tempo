@@ -389,3 +389,30 @@ export async function unarchiveTimeEntry(entryId: string): Promise<{ error?: str
   if (error) return { error: error.message };
   return {};
 }
+
+// 2026-09-24 (phase110, Sandra: "do follow up log") -- extra time on a task
+// that's already Done/validated (late feedback, validated too early, scope
+// change). Always pending approval; the task stays Done.
+export type FollowUpReason = "late_feedback" | "validated_too_early" | "scope_change";
+export const FOLLOW_UP_REASON_LABEL: Record<FollowUpReason, string> = {
+  late_feedback: "Late feedback",
+  validated_too_early: "Validated too early",
+  scope_change: "Scope change",
+};
+export async function submitFollowUpTimeEntry(
+  taskId: string,
+  startedAt: string,
+  endedAt: string,
+  reason: FollowUpReason,
+  notes: string
+): Promise<{ id?: string; error?: string }> {
+  const { data, error } = await supabase.rpc("submit_follow_up_time_entry", {
+    p_task_id: taskId,
+    p_started_at: startedAt,
+    p_ended_at: endedAt,
+    p_reason: reason,
+    p_notes: notes || null,
+  });
+  if (error) return { error: error.message };
+  return { id: data as unknown as string };
+}

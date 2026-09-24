@@ -22,7 +22,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
-import { decideTimeEntry, decideTimeEntryCorrection, formatDuration } from "../lib/timeTracking";
+import { decideTimeEntry, decideTimeEntryCorrection, formatDuration, FOLLOW_UP_REASON_LABEL, type FollowUpReason } from "../lib/timeTracking";
 
 // Approval Center (2026-09-18, Sandra: "create an approval center page
 // under main... where all things for approval should show like extension
@@ -93,6 +93,8 @@ interface TimeEntryRowLite {
   requested_by: string | null;
   reason_category: string | null;
   reason_notes: string | null;
+  is_follow_up?: boolean;
+  follow_up_reason?: string | null;
   task: {
     id: string;
     name: string;
@@ -351,7 +353,7 @@ export default function ApprovalCenter() {
       supabase
         .from("time_entries")
         .select(
-          `id, task_id, activity_type_id, person_id, started_at, ended_at, created_at, duration_minutes, requested_by, reason_category, reason_notes,
+          `id, task_id, activity_type_id, person_id, started_at, ended_at, created_at, duration_minutes, requested_by, reason_category, reason_notes, is_follow_up, follow_up_reason,
            task:tasks ( id, name, project_id, project:projects ( id, name, owner_id ) ),
            activity_type:non_project_activity_types ( id, name ),
            person:people!time_entries_person_id_fkey ( id, name )`
@@ -855,7 +857,10 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         context: isNonProject ? "Non-project" : row.task?.project?.name ?? "—",
         requestedByName: row.person?.name ?? "—",
         requestedAt: row.started_at,
-        reasonCategory: row.reason_category,
+        // phase110: follow-up time on a Done task reads as such for the approver.
+        reasonCategory: row.is_follow_up
+          ? `Follow-up · ${row.follow_up_reason ? FOLLOW_UP_REASON_LABEL[row.follow_up_reason as FollowUpReason] : "after Done"}`
+          : row.reason_category,
         reasonNotes: row.reason_notes,
         extraLine: `Logged: ${hours(row.duration_minutes)}`,
         workStartedAt: row.started_at,
@@ -1161,7 +1166,8 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
           </thead>
           <tbody>
             {rows.map((row) => {
-              const details = row.reasonNotes?.trim() || row.reasonCategory || "—";
+              const isFollowUp = (row.reasonCategory ?? "").startsWith("Follow-up");
+              const details = isFollowUp ? row.reasonNotes?.trim() || "—" : row.reasonNotes?.trim() || row.reasonCategory || "—";
               return (
                 <tr key={row.key} style={{ borderBottom: "1px solid var(--border)" }}>
                   <td style={td}>
@@ -1187,6 +1193,11 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{row.workStartedAt ? formatClockRange(row.workStartedAt, row.workEndedAt) : "—"}</td>
                   <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{formatDuration(row.durationMinutes ?? null)}</td>
                   <td style={{ ...td, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={details !== "—" ? details : undefined}>
+                    {isFollowUp && (
+                      <div style={{ marginBottom: 2 }}>
+                        <span className="status-pill gold" style={{ fontSize: 9, padding: "1px 5px" }}>{row.reasonCategory}</span>
+                      </div>
+                    )}
                     {details}
                   </td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{row.loggedOnAt ? formatDateTime(row.loggedOnAt) : "—"}</td>
