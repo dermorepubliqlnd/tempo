@@ -3538,6 +3538,7 @@ export default function Projects() {
         label: "Work Type",
         defaultWidth: 150,
         render: (t) => {
+          if (t._depth === 0 && hasChildren(t.id)) return <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="Not applicable -- set on the sub-tasks.">N/A</span>;
           const wt = workTypes.find((w) => w.id === t.work_type_id);
           return wt ? <span className="status-pill neutral">{wt.name}</span> : <span style={{ color: "var(--muted)" }}>—</span>;
         },
@@ -3556,6 +3557,7 @@ export default function Projects() {
         label: "Output Type",
         defaultWidth: 140,
         render: (t) => {
+          if (t._depth === 0 && hasChildren(t.id)) return <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="Not applicable -- outputs are counted on the sub-tasks.">N/A</span>;
           const ot = outputTypes.find((o) => o.id === t.output_type_id);
           return ot ? <span className="status-pill neutral">{ot.name}</span> : <span style={{ color: "var(--muted)" }}>—</span>;
         },
@@ -3573,10 +3575,11 @@ export default function Projects() {
           // (which already shows Output Count at that moment). Once
           // Done, it locks; still editable pre-Done and (same as
           // before) never on a parent row.
+          if (isParent) return <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="Not applicable -- outputs are counted on the sub-tasks.">N/A</span>;
           return (
             <InlineNumber
               value={t.output_count}
-              editable={canEditTask(t) && !isTaskLocked(t) && !isParent && t.status !== "Done"}
+              editable={canEditTask(t) && !isTaskLocked(t) && t.status !== "Done"}
               onCommit={(v) => updateTask(t.id, { output_count: v })}
             />
           );

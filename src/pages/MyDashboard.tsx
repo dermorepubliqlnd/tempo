@@ -519,7 +519,8 @@ export default function MyDashboard() {
     const monthPrefix = todayIso.slice(0, 7);
     const map = new Map<string, { name: string; done: number; total: number; sort: number }>();
     tasks
-      .filter((t) => t.assignee_id === me.id && t.output_type_id && t.current_due_date && t.current_due_date.slice(0, 7) === monthPrefix)
+      // Parent tasks excluded: their outputs are counted on the sub-tasks.
+      .filter((t) => t.assignee_id === me.id && t.output_type_id && !tasks.some((c) => c.parent_task_id === t.id) && t.current_due_date && t.current_due_date.slice(0, 7) === monthPrefix)
       .forEach((t) => {
         const ot = outputTypes.find((o) => o.id === t.output_type_id);
         const name = ot?.name ?? "Other";

@@ -5975,7 +5975,14 @@ export default function WbsPlanning() {
                         )}
                       </td>
                       <td style={wbsColStickyStyle("output_type", true, rowLocked)}>
-                        {(() => {
+                        {/* 2026-09-24 (Sandra): parent rows are N/A for Output Type too,
+                            same as Work Type / Output Count -- outputs belong to the
+                            sub-tasks that produce them. */}
+                        {isParent ? (
+                          <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="Not applicable -- a parent task's outputs are counted on its sub-tasks.">
+                            N/A
+                          </span>
+                        ) : (() => {
                           const currentOt = outputTypes.find((o) => o.id === t.output_type_id);
                           // Phase 23 (2026-08-25): conditional Output Type --
                           // Sandra: "I want the output be conditional based
@@ -6000,7 +6007,7 @@ export default function WbsPlanning() {
                           // they stay open per the "every task gets
                           // Output Type" rule from the original Materials
                           // Output ship).
-                          const needsWorkTypeFirst = !isParent && !t.work_type_id;
+                          const needsWorkTypeFirst = !t.work_type_id;
                           if (needsWorkTypeFirst) {
                             return (
                               <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="Pick a Work Type first -- Output Type options depend on it.">
