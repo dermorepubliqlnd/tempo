@@ -532,7 +532,11 @@ export default function ApprovalCenter() {
     setTimeEntries((teData as unknown as TimeEntryRowLite[]) ?? []);
     setBaselineRequests((blData as BaselineRow[]) ?? []);
     setClosureRequests((clData as ClosureRow[]) ?? []);
-    setTaskCompletions((tcData as unknown as TaskCompletionRow[]) ?? []);
+    // 2026-09-24 (Sandra: "why are there 2 Task Validations groups?"): a
+    // Done-but-unvalidated task on a CLOSED project can never be validated
+    // (closed projects are final/locked), so it sat forever under "Other
+    // pending approvals" with no one able to act. Excluded here.
+    setTaskCompletions(((tcData as unknown as TaskCompletionRow[]) ?? []).filter((t) => t.project?.wbs_status !== "closed"));
     setAllTimeEntries((allTeData as { task_id: string; duration_minutes: number | null; status: "confirmed" | "approved" }[]) ?? []);
     setChainPeople((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []);
     setParentTaskIds(new Set(((parentIdData as { parent_task_id: string }[]) ?? []).map((r) => r.parent_task_id)));
