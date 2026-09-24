@@ -159,6 +159,13 @@ function notOnArchived(r: unknown): boolean {
   return !x.task?.is_archived && !x.project?.is_archived;
 }
 
+// My Work Today grid (2026-09-24): one template shared by header + rows.
+// Task/Project capped so wide screens don't stretch them; the 1fr spacer
+// before Actions absorbs leftover width so Actions stays at the right edge.
+const MWT_COLUMNS = ["minmax(200px, 260px)", "110px", "100px", "minmax(240px, 420px)", "150px", "160px", "170px", "minmax(0, 1fr)", "90px"];
+const MWT_GRID: CSSProperties = { display: "grid", gridTemplateColumns: MWT_COLUMNS.join(" "), columnGap: 16, alignItems: "center" };
+const MWT_MIN_WIDTH = 200 + 110 + 100 + 240 + 150 + 160 + 170 + 90 + 16 * 8;
+
 export default function MyDashboard() {
   const { person: me } = useSession();
   // 2026-09-24: Approval Center is hidden for users without approval
@@ -799,45 +806,27 @@ export default function MyDashboard() {
               over" instead of a signed number, and the Start/Stop + Hide
               icon buttons sit right-aligned. UI only -- the same timer and
               hide handlers as before. */}
+          {/* 2026-09-24 (Sandra: column spacing diagnosis) -- switched from
+              a fixed-layout <table> (where Task's 22% and Project's auto
+              width absorbed ALL extra space on wide screens, leaving big
+              empty stretches after short text) to ONE shared CSS Grid
+              template for header + rows: Task and Project are capped, a
+              flexible spacer before Actions takes any leftover width, and
+              a uniform 16px column gap does the separating. */}
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", minWidth: 980, borderCollapse: "collapse", tableLayout: "fixed" }}>
-              <colgroup>
-                <col style={{ width: "22%" }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 96 }} />
-                <col />
-                <col style={{ width: 150 }} />
-                <col style={{ width: 150 }} />
-                <col style={{ width: 140 }} />
-                <col style={{ width: 84 }} />
-              </colgroup>
-              <thead>
-                <tr>
-                  {["Task", "Status", "Timing", "Project", "Dates", "Hours (Logged / Est.)", "Remaining / Variance", "Actions"].map((h, i) => (
-                    <th
-                      key={h}
-                      style={{
-                        padding: "8px 8px 6px",
-                        fontSize: 10,
-                        fontWeight: 600,
-                        color: "var(--muted)",
-                        textTransform: "uppercase",
-                        letterSpacing: 0.3,
-                        whiteSpace: "nowrap",
-                        textAlign: i === 7 ? "right" : "left",
-                        borderBottom: "1px solid var(--border)",
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
+            <div style={{ minWidth: MWT_MIN_WIDTH }}>
+              <div style={{ ...MWT_GRID, padding: "8px 0 6px", borderBottom: "1px solid var(--border)" }}>
+                {["Task", "Status", "Timing", "Project", "Dates", "Hours (Logged / Est.)", "Remaining / Variance", "", "Actions"].map((h, i) => (
+                  <span
+                    key={i}
+                    style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap", textAlign: i === 8 ? "right" : "left" }}
+                  >
+                    {h}
+                  </span>
+                ))}
+              </div>
           {myWorkTodayVisible.length === 0 ? (
-            <tr>
-              <td colSpan={8} style={{ fontSize: 12, color: "var(--muted)", padding: "10px 8px" }}>Nothing left to show -- everything scheduled for today is hidden.</td>
-            </tr>
+            <p style={{ fontSize: 12, color: "var(--muted)", padding: "10px 0" }}>Nothing left to show -- everything scheduled for today is hidden.</p>
           ) : (
             myWorkTodayVisible.map((t) => {
               const isHidden = hiddenTodayIds.has(t.id);
@@ -847,28 +836,28 @@ export default function MyDashboard() {
               const logged = loggedHoursForTask(t.id);
               const variance = hoursVarianceOf(t.estimated_hours, logged);
               const varianceTone = hoursVarianceTone(variance?.percent ?? null);
-              const td: CSSProperties = { padding: "10px 8px", borderBottom: "1px solid var(--border)", verticalAlign: "middle", fontSize: 12 };
+              const td: CSSProperties = { fontSize: 12, minWidth: 0 };
               const iconBtn: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: "var(--radius-sm)", border: "none", cursor: "pointer", padding: 0 };
               return (
-                <tr key={t.id} style={{ opacity: isHidden ? 0.55 : 1 }}>
-                  <td style={td}>
+                <div key={t.id} style={{ ...MWT_GRID, padding: "10px 0", borderBottom: "1px solid var(--border)", opacity: isHidden ? 0.55 : 1 }}>
+                  <div style={td}>
                     <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</div>
                     <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>T-{String(t.task_number).padStart(4, "0")}</div>
-                  </td>
-                  <td style={td}>
+                  </div>
+                  <div style={td}>
                     <span className={`status-pill ${myWorkTodayStatusTone(t.status)}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span>
-                  </td>
-                  <td style={td}>
+                  </div>
+                  <div style={td}>
                     <span className={`status-pill ${timing.tone}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{timing.label}</span>
-                  </td>
-                  <td style={{ ...td, color: "var(--text-secondary)" }} title={t.project?.name ?? undefined}>
+                  </div>
+                  <div style={{ ...td, color: "var(--text-secondary)" }} title={t.project?.name ?? undefined}>
                     <div style={{ overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{t.project?.name ?? "—"}</div>
-                  </td>
-                  <td style={{ ...td, color: "var(--text-secondary)", fontSize: 11.5, lineHeight: 1.4 }}>
+                  </div>
+                  <div style={{ ...td, color: "var(--text-secondary)", fontSize: 11.5, lineHeight: 1.4 }}>
                     <div>{t.start_date ? formatDate(t.start_date) : "—"} →</div>
                     <div>{formatDate(t.current_due_date)}</div>
-                  </td>
-                  <td style={td}>
+                  </div>
+                  <div style={td}>
                     <div style={{ fontSize: 12 }}>
                       <strong style={{ color: "var(--navy)" }}>{logged > 0 ? `${logged.toFixed(1)}h` : "0h"}</strong>
                       <span style={{ color: "var(--muted)" }}> / {t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
@@ -888,8 +877,8 @@ export default function MyDashboard() {
                         <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{variance.percent}%</span>
                       </div>
                     )}
-                  </td>
-                  <td style={td}>
+                  </div>
+                  <div style={td}>
                     {variance ? (
                       <span className={`status-pill ${variance.hours <= 0 ? "success" : varianceTone}`} style={{ fontSize: 10, whiteSpace: "nowrap" }}>
                         {variance.hours <= 0 ? `${Math.abs(variance.hours).toFixed(1)}h remaining` : `${variance.hours.toFixed(1)}h over`}
@@ -897,8 +886,9 @@ export default function MyDashboard() {
                     ) : (
                       <span style={{ fontSize: 11.5, color: "var(--muted)" }}>—</span>
                     )}
-                  </td>
-                  <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
+                  </div>
+                  <div />
+                  <div style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
                     <button
                       onClick={async () => {
                         if (isRunningHere) {
@@ -933,13 +923,12 @@ export default function MyDashboard() {
                         <Eye size={13} />
                       </button>
                     )}
-                  </td>
-                </tr>
+                  </div>
+                </div>
               );
             })
           )}
-              </tbody>
-            </table>
+            </div>
           </div>
         </div>
       )}
