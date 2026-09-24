@@ -970,7 +970,9 @@ export default function MyDashboard() {
                     <span onClick={go} style={{ ...cell, fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap" }}>
                       {p.project_number ? `P-${String(p.project_number).padStart(4, "0")}` : "—"}
                     </span>
-                    <span onClick={go} style={{ ...cell, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>{p.name}</span>
+                    <span onClick={go} style={{ ...cell, fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }} title={p.name}>
+                      <span style={{ overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", lineHeight: 1.3 }}>{p.name}</span>
+                    </span>
                     <span onClick={go} style={cell}>
                       <span title={wbsMeta?.hint} style={{ display: "inline-block", padding: "1px 7px", fontSize: 10.5, fontWeight: 500, whiteSpace: "nowrap", borderRadius: "var(--radius-btn)", border: `1px solid ${wbsMeta?.border ?? "var(--border)"}`, background: wbsMeta?.bg ?? "var(--surface)", color: wbsMeta?.color ?? "var(--text-secondary)" }}>
                         {wbsMeta?.label ?? p.wbs_status}
