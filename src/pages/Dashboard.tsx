@@ -966,8 +966,12 @@ export default function Dashboard() {
     const tentativeCounts: Record<string, number> = {};
     let untypedClosed = 0;
     let untypedTentative = 0;
+    // 2026-09-24: parent tasks never count -- their outputs live on the sub-tasks
+    // (a few parents still carry an Output Count from before they had children).
+    const outputParentIds = new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
     for (const t of tasks) {
       if (!filteredProjectIds.has(t.project_id)) continue;
+      if (outputParentIds.has(t.id)) continue;
       // 2026-09-10 (Cancelled task status revived): a cancelled task's
       // Output Count shouldn't count toward Materials Output -- it never
       // actually produced that material, or its production no longer
