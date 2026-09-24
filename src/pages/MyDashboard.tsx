@@ -163,9 +163,9 @@ function notOnArchived(r: unknown): boolean {
 // Task/Project capped so wide screens don't stretch them; the 1fr spacer
 // before Actions absorbs leftover width so Actions stays at the right edge.
 // Mins sized so the whole grid fits a 1440px laptop screen without scrolling (verified live 2026-09-24).
-const MWT_COLUMNS = ["minmax(170px, 260px)", "100px", "90px", "minmax(190px, 420px)", "130px", "130px", "136px", "minmax(0, 1fr)", "76px"];
+const MWT_COLUMNS = ["minmax(160px, 260px)", "100px", "90px", "minmax(180px, 420px)", "130px", "130px", "136px", "minmax(0, 1fr)", "76px"];
 const MWT_GRID: CSSProperties = { display: "grid", gridTemplateColumns: MWT_COLUMNS.join(" "), columnGap: 16, alignItems: "center" };
-const MWT_MIN_WIDTH = 170 + 100 + 90 + 190 + 130 + 130 + 136 + 76 + 16 * 8;
+const MWT_MIN_WIDTH = 160 + 100 + 90 + 180 + 130 + 130 + 136 + 76 + 16 * 8;
 
 export default function MyDashboard() {
   const { person: me } = useSession();
@@ -934,7 +934,7 @@ export default function MyDashboard() {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)", gap: 20, alignItems: "start" }}>
         <div>
           <div className="dash-card">
             <SectionHeader title={`My Projects (${myProjects.length})`} to="/projects?owner=me" />
@@ -1044,7 +1044,7 @@ export default function MyDashboard() {
         <div>
           <div className="dash-card">
             <SectionHeader title="My Utilization This Week" to="/utilization?person=me" small="Based on assigned work vs available capacity" />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8 }}>
               {dailyStats.map((d) => {
                 const over = d.capacity > 0 && d.pct > 100;
                 const colors = d.off ? { bg: "var(--hover-bg)", fg: "var(--muted)" } : over ? toneColors("danger") : toneColors("success");
@@ -1079,7 +1079,7 @@ export default function MyDashboard() {
                 this is a personal dashboard, I don't think we need to
                 show the name and role") -- same bordered-card grid as
                 My Utilization This Week above, name/role row dropped. */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8 }}>
               {dailyStats.map((d) => {
                 // 2026-09-23 (dynamic expected hours): d.capacity already
                 // accounts for off/half-day/holiday (computed above in
