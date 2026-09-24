@@ -159,13 +159,25 @@ function notOnArchived(r: unknown): boolean {
   return !x.task?.is_archived && !x.project?.is_archived;
 }
 
-// My Work Today grid (2026-09-24): one template shared by header + rows.
-// Task/Project capped so wide screens don't stretch them; the 1fr spacer
-// before Actions absorbs leftover width so Actions stays at the right edge.
-// Mins sized so the whole grid fits a 1440px laptop screen without scrolling (verified live 2026-09-24).
-const MWT_COLUMNS = ["minmax(160px, 260px)", "100px", "90px", "minmax(180px, 420px)", "130px", "130px", "136px", "minmax(0, 1fr)", "76px"];
-const MWT_GRID: CSSProperties = { display: "grid", gridTemplateColumns: MWT_COLUMNS.join(" "), columnGap: 16, alignItems: "center" };
-const MWT_MIN_WIDTH = 160 + 100 + 90 + 180 + 130 + 130 + 136 + 76 + 16 * 8;
+// My Work Today grid (2026-09-24, v3 -- Sandra: "still too much white space").
+// ONE grid for header + every cell (rows use display:contents), so columns
+// size to their ACTUAL content (max-content / fit-content caps) and line up
+// across rows. Content packs left with a uniform gap; the single 1fr spacer
+// before Actions takes whatever is left so Actions stays at the right edge.
+const MWT_COLUMNS = [
+  "max-content",        // Task ID
+  "fit-content(260px)", // Task
+  "max-content",        // Status
+  "max-content",        // Timing
+  "fit-content(320px)", // Project
+  "max-content",        // Dates (one line)
+  "max-content",        // Hours
+  "max-content",        // Remaining / Variance
+  "minmax(0, 1fr)",     // spacer
+  "max-content",        // Actions
+];
+const MWT_GRID: CSSProperties = { display: "grid", gridTemplateColumns: MWT_COLUMNS.join(" "), alignItems: "stretch" };
+const MWT_GAP = 28;
 
 export default function MyDashboard() {
   const { person: me } = useSession();
@@ -815,19 +827,17 @@ export default function MyDashboard() {
               flexible spacer before Actions takes any leftover width, and
               a uniform 16px column gap does the separating. */}
           <div style={{ overflowX: "auto" }}>
-            <div style={{ minWidth: MWT_MIN_WIDTH }}>
-              <div style={{ ...MWT_GRID, padding: "8px 0 6px", borderBottom: "1px solid var(--border)" }}>
-                {["Task", "Status", "Timing", "Project", "Dates", "Hours (Logged / Est.)", "Remaining / Variance", "", "Actions"].map((h, i) => (
-                  <span
-                    key={i}
-                    style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap", textAlign: i === 8 ? "right" : "left" }}
-                  >
-                    {h}
-                  </span>
-                ))}
-              </div>
+            <div style={MWT_GRID}>
+              {["Task ID", "Task", "Status", "Timing", "Project", "Dates", "Hours (Logged / Est.)", "Remaining / Variance", "", "Actions"].map((h, i, arr) => (
+                <span
+                  key={`h${i}`}
+                  style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap", textAlign: i === arr.length - 1 ? "right" : "left", padding: `8px ${i === arr.length - 1 || i === arr.length - 2 ? 0 : MWT_GAP}px 6px 0`, borderBottom: "1px solid var(--border)" }}
+                >
+                  {h}
+                </span>
+              ))}
           {myWorkTodayVisible.length === 0 ? (
-            <p style={{ fontSize: 12, color: "var(--muted)", padding: "10px 0" }}>Nothing left to show -- everything scheduled for today is hidden.</p>
+            <p style={{ gridColumn: "1 / -1", fontSize: 12, color: "var(--muted)", padding: "10px 0" }}>Nothing left to show -- everything scheduled for today is hidden.</p>
           ) : (
             myWorkTodayVisible.map((t) => {
               const isHidden = hiddenTodayIds.has(t.id);
@@ -837,29 +847,29 @@ export default function MyDashboard() {
               const logged = loggedHoursForTask(t.id);
               const variance = hoursVarianceOf(t.estimated_hours, logged);
               const varianceTone = hoursVarianceTone(variance?.percent ?? null);
-              const td: CSSProperties = { fontSize: 12, minWidth: 0 };
+              // Every cell carries the row's padding/border/opacity (display:contents rows have no box).
+              const td: CSSProperties = { fontSize: 12, minWidth: 0, padding: `10px ${MWT_GAP}px 10px 0`, borderBottom: "1px solid var(--border)", opacity: isHidden ? 0.55 : 1, display: "flex", flexDirection: "column", justifyContent: "center" };
               const iconBtn: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: "var(--radius-sm)", border: "none", cursor: "pointer", padding: 0 };
               return (
-                <div key={t.id} style={{ ...MWT_GRID, padding: "10px 0", borderBottom: "1px solid var(--border)", opacity: isHidden ? 0.55 : 1 }}>
+                <div key={t.id} style={{ display: "contents" }}>
+                  <div style={{ ...td, fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap" }}>T-{String(t.task_number).padStart(4, "0")}</div>
                   <div style={td}>
                     <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</div>
-                    <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>T-{String(t.task_number).padStart(4, "0")}</div>
                   </div>
-                  <div style={td}>
+                  <div style={{ ...td, alignItems: "flex-start" }}>
                     <span className={`status-pill ${myWorkTodayStatusTone(t.status)}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span>
                   </div>
-                  <div style={td}>
+                  <div style={{ ...td, alignItems: "flex-start" }}>
                     <span className={`status-pill ${timing.tone}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{timing.label}</span>
                   </div>
                   <div style={{ ...td, color: "var(--text-secondary)" }} title={t.project?.name ?? undefined}>
                     <div style={{ overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{t.project?.name ?? "—"}</div>
                   </div>
-                  <div style={{ ...td, color: "var(--text-secondary)", fontSize: 11.5, lineHeight: 1.4 }}>
-                    <div>{t.start_date ? formatDate(t.start_date) : "—"} →</div>
-                    <div>{formatDate(t.current_due_date)}</div>
+                  <div style={{ ...td, color: "var(--text-secondary)", fontSize: 11.5, whiteSpace: "nowrap" }}>
+                    {t.start_date ? formatDate(t.start_date) : "—"} → {formatDate(t.current_due_date)}
                   </div>
                   <div style={td}>
-                    <div style={{ fontSize: 12 }}>
+                    <div style={{ fontSize: 12, whiteSpace: "nowrap" }}>
                       <strong style={{ color: "var(--navy)" }}>{logged > 0 ? `${logged.toFixed(1)}h` : "0h"}</strong>
                       <span style={{ color: "var(--muted)" }}> / {t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
                     </div>
@@ -879,7 +889,7 @@ export default function MyDashboard() {
                       </div>
                     )}
                   </div>
-                  <div style={td}>
+                  <div style={{ ...td, alignItems: "flex-start" }}>
                     {variance ? (
                       <span className={`status-pill ${variance.hours <= 0 ? "success" : varianceTone}`} style={{ fontSize: 10, whiteSpace: "nowrap" }}>
                         {variance.hours <= 0 ? `${Math.abs(variance.hours).toFixed(1)}h remaining` : `${variance.hours.toFixed(1)}h over`}
@@ -888,8 +898,8 @@ export default function MyDashboard() {
                       <span style={{ fontSize: 11.5, color: "var(--muted)" }}>—</span>
                     )}
                   </div>
-                  <div />
-                  <div style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
+                  <div style={{ ...td, paddingRight: 0 }} />
+                  <div style={{ ...td, paddingRight: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
                     <button
                       onClick={async () => {
                         if (isRunningHere) {
