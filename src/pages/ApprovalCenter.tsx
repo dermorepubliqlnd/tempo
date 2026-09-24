@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import {
   CheckCircle2,
@@ -286,6 +286,119 @@ function notOnArchived(r: unknown): boolean {
   return !x.task?.is_archived && !x.project?.is_archived;
 }
 
+
+// 2026-09-24 bugfix (Sandra: corrections -- "submitting does not proceed",
+// typing resets). These two own local state (the reject note, the confirm
+// date), so they live at module level: defined inside ApprovalCenter they
+// were a brand-new component type on every render, and each keystroke in
+// the reject note re-rendered the page and remounted them -- closing the
+// note popover / resetting the date. The tables that contain them are now
+// called as plain functions (not <Component />) for the same reason.
+function DecideButtons({ onApprove, onReject }: { onApprove: () => void | Promise<void>; onReject: (note: string) => void | Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [note, setNote] = useState("");
+  async function run(fn: () => void | Promise<void>) {
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div style={{ position: "relative", display: "inline-flex" }}>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          onClick={() => setRejecting((r) => !r)}
+          disabled={busy}
+          title="Reject"
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
+        >
+          <XCircle size={14} />
+        </button>
+        <button
+          onClick={() => run(onApprove)}
+          disabled={busy}
+          title="Approve"
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer", opacity: busy ? 0.6 : 1 }}
+        >
+          <CheckCircle2 size={14} />
+        </button>
+      </div>
+      {rejecting && (
+        <div
+          style={{
+            position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 30,
+            background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
+            padding: 10, width: 240, boxShadow: "0 6px 20px rgba(15,23,42,0.16)",
+          }}
+        >
+          <input
+            type="text"
+            autoFocus
+            placeholder="Reason for rejecting (required)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            style={{ width: "100%", fontSize: 11.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
+          />
+          {!note.trim() && <div style={{ fontSize: 10, color: "var(--danger-text)", marginTop: 4 }}>A note is required to reject.</div>}
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <button
+              onClick={() => {
+                if (!note.trim()) return;
+                const n = note.trim();
+                setRejecting(false);
+                run(() => onReject(n));
+              }}
+              disabled={busy || !note.trim()}
+              style={{ flex: 1, fontSize: 11, fontWeight: 600, color: "#fff", background: note.trim() ? "var(--danger-text)" : "var(--muted)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 8px", cursor: note.trim() ? "pointer" : "not-allowed" }}
+            >
+              Confirm reject
+            </button>
+            <button
+              onClick={() => setRejecting(false)}
+              style={{ fontSize: 11, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 8px", cursor: "pointer" }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ValidateActionCells({ row, busy, onValidate }: { row: TaskCompletionRow; busy: boolean; onValidate: (date: string) => void }) {
+  const defaultDate = (row.actual_completion_date ?? row.submitted_on ?? new Date().toISOString()).slice(0, 10);
+  const [date, setDate] = useState(defaultDate);
+  const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
+  return (
+    <>
+      <td style={{ ...td, whiteSpace: "nowrap" }}>
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          title="Confirm Completion Date -- the date that gets locked in when you validate"
+          style={{ fontSize: 11.5, padding: "6px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }}
+        />
+      </td>
+      <td style={{ ...td, textAlign: "center" }}>
+        <button
+          onClick={() => onValidate(date)}
+          disabled={busy || !date}
+          title="Validate"
+          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap", margin: "0 auto" }}
+        >
+          <CheckCircle2 size={13} />
+          Validate
+        </button>
+      </td>
+    </>
+  );
+}
+
 export default function ApprovalCenter() {
   const { person: me } = useSession();
   const { confirm, alert, dialog: confirmDialog } = useConfirm();
@@ -528,13 +641,13 @@ export default function ApprovalCenter() {
   // 2026-09-22: the old modal confirm() for "Reject ...?" is gone -- the
   // Reject icon's required-note popover (DecideButtons) IS the
   // confirmation step now, so this no longer asks twice.
-  async function decideExtension(row: ExtensionRow, status: "Approved" | "Rejected") {
+  async function decideExtension(row: ExtensionRow, status: "Approved" | "Rejected", note: string | null = null) {
     const key = `ext-${row.id}`;
     setDecidingKey(key);
     const { error } = await supabase.rpc(row.project ? "decide_project_extension_request" : "decide_extension_request", {
       p_request_id: row.id,
       p_status: status,
-      p_decision_notes: notesDraft[key]?.trim() || null,
+      p_decision_notes: note?.trim() || notesDraft[key]?.trim() || null,
     });
     setDecidingKey(null);
     if (error) {
@@ -546,10 +659,10 @@ export default function ApprovalCenter() {
 
   // 2026-09-22: same -- the popover's own "Confirm reject" is the
   // confirmation now.
-  async function decideTime(row: TimeEntryRowLite, status: "approved" | "rejected") {
+  async function decideTime(row: TimeEntryRowLite, status: "approved" | "rejected", note: string | null = null) {
     const key = `time-${row.id}`;
     setDecidingKey(key);
-    const res = await decideTimeEntry(row.id, status, notesDraft[key]?.trim() || null);
+    const res = await decideTimeEntry(row.id, status, note?.trim() || notesDraft[key]?.trim() || null);
     setDecidingKey(null);
     if (res.error) {
       await alert(`Couldn't ${status === "approved" ? "approve" : "reject"} this entry: ${res.error}`);
@@ -571,10 +684,10 @@ export default function ApprovalCenter() {
     return nearestActiveManager(row.requested_by) === me.id;
   }
 
-  async function decideCorrection(row: CorrectionRequestRowLite, decision: "approved" | "rejected") {
+  async function decideCorrection(row: CorrectionRequestRowLite, decision: "approved" | "rejected", note: string | null = null) {
     const key = `corr-${row.id}`;
     setDecidingKey(key);
-    const res = await decideTimeEntryCorrection(row.id, decision, notesDraft[key]?.trim() || null);
+    const res = await decideTimeEntryCorrection(row.id, decision, note?.trim() || notesDraft[key]?.trim() || null);
     setDecidingKey(null);
     if (res.error) {
       await alert(`Couldn't ${decision === "approved" ? "approve" : "reject"} this correction: ${res.error}`);
@@ -644,72 +757,6 @@ export default function ApprovalCenter() {
   // still has a real approve/reject decision here (Extension, Time
   // Entry/Non-project Time) -- Baseline/Closure deep-link to WBS instead
   // (ReviewLink) and Task Completion has no reject concept (ValidateAction).
-  function DecideButtons({ rowKey, onApprove, onReject }: { rowKey: string; onApprove: () => void; onReject: () => void }) {
-    const busy = decidingKey === rowKey;
-    const [rejecting, setRejecting] = useState(false);
-    const note = notesDraft[rowKey] ?? "";
-    return (
-      <div style={{ position: "relative", display: "inline-flex" }}>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button
-            onClick={() => setRejecting((r) => !r)}
-            disabled={busy}
-            title="Reject"
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
-          >
-            <XCircle size={14} />
-          </button>
-          <button
-            onClick={onApprove}
-            disabled={busy}
-            title="Approve"
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
-          >
-            <CheckCircle2 size={14} />
-          </button>
-        </div>
-        {rejecting && (
-          <div
-            style={{
-              position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 30,
-              background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
-              padding: 10, width: 240, boxShadow: "0 6px 20px rgba(15,23,42,0.16)",
-            }}
-          >
-            <input
-              type="text"
-              autoFocus
-              placeholder="Reason for rejecting (required)"
-              value={note}
-              onChange={(e) => setNotesDraft((prev) => ({ ...prev, [rowKey]: e.target.value }))}
-              style={{ width: "100%", fontSize: 11.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
-            />
-            {!note.trim() && <div style={{ fontSize: 10, color: "var(--danger-text)", marginTop: 4 }}>A note is required to reject.</div>}
-            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-              <button
-                onClick={() => {
-                  if (!note.trim()) return;
-                  onReject();
-                  setRejecting(false);
-                }}
-                disabled={busy || !note.trim()}
-                style={{ flex: 1, fontSize: 11, fontWeight: 600, color: "#fff", background: note.trim() ? "var(--danger-text)" : "var(--muted)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 8px", cursor: note.trim() ? "pointer" : "not-allowed" }}
-              >
-                Confirm reject
-              </button>
-              <button
-                onClick={() => setRejecting(false)}
-                style={{ fontSize: 11, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 8px", cursor: "pointer" }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
   // 2026-09-21 (Sandra): clicking Validate now confirms a date first,
   // rather than firing immediately with whatever validate_task_completion
   // would have defaulted to silently -- same default (actual_completion_
@@ -755,38 +802,6 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
   //     that gets locked in as validated_completion_date the moment
   //     Validate is clicked. Pre-filled from Reported Completion (or
   //     submitted_on, or today) same as before.
-  function ValidateActionCells({ row }: { row: TaskCompletionRow }) {
-    const rowKey = `taskval-${row.id}`;
-    const defaultDate = (row.actual_completion_date ?? row.submitted_on ?? new Date().toISOString()).slice(0, 10);
-    const [date, setDate] = useState(defaultDate);
-    const busy = decidingKey === rowKey;
-    const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
-    return (
-      <>
-        <td style={{ ...td, whiteSpace: "nowrap" }}>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            title="Confirm Completion Date -- the date that gets locked in when you validate"
-            style={{ fontSize: 11.5, padding: "6px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }}
-          />
-        </td>
-        <td style={{ ...td, textAlign: "center" }}>
-          <button
-            onClick={() => confirmAndValidate(row, date)}
-            disabled={busy || !date}
-            title="Validate"
-            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap", margin: "0 auto" }}
-          >
-            <CheckCircle2 size={13} />
-            Validate
-          </button>
-        </td>
-      </>
-    );
-  }
-
   // 2026-09-22 (Sandra, on a Baseline mockup: "change action to review
   // WBS") -- gained a `label` prop so BaselineTable's Action button can
   // read "Review WBS" (matching her mockup's plain blue button) while
@@ -836,7 +851,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         extraLine: `${formatDate(row.project ? row.project.end_date : row.task?.current_due_date)} → ${formatDate(row.requested_new_due_date)}`,
         canDecide: canDecideExtension(row),
         action: canDecideExtension(row) ? (
-          <DecideButtons rowKey={key} onApprove={() => decideExtension(row, "Approved")} onReject={() => decideExtension(row, "Rejected")} />
+          <DecideButtons onApprove={() => decideExtension(row, "Approved")} onReject={(n) => decideExtension(row, "Rejected", n)} />
         ) : null,
         extensionRow: row,
       });
@@ -869,7 +884,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         loggedOnAt: row.created_at,
         canDecide: canDecideTimeEntry(row),
         action: canDecideTimeEntry(row) ? (
-          <DecideButtons rowKey={key} onApprove={() => decideTime(row, "approved")} onReject={() => decideTime(row, "rejected")} />
+          <DecideButtons onApprove={() => decideTime(row, "approved")} onReject={(n) => decideTime(row, "rejected", n)} />
         ) : null,
       });
     });
@@ -891,7 +906,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         extraLine: null,
         canDecide,
         action: canDecide ? (
-          <DecideButtons rowKey={key} onApprove={() => decideCorrection(row, "approved")} onReject={() => decideCorrection(row, "rejected")} />
+          <DecideButtons onApprove={() => decideCorrection(row, "approved")} onReject={(n) => decideCorrection(row, "rejected", n)} />
         ) : null,
         correctionRow: row,
       });
@@ -1337,7 +1352,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(tc.current_due_date)}</td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{tc.actual_completion_date ? formatDate(tc.actual_completion_date) : "Not set"}</td>
                   {row.canDecide ? (
-                    <ValidateActionCells row={tc} />
+                    <ValidateActionCells row={tc} busy={decidingKey === `taskval-${tc.id}`} onValidate={(d) => confirmAndValidate(tc, d)} />
                   ) : (
                     <>
                       <td style={td}>—</td>
@@ -1547,17 +1562,17 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         </button>
         {expanded &&
           (kind === "time" ? (
-            <TimeEntryTable rows={rows} />
+            TimeEntryTable({ rows })
           ) : kind === "correction" ? (
-            <CorrectionTable rows={rows} />
+            CorrectionTable({ rows })
           ) : kind === "task_completion" ? (
-            <TaskCompletionTable rows={rows} />
+            TaskCompletionTable({ rows })
           ) : kind === "extension" ? (
-            <ExtensionTable rows={rows} />
+            ExtensionTable({ rows })
           ) : kind === "baseline" ? (
-            <BaselineTable rows={rows} />
+            BaselineTable({ rows })
           ) : (
-            rows.map((row) => <RequestCard key={row.key} row={row} />)
+            rows.map((row) => <Fragment key={row.key}>{RequestCard({ row })}</Fragment>)
           ))}
       </div>
     );
@@ -1576,20 +1591,20 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
     return (
       <div>
         {KIND_ORDER.map((kind) => (
-          <KindSection
-            key={kind}
-            kind={kind}
-            rows={rows.filter((r) => r.kind === kind)}
-            expanded={expandedKinds.has(kind)}
-            onToggle={() =>
-              setExpandedKinds((prev) => {
-                const next = new Set(prev);
-                if (next.has(kind)) next.delete(kind);
-                else next.add(kind);
-                return next;
-              })
-            }
-          />
+          <Fragment key={kind}>
+            {KindSection({
+              kind,
+              rows: rows.filter((r) => r.kind === kind),
+              expanded: expandedKinds.has(kind),
+              onToggle: () =>
+                setExpandedKinds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(kind)) next.delete(kind);
+                  else next.add(kind);
+                  return next;
+                }),
+            })}
+          </Fragment>
         ))}
       </div>
     );
@@ -1605,13 +1620,13 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-        <AllRequestsSummaryCard />
-        <SummaryCard kind="extension" />
-        <SummaryCard kind="time" />
-        <SummaryCard kind="correction" />
-        <SummaryCard kind="baseline" />
-        <SummaryCard kind="closure" />
-        <SummaryCard kind="task_completion" />
+        {AllRequestsSummaryCard()}
+        {SummaryCard({ kind: "extension" })}
+        {SummaryCard({ kind: "time" })}
+        {SummaryCard({ kind: "correction" })}
+        {SummaryCard({ kind: "baseline" })}
+        {SummaryCard({ kind: "closure" })}
+        {SummaryCard({ kind: "task_completion" })}
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
@@ -1642,7 +1657,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
       </div>
 
       <h2 style={{ fontSize: 13 }}>Needs your decision ({needsDecision.length})</h2>
-      <RequestList rows={needsDecision} emptyLabel="Nothing needs your decision right now." />
+      {RequestList({ rows: needsDecision, emptyLabel: "Nothing needs your decision right now." })}
 
       {/* 2026-09-24 (Sandra: "only show what they need to see") --
           requests someone else must decide are an oversight view for
@@ -1650,7 +1665,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
       {isFullAccess && (
         <>
           <h2 style={{ fontSize: 13, marginTop: 24 }}>Other pending approvals ({otherPending.length})</h2>
-          <RequestList rows={otherPending} emptyLabel="No other pending approvals." />
+          {RequestList({ rows: otherPending, emptyLabel: "No other pending approvals." })}
         </>
       )}
 

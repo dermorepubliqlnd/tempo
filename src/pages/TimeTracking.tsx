@@ -1537,7 +1537,17 @@ export default function TimeTracking() {
   // also cover a Rejected entry, not just a Pending one (see
   // canEditDeletePending) -- editing a Rejected entry resubmits it to
   // Pending server-side (phase74_migration.sql).
-  function EntriesTable({ rows, showAssignee }: { rows: EntryRow[]; showAssignee: boolean }) {
+  // 2026-09-24 bugfix (Sandra: "time corrections -- when one types or
+  // changes the date, if idle for a couple of seconds it goes back to the
+  // original time; typing notes has a bug too; submitting does not
+  // proceed"). Root cause: this used to be rendered as <EntriesTable />, a
+  // component type re-created on EVERY TimeTracking render -- and the page
+  // re-renders on its own every 30s (nowTick) and 60s (Team Time poll), so
+  // React remounted the whole table and every inline form in it
+  // (Correct / Request correction / Edit / Archive) lost its typed values
+  // and focus mid-edit. Called as a plain function now, so the table's
+  // element types stay stable and each form keeps its own state.
+  function renderEntriesTable({ rows, showAssignee }: { rows: EntryRow[]; showAssignee: boolean }) {
     if (rows.length === 0) return null;
     const isFullAccess = me?.access_level === "full";
     const colCount = showAssignee ? 10 : 9;
@@ -2651,7 +2661,7 @@ export default function TimeTracking() {
                     </button>
                     {isExpanded && (
                       <div style={{ marginTop: 6 }}>
-                        <EntriesTable rows={g.rows} showAssignee={scope !== "mine"} />
+                        {renderEntriesTable({ rows: g.rows, showAssignee: scope !== "mine" })}
                       </div>
                     )}
                   </div>
@@ -2659,7 +2669,7 @@ export default function TimeTracking() {
               })}
             </div>
           ) : (
-            <EntriesTable rows={filteredEntries} showAssignee={scope !== "mine"} />
+            renderEntriesTable({ rows: filteredEntries, showAssignee: scope !== "mine" })
           )}
         </>
       )}
