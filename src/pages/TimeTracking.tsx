@@ -784,7 +784,11 @@ export default function TimeTracking() {
   // separate from the Today/This Week KPI cards below, which always
   // reflect the real current day/week regardless of what's being
   // browsed here.
-  const [datePreset, setDatePreset] = useState<"today" | "this_week" | "last_week" | "this_month" | "custom">(ttPrefs.datePreset ?? "this_week");
+  // "last_week" was retired as a button 2026-09-24 -- a saved pref for it
+  // opens as Week (the < arrow reaches last week in one click).
+  const [datePreset, setDatePreset] = useState<"today" | "this_week" | "last_week" | "this_month" | "custom">(
+    ttPrefs.datePreset === "last_week" ? "this_week" : ttPrefs.datePreset ?? "this_week"
+  );
   const [rangeAnchor, setRangeAnchor] = useState(() => new Date());
   const [customStart, setCustomStart] = useState(() => ttPrefs.customStart ?? toDateInputValue());
   const [customEnd, setCustomEnd] = useState(() => ttPrefs.customEnd ?? toDateInputValue());
@@ -2361,10 +2365,14 @@ export default function TimeTracking() {
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
             {(
               [
-                { key: "today" as const, label: "Today" },
-                { key: "this_week" as const, label: "This Week" },
-                { key: "last_week" as const, label: "Last Week" },
-                { key: "this_month" as const, label: "This Month" },
+                // 2026-09-24 (Sandra: "change to day, week, month and
+                // custom -- remove last week; if I select Today and step to
+                // another day it's not today anymore"). Internal keys kept
+                // (saved prefs); the < > arrows move between periods, and
+                // clicking a button again jumps back to the current day/week/month.
+                { key: "today" as const, label: "Day" },
+                { key: "this_week" as const, label: "Week" },
+                { key: "this_month" as const, label: "Month" },
                 { key: "custom" as const, label: "Custom" },
               ]
             ).map((p) => (
