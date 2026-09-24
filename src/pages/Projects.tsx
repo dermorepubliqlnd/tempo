@@ -2201,7 +2201,7 @@ export default function Projects() {
         label: "Created",
         defaultWidth: 110,
         maxWidth: 130,
-        render: (p) => <span>{formatDate(p.created_at.slice(0, 10))}</span>,
+        render: (p) => <span>{formatDate(toISOWorkingDay(new Date(p.created_at)))}</span>,
       },
       {
         // Added 2026-09-07 (Sandra: "capture sign off date -- that's when
@@ -4181,7 +4181,7 @@ export default function Projects() {
         label: "Created",
         defaultWidth: 110,
         maxWidth: 130,
-        render: (t) => <span>{formatDate(t.created_at.slice(0, 10))}</span>,
+        render: (t) => <span>{formatDate(toISOWorkingDay(new Date(t.created_at)))}</span>,
       },
       {
         // Companion to Created At -- who added the task. Existing tasks
@@ -4609,7 +4609,7 @@ export default function Projects() {
     // fresh task defaulting to today reads as immediately overdue and
     // was the actual trigger for building the scoping-lock mechanism.
     // Falls back to today only if the project has no end_date set yet.
-    const today = new Date().toISOString().slice(0, 10);
+    const today = toISOWorkingDay(new Date());
     const project = projects.find((p) => p.id === projectId);
     const defaultDue = project?.end_date ?? today;
     const { error } = await supabase.from("tasks").insert({

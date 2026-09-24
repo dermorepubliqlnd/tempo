@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { toISO as toLocalISODate } from "../lib/workingDays";
 import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { InlineText, InlineDate, InlineSelect } from "../components/InlineCell";
 import { useConfirm } from "../lib/useConfirm";
@@ -66,7 +67,7 @@ export default function HolidayCalendar({ embedded = false }: { embedded?: boole
   }
 
   async function addHoliday() {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = toLocalISODate(new Date());
     const { error } = await supabase.from("holidays").insert({ date: today, name: "New holiday", category: "legal_ph" });
     if (error) {
       window.alert(`Couldn't add: ${error.message}`);

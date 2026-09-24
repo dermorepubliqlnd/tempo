@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { toISO as toLocalISODate } from "../lib/workingDays";
 import { formatDate } from "../lib/formatDate";
 
 // Round 3 of the WBS UI redesign (Sandra, 2026-07-29): the "View Full
@@ -181,7 +182,7 @@ export default function AuditTrail() {
           <option value="all">All revisions ({changes.length} change{changes.length === 1 ? "" : "s"})</option>
           {revisions.map((r) => (
             <option key={r.id} value={r.id}>
-              Revision {r.revision_number} — {r.status} ({formatDate(r.started_at.slice(0, 10))})
+              Revision {r.revision_number} — {r.status} ({formatDate(toLocalISODate(new Date(r.started_at)))})
             </option>
           ))}
         </select>

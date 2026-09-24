@@ -35,6 +35,7 @@ import {
   CalendarClock,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { toISO as toLocalISODate } from "../lib/workingDays";
 import { formatDate } from "../lib/formatDate";
 import { colorForPerson } from "../lib/personColors";
 // Category list/colors are self-service now (Phase 36, 2026-09-03) --
@@ -116,12 +117,12 @@ interface ProjectStartLite {
 }
 
 const TODAY = new Date();
-const TODAY_ISO = TODAY.toISOString().slice(0, 10);
+const TODAY_ISO = toLocalISODate(TODAY);
 
 function addDaysISO(iso: string, days: number): string {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return toLocalISODate(d);
 }
 
 function monthLabel(iso: string): string {

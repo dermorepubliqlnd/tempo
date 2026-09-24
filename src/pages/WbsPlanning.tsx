@@ -1526,7 +1526,7 @@ export default function WbsPlanning() {
   const today = toISO(new Date());
   // Fallback only -- used to seed the very first task's default Start
   // (and the header display) before any task has its own Start date yet.
-  const fallbackStartDate = project?.start_date ? project.start_date.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const fallbackStartDate = project?.start_date ? project.start_date.slice(0, 10) : toISO(new Date());
 
   // Parent tasks first, each followed immediately by its own sub-tasks --
   // same 2-level nesting the Projects table uses elsewhere. Relies on
@@ -2693,7 +2693,7 @@ export default function WbsPlanning() {
     // task can never discard in-progress work on other rows.
     const flushed = await flushPendingEdits();
     if (!flushed) return;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = toISO(new Date());
     const anchor = project.start_date ? project.start_date.slice(0, 10) : fallbackStartDate;
     let defaultStartFull = anchor;
     let defaultStartStandard = anchor;

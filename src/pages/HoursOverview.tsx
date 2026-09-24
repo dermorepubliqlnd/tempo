@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIco
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
-import { buildHolidaySet } from "../lib/workingDays";
+import { buildHolidaySet, toISO as toLocalISODate } from "../lib/workingDays";
 import { expectedHoursForDay } from "../lib/dailyAllocation";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
 // 2026-09-23 (stakeholder review: "keep it subtle -- a legend, not a
@@ -442,7 +442,7 @@ export default function HoursOverview() {
   // outside a task's plan (or after reassignment/completion) still shows.
   function loggedPersonTotalFor(personId: string, dateStr: string): number {
     return timeEntries
-      .filter((e) => e.person_id === personId && e.started_at.slice(0, 10) === dateStr)
+      .filter((e) => e.person_id === personId && toLocalISODate(new Date(e.started_at)) === dateStr)
       .reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);
   }
   // 2026-09-22: item.taskId is either a real task id, or a synthetic
@@ -453,7 +453,7 @@ export default function HoursOverview() {
     return timeEntries
       .filter((e) =>
         e.person_id === personId &&
-        e.started_at.slice(0, 10) === dateStr &&
+        toLocalISODate(new Date(e.started_at)) === dateStr &&
         (npId ? e.activity_type_id === npId : e.task_id === taskId)
       )
       .reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);

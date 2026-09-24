@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronLeft, Download } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { toISO as toLocalISODate } from "../lib/workingDays";
 import { toCsv } from "../lib/csv";
 import type { ProjectRow, TaskRow } from "./Projects";
 import { MaterialsOutputBarList, type OutputTypeRow } from "./Dashboard";
@@ -34,7 +35,7 @@ interface SourceRow {
 }
 
 const TODAY = new Date();
-const TODAY_ISO = TODAY.toISOString().slice(0, 10);
+const TODAY_ISO = toLocalISODate(TODAY);
 
 const selectStyle: React.CSSProperties = {
   fontSize: 11.5,

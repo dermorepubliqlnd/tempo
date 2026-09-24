@@ -56,6 +56,7 @@ interface PersonLite {
 interface ProjectLite {
   id: string;
   name: string;
+  project_number?: number | null;
   owner_id: string | null;
   wbs_status: string | null;
 }
@@ -284,6 +285,8 @@ interface Row {
   // phase113: Time Log ID + Task ID labels for time-entry rows.
   logId?: string;
   taskIdLabel?: string;
+  // Project ID ("P-0012") for project-level requests (close, baseline).
+  refId?: string;
 }
 
 // phase104: requests on an archived task/project stay out of every list
@@ -459,7 +462,7 @@ export default function ApprovalCenter() {
     const [{ data: peopleData }, { data: chainPeopleData }, { data: projectData }, { data: extData }, { data: teData }, { data: blData }, { data: clData }, { data: tcData }, { data: allTeData }, { data: parentIdData }, { data: corrData }] = await Promise.all([
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
       supabase.from("people").select("id,reports_to,is_active"),
-      supabase.from("projects").select("id,name,owner_id,wbs_status"),
+      supabase.from("projects").select("id,name,owner_id,wbs_status,project_number"),
       supabase
         .from("extension_requests")
         .select(
@@ -543,6 +546,10 @@ export default function ApprovalCenter() {
   const isFullAccess = me?.access_level === "full";
   const personName = (id: string | null) => people.find((p) => p.id === id)?.name ?? "—";
   const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
+  const projectIdLabel = (projectId: string) => {
+    const n = projectById.get(projectId)?.project_number;
+    return n ? `P-${String(n).padStart(4, "0")}` : undefined;
+  };
 
   // Mirrors can_decide_extension() -- identical logic to
   // ExtensionRequests.tsx's canDecide.
@@ -920,6 +927,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         kind: "baseline",
         typeLabel: "Baseline Approval",
         subject: proj?.name ?? "Untitled project",
+        refId: projectIdLabel(row.project_id),
         context: "Baseline approval",
         requestedByName: personName(row.requested_by),
         requestedAt: row.requested_at,
@@ -940,6 +948,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         kind: "closure",
         typeLabel: "Close Request",
         subject: proj?.name ?? "Untitled project",
+        refId: projectIdLabel(row.project_id),
         context: "Closure approval",
         requestedByName: personName(row.requested_by),
         requestedAt: row.requested_at,
@@ -1109,7 +1118,10 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
           <span className={`status-pill ${meta.tone}`} style={{ fontSize: 9.5, marginBottom: 4, display: "inline-block" }}>
             {row.typeLabel}
           </span>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>{row.subject}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>
+            {row.refId && <span style={{ marginRight: 6, color: "var(--accent)" }}>{row.refId}</span>}
+            {row.subject}
+          </div>
         </div>
 
         <div style={{ minWidth: 170, flex: "1 1 170px", display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "var(--text-secondary)" }}>
@@ -1490,6 +1502,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "var(--surface-2, #f5f6f8)", textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+              <th style={th}>Project ID</th>
               <th style={th}>Project</th>
               <th style={th}>Owner</th>
               <th style={th}>Baseline Date</th>
@@ -1501,6 +1514,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
           <tbody>
             {rows.map((row) => (
               <tr key={row.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>{row.refId ?? "—"}</td>
                 <td style={td}>
                   <div style={{ fontWeight: 700, color: "var(--navy)" }}>{row.subject}</div>
                   <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 1 }}>{row.context}</div>
