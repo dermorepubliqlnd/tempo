@@ -21,16 +21,21 @@ export function PauseProjectModal({
   onClose: () => void;
   onDone: () => void;
 }) {
+  // Sandra (2026-09-24): Reason = the pick-list (required), Notes required,
+  // Expected resume optional. No separate free-text reason field.
   const [reason, setReason] = useState("");
-  const [category, setCategory] = useState("");
   const [resume, setResume] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submit() {
-    if (!reason.trim()) {
-      setError("A pause reason is required.");
+    if (!reason) {
+      setError("Choose a reason.");
+      return;
+    }
+    if (!note.trim()) {
+      setError("Notes are required.");
       return;
     }
     if (resume && resume < toISO(new Date())) {
@@ -40,7 +45,7 @@ export function PauseProjectModal({
     setSaving(true);
     const failures: string[] = [];
     for (const p of projects) {
-      const { error: err } = await pauseProject(p.id, reason.trim(), category || null, resume || null, note.trim() || null);
+      const { error: err } = await pauseProject(p.id, reason, null, resume || null, note.trim());
       if (err) failures.push(`${p.name}: ${err.message}`);
     }
     setSaving(false);
@@ -58,15 +63,11 @@ export function PauseProjectModal({
         paused. Dates and the baseline stay as they are. Time can't be logged on a paused project.
       </p>
       <div style={{ display: "grid", gap: 12 }}>
-        <div>
-          <span style={label}>Pause reason (required)</span>
-          <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="e.g. Temporarily deprioritized to support a higher-priority project" style={{ ...input, width: "100%", resize: "vertical" }} />
-        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <div>
-            <span style={label}>Category (optional)</span>
-            <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ ...input, width: "100%" }}>
-              <option value="">—</option>
+            <span style={label}>Reason (required)</span>
+            <select value={reason} onChange={(e) => setReason(e.target.value)} style={{ ...input, width: "100%" }}>
+              <option value="">Choose a reason…</option>
               {PAUSE_CATEGORIES.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -80,8 +81,8 @@ export function PauseProjectModal({
           </div>
         </div>
         <div>
-          <span style={label}>Additional note (optional)</span>
-          <input type="text" value={note} onChange={(e) => setNote(e.target.value)} style={{ ...input, width: "100%" }} />
+          <span style={label}>Notes (required)</span>
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="e.g. Temporarily deprioritized to support a higher-priority project" style={{ ...input, width: "100%", resize: "vertical" }} />
         </div>
         <p style={{ fontSize: 11, color: "var(--muted)", margin: 0 }}>The date, time and your name are recorded automatically and added to the project's Notes.</p>
         {error && <div style={{ fontSize: 12, color: "var(--danger-text)", whiteSpace: "pre-wrap" }}>{error}</div>}
