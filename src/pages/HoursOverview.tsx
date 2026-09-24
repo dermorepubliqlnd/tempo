@@ -42,6 +42,7 @@ import {
   type UtilTaskRow,
 } from "../lib/dailyAllocation";
 import UtilPersonFilterButton from "../components/UtilPersonFilterButton";
+import MultiSelectFilter from "../components/MultiSelectFilter";
 
 // Scoped vs Logged (2026-08-25, consolidated same day). Originally shipped
 // alongside a separate "Work Schedule" page (Logged tab + Scoped tab).
@@ -222,6 +223,7 @@ export default function HoursOverview() {
   // utilization snap shot") -- same reusable searchable multi-select
   // already used by WbsPlanning.tsx's Utilization snapshot panel.
   const [personFilter, setPersonFilter] = useState<Set<string> | null>(null);
+  const [projectFilter, setProjectFilter] = useState<string[]>([]);
   // 2026-09-21 (Sandra): let My Dashboard's "View All" links land here
   // already scoped to the signed-in person (?person=me), instead of always
   // showing the full team. One-shot on mount only -- doesn't fight the
@@ -377,7 +379,16 @@ export default function HoursOverview() {
   );
   const visiblePeople = scopedPeople
     .filter((p) => !personFilter || personFilter.has(p.id))
-    .filter((p) => !roleFilter || p.job_title === roleFilter);
+    .filter((p) => !roleFilter || p.job_title === roleFilter)
+    // Project filter (Daily Activity): only people with tasks, ownership or
+    // logged time in those projects.
+    .filter(
+      (p) =>
+        projectFilter.length === 0 ||
+        tasks.some((t) => projectFilter.includes(t.project_id) && t.assignee_id === p.id) ||
+        projects.some((pr) => projectFilter.includes(pr.id) && pr.owner_id === p.id) ||
+        timeEntries.some((e) => e.person_id === p.id && e.task_id && projectFilter.includes(tasks.find((t) => t.id === e.task_id)?.project_id ?? ""))
+    );
 
   const holidayByDate = useMemo(() => {
     const m = new Map<string, HolidayRow>();
@@ -394,19 +405,30 @@ export default function HoursOverview() {
   // as a person's planned hours on that day: open leaf tasks spread over
   // real working days, plus PM overhead for every project they own, plus
   // any archived hours from permanently-deleted work.
+  // 2026-09-24 (Sandra): Daily Activity Project multi-select filter. When
+  // set, Scoped (engine) and Logged both come only from those projects'
+  // tasks; non-project time and archived (deleted-task) hours are left out.
+  const projectFilterSet = useMemo(() => (projectFilter.length ? new Set(projectFilter) : null), [projectFilter]);
+  const gridTasks = useMemo(() => (projectFilterSet ? tasks.filter((t) => projectFilterSet.has(t.project_id)) : tasks), [tasks, projectFilterSet]);
+  const gridProjects = useMemo(() => (projectFilterSet ? projects.filter((p) => projectFilterSet.has(p.id)) : projects), [projects, projectFilterSet]);
+  const gridEntries = useMemo(() => {
+    if (!projectFilterSet) return timeEntries;
+    const ids = new Set(gridTasks.map((t) => t.id));
+    return timeEntries.filter((e) => e.task_id && ids.has(e.task_id));
+  }, [timeEntries, gridTasks, projectFilterSet]);
   const engine = useMemo(
     () =>
       createAllocationEngine({
-        tasks: tasks as UtilTaskRow[],
-        projects: projects as UtilProjectRow[],
+        tasks: gridTasks as UtilTaskRow[],
+        projects: gridProjects as UtilProjectRow[],
         holidays: holidaySet,
         availability,
         assigneeHistory,
         ownerHistory,
         todayStr: today,
-        deletedHours,
+        deletedHours: projectFilterSet ? [] : deletedHours,
       }),
-    [tasks, projects, holidaySet, availability, assigneeHistory, ownerHistory, today, deletedHours]
+    [gridTasks, gridProjects, projectFilterSet, holidaySet, availability, assigneeHistory, ownerHistory, today, deletedHours]
   );
 
   function isOffDay(personId: string, dateStr: string): boolean {
@@ -428,10 +450,10 @@ export default function HoursOverview() {
   // shared engine's date-gated value, so a Done task's row here correctly
   // shows its real past hours and 0 from today forward).
   function scopedOpenTasksFor(personId: string): TaskRow[] {
-    return tasks.filter((t) => t.assignee_id === personId && !parentTaskIds.has(t.id));
+    return gridTasks.filter((t) => t.assignee_id === personId && !parentTaskIds.has(t.id));
   }
   function ownedProjectsFor(personId: string): ProjectRow[] {
-    return projects.filter((p) => p.owner_id === personId);
+    return gridProjects.filter((p) => p.owner_id === personId);
   }
   // 2026-08-31: now includes PM overhead and the deletion archive, so this
   // number is the SAME number Utilization.tsx prints for the same person on
@@ -446,7 +468,7 @@ export default function HoursOverview() {
   // the task's scoped window or current assignment/status, so time logged
   // outside a task's plan (or after reassignment/completion) still shows.
   function loggedPersonTotalFor(personId: string, dateStr: string): number {
-    return timeEntries
+    return gridEntries
       .filter((e) => e.person_id === personId && toLocalISODate(new Date(e.started_at)) === dateStr)
       .reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);
   }
@@ -455,7 +477,7 @@ export default function HoursOverview() {
   // combinedSubItemsFor below) -- route to the matching entries either way.
   function loggedHoursFor(personId: string, taskId: string, dateStr: string): number {
     const npId = taskId.startsWith("np:") ? taskId.slice(3) : null;
-    return timeEntries
+    return gridEntries
       .filter((e) =>
         e.person_id === personId &&
         toLocalISODate(new Date(e.started_at)) === dateStr &&
@@ -489,7 +511,7 @@ export default function HoursOverview() {
       const proj = projects.find((p) => p.id === t.project_id);
       byId.set(t.id, { taskId: t.id, label: t.name, project: proj?.name });
     });
-    timeEntries
+    gridEntries
       .filter((e) => e.person_id === personId)
       .forEach((e) => {
         // 2026-09-22: a non-project entry (task_id null, activity_type_id
@@ -884,6 +906,15 @@ export default function HoursOverview() {
               setSearch={setPersonFilterSearch}
               onChange={setPersonFilter}
             />
+            {view === "grid" && (
+              <MultiSelectFilter
+                options={projects.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name))}
+                selected={projectFilter}
+                onChange={setProjectFilter}
+                noun="projects"
+                singular="Project"
+              />
+            )}
             <select
               value={showAllPeople ? "all" : "active"}
               onChange={(e) => setShowAllPeople(e.target.value === "all")}

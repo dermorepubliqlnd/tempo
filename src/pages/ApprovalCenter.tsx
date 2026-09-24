@@ -1,3 +1,4 @@
+import MultiSelectFilter from "../components/MultiSelectFilter";
 import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -247,6 +248,10 @@ const KIND_META: Record<ApprovalKind, { label: string; pluralLabel: string; tone
 interface Row {
   key: string;
   kind: ApprovalKind;
+  // 2026-09-24 (Sandra): person / project filters + ID search.
+  personId?: string | null;
+  projectId?: string | null;
+  searchIds?: string;
   typeLabel: string;
   subject: string;
   context: string;
@@ -442,6 +447,8 @@ export default function ApprovalCenter() {
   // to null, meaning "All".
   const [kindFilter, setKindFilter] = useState<ApprovalKind | null>(null);
   const [search, setSearch] = useState("");
+  const [personFilter, setPersonFilter] = useState<string[]>([]);
+  const [projectFilter, setProjectFilter] = useState<string[]>([]);
   const [sortNewestFirst, setSortNewestFirst] = useState(true);
   // 2026-09-23 (Sandra: "when a user expands and approves it goes back
   // to collapsed, please retain expanded view if the user left it as
@@ -846,6 +853,8 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
       rows.push({
         key,
         kind: "extension",
+        personId: row.requester?.id ?? null,
+        projectId: row.project?.id ?? row.task?.project_id ?? null,
         typeLabel: row.project ? "Project Timeline Extension" : "Task Extension",
         subject: row.project ? row.project.name : row.task?.name ?? "Untitled task",
         context: row.project ? "Whole project" : row.task?.project?.name ?? "—",
@@ -872,6 +881,8 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
       rows.push({
         key,
         kind: "time",
+        personId: row.person_id,
+        projectId: row.task?.project_id ?? null,
         typeLabel: isNonProject ? "Non-project Time" : "Time Entry",
         subject: isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task",
         context: isNonProject ? "Non-project" : row.task?.project?.name ?? "—",
@@ -907,6 +918,9 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
       rows.push({
         key,
         kind: "correction",
+        personId: row.requested_by,
+        projectId: row.entry?.task?.project?.id ?? null,
+        searchIds: [timeLogId(row.entry?.entry_number ?? null), row.entry?.task?.task_number ? `T-${String(row.entry.task.task_number).padStart(4, "0")}` : "", row.entry?.non_project_entry_number ? `NP-${String(row.entry.non_project_entry_number).padStart(4, "0")}` : ""].join(" "),
         typeLabel: "Time Correction",
         subject: isNonProject ? row.entry?.activity_type?.name ?? "Non-project" : row.entry?.task?.name ?? "Untitled task",
         context: isNonProject ? "Non-project" : row.entry?.task?.project?.name ?? "—",
@@ -929,6 +943,8 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
       rows.push({
         key,
         kind: "baseline",
+        personId: row.requested_by,
+        projectId: row.project_id,
         typeLabel: "Baseline Approval",
         subject: proj?.name ?? "Untitled project",
         refId: projectIdLabel(row.project_id),
@@ -950,6 +966,8 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
       rows.push({
         key,
         kind: "closure",
+        personId: row.requested_by,
+        projectId: row.project_id,
         typeLabel: "Close Request",
         subject: proj?.name ?? "Untitled project",
         refId: projectIdLabel(row.project_id),
@@ -980,6 +998,9 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
       rows.push({
         key,
         kind: "task_completion",
+        personId: row.assignee_id,
+        projectId: row.project_id,
+        searchIds: row.task_number ? `T-${String(row.task_number).padStart(4, "0")}` : "",
         typeLabel: "Task Completion",
         subject: row.name,
         context: row.project?.name ?? "—",
@@ -1017,14 +1038,52 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
 
   const visibleRows = useMemo(() => {
     let rows = kindFilter ? allRows.filter((r) => r.kind === kindFilter) : allRows;
+    if (personFilter.length) rows = rows.filter((r) => r.personId && personFilter.includes(r.personId));
+    if (projectFilter.length) rows = rows.filter((r) => r.projectId && projectFilter.includes(r.projectId));
+    // 2026-09-24 (Sandra): search anything -- IDs (TL-/T-/NP-/P-),
+    // project, person, task, type, reason.
     const q = search.trim().toLowerCase();
     if (q) {
-      rows = rows.filter(
-        (r) => r.subject.toLowerCase().includes(q) || r.context.toLowerCase().includes(q) || r.requestedByName.toLowerCase().includes(q) || r.typeLabel.toLowerCase().includes(q)
-      );
+      rows = rows.filter((r) => {
+        const hay = [
+          r.subject,
+          r.context,
+          r.requestedByName,
+          r.typeLabel,
+          r.reasonCategory,
+          r.reasonNotes,
+          r.refId,
+          r.logId,
+          r.taskIdLabel,
+          r.searchIds,
+          r.projectId ? projectIdLabel(r.projectId) : "",
+          r.projectId ? projectById.get(r.projectId)?.name : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(q);
+      });
     }
     return [...rows].sort((a, b) => (sortNewestFirst ? 1 : -1) * (new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime()));
-  }, [allRows, kindFilter, search, sortNewestFirst]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRows, kindFilter, search, sortNewestFirst, personFilter, projectFilter]);
+
+  const personFilterOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    allRows.forEach((r) => {
+      if (r.personId && !m.has(r.personId)) m.set(r.personId, r.requestedByName);
+    });
+    return Array.from(m.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [allRows]);
+  const projectFilterOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    allRows.forEach((r) => {
+      if (r.projectId && !m.has(r.projectId)) m.set(r.projectId, projectById.get(r.projectId)?.name ?? r.context);
+    });
+    return Array.from(m.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRows]);
 
   const needsDecision = visibleRows.filter((r) => r.canDecide);
   const otherPending = visibleRows.filter((r) => !r.canDecide);
@@ -1660,12 +1719,14 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
           <Search size={14} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", pointerEvents: "none" }} />
           <input
             type="text"
-            placeholder="Search requests..."
+            placeholder="Search by ID (TL-, T-, P-), project, person…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{ width: "100%", boxSizing: "border-box", fontSize: 12, padding: "7px 10px 7px 28px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
           />
         </div>
+        <MultiSelectFilter options={personFilterOptions} selected={personFilter} onChange={setPersonFilter} noun="people" singular="Person" />
+        <MultiSelectFilter options={projectFilterOptions} selected={projectFilter} onChange={setProjectFilter} noun="projects" singular="Project" />
         <button
           onClick={() => setSortNewestFirst((v) => !v)}
           style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text-secondary)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 10px", cursor: "pointer" }}

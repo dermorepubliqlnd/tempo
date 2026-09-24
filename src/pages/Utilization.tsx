@@ -9,6 +9,7 @@ import { buildHolidaySet } from "../lib/workingDays";
 // See src/lib/dailyAllocation.ts for what used to be duplicated here.
 import { createAllocationEngine, dailyCapacityHours, parentTaskIdsOf, type UtilTaskRow } from "../lib/dailyAllocation";
 import UtilPersonFilterButton from "../components/UtilPersonFilterButton";
+import MultiSelectFilter from "../components/MultiSelectFilter";
 import { displayPct, tierOf, UTIL_LEGEND } from "../lib/utilizationBands";
 
 interface PersonRow {
@@ -229,6 +230,7 @@ export default function Utilization() {
   // already shipped on Scoped vs Logged (HoursOverview.tsx) and the WBS
   // snapshot (WbsPlanning.tsx), so all three surfaces behave identically.
   const [personFilter, setPersonFilter] = useState<Set<string> | null>(null);
+  const [projectFilter, setProjectFilter] = useState<string[]>([]);
   // 2026-09-21 (Sandra): let My Dashboard's "View All" links land here
   // already scoped to the signed-in person (?person=me), instead of always
   // showing the full team. One-shot on mount only -- doesn't fight the
@@ -414,19 +416,27 @@ export default function Utilization() {
   // per-task sub-rows, PM sub-rows, weekly aggregation) reads from it, so
   // Scoped vs Logged and the WBS snapshot -- which build the same engine
   // from the same tables -- cannot drift from this page's numbers.
+  // 2026-09-24 (Sandra): Project multi-select filter -- when set, the
+  // engine only sees those projects' tasks and PM overhead, so every
+  // number on the page is "utilization from these projects". Archived
+  // (deleted-task) hours can't be attributed to a project, so they're
+  // left out while the filter is on.
+  const projectFilterSet = useMemo(() => (projectFilter.length ? new Set(projectFilter) : null), [projectFilter]);
+  const engineTasks = useMemo(() => (projectFilterSet ? tasks.filter((t) => projectFilterSet.has(t.project_id)) : tasks), [tasks, projectFilterSet]);
+  const engineProjects = useMemo(() => (projectFilterSet ? projects.filter((p) => projectFilterSet.has(p.id)) : projects), [projects, projectFilterSet]);
   const engine = useMemo(
     () =>
       createAllocationEngine({
-        tasks: tasks as UtilTaskRow[],
-        projects,
+        tasks: engineTasks as UtilTaskRow[],
+        projects: engineProjects,
         holidays: holidaySet,
         availability,
         assigneeHistory,
         ownerHistory,
         todayStr: today,
-        deletedHours,
+        deletedHours: projectFilterSet ? [] : deletedHours,
       }),
-    [tasks, projects, holidaySet, availability, assigneeHistory, ownerHistory, today, deletedHours]
+    [engineTasks, engineProjects, projectFilterSet, holidaySet, availability, assigneeHistory, ownerHistory, today, deletedHours]
   );
 
   // "Ever associated" -- 2026-08-14: a person's expandable sub-rows now
@@ -462,12 +472,12 @@ export default function Utilization() {
   // assigned to, open or Done alike; a Done task's row simply reads 0 on
   // any date from today forward, same as the collapsed total does.
   function openTasksFor(personId: string): TaskRow[] {
-    return tasks.filter(
+    return engineTasks.filter(
       (t) => (t.assignee_id === personId || historicalAssigneeIds(t.id).has(personId)) && !parentTaskIds.has(t.id)
     );
   }
   function ownedProjectsFor(personId: string): ProjectRow[] {
-    return projects.filter((p) => p.owner_id === personId || historicalOwnerIds(p.id).has(personId));
+    return engineProjects.filter((p) => p.owner_id === personId || historicalOwnerIds(p.id).has(personId));
   }
 
   function taskHoursOnDate(t: TaskRow, dateStr: string, forPersonId: string): number {
@@ -498,7 +508,9 @@ export default function Utilization() {
   );
   const visiblePeople = scopedPeople
     .filter((p) => !personFilter || personFilter.has(p.id))
-    .filter((p) => !roleFilter || p.job_title === roleFilter);
+    .filter((p) => !roleFilter || p.job_title === roleFilter)
+    // Project filter: only people who work on (or own) one of those projects.
+    .filter((p) => !projectFilterSet || openTasksFor(p.id).length > 0 || ownedProjectsFor(p.id).length > 0);
 
   // Single source of truth for a rollup cell's numeric hours value, for
   // BOTH the daily grid and the weekly aggregation below.
@@ -619,6 +631,14 @@ export default function Utilization() {
           search={personFilterSearch}
           setSearch={setPersonFilterSearch}
           onChange={setPersonFilter}
+        />
+
+        <MultiSelectFilter
+          options={projects.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name))}
+          selected={projectFilter}
+          onChange={setProjectFilter}
+          noun="projects"
+          singular="Project"
         />
 
         <div style={{ width: 1, height: 18, background: "var(--border)" }} />

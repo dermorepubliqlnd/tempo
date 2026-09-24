@@ -10,6 +10,7 @@ import { loggedHoursTier } from "../lib/loggedHoursBands";
 import { expectedHoursForDay } from "../lib/dailyAllocation";
 import { buildHolidayNameMap, nonWorkingDayConfirmMessage, type HolidayNameMap } from "../lib/workingDays";
 import { useSearchParams } from "react-router-dom";
+import MultiSelectFilter from "../components/MultiSelectFilter";
 import Modal from "../components/Modal";
 
 interface PersonLite {
@@ -759,6 +760,9 @@ export default function TimeTracking() {
   // old clickable status-count cards (those cards are gone -- replaced
   // by the Today/This Week/Total Entries/Needs Attention KPI row).
   const [sourceFilter, setSourceFilter] = useState<"all" | "manual" | "timer">(ttPrefs.sourceFilter ?? "all");
+  const [filterProjectIds, setFilterProjectIds] = useState<string[]>(() => (searchParams.get("project") ? [searchParams.get("project") as string] : []));
+  const [filterMemberIds, setFilterMemberIds] = useState<string[]>([]);
+  const [logTypeFilter, setLogTypeFilter] = useState<"all" | "project" | "non_project">("all");
   const [searchText, setSearchText] = useState("");
   // 2026-09-23 (Sandra: "remove shortest and longest duration in the
   // sort for all... if grouped by dates, allow sorting by date but
@@ -1339,9 +1343,22 @@ export default function TimeTracking() {
       .map(([id, label]) => ({ id, label }))
       .sort((a, b) => a.label.localeCompare(b.label));
   })();
-  const projectFilteredEntries = filterProjectId
-    ? entries.filter((e) => e.task?.project?.id === filterProjectId)
-    : entries;
+  // 2026-09-24 (Sandra): Team Member + Project multi-select and Log Type
+  // (Project / Non-Project) filters. Applied here, BEFORE the scope/KPI
+  // step, so the KPI cards follow the filters too (same as the old
+  // ?project= filter did). A ?project= link pre-selects that project.
+  const entryPersonOptions = (() => {
+    const seen = new Map<string, string>();
+    for (const e of entries) if (e.person_id && !seen.has(e.person_id)) seen.set(e.person_id, e.person?.name ?? personName(e.person_id));
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  })();
+  const projectFilteredEntries = entries.filter((e) => {
+    if (filterProjectIds.length && !(e.task?.project?.id && filterProjectIds.includes(e.task.project.id))) return false;
+    if (filterMemberIds.length && !filterMemberIds.includes(e.person_id)) return false;
+    if (logTypeFilter === "project" && !e.task_id) return false;
+    if (logTypeFilter === "non_project" && e.task_id) return false;
+    return true;
+  });
   // 2026-09-23 (Sandra: "My Time / Team Time / All Time") -- the scope
   // tab narrows down to a set of people BEFORE the status cards/filter
   // are computed, so switching tabs re-scopes everything below it (the
@@ -2491,6 +2508,25 @@ export default function TimeTracking() {
               <option value="timer">Timer</option>
             </select>
             <select
+              value={logTypeFilter}
+              onChange={(e) => setLogTypeFilter(e.target.value as typeof logTypeFilter)}
+              style={{ fontSize: 12, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 10 }}
+            >
+              <option value="all">All Log Types</option>
+              <option value="project">Project</option>
+              <option value="non_project">Non-Project</option>
+            </select>
+            {scope !== "mine" && (
+              <MultiSelectFilter options={entryPersonOptions} selected={filterMemberIds} onChange={setFilterMemberIds} noun="team members" singular="Member" />
+            )}
+            <MultiSelectFilter
+              options={entryProjectOptions.map((o) => ({ id: o.id, name: o.label }))}
+              selected={filterProjectIds}
+              onChange={setFilterProjectIds}
+              noun="projects"
+              singular="Project"
+            />
+            <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
               style={{ fontSize: 12, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: 10 }}
@@ -2504,12 +2540,15 @@ export default function TimeTracking() {
                 Group by date
               </label>
             )}
-            {(searchText || statusFilter !== "all" || sourceFilter !== "all") && (
+            {(searchText || statusFilter !== "all" || sourceFilter !== "all" || logTypeFilter !== "all" || filterMemberIds.length > 0 || filterProjectIds.length > 0) && (
               <button
                 onClick={() => {
                   setSearchText("");
                   setStatusFilter("all");
                   setSourceFilter("all");
+                  setLogTypeFilter("all");
+                  setFilterMemberIds([]);
+                  setFilterProjectIds([]);
                 }}
                 style={{ fontSize: 11, color: "var(--muted)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
               >
