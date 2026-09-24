@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon, Download } from "lucide-react";
+import { timingWithPause, type PauseProjectInfo, type TimingResult } from "../lib/pause";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
@@ -76,6 +77,10 @@ interface ProjectRow {
   start_date: string | null;
   end_date: string | null;
   wbs_status: string | null;
+  status?: string | null;
+  paused_at?: string | null;
+  resumed_at?: string | null;
+  schedule_review_required?: boolean | null;
 }
 interface TaskRow {
   id: string;
@@ -247,7 +252,7 @@ export default function HoursOverview() {
       await Promise.all([
         supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").eq("is_active", true).order("name"),
         supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").order("name"),
-        supabase.from("projects").select("id,name,is_archived,owner_id,start_date,end_date,wbs_status").eq("is_archived", false),
+        supabase.from("projects").select("id,name,is_archived,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at,schedule_review_required").eq("is_archived", false),
         supabase
           .from("tasks")
           .select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,task_number,submitted_on,validated_completion_date,actual_completion_date")
@@ -529,7 +534,7 @@ export default function HoursOverview() {
           owner: owner ? (owner.is_active ? owner.name : `${owner.name} (inactive)`) : "Unassigned",
           status: t.status,
           dueDate: t.current_due_date,
-          timing: timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)),
+          timing: timingWithPause(t, statusGroupOf(TASK_STATUS_GROUPED, t.status), proj as PauseProjectInfo | undefined),
           timeLogStatus: ownTimeLogStatusFor(timeEntries, t.id),
           scoped,
           logged,
@@ -648,7 +653,11 @@ export default function HoursOverview() {
       key: "timing",
       label: "Timing",
       defaultWidth: 110,
-      render: (r) => <span className={`status-pill ${r.timing.tone}`} style={{ fontSize: 11 }}>{r.timing.label}</span>,
+      render: (r) => (
+        <span className={`status-pill ${r.timing.tone}`} style={{ fontSize: 11 }} title={r.timing.hint}>
+          {r.timing.label}
+        </span>
+      ),
     },
     {
       key: "timeLogStatus",
@@ -1345,7 +1354,7 @@ type TaskHourRowData = {
   owner: string;
   status: string | null;
   dueDate: string;
-  timing: { label: string; tone: "success" | "warning" | "danger" | "neutral" };
+  timing: TimingResult;
   timeLogStatus: TimeLogStatus;
   scoped: number;
   logged: number;

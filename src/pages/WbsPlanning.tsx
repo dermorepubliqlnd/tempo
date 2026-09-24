@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Fragment, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, Link } from "react-router-dom";
+import { PauseReviewBanner } from "../components/PauseProjectModals";
 import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { archiveItem, ARCHIVE_MOVE_NOTE, splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, loggedTimeDeleteWarning } from "../lib/archive";
@@ -38,6 +39,12 @@ interface ProjectRow {
   id: string;
   name: string;
   owner_id: string | null;
+  // phase118
+  paused_at?: string | null;
+  resumed_at?: string | null;
+  pause_reason?: string | null;
+  pause_expected_resume?: string | null;
+  schedule_review_required?: boolean | null;
   start_date: string | null;
   end_date: string | null;
   timelines_locked: boolean;
@@ -1013,7 +1020,7 @@ export default function WbsPlanning() {
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
     const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by").eq("id", projectId).single(),
+      supabase.from("projects").select("id,name,owner_id,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -1035,7 +1042,7 @@ export default function WbsPlanning() {
           .order("id")
           .range(from, to)
       ),
-      supabase.from("projects").select("id,owner_id,start_date,end_date,wbs_status").eq("is_archived", false),
+      supabase.from("projects").select("id,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at").eq("is_archived", false),
       supabase.from("work_types").select("id,name,is_active,sort_order,is_fixed_schedule").order("sort_order"),
       supabase.from("output_types").select("id,name,is_active,sort_order").order("sort_order"),
       supabase.from("work_type_output_types").select("work_type_id,output_type_id"),
@@ -4455,6 +4462,12 @@ export default function WbsPlanning() {
         <ArrowLeft size={13} /> Back to {project.name}
       </Link>
       <h1>WBS Planning — {project.name}</h1>
+      {/* phase118: Paused details / Schedule Review Required banner. */}
+      <PauseReviewBanner
+        project={project}
+        canResolve={isFullAccess || project.owner_id === me?.id}
+        onResolved={() => loadAll(true)}
+      />
 
       {/* Phase 3 (2026-07-28): status banner for the Draft/Baseline/
           Revision/Final-Scope workflow -- see [[project_capaciq_wbs_planning]].

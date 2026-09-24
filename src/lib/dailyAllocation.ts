@@ -56,6 +56,27 @@ export interface UtilProjectRow {
   start_date: string | null;
   end_date: string | null;
   wbs_status?: string | null;
+  // phase118: pause window -- a paused project frees its people's capacity.
+  status?: string | null;
+  paused_at?: string | null;
+  resumed_at?: string | null;
+}
+
+/** phase118 (Sandra, 2026-09-24): pausing is meant to free bandwidth, so a
+ * paused project's tasks and PM overhead stop consuming capacity for the
+ * days it was paused -- from the pause date until it resumes (open-ended
+ * while still Paused). Days before the pause keep their history. */
+function localIsoOf(ts: string): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+export function isProjectPausedOn(p: UtilProjectRow | undefined, dateStr: string): boolean {
+  if (!p || !p.paused_at) return false;
+  const from = localIsoOf(p.paused_at);
+  if (dateStr < from) return false;
+  if (p.status === "Paused") return true;
+  if (p.resumed_at) return dateStr < localIsoOf(p.resumed_at);
+  return false;
 }
 export interface UtilPersonRow {
   id: string;
@@ -303,6 +324,7 @@ export function createAllocationEngine(config: AllocationEngineConfig): Allocati
   const parentTaskIds = parentTaskIdsOf(tasks);
   const leafTasks = tasks.filter((t) => !parentTaskIds.has(t.id));
   const closed = closedProjectIds(projects);
+  const projectByIdForPause = new Map(projects.map((p) => [p.id, p]));
 
   const offByPerson = new Map<string, OffDaySet>();
   function offDaysFor(personId: string): OffDaySet {
@@ -359,6 +381,7 @@ export function createAllocationEngine(config: AllocationEngineConfig): Allocati
     // all, matching the closed-project check's own fallback below.
     if (!isOpenTask(task) && todayStr && dateStr >= todayStr) return 0;
     if (todayStr && dateStr >= todayStr && closed.has(task.project_id)) return 0;
+    if (isProjectPausedOn(projectByIdForPause.get(task.project_id), dateStr)) return 0;
     if (!assigneeMatchesOnDate(task, personId, dateStr, assigneeHistory)) return 0;
     const days = taskDays(personId, task);
     if (!days.has(dateStr)) return 0;
@@ -367,6 +390,7 @@ export function createAllocationEngine(config: AllocationEngineConfig): Allocati
 
   function pmHoursOnDateFn(personId: string, project: UtilProjectRow, dateStr: string): number {
     if (todayStr && dateStr >= todayStr && project.wbs_status === "closed") return 0;
+    if (isProjectPausedOn(project, dateStr)) return 0;
     if (!ownerMatchesOnDate(project, personId, dateStr, ownerHistory)) return 0;
     return pmDays(personId, project).has(dateStr) ? PROJECT_PM_DAILY_HOURS : 0;
   }

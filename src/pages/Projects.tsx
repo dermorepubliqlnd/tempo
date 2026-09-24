@@ -13,6 +13,8 @@ import CardActionMenu from "../components/CardActionMenu";
 import ViewTabs from "../components/ViewTabs";
 import ViewSettingsMenu, { ViewFilterPills } from "../components/ViewSettingsMenu";
 import Modal from "../components/Modal";
+import { PauseProjectModal, ScheduleReviewModal } from "../components/PauseProjectModals";
+import { timingWithPause, type TimingResult } from "../lib/pause";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import FollowUpTimeModal from "../components/FollowUpTimeModal";
 import NotesSidebar from "../components/NotesSidebar";
@@ -57,7 +59,7 @@ interface DeletedSpentHourRow {
 }
 import { useTimeTracking } from "../lib/TimeTrackingContext";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
-import { Play, Square } from "lucide-react";
+import { Play, Square, Info } from "lucide-react";
 import {
   PROJECT_EFFORT_LEVEL_OPTIONS,
   PROJECT_EFFORT_LEVEL_TONES,
@@ -217,6 +219,14 @@ export interface ProjectRow {
   description: string | null;
   // phase114: stamped when status becomes Completed (ready-to-close reminders).
   completed_at?: string | null;
+  // phase118: pause / resume / schedule review.
+  paused_at?: string | null;
+  paused_by?: string | null;
+  pause_reason?: string | null;
+  pause_category?: string | null;
+  pause_expected_resume?: string | null;
+  resumed_at?: string | null;
+  schedule_review_required?: boolean | null;
 }
 
 export interface TaskRow {
@@ -518,6 +528,9 @@ export function healthOf(
     return done <= due ? { label: "Completed on time", tone: "success" } : { label: "Completed late", tone: "gold" };
   }
   if (status === "Paused") return { label: "Paused", tone: "purple" };
+  // phase118: resumed but the owner hasn't confirmed the schedule yet --
+  // don't judge it Overdue/At risk off dates that may be about to change.
+  if (p.schedule_review_required) return { label: "Schedule review", tone: "gold" };
 
   // 2026-09-21 (Sandra: "why is this tagged as overdue when WBS has not
   // been finalized yet?"): a Draft project's start/end dates are still
@@ -648,6 +661,7 @@ function healthRank(label: string): number {
   if (label === "Overdue") return 0;
   if (label === "Off track") return 1;
   if (label === "At risk") return 2;
+  if (label === "Schedule review") return 3;
   if (label === "Not started") return 3;
   if (label === "On track") return 4;
   if (label === "Completed – open tasks") return 5;
@@ -729,6 +743,10 @@ const TASK_BOARD_COLUMNS: BoardColumnDef[] = TASK_STATUS_GROUPED.flatMap((group)
 // dragged.
 const TASK_TIMING_BOARD_COLUMNS: BoardColumnDef[] = [
   { value: "Overdue", label: "Overdue", tone: "danger" },
+  // phase118: paused / resumed-under-review projects.
+  { value: "Paused · Overdue", label: "Paused · Overdue", tone: "purple" },
+  { value: "Review pending", label: "Review pending", tone: "gold" },
+  { value: "Paused", label: "Paused", tone: "purple" },
   { value: "Due soon", label: "Due soon", tone: "warning" },
   { value: "On track", label: "On track", tone: "success" },
   { value: "Late", label: "Late", tone: "danger" },
@@ -971,6 +989,11 @@ function reorderedSortValue(list: { id: string; sort_order: number | null }[], d
 
 export default function Projects() {
   const navigate = useNavigate();
+  // phase118: pause-aware Timing (Paused / Paused · Overdue / Review pending).
+  // Declared as a function so it can read `projects` state declared below.
+  function taskTiming(t: TaskRow): TimingResult {
+    return timingWithPause(t, statusGroupOf(TASK_STATUS_GROUPED, t.status), projects.find((p) => p.id === t.project_id));
+  }
   const { person: me } = useSession();
   // URL-driven "My Dashboard" quick links (2026-09-21, Sandra: "let's try
   // the saved view approach" -- View All should land the person on a real,
@@ -1229,6 +1252,9 @@ export default function Projects() {
   const [extDetailTask, setExtDetailTask] = useState<TaskWithDepth | null>(null);
 
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
+  // phase118: Pause dialog targets + post-resume schedule review prompt.
+  const [pauseTargets, setPauseTargets] = useState<ProjectRow[] | null>(null);
+  const [reviewProjectId, setReviewProjectId] = useState<string | null>(null);
   // Sandra: "align the collapse/expand [group toggle] with the sort and
   // group pills" -- these hold the actual DOM node of each table's
   // ViewFilterPills row so DataTable can portal its Collapse all/Expand
@@ -1441,7 +1467,18 @@ export default function Projects() {
         return;
       }
     }
-    updateProject(p.id, { status: newStatus, phase: newStatus ? nextPhaseForStatusLive(p.phase, newStatus) : p.phase });
+    // phase118: pausing needs a reason -> dialog (the DB refuses otherwise).
+    if (newStatus === "Paused" && projectStatusOf(p) !== "Paused") {
+      setPauseTargets([p]);
+      return;
+    }
+    const resuming = projectStatusOf(p) === "Paused" && (newStatus === "In Progress" || newStatus === "Not Started");
+    updateProject(p.id, { status: newStatus, phase: newStatus ? nextPhaseForStatusLive(p.phase, newStatus) : p.phase }).then(async () => {
+      if (resuming) {
+        await loadAll();
+        setReviewProjectId(p.id);
+      }
+    });
   }
 
   function dismissDoneSuggestion(projectId: string) {
@@ -1969,6 +2006,16 @@ export default function Projects() {
     const targets = projects.filter((p) => ids.includes(p.id) && p.wbs_status !== "draft");
     if (targets.length === 0) {
       if (skippedDraft) alert(`Status stays "Not Started" for Draft projects until Start Project is run on their WBS page -- nothing was changed.`);
+      return;
+    }
+    // phase118: bulk pause -> one Pause dialog for all eligible projects.
+    if (newStatus === "Paused") {
+      const pausable = targets.filter((p) => projectStatusOf(p) !== "Paused" && p.status !== "Completed" && p.status !== "Cancelled" && p.wbs_status !== "closed");
+      if (pausable.length === 0) {
+        alert("None of the selected projects can be paused (already paused, completed, cancelled or closed).");
+        return;
+      }
+      setPauseTargets(pausable);
       return;
     }
     const nextPhaseById = new Map(targets.map((p) => [p.id, newStatus ? nextPhaseForStatusLive(p.phase, newStatus) : p.phase]));
@@ -3649,8 +3696,13 @@ export default function Projects() {
               </span>
             );
           }
-          const timing = timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status));
-          return <span className={`status-pill ${timing.tone}`}>{timing.label}</span>;
+          const timing = taskTiming(t);
+          return (
+            <span className={`status-pill ${timing.tone}`} title={timing.hint} style={timing.hint ? { cursor: "help" } : undefined}>
+              {timing.label}
+              {timing.hint && <Info size={10} style={{ marginLeft: 3, verticalAlign: "-1px" }} />}
+            </span>
+          );
         },
       },
       {
@@ -4470,8 +4522,8 @@ export default function Projects() {
       // column's own isParent branch above) -- group them under "N/A"
       // rather than letting them fall into whatever timingOf() computes
       // now that its underlying fields are permanently blank on a parent.
-      getGroup: (t) => (t._depth === 0 && hasChildren(t.id) ? "N/A" : timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)).label),
-      getTone: (t) => (t._depth === 0 && hasChildren(t.id) ? "neutral" : timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)).tone),
+      getGroup: (t) => (t._depth === 0 && hasChildren(t.id) ? "N/A" : taskTiming(t).label),
+      getTone: (t) => (t._depth === 0 && hasChildren(t.id) ? "neutral" : taskTiming(t).tone),
       allGroups: () => TASK_TIMING_BOARD_COLUMNS.map((c) => c.value),
     },
     {
@@ -4507,8 +4559,8 @@ export default function Projects() {
     {
       key: "timing",
       label: "Timing",
-      getGroup: (t) => (t._depth === 0 && hasChildren(t.id) ? "N/A" : timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)).label),
-      getTone: (t) => (t._depth === 0 && hasChildren(t.id) ? "neutral" : timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)).tone),
+      getGroup: (t) => (t._depth === 0 && hasChildren(t.id) ? "N/A" : taskTiming(t).label),
+      getTone: (t) => (t._depth === 0 && hasChildren(t.id) ? "neutral" : taskTiming(t).tone),
       boardGroupable: true,
     },
     { key: "start_date", label: "Start", getGroup: () => "", boardGroupable: false },
@@ -4574,7 +4626,7 @@ export default function Projects() {
     if (groupBy === "effort") return t.effort;
     if (groupBy === "work_type") return t.work_type_id;
     if (groupBy === "project") return t.project_id;
-    if (groupBy === "timing") return t._depth === 0 && hasChildren(t.id) ? "N/A" : timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)).label;
+    if (groupBy === "timing") return t._depth === 0 && hasChildren(t.id) ? "N/A" : taskTiming(t).label;
     if (groupBy === "due_date_ext") return dueDateExtStatus(t).label;
     return t.status;
   }
@@ -4602,7 +4654,7 @@ export default function Projects() {
     { key: "effort", label: "Effort", getValue: (t) => (t.effort ? (TASK_EFFORT_OPTIONS.indexOf(t.effort) + 1 || null) : null) },
     { key: "work_type", label: "Work Type", getValue: (t) => workTypes.find((w) => w.id === t.work_type_id)?.name ?? "" },
     { key: "start_date", label: "Start", getValue: (t) => (t.start_date ? new Date(t.start_date).getTime() : null) },
-    { key: "timing", label: "Timing", getValue: (t) => (t._depth === 0 && hasChildren(t.id) ? -1 : timingRank(timingOf(t, statusGroupOf(TASK_STATUS_GROUPED, t.status)).label)) },
+    { key: "timing", label: "Timing", getValue: (t) => (t._depth === 0 && hasChildren(t.id) ? -1 : timingRank(taskTiming(t).label)) },
     { key: "current_due_date", label: "Due", getValue: (t) => (t.current_due_date ? new Date(t.current_due_date).getTime() : null) },
     { key: "estimated_hours", label: "Scoped Hours", getValue: (t) => t.estimated_hours ?? null },
     { key: "time_spent_hours", label: "Spent hrs", getValue: (t) => spentHoursFor(t.id) },
@@ -4901,6 +4953,33 @@ export default function Projects() {
   return (
     <div>
       {confirmDialog}
+      {pauseTargets && (
+        <PauseProjectModal
+          projects={pauseTargets.map((p) => ({ id: p.id, name: p.name }))}
+          onClose={() => setPauseTargets(null)}
+          onDone={() => {
+            setPauseTargets(null);
+            setSelectedProjectIds([]);
+            loadAll();
+          }}
+        />
+      )}
+      {reviewProjectId && projects.find((p) => p.id === reviewProjectId)?.schedule_review_required && (
+        <ScheduleReviewModal
+          project={projects.find((p) => p.id === reviewProjectId)!}
+          justResumed
+          onClose={() => setReviewProjectId(null)}
+          onReviewWbs={() => {
+            const id = reviewProjectId;
+            setReviewProjectId(null);
+            navigate(`/projects/${id}/wbs`);
+          }}
+          onResolved={() => {
+            setReviewProjectId(null);
+            loadAll();
+          }}
+        />
+      )}
       <CancelTaskDialog
         open={Boolean(cancelTaskDialog)}
         taskLabel={cancelTaskDialog?.label ?? ""}

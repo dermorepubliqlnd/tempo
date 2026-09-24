@@ -22,6 +22,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { tierOf, displayPct, UTIL_LEGEND } from "../lib/utilizationBands";
+import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { supabase } from "../lib/supabaseClient";
 import Modal from "../components/Modal";
 import { useSession } from "../lib/useSession";
@@ -379,7 +380,12 @@ export default function MyDashboard() {
       .map((t) => ({ ...t, project: projectById.get(t.project_id) ?? null }))
       .sort((a, b) => (a.current_due_date ?? "9999").localeCompare(b.current_due_date ?? "9999"));
   }, [tasks, me, projectById]);
-  const overdueTasks = myOpenTasks.filter((t) => t.current_due_date && t.current_due_date.slice(0, 10) < todayIso);
+  // phase118: paused projects' tasks (and dates that passed during a pause,
+  // until the schedule review is confirmed) don't count as overdue.
+  const overdueTasks = myOpenTasks.filter(
+    (t) => t.current_due_date && t.current_due_date.slice(0, 10) < todayIso && !isOverdueSuppressed(t, t.project as PauseProjectInfo | null)
+  );
+  const isPausedTask = (t: { project?: unknown }) => (t.project as PauseProjectInfo | null)?.status === "Paused";
   const tasksDueToday = myOpenTasks.filter((t) => t.current_due_date && t.current_due_date.slice(0, 10) === todayIso);
 
   // ---- My Work Today (2026-09-23) ------------------------------------
@@ -391,7 +397,8 @@ export default function MyDashboard() {
   // rather than re-deriving the exclusion rule.
   const hiddenTodayIds = useMemo(() => new Set(hiddenToday.filter((h) => h.hidden_date === todayIso).map((h) => h.task_id)), [hiddenToday, todayIso]);
   const myWorkTodayAll = useMemo(
-    () => myOpenTasks.filter((t) => t.start_date && t.start_date.slice(0, 10) <= todayIso && t.current_due_date && t.current_due_date.slice(0, 10) >= todayIso),
+    // phase118: tasks of paused projects are hidden here (Sandra).
+    () => myOpenTasks.filter((t) => !isPausedTask(t) && t.start_date && t.start_date.slice(0, 10) <= todayIso && t.current_due_date && t.current_due_date.slice(0, 10) >= todayIso),
     [myOpenTasks, todayIso]
   );
   const myWorkTodayHiddenCount = myWorkTodayAll.filter((t) => hiddenTodayIds.has(t.id)).length;
@@ -458,7 +465,7 @@ export default function MyDashboard() {
   }, [justHidden]);
   const weekEndIso = toISO(weekDays[4]);
   const weekStartIso = toISO(weekDays[0]);
-  const tasksThisWeek = myOpenTasks.filter((t) => t.current_due_date && t.current_due_date.slice(0, 10) >= weekStartIso && t.current_due_date.slice(0, 10) <= weekEndIso);
+  const tasksThisWeek = myOpenTasks.filter((t) => !isPausedTask(t) && t.current_due_date && t.current_due_date.slice(0, 10) >= weekStartIso && t.current_due_date.slice(0, 10) <= weekEndIso);
 
   // 2026-09-24 (Sandra): My Projects lists only projects whose WBS is NOT
   // closed -- a closed WBS is final, nothing left to act on.
@@ -622,6 +629,8 @@ export default function MyDashboard() {
   const completedOpenProjects = myCompletedProjects
     .map((p) => ({ p, open: leafTasksOf(p.id).filter((t) => t.status !== "Done" && t.status !== "Cancelled") }))
     .filter((x) => x.open.length > 0);
+  // phase118: resumed projects waiting for the owner's schedule review.
+  const scheduleReviewProjects = projects.filter((p) => p.owner_id === me?.id && (p as { schedule_review_required?: boolean }).schedule_review_required);
   const readyToCloseProjects = myCompletedProjects
     .filter((p) => !completedOpenProjects.some((x) => x.p.id === p.id))
     .map((p) => ({
@@ -726,7 +735,7 @@ export default function MyDashboard() {
         <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Items" value={overdueTasks.length} sub="Needs attention" />
       </div>
 
-      {(tasksDueToday.length > 0 || overdueTasks.length > 0 || missingLogHours > 0.1 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0) && (
+      {(tasksDueToday.length > 0 || overdueTasks.length > 0 || missingLogHours > 0.1 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
           {/* 2026-09-23 (Sandra: "Pending approvals, remove and use the
@@ -751,6 +760,16 @@ export default function MyDashboard() {
           {readyToCloseProjects.length > 0 && (
             <AttentionPill tone="success" icon={<CheckCircle2 size={12} />} value={readyToCloseProjects.length} label={readyToCloseProjects.length === 1 ? "Project ready to close" : "Projects ready to close"} onClick={() => setAttentionModal("ready_to_close")} />
           )}
+          {scheduleReviewProjects.map((p) => (
+            <AttentionPill
+              key={`sr-${p.id}`}
+              tone="warning"
+              icon={<AlertTriangle size={12} />}
+              value={1}
+              label={`Schedule review required: ${p.name}`}
+              onClick={() => navigate(`/projects/${p.id}/wbs`)}
+            />
+          ))}
           {completedOpenProjects.length > 0 && (
             <AttentionPill tone="warning" icon={<AlertTriangle size={12} />} value={completedOpenProjects.length} label={completedOpenProjects.length === 1 ? "Completed project has open tasks" : "Completed projects have open tasks"} onClick={() => setAttentionModal("completed_open")} />
           )}

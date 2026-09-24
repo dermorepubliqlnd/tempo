@@ -173,6 +173,7 @@ const HEALTH_TONE: Record<string, { fill: string; pill: string }> = {
   "Completed late": { fill: CATEGORY_TONE_ICON_COLOR.gold, pill: "gold" },
   "Completed – open tasks": { fill: CATEGORY_TONE_ICON_COLOR.warning, pill: "warning" },
   "Work complete": { fill: CATEGORY_TONE_ICON_COLOR.success, pill: "success" },
+  "Schedule review": { fill: CATEGORY_TONE_ICON_COLOR.gold, pill: "gold" },
   Paused: { fill: CATEGORY_TONE_ICON_COLOR.purple, pill: "purple" },
   // Slate, not neutral -- see healthOf() in Projects.tsx.
   "Health unavailable": { fill: CATEGORY_TONE_ICON_COLOR.slate, pill: "slate" },
@@ -206,6 +207,7 @@ const HEALTH_CHART_COLOR: Record<string, string> = {
   Overdue: "#ec4899",
   "At risk": "#2e75b6",
   Completed: "#06b6d4",
+  "Schedule review": "#d4a72c",
 };
 
 // Fixed per-label chart color for the Project Status donut, given

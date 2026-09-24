@@ -46,9 +46,12 @@ export function actualCompletionDateOf(t: TaskTimingRow): string | null {
 // Severity order for sorting by Timing: worst first (Overdue).
 export function timingRank(label: string): number {
   if (label === "Overdue") return 0;
+  if (label === "Paused · Overdue") return 1;
+  if (label === "Review pending") return 1;
   if (label === "Late") return 1;
   if (label === "Due soon") return 2;
   if (label === "On track") return 3;
+  if (label === "Paused") return 4;
   if (label === "Pending") return 4;
   if (label === "On time") return 5;
   if (label === "Early") return 6;

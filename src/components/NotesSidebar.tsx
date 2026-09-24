@@ -16,6 +16,7 @@ interface ProjectNoteRow {
   body: string;
   mentioned_person_ids: string[];
   created_at: string;
+  note_type?: "manual" | "system";
 }
 
 interface NotesSidebarProps {
@@ -180,9 +181,20 @@ export default function NotesSidebar({ projectId, projectName, people, currentPe
             {relative}
           </span>
         </div>
-        <div style={{ fontSize: 13, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-          {renderBodyWithMentions(note.body, people)}
-        </div>
+        {note.note_type === "system" ? (
+          // phase118: system notes (pause / resume / schedule review) --
+          // first line is the event title, shown as a tag.
+          <div style={{ fontSize: 12.5, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--hover-bg)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", padding: "7px 10px" }}>
+            <span className="status-pill slate" style={{ fontSize: 9.5, marginBottom: 4, display: "inline-block" }}>
+              System · {note.body.split("\n")[0]}
+            </span>
+            <div>{note.body.split("\n").slice(1).join("\n")}</div>
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            {renderBodyWithMentions(note.body, people)}
+          </div>
+        )}
         {!isReply && (
           <button
             onClick={() => {
