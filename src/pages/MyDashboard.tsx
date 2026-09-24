@@ -17,7 +17,11 @@ import {
   EyeOff,
   Plus,
   ChevronDown,
+  Minus,
+  Circle,
+  TrendingUp,
 } from "lucide-react";
+import { tierOf, displayPct, UTIL_LEGEND } from "../lib/utilizationBands";
 import { supabase } from "../lib/supabaseClient";
 import Modal from "../components/Modal";
 import { useSession } from "../lib/useSession";
@@ -26,6 +30,23 @@ import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
 import { buildHolidaySet, buildHolidayNameMap, nonWorkingDayConfirmMessage } from "../lib/workingDays";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
+// Same tier->icon mapping as Utilization.tsx's TIER_ICONS.
+const UTIL_TIER_ICON: Record<string, typeof Minus> = {
+  unallocated: Minus,
+  available: Circle,
+  healthy: CheckCircle2,
+  high: TrendingUp,
+  full: Gauge,
+  overloaded: AlertTriangle,
+};
+const UTIL_LEGEND_DOT: Record<string, string> = {
+  neutral: "var(--muted)",
+  available: "var(--available-text)",
+  success: "var(--success-text)",
+  warning: "var(--warning-text)",
+  accent: "var(--accent)",
+  danger: "var(--danger-text)",
+};
 const LEGEND_DOT_COLOR: Record<string, string> = {
   blue: "var(--blue-text)",
   skyblue: "var(--skyblue-text)",
@@ -482,7 +503,7 @@ export default function MyDashboard() {
       const logged = monthEntries
         .filter((e) => toISO(new Date(e.started_at)) === dateStr)
         .reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);
-      return { date: d, dateStr, capacity, scoped, pct, logged, off };
+      return { date: d, dateStr, capacity, scoped, pct, logged, off, halfDay: !!halfDayRow };
     });
   }, [me, weekDays, availability, holidayDateStrings, engine, monthEntries]);
 
@@ -1103,21 +1124,29 @@ export default function MyDashboard() {
           <div className="dash-card">
             <SectionHeader title="My Utilization This Week" to="/utilization?person=me" small="Based on assigned work vs available capacity" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8 }}>
+              {/* 2026-09-24 (Sandra: "doesn't match the Utilization page") --
+                  same 6-tier bands, icons and half-day marker as the main
+                  Utilization page (lib/utilizationBands tierOf/displayPct),
+                  instead of the old green-unless-over-100% coloring. */}
               {dailyStats.map((d) => {
-                const over = d.capacity > 0 && d.pct > 100;
-                const colors = d.off ? { bg: "var(--hover-bg)", fg: "var(--muted)" } : over ? toneColors("danger") : toneColors("success");
+                const tier = tierOf(d.pct);
+                const Icon = UTIL_TIER_ICON[tier.key] ?? Minus;
+                const colors = d.off ? { bg: "var(--hover-bg)", fg: "var(--muted)" } : { bg: tier.bg ?? "var(--surface)", fg: tier.fg };
                 return (
                   <div key={d.dateStr} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
                     <div style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textAlign: "center", padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
                       {WEEKDAY_LABEL[d.date.getDay()]}
                       <div style={{ fontSize: 9, fontWeight: 400 }}>{d.date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
                     </div>
-                    <div style={{ padding: "10px 4px", textAlign: "center", background: colors.bg }}>
+                    <div style={{ padding: "8px 4px", textAlign: "center", background: colors.bg }} title={d.off ? "Off" : `${tier.label}${d.halfDay ? " · half day" : ""}`}>
                       {d.off ? (
                         <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Off</div>
                       ) : (
                         <>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: colors.fg }}>{Math.round(d.pct)}%</div>
+                          <Icon size={13} style={{ color: colors.fg, flexShrink: 0 }} />
+                          <div style={{ fontSize: 14, fontWeight: 700, color: colors.fg }}>
+                            {displayPct(d.pct)}%{d.halfDay && <span style={{ fontSize: 9, marginLeft: 2 }}>½</span>}
+                          </div>
                           <div style={{ fontSize: 9, color: colors.fg }}>
                             {d.scoped.toFixed(1)}h / {d.capacity.toFixed(1)}h
                           </div>
@@ -1127,6 +1156,14 @@ export default function MyDashboard() {
                   </div>
                 );
               })}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", marginTop: 10, fontSize: 10.5, color: "var(--muted)" }}>
+              {UTIL_LEGEND.map((l) => (
+                <span key={l.label} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: UTIL_LEGEND_DOT[l.tone], flexShrink: 0 }} />
+                  {l.label} <span style={{ opacity: 0.75 }}>{l.pct}</span>
+                </span>
+              ))}
             </div>
           </div>
 
