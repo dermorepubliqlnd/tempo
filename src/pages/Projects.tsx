@@ -481,13 +481,42 @@ function projectStatusOf(p: ProjectRow): string | null {
   return p.wbs_status === "draft" ? "Not Started" : p.status;
 }
 
+// phase115 (Sandra, 2026-09-24): a Completed project's Health keeps its
+// final SCHEDULE outcome instead of echoing "Completed" (Status/Phase
+// already say that). Completion date = latest Actual Completion Date of
+// its Done leaf tasks (fallbacks: submitted_on, Actual Close Date,
+// completed_at). Due date = current End Date, which already reflects any
+// approved Rebaseline or Project Timeline Extension.
+export function projectCompletionDate(projectId: string, allTasks: TaskRow[], p?: ProjectRow): string | null {
+  const parentIds = new Set(allTasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
+  const dates = allTasks
+    .filter((t) => t.project_id === projectId && t.status === "Done" && !parentIds.has(t.id) && !t.is_archived)
+    .map((t) => (t.actual_completion_date ?? t.submitted_on ?? null) as string | null)
+    .filter((d): d is string => Boolean(d))
+    .map((d) => (d.length > 10 ? toISOWorkingDay(new Date(d)) : d));
+  if (dates.length) return dates.sort()[dates.length - 1];
+  const fallback = (p as { actual_close_date?: string | null } | undefined)?.actual_close_date ?? p?.completed_at ?? null;
+  return fallback ? (fallback.length > 10 ? toISOWorkingDay(new Date(fallback)) : fallback) : null;
+}
+
 export function healthOf(
   p: ProjectRow,
   allTasks: TaskRow[],
   holidayDates: Set<string>
-): { label: string; tone: "success" | "warning" | "danger" | "neutral" | "purple" | "slate" } {
+): { label: string; tone: "success" | "warning" | "danger" | "neutral" | "purple" | "slate" | "gold" } {
   const status = projectStatusOf(p);
-  if (status === "Completed" || status === "Cancelled") return { label: status, tone: "neutral" };
+  if (status === "Cancelled") return { label: status, tone: "neutral" };
+  if (status === "Completed") {
+    const parentIds = new Set(allTasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
+    const hasOpen = allTasks.some(
+      (t) => t.project_id === p.id && !t.is_archived && !parentIds.has(t.id) && t.status !== "Done" && t.status !== "Cancelled"
+    );
+    if (hasOpen) return { label: "Completed – open tasks", tone: "warning" };
+    const done = projectCompletionDate(p.id, allTasks, p);
+    const due = p.end_date ? p.end_date.slice(0, 10) : null;
+    if (!done || !due) return { label: "Completed", tone: "neutral" };
+    return done <= due ? { label: "Completed on time", tone: "success" } : { label: "Completed late", tone: "gold" };
+  }
   if (status === "Paused") return { label: "Paused", tone: "purple" };
 
   // 2026-09-21 (Sandra: "why is this tagged as overdue when WBS has not
@@ -504,7 +533,8 @@ export function healthOf(
   if (p.wbs_status === "draft") return { label: "Not started", tone: "neutral" };
 
   const actual = actualProgress(p.id, allTasks);
-  if (actual === 100) return { label: "Completed", tone: "success" };
+  // phase115: all work Done but Status not set to Completed yet.
+  if (actual === 100) return { label: "Work complete", tone: "success" };
 
   // "Health unavailable" (missing dates / no applicable tasks / zero
   // working days) uses "slate" -- a distinct, cooler grey from "Not
@@ -620,6 +650,10 @@ function healthRank(label: string): number {
   if (label === "At risk") return 2;
   if (label === "Not started") return 3;
   if (label === "On track") return 4;
+  if (label === "Completed – open tasks") return 5;
+  if (label === "Work complete") return 5;
+  if (label === "Completed late") return 5;
+  if (label === "Completed on time") return 5;
   if (label === "Completed") return 5;
   if (label === "Health unavailable") return 6;
   return 7; // manually-echoed status labels (Canceled/Merged/etc.)

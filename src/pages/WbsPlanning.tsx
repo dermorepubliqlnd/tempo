@@ -92,6 +92,8 @@ interface ProjectRow {
 }
 interface TaskRow {
   id: string;
+  // phase115: used to default Actual Project Close Date.
+  actual_completion_date?: string | null;
   project_id: string;
   parent_task_id: string | null;
   name: string;
@@ -1015,7 +1017,7 @@ export default function WbsPlanning() {
       supabase
         .from("tasks")
         .select(
-          "id,project_id,parent_task_id,name,assignee_id,status,start_date,start_date_full,start_date_standard,start_full_auto,start_standard_auto,manual_end_date,current_due_date,estimated_hours,effort,work_type_id,output_type_id,output_count,cancellation_reason,is_archived,sort_order"
+          "id,project_id,parent_task_id,name,assignee_id,status,start_date,start_date_full,start_date_standard,start_full_auto,start_standard_auto,manual_end_date,current_due_date,estimated_hours,effort,work_type_id,output_type_id,output_count,cancellation_reason,is_archived,sort_order,actual_completion_date"
         )
         .eq("project_id", projectId)
         .eq("is_archived", false)
@@ -2395,6 +2397,18 @@ export default function WbsPlanning() {
 
   async function handleRequestClosure() {
     if (!project) return;
+    // Actual Close Date defaults to the latest task completion date when
+    // the requester hasn't picked one.
+    if (!project.actual_close_date) {
+      const d = defaultActualCloseDate();
+      if (d) {
+        const { error: acdErr } = await supabase.from("projects").update({ actual_close_date: d }).eq("id", project.id);
+        if (!acdErr) {
+          project.actual_close_date = d;
+          setProject((prev) => (prev ? { ...prev, actual_close_date: d } : prev));
+        }
+      }
+    }
     // Sandra, 2026-08-26: "before requesting to close -- all details are
     // encoded like project status, phase, category, priority, source and
     // complexity -- technically all that requires manual input." These
@@ -3064,6 +3078,19 @@ export default function WbsPlanning() {
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...patch } : t)));
     const existing = pendingTaskPatches.current.get(taskId) ?? {};
     pendingTaskPatches.current.set(taskId, { ...existing, ...patch });
+  }
+
+  // 2026-09-24 (Sandra: "by default pull the latest task [completion
+  // date], but still allow the requester to select/confirm Actual Close
+  // Date"): the latest Actual Completion Date among Done leaf tasks.
+  function defaultActualCloseDate(): string | null {
+    const parentIds = new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
+    const dates = tasks
+      .filter((t) => t.status === "Done" && !parentIds.has(t.id) && t.actual_completion_date)
+      .map((t) => (t.actual_completion_date as string).slice(0, 10));
+    if (!dates.length) return null;
+    dates.sort();
+    return dates[dates.length - 1];
   }
 
   function saveProjectField(patch: Partial<ProjectRow>) {
@@ -6309,11 +6336,14 @@ export default function WbsPlanning() {
         <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Actual Project Close Date:</span>
         <div className="wbs-field-box" style={fieldBoxStyle(!!project.actual_close_date, 110, !canEditWbs)}>
           <InlineDate
-            value={project.actual_close_date}
+            value={project.actual_close_date ?? defaultActualCloseDate()}
             editable={canEditWbs}
             onCommit={(v) => saveProjectField({ actual_close_date: v })}
           />
         </div>
+        {!project.actual_close_date && defaultActualCloseDate() && (
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>Default: latest task completion date -- change it if the work wrapped on a different day</span>
+        )}
         <span
           title="When the work on this project actually wrapped -- may be earlier than the Signed Off Date above if approval happens later. Required before requesting closure."
           style={{ display: "inline-flex", cursor: "help", flexShrink: 0 }}

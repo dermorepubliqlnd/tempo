@@ -168,6 +168,11 @@ const HEALTH_TONE: Record<string, { fill: string; pill: string }> = {
   Overdue: { fill: CATEGORY_TONE_ICON_COLOR.danger, pill: "danger" },
   "Not started": { fill: CATEGORY_TONE_ICON_COLOR.neutral, pill: "neutral" },
   Completed: { fill: CATEGORY_TONE_ICON_COLOR.success, pill: "success" },
+  // phase115 health labels
+  "Completed on time": { fill: CATEGORY_TONE_ICON_COLOR.success, pill: "success" },
+  "Completed late": { fill: CATEGORY_TONE_ICON_COLOR.gold, pill: "gold" },
+  "Completed – open tasks": { fill: CATEGORY_TONE_ICON_COLOR.warning, pill: "warning" },
+  "Work complete": { fill: CATEGORY_TONE_ICON_COLOR.success, pill: "success" },
   Paused: { fill: CATEGORY_TONE_ICON_COLOR.purple, pill: "purple" },
   // Slate, not neutral -- see healthOf() in Projects.tsx.
   "Health unavailable": { fill: CATEGORY_TONE_ICON_COLOR.slate, pill: "slate" },
