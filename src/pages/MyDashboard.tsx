@@ -162,9 +162,10 @@ function notOnArchived(r: unknown): boolean {
 // My Work Today grid (2026-09-24): one template shared by header + rows.
 // Task/Project capped so wide screens don't stretch them; the 1fr spacer
 // before Actions absorbs leftover width so Actions stays at the right edge.
-const MWT_COLUMNS = ["minmax(200px, 260px)", "110px", "100px", "minmax(240px, 420px)", "150px", "160px", "170px", "minmax(0, 1fr)", "90px"];
+// Mins sized so the whole grid fits a 1440px laptop screen without scrolling (verified live 2026-09-24).
+const MWT_COLUMNS = ["minmax(170px, 260px)", "100px", "90px", "minmax(190px, 420px)", "130px", "130px", "136px", "minmax(0, 1fr)", "76px"];
 const MWT_GRID: CSSProperties = { display: "grid", gridTemplateColumns: MWT_COLUMNS.join(" "), columnGap: 16, alignItems: "center" };
-const MWT_MIN_WIDTH = 200 + 110 + 100 + 240 + 150 + 160 + 170 + 90 + 16 * 8;
+const MWT_MIN_WIDTH = 170 + 100 + 90 + 190 + 130 + 130 + 136 + 76 + 16 * 8;
 
 export default function MyDashboard() {
   const { person: me } = useSession();
