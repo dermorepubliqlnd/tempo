@@ -21,7 +21,8 @@ export type ArchiveKind =
   | "activity_type"
   | "time_entry_reason"
   | "cancellation_reason"
-  | "decline_reason";
+  | "decline_reason"
+  | "time_off";
 
 export const ARCHIVE_RETENTION_DAYS = 90;
 
@@ -43,6 +44,7 @@ export const ARCHIVE_KIND_LABEL: Record<ArchiveKind, string> = {
   time_entry_reason: "Time Logging Reason",
   cancellation_reason: "Cancellation Reason",
   decline_reason: "Decline Reason",
+  time_off: "Time Off",
 };
 
 export const ARCHIVE_MOVE_NOTE = `It moves to the Archive and can be restored within ${ARCHIVE_RETENTION_DAYS} days.`;
@@ -78,9 +80,30 @@ export async function splitByArchivePermission(
   return { allowed, blocked };
 }
 
-export function blockedDeleteMessage(blocked: { message: string }[], allowedCount: number): string {
-  const lines = blocked.length === 1 ? blocked[0].message : blocked.map((b) => `- ${b.message}`).join("\n");
-  const head = blocked.length === 1 ? "" : `${blocked.length} of the selected items can't be deleted by you:\n`;
+export function blockedDeleteMessage(kind: "project" | "task", blockedNames: string[], allowedCount: number): string {
+  const noun = kind === "project" ? "project" : "task";
+  const head =
+    blockedNames.length === 1
+      ? `You can't delete this ${noun}${allowedCount > 0 ? ` (${blockedNames[0]})` : ""}.`
+      : `You can't delete ${blockedNames.length} of the selected ${noun}s:\n${blockedNames.map((n) => `- ${n}`).join("\n")}`;
   const tail = allowedCount > 0 ? `\n\nThe other ${allowedCount} can still be deleted -- you'll be asked to confirm next.` : "";
-  return head + lines + tail;
+  return `${head}\nPlease reach out to the project owner or your supervisor.${tail}`;
+}
+
+// Hours logged on a set of tasks (live, non-rejected entries), for the
+// "this task has logged time" delete warning.
+export async function loggedHoursOnTasks(taskIds: string[]): Promise<{ hours: number; entries: number }> {
+  if (taskIds.length === 0) return { hours: 0, entries: 0 };
+  const { data } = await supabase
+    .from("time_entries")
+    .select("duration_minutes,status")
+    .in("task_id", taskIds)
+    .eq("is_archived", false)
+    .neq("status", "rejected");
+  const rows = (data as { duration_minutes: number | null }[] | null) ?? [];
+  return { hours: rows.reduce((s, r) => s + (r.duration_minutes ?? 0), 0) / 60, entries: rows.length };
+}
+
+export function loggedTimeDeleteWarning(what: string, hours: number, entries: number): string {
+  return `**${what} has ${hours.toFixed(2)}h of logged time** (${entries} time log${entries === 1 ? "" : "s"}).\n\nDeleting removes those hours from Productivity and Utilization until it's restored from the Archive. If the work was stopped or is no longer needed, use **Cancel** on the task instead -- it keeps the logged history.\n\nAre you sure you want to delete?`;
 }

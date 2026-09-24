@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, CornerDownRight, ChevronRight, ChevronDown, Archive, ArchiveRestore, Trash2, Feather, Weight, BicepsFlexed, Flame, AlertTriangle, CalendarClock, CheckCircle2, X, RotateCcw, MessageCircle, Handshake, ShieldCheck, Cpu, Crown, TrendingUp, Wrench, Sparkles, Folder, Lock } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import { splitByArchivePermission, blockedDeleteMessage, archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
+import { splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useTableViews } from "../lib/useTableViews";
 import DataTable from "../components/DataTable";
@@ -1997,9 +1997,13 @@ export default function Projects() {
     // phase117: flag projects this person can't delete, with who to contact.
     const { allowed: ids, blocked } = await splitByArchivePermission("project", requestedIds);
     if (blocked.length) {
-      await alert({ title: "You can't delete this", message: blockedDeleteMessage(blocked, ids.length) });
+      await alert({ title: "You can't delete this", message: blockedDeleteMessage("project", blocked.map((b) => projects.find((p) => p.id === b.id)?.name ?? "Project"), ids.length) });
       if (ids.length === 0) return;
     }
+    const logged = await loggedHoursOnTasks(tasks.filter((t) => ids.includes(t.project_id)).map((t) => t.id));
+    const loggedNote = logged.entries > 0
+      ? ` **Heads up: ${logged.hours.toFixed(2)}h of logged time** (${logged.entries} time log${logged.entries === 1 ? "" : "s"}) will be removed from Productivity and Utilization until restored.`
+      : "";
     const childTaskCount = tasks.filter((t) => ids.includes(t.project_id)).length;
     // phase104 (Sandra: no hard deletes, Archive page = recycle bin): each
     // project archives server-side as ONE bundle with its tasks and their
@@ -2008,7 +2012,7 @@ export default function Projects() {
       title: ids.length > 1 ? "Archive projects" : "Archive project",
       message:
         childTaskCount > 0
-          ? `Archive ${ids.length} project${ids.length > 1 ? "s" : ""}? This will also archive ${childTaskCount} task${childTaskCount > 1 ? "s" : ""} in them and their time entries. ${ARCHIVE_MOVE_NOTE}`
+          ? `Archive ${ids.length} project${ids.length > 1 ? "s" : ""}? This will also archive ${childTaskCount} task${childTaskCount > 1 ? "s" : ""} in them and their time entries.${loggedNote} ${ARCHIVE_MOVE_NOTE}`
           : `Archive ${ids.length > 1 ? `${ids.length} projects` : "this project"}? ${ARCHIVE_MOVE_NOTE}`,
       confirmLabel: "Archive",
     });
@@ -2089,7 +2093,7 @@ export default function Projects() {
     // phase117: flag tasks this person can't delete, with who to contact.
     const { allowed: ids, blocked } = await splitByArchivePermission("task", selectedTaskIds);
     if (blocked.length) {
-      await alert({ title: "You can't delete this", message: blockedDeleteMessage(blocked, ids.length) });
+      await alert({ title: "You can't delete this", message: blockedDeleteMessage("task", blocked.map((b) => tasks.find((t) => t.id === b.id)?.name ?? "Task"), ids.length) });
       if (ids.length === 0) return;
     }
     // phase104: archive, never hard-delete. Each selected task archives

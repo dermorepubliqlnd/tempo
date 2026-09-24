@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import { archiveItem, ARCHIVE_MOVE_NOTE, splitByArchivePermission } from "../lib/archive";
+import { archiveItem, ARCHIVE_MOVE_NOTE, splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, loggedTimeDeleteWarning } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { InlineText, InlineNumber, InlineSelect, InlineDate, InlineTextArea } from "../components/InlineCell";
@@ -2828,16 +2828,30 @@ export default function WbsPlanning() {
     // phase117: flag it (with who to contact) if this person can't delete it.
     const { blocked } = await splitByArchivePermission("task", [t.id]);
     if (blocked.length) {
-      await alert({ title: "You can't delete this", message: blocked[0].message });
+      await alert({ title: "You can't delete this", message: blockedDeleteMessage("task", [t.name], 0) });
       return;
     }
     const childIds = t.depth === 0 ? tasks.filter((x) => x.parent_task_id === t.id).map((x) => x.id) : [];
-    const ok = await confirm({
+    // Sandra (2026-09-24): warn when the task (or its sub-tasks) has logged
+    // time -- deleting pulls those hours out of Productivity/Utilization.
+    const logged = await loggedHoursOnTasks([t.id, ...childIds]);
+    if (logged.entries > 0) {
+      const goAhead = await confirm({
+        title: "This task has logged time",
+        message: loggedTimeDeleteWarning(childIds.length ? "This task (with its sub-tasks)" : "This task", logged.hours, logged.entries),
+        confirmLabel: "Delete anyway",
+        cancelLabel: "Keep task",
+        danger: true,
+      });
+      if (!goAhead) return;
+    }
+    // One dialog only: the logged-time warning already asked.
+    const ok = logged.entries > 0 || (await confirm({
       title: "Delete task",
       message: `Delete "${t.name}"${childIds.length ? ` (and ${childIds.length} sub-task${childIds.length > 1 ? "s" : ""})` : ""}? ${ARCHIVE_MOVE_NOTE}`,
       confirmLabel: "Delete",
       danger: true,
-    });
+    }));
     if (!ok) return;
     // Same bugfix as addTopLevelTask/addSubtask -- flush staged edits on
     // OTHER tasks first, so deleting one task can't silently discard
