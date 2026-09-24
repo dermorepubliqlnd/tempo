@@ -37,6 +37,7 @@ import { parseLocalDate, calendarDaysBetween } from "../lib/taskTiming";
 // Reuses Health/Progress straight from Projects.tsx (same convention
 // Dashboard.tsx already follows) so this page's numbers can never drift
 // out of sync with what the Projects table itself shows for a project.
+import { wbsStatusMetaFor } from "../lib/wbsStatus";
 import { healthOf, actualProgress, countWorkingDays, type ProjectRow, type TaskRow } from "./Projects";
 import {
   createAllocationEngine,
@@ -435,7 +436,9 @@ export default function MyDashboard() {
   const weekStartIso = toISO(weekDays[0]);
   const tasksThisWeek = myOpenTasks.filter((t) => t.current_due_date && t.current_due_date.slice(0, 10) >= weekStartIso && t.current_due_date.slice(0, 10) <= weekEndIso);
 
-  const myProjects = useMemo(() => (me ? projects.filter((p) => p.owner_id === me.id) : []), [projects, me]);
+  // 2026-09-24 (Sandra): My Projects lists only projects whose WBS is NOT
+  // closed -- a closed WBS is final, nothing left to act on.
+  const myProjects = useMemo(() => (me ? projects.filter((p) => p.owner_id === me.id && p.wbs_status !== "closed") : []), [projects, me]);
 
   // ---- Utilization This Week (assigned/scoped work), via the SAME
   // shared allocation engine Utilization.tsx/HoursOverview.tsx/
@@ -942,46 +945,53 @@ export default function MyDashboard() {
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)", gap: 20, alignItems: "start" }}>
         <div>
+          {/* Hidden entirely when every project I own is closed ("all clear"). */}
+          {myProjects.length > 0 && (
           <div className="dash-card">
             <SectionHeader title={`My Projects (${myProjects.length})`} to="/projects?owner=me" />
-            {myProjects.length === 0 ? (
-              <p style={{ fontSize: 12, color: "var(--muted)" }}>You don't own any active projects.</p>
-            ) : (
-              <>
-                {/* 2026-09-24 (Sandra: "fix alignment, reduce the progress
-                    bar"): fixed column widths shared by header + rows, a
-                    wider no-wrap Health column (labels like "Completed on
-                    time"), and a compact fixed-width progress bar. */}
-                <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
-                  <span style={{ flex: "1 1 auto", minWidth: 0 }}>Project</span>
-                  <span style={{ flex: "0 0 150px", textAlign: "center" }}>Health</span>
-                  <span style={{ flex: "0 0 130px" }}>Progress</span>
-                  <span style={{ flex: "0 0 80px", textAlign: "right" }}>End Date</span>
-                </div>
-                {myProjects.slice(0, 6).map((p) => {
-                  const health = healthOf(p, tasks, holidayDateStrings);
-                  const progress = actualProgress(p.id, tasks);
-                  return (
-                    <div key={p.id} className="dash-row" onClick={() => navigate(`/projects/${p.id}/wbs`)} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <span style={{ flex: "1 1 auto", minWidth: 0, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>{p.name}</span>
-                      <span style={{ flex: "0 0 150px", textAlign: "center" }}>
-                        <span className={`status-pill ${health.tone}`} style={{ fontSize: 9.5, whiteSpace: "nowrap" }}>
-                          {health.label.toUpperCase()}
-                        </span>
+            {/* One grid for header + rows: ID/WBS/Health/Progress/End hug
+                their content; Project takes the rest. */}
+            <div style={{ display: "grid", gridTemplateColumns: "max-content minmax(120px, 1fr) max-content max-content max-content max-content", columnGap: 16, alignItems: "center" }}>
+              {["ID", "Project", "WBS Status", "Health", "Progress", "End Date"].map((h, i) => (
+                <span key={h} style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 0 6px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", textAlign: i === 3 ? "center" : i === 5 ? "right" : "left" }}>{h}</span>
+              ))}
+              {myProjects.slice(0, 6).map((p) => {
+                const health = healthOf(p, tasks, holidayDateStrings);
+                const progress = actualProgress(p.id, tasks);
+                const closureRequested = closureRequests.some((r) => r.project_id === p.id);
+                const baselinePending = baselineRequests.some((r) => r.project_id === p.id);
+                const wbsMeta = closureRequested
+                  ? { label: "Closure Requested", hint: "Closure has been requested and is waiting for approval.", color: "var(--warning-text, #b45309)", bg: "var(--warning-bg, #fff7ed)", border: "#f3dfb8" }
+                  : wbsStatusMetaFor(p.wbs_status, baselinePending);
+                const cell: CSSProperties = { padding: "9px 0", borderBottom: "1px solid var(--border)", cursor: "pointer", minWidth: 0 };
+                const go = () => navigate(`/projects/${p.id}/wbs`);
+                return (
+                  <div key={p.id} className="dash-grid-row" style={{ display: "contents" }}>
+                    <span onClick={go} style={{ ...cell, fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap" }}>
+                      {p.project_number ? `P-${String(p.project_number).padStart(4, "0")}` : "—"}
+                    </span>
+                    <span onClick={go} style={{ ...cell, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>{p.name}</span>
+                    <span onClick={go} style={cell}>
+                      <span title={wbsMeta?.hint} style={{ display: "inline-block", padding: "1px 7px", fontSize: 10.5, fontWeight: 500, whiteSpace: "nowrap", borderRadius: "var(--radius-btn)", border: `1px solid ${wbsMeta?.border ?? "var(--border)"}`, background: wbsMeta?.bg ?? "var(--surface)", color: wbsMeta?.color ?? "var(--text-secondary)" }}>
+                        {wbsMeta?.label ?? p.wbs_status}
                       </span>
-                      <span style={{ flex: "0 0 130px", display: "flex", alignItems: "center", gap: 8 }}>
-                        <div style={{ flex: "0 0 90px", height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
-                          <div style={{ width: `${progress ?? 0}%`, height: "100%", background: "var(--accent)", borderRadius: 3 }} />
-                        </div>
-                        <span style={{ fontSize: 11, color: "var(--muted)", flexShrink: 0, width: 32, textAlign: "right" }}>{progress === null ? "—" : `${Math.round(progress)}%`}</span>
-                      </span>
-                      <span style={{ flex: "0 0 80px", textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(p.end_date)}</span>
-                    </div>
-                  );
-                })}
-              </>
-            )}
+                    </span>
+                    <span onClick={go} style={{ ...cell, textAlign: "center" }}>
+                      <span className={`status-pill ${health.tone}`} style={{ fontSize: 9.5, whiteSpace: "nowrap" }}>{health.label.toUpperCase()}</span>
+                    </span>
+                    <span onClick={go} style={{ ...cell, display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ flex: "0 0 60px", height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
+                        <div style={{ width: `${progress ?? 0}%`, height: "100%", background: "var(--accent)", borderRadius: 3 }} />
+                      </div>
+                      <span style={{ fontSize: 11, color: "var(--muted)", width: 32, textAlign: "right" }}>{progress === null ? "—" : `${Math.round(progress)}%`}</span>
+                    </span>
+                    <span onClick={go} style={{ ...cell, textAlign: "right", fontSize: 11.5, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{formatDate(p.end_date)}</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+          )}
 
           <div className="dash-card">
             <SectionHeader title={`Tasks Due This Week (${tasksThisWeek.length})`} to="/projects?assignee=me" />
