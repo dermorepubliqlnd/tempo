@@ -4123,6 +4123,7 @@ export default function Projects() {
                   assignee, or Full Access on their behalf. Not on parent
                   tasks, closed projects, or unlocked baselines. */}
               {t.status === "Done" &&
+                !isRunningHere &&
                 !t.is_archived &&
                 !(t._depth === 0 && hasChildren(t.id)) &&
                 !isProjectClosed(t.project_id) &&
