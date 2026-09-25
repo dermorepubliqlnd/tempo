@@ -46,14 +46,15 @@ export interface ValidateCompletionModalProps {
   // Only when the caller has no date picker of its own (Projects table
   // Validate button) -- otherwise the confirmed date is read-only here.
   onChangeConfirmed?: (d: string) => void;
-  minDate?: string | null;         // task start date
+  minDate?: string | null;         // reported completion date (can't confirm earlier)
   busy?: boolean;
+  error?: string | null;           // shown inline -- an alert() would sit behind this modal
   onCancel: () => void;
   onValidate: (reason: string | null) => void;
 }
 
 export default function ValidateCompletionModal({
-  taskName, taskId, targetDueDate, reportedDate, confirmedDate, onChangeConfirmed, minDate, busy, onCancel, onValidate,
+  taskName, taskId, targetDueDate, reportedDate, confirmedDate, onChangeConfirmed, minDate, busy, error, onCancel, onValidate,
 }: ValidateCompletionModalProps) {
   const [reason, setReason] = useState("");
   const reported = reportedDate ? reportedDate.slice(0, 10) : null;
@@ -73,7 +74,7 @@ export default function ValidateCompletionModal({
   return (
     <div
       onClick={busy ? undefined : onCancel}
-      style={{ position: "fixed", inset: 0, background: "rgba(15,41,66,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}
+      style={{ position: "fixed", inset: 0, background: "rgba(15,41,66,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 150 }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -142,6 +143,12 @@ export default function ValidateCompletionModal({
             />
             <div style={{ textAlign: "right", fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>{reason.length}/{MAX_REASON}</div>
           </>
+        )}
+
+        {error && (
+          <div role="alert" style={{ marginTop: 12, padding: "8px 12px", borderRadius: "var(--radius)", background: "var(--danger-bg)", color: "var(--danger-text)", fontSize: 12, fontWeight: 600 }}>
+            {error}
+          </div>
         )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
