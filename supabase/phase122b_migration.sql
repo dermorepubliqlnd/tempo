@@ -1,0 +1,10 @@
+-- Phase 122b/c (2026-09-25, Sandra): Confirmed Completion Date can't be
+-- earlier than the Reported Completion Date. It CAN be earlier than the
+-- due date or start date (people finish early). The start-date rule from
+-- phase122 is removed. Error messages reworded in plain language.
+-- Applied live by patching the live validate_task_completion definition:
+--   removed:  if v_start is not null and v_new_date < v_start then ... start date ...
+--   added:    if v_reported is not null and v_new_date < v_reported then
+--               raise exception 'The confirmed completion date can''t be earlier than the reported completion date (%).', to_char(v_reported, 'Mon FMDD, YYYY');
+--   future:   'The confirmed completion date can''t be in the future.'
+--   reason:   'Please add a reason for adjustment, since the confirmed date differs from the reported date.'
