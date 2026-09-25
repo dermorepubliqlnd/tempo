@@ -1,4 +1,5 @@
 import MultiSelectFilter from "../components/MultiSelectFilter";
+import ValidateCompletionModal from "../components/ValidateCompletionModal";
 import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -164,6 +165,7 @@ interface TaskCompletionRow {
   current_due_date: string | null;
   actual_completion_date: string | null;
   submitted_on: string | null;
+  start_date?: string | null;
   // 2026-09-22 (Sandra: "show scoped hours vs logged hours" on this
   // card) -- Scoped is just the task's own estimated_hours; Logged comes
   // from a separate lightweight time_entries fetch below (ownHoursFor).
@@ -395,7 +397,9 @@ function ValidateActionCells({ row, busy, onValidate }: { row: TaskCompletionRow
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          title="Confirm Completion Date -- the date that gets locked in when you validate"
+          max={(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; })()}
+          min={row.start_date ? row.start_date.slice(0, 10) : undefined}
+          title="Confirmed Completion Date -- the date that gets locked in when you validate"
           style={{ fontSize: 11.5, padding: "6px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }}
         />
       </td>
@@ -416,7 +420,7 @@ function ValidateActionCells({ row, busy, onValidate }: { row: TaskCompletionRow
 
 export default function ApprovalCenter() {
   const { person: me } = useSession();
-  const { confirm, alert, dialog: confirmDialog } = useConfirm();
+  const { alert, dialog: confirmDialog } = useConfirm();
 
   const [loading, setLoading] = useState(true);
   const [people, setPeople] = useState<PersonLite[]>([]);
@@ -441,6 +445,8 @@ export default function ApprovalCenter() {
   // parent_task_id fetch above for why Task Completion excludes these.
   const [parentTaskIds, setParentTaskIds] = useState<Set<string>>(new Set());
   const [decidingKey, setDecidingKey] = useState<string | null>(null);
+  // phase122: the Validate confirm step (ValidateCompletionModal).
+  const [validating, setValidating] = useState<{ row: TaskCompletionRow; date: string } | null>(null);
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
   // Type filter -- clicking a summary card sets this to that kind; click
   // the same card again (or there's nothing else to clear to) resets it
@@ -496,7 +502,7 @@ export default function ApprovalCenter() {
       supabase
         .from("tasks")
         .select(
-          `id, name, task_number, assignee_id, project_id, parent_task_id, current_due_date, actual_completion_date, submitted_on, estimated_hours,
+          `id, name, task_number, assignee_id, project_id, parent_task_id, current_due_date, actual_completion_date, submitted_on, start_date, estimated_hours,
            project:projects ( id, name, owner_id, wbs_status )`
         )
         .eq("status", "Done")
@@ -757,10 +763,10 @@ export default function ApprovalCenter() {
   // still a separate two-step Validate-then-Lock there, since it has no
   // "this is final" confirm step of its own; this only short-circuits
   // that second step when validation happens through this page.
-  async function decideTaskCompletion(row: TaskCompletionRow, validatedDate: string) {
+  async function decideTaskCompletion(row: TaskCompletionRow, validatedDate: string, reason: string | null = null) {
     const key = `taskval-${row.id}`;
     setDecidingKey(key);
-    const { error } = await supabase.rpc("validate_task_completion", { p_task_id: row.id, p_validated_date: new Date(validatedDate).toISOString() });
+    const { error } = await supabase.rpc("validate_task_completion", { p_task_id: row.id, p_validated_date: new Date(validatedDate).toISOString(), p_adjustment_reason: reason });
     if (error) {
       setDecidingKey(null);
       await alert(`Couldn't validate "${row.name}": ${error.message}`);
@@ -768,6 +774,7 @@ export default function ApprovalCenter() {
     }
     const { error: lockError } = await supabase.rpc("lock_task_validation", { p_task_id: row.id });
     setDecidingKey(null);
+    setValidating(null);
     if (lockError) {
       // Validation itself succeeded -- only the lock step failed (rare;
       // e.g. a permission edge case). Surface it rather than silently
@@ -804,17 +811,12 @@ export default function ApprovalCenter() {
   // both the (unchangeable) Due Date and the date about to be locked in
   // as the final, approved completion date, so a validator can't
   // mis-click their way into signing off on the wrong date.
-  async function confirmAndValidate(row: TaskCompletionRow, date: string) {
-    const ok = await confirm({
-      title: "Confirm task validation",
-      message: `Target Due Date: ${formatDate(row.current_due_date)}
-
-You are approving/validating that "${row.name}" was completed on ${formatDate(date)} -- this becomes the final, approved completion date.`,
-      confirmLabel: "Validate",
-      cancelLabel: "Cancel",
-    });
-    if (!ok) return;
-    decideTaskCompletion(row, date);
+  // phase122 (2026-09-25): the paragraph confirm is replaced by
+  // ValidateCompletionModal -- Target / Reported / Confirmed as separate
+  // rows, a variance line, and a required Reason for adjustment whenever
+  // Confirmed differs from Reported.
+  function confirmAndValidate(row: TaskCompletionRow, date: string) {
+    setValidating({ row, date });
   }
 
   // 2026-09-22 (Sandra: "Due Date, Reported Completion, Confirm Completion
@@ -1420,7 +1422,7 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
               <th style={th}>Assignee</th>
               <th style={th}>Due Date</th>
               <th style={th}>Reported Completion</th>
-              <th style={th}>Confirm Completion Date</th>
+              <th style={th}>Confirmed Completion Date</th>
               <th style={{ ...th, textAlign: "center" }}>Action</th>
             </tr>
           </thead>
@@ -1775,6 +1777,18 @@ You are approving/validating that "${row.name}" was completed on ${formatDate(da
       )}
 
       {confirmDialog}
+      {validating && (
+        <ValidateCompletionModal
+          taskName={validating.row.name}
+          taskId={validating.row.task_number ? `T-${String(validating.row.task_number).padStart(4, "0")}` : null}
+          targetDueDate={validating.row.current_due_date}
+          reportedDate={validating.row.actual_completion_date}
+          confirmedDate={validating.date}
+          busy={decidingKey === `taskval-${validating.row.id}`}
+          onCancel={() => setValidating(null)}
+          onValidate={(reason) => decideTaskCompletion(validating.row, validating.date, reason)}
+        />
+      )}
     </div>
   );
 }

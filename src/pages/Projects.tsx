@@ -1,3 +1,4 @@
+import ValidateCompletionModal from "../components/ValidateCompletionModal";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, CornerDownRight, ChevronRight, ChevronDown, Archive, ArchiveRestore, Trash2, Feather, Weight, BicepsFlexed, Flame, AlertTriangle, CalendarClock, CheckCircle2, X, RotateCcw, MessageCircle, Handshake, ShieldCheck, Cpu, Crown, TrendingUp, Wrench, Sparkles, Folder, Lock } from "lucide-react";
@@ -300,6 +301,9 @@ export interface TaskRow {
   // assigned once by the DB, never reused (a hard-deleted or archived
   // task just leaves a gap, by design).
   task_number: number;
+  // phase122: approver's note when Confirmed <> Reported completion date.
+  completion_adjustment_reason?: string | null;
+  validation_performed_at?: string | null;
 }
 
 // Lightweight projection of extension_requests, fetched alongside
@@ -1246,6 +1250,26 @@ export default function Projects() {
     });
   }
   const { confirm, alert, dialog: confirmDialog } = useConfirm();
+  // phase122: Validate confirm step. `editable` = no date was picked before
+  // opening (plain Validate button), so the modal shows its own date input.
+  const [validatingTask, setValidatingTask] = useState<{ t: TaskRow; date: string; editable: boolean } | null>(null);
+  const [validatingBusy, setValidatingBusy] = useState(false);
+  async function submitValidation(reason: string | null) {
+    if (!validatingTask) return;
+    setValidatingBusy(true);
+    const { error } = await supabase.rpc("validate_task_completion", {
+      p_task_id: validatingTask.t.id,
+      p_validated_date: new Date(validatingTask.date).toISOString(),
+      p_adjustment_reason: reason,
+    });
+    setValidatingBusy(false);
+    if (error) {
+      alert(`Couldn't validate: ${error.message}`);
+      return;
+    }
+    setValidatingTask(null);
+    loadAll();
+  }
 
   const [extensionTask, setExtensionTask] = useState<TaskWithDepth | null>(null);
   const [extensionProject, setExtensionProject] = useState<ProjectRow | null>(null);
@@ -3801,7 +3825,7 @@ export default function Projects() {
       },
       {
         key: "validated_completion_date",
-        label: "Confirm Completion Date",
+        label: "Confirmed Completion Date",
         defaultWidth: 160,
         minWidth: 140,
         // Independent completion check, distinct from the assignee's own
@@ -3847,10 +3871,10 @@ export default function Projects() {
             if (!canValidate) return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>Pending validation</span>;
             return (
               <button
-                onClick={async () => {
-                  const { error } = await supabase.rpc("validate_task_completion", { p_task_id: t.id });
-                  if (error) alert(`Couldn't validate: ${error.message}`);
-                  else loadAll();
+                onClick={() => {
+                  const d = new Date();
+                  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                  setValidatingTask({ t, date: (t.actual_completion_date ?? t.submitted_on ?? today).slice(0, 10), editable: true });
                 }}
                 style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}
               >
@@ -3902,6 +3926,15 @@ export default function Projects() {
           }
           return (
             <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              {/* phase122: approver changed the reported date -- show why (and when/who). */}
+              {t.completion_adjustment_reason && (
+                <span
+                  title={`Adjusted from reported ${formatDate(t.actual_completion_date)}: ${t.completion_adjustment_reason}${t.validation_performed_at ? `\nValidated at ${new Date(t.validation_performed_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}` : ""}${t.validated_by ? ` by ${people.find((p) => p.id === t.validated_by)?.name ?? "—"}` : ""}`}
+                  style={{ order: 3, display: "inline-flex", color: "var(--warning-text)", cursor: "help" }}
+                >
+                  <Info size={12} />
+                </span>
+              )}
               {locked ? (
                 // Locked: read-only, green-checkmark/lock indicator.
                 // Clicking it (when authorized) is the entry point into
@@ -3930,19 +3963,14 @@ export default function Projects() {
                 <InlineDate
                   value={dateOnly}
                   editable={canValidate}
-                  onCommit={async (v) => {
-                    if (!v) return;
-                    // Sandra, 2026-08-25: validation date can't be earlier
-                    // than the actual completion date -- you can't sign off
-                    // on completion before the work was actually done.
-                    const completionRef = t.actual_completion_date ?? t.submitted_on;
-                    if (completionRef && v < completionRef.slice(0, 10)) {
-                      alert(`Confirm Completion Date can't be earlier than the reported completion date (${formatDate(completionRef)}).`);
-                      return;
-                    }
-                    const { error } = await supabase.rpc("validate_task_completion", { p_task_id: t.id, p_validated_date: new Date(v).toISOString() });
-                    if (error) alert(`Couldn't save: ${error.message}`);
-                    else loadAll();
+                  onCommit={(v) => {
+                    if (!v || v === dateOnly) return;
+                    // phase122: changing the Confirmed Completion Date goes
+                    // through the same confirm step (and Reason for
+                    // adjustment when it differs from Reported). The old
+                    // "can't be earlier than reported" rule is retired --
+                    // the approver may move it earlier or later with a reason.
+                    setValidatingTask({ t, date: v, editable: false });
                   }}
                 />
               )}
@@ -4969,6 +4997,20 @@ export default function Projects() {
   return (
     <div>
       {confirmDialog}
+      {validatingTask && (
+        <ValidateCompletionModal
+          taskName={validatingTask.t.name}
+          taskId={validatingTask.t.task_number ? `T-${String(validatingTask.t.task_number).padStart(4, "0")}` : null}
+          targetDueDate={validatingTask.t.current_due_date}
+          reportedDate={validatingTask.t.actual_completion_date}
+          confirmedDate={validatingTask.date}
+          minDate={validatingTask.t.start_date}
+          onChangeConfirmed={validatingTask.editable ? (d) => setValidatingTask((prev) => (prev ? { ...prev, date: d } : prev)) : undefined}
+          busy={validatingBusy}
+          onCancel={() => setValidatingTask(null)}
+          onValidate={submitValidation}
+        />
+      )}
       {pauseTargets && (
         <PauseProjectModal
           projects={pauseTargets.map((p) => ({ id: p.id, name: p.name }))}
