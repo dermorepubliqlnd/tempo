@@ -1562,13 +1562,29 @@ export default function Projects() {
     return false;
   }
 
+  // phase121: Full Access overrides for anyone except my own upline (and
+  // myself unless top of chain). Mirrors can_full_access_approve().
+  function canFullAccessApprove(subjectId: string | null): boolean {
+    if (!me?.id || !isFullAccess) return false;
+    if (!subjectId) return true;
+    if (subjectId === me.id) return nearestActiveManagerClient(me.id) === null;
+    let current = chainPeople.find((p) => p.id === me.id)?.reports_to ?? null;
+    let depth = 0;
+    while (current && depth < 20) {
+      if (current === subjectId) return false;
+      current = chainPeople.find((p) => p.id === current)?.reports_to ?? null;
+      depth += 1;
+    }
+    return true;
+  }
+
   function canValidateTask(t: TaskRow): boolean {
     if (isProjectClosed(t.project_id)) return false;
     if (t.assignee_id && t.assignee_id === me?.id) {
       // Own work: only when nobody active sits above you.
       return nearestActiveManagerClient(t.assignee_id) === null;
     }
-    if (isFullAccess) return true;
+    if (canFullAccessApprove(t.assignee_id)) return true;
     return isInApprovalChainOf(t.assignee_id);
   }
 
@@ -1586,7 +1602,7 @@ export default function Projects() {
   // approximation for whether to even show the button.
   function canReopenTask(t: TaskRow): boolean {
     if (isProjectClosed(t.project_id)) return false;
-    if (isFullAccess) return true;
+    if (canFullAccessApprove(t.assignee_id)) return true;
     return isInApprovalChainOf(t.assignee_id);
   }
 

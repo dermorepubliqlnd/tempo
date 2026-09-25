@@ -568,7 +568,7 @@ export default function ApprovalCenter() {
     // phase112: requester's reporting line (Immediate Supervisor or anyone
     // above), or Full Access -- project owners no longer approve.
     if (!me) return false;
-    if (isFullAccess) return true;
+    if (canFullAccessApprove(row.requester?.id ?? null)) return true;
     return isApproverFor(row.requester?.id ?? null);
   }
 
@@ -578,7 +578,7 @@ export default function ApprovalCenter() {
     // phase112: the person whose time it is -- their reporting line, or
     // Full Access (project, non-project and follow-up entries alike).
     if (!me) return false;
-    if (isFullAccess) return true;
+    if (canFullAccessApprove(row.person_id)) return true;
     return isApproverFor(row.person_id);
   }
 
@@ -617,6 +617,24 @@ export default function ApprovalCenter() {
     return null;
   }
 
+  // phase121 (Sandra: "Jo reports to me but he is able to approve my
+  // logs. No."): Full Access overrides for anyone EXCEPT people above me
+  // in my own Reports-to chain, and except myself (top of chain only).
+  // Mirrors can_full_access_approve() in phase121_migration.sql.
+  function canFullAccessApprove(subjectId: string | null): boolean {
+    if (!me || !isFullAccess) return false;
+    if (!subjectId) return true;
+    if (subjectId === me.id) return nearestActiveManager(me.id) === null;
+    let current = chainPeople.find((p) => p.id === me.id)?.reports_to ?? null;
+    let depth = 0;
+    while (current && depth < 20) {
+      if (current === subjectId) return false;
+      current = chainPeople.find((p) => p.id === current)?.reports_to ?? null;
+      depth += 1;
+    }
+    return true;
+  }
+
   // phase112 (Sandra: "all approvals route to the immediate supervisor,
   // following hierarchy -- skip level if the supervisor is out"): true if
   // I sit anywhere above personId in the Reports-to chain. Mirrors
@@ -646,7 +664,7 @@ export default function ApprovalCenter() {
     if (!me) return false;
     if (row.project?.wbs_status === "closed") return false;
     if (row.assignee_id && row.assignee_id === me.id) return nearestActiveManager(row.assignee_id) === null;
-    if (isFullAccess) return true;
+    if (canFullAccessApprove(row.assignee_id)) return true;
     return isApproverFor(row.assignee_id);
   }
 
@@ -692,7 +710,7 @@ export default function ApprovalCenter() {
     // (except top of chain).
     if (!me) return false;
     if (row.requested_by === me.id) return nearestActiveManager(row.requested_by) === null;
-    if (isFullAccess) return true;
+    if (canFullAccessApprove(row.requested_by)) return true;
     return isApproverFor(row.requested_by);
   }
 
