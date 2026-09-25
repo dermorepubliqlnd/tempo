@@ -1252,7 +1252,7 @@ export default function Projects() {
   const { confirm, alert, dialog: confirmDialog } = useConfirm();
   // phase122: Validate confirm step. `editable` = no date was picked before
   // opening (plain Validate button), so the modal shows its own date input.
-  const [validatingTask, setValidatingTask] = useState<{ t: TaskRow; date: string; editable: boolean } | null>(null);
+  const [validatingTask, setValidatingTask] = useState<{ t: TaskRow; date: string; editable: boolean; error?: string | null } | null>(null);
   const [validatingBusy, setValidatingBusy] = useState(false);
   async function submitValidation(reason: string | null) {
     if (!validatingTask) return;
@@ -1264,7 +1264,7 @@ export default function Projects() {
     });
     setValidatingBusy(false);
     if (error) {
-      alert(`Couldn't validate: ${error.message}`);
+      setValidatingTask((prev) => (prev ? { ...prev, error: error.message } : prev));
       return;
     }
     setValidatingTask(null);
@@ -5004,9 +5004,10 @@ export default function Projects() {
           targetDueDate={validatingTask.t.current_due_date}
           reportedDate={validatingTask.t.actual_completion_date}
           confirmedDate={validatingTask.date}
-          minDate={validatingTask.t.start_date}
-          onChangeConfirmed={validatingTask.editable ? (d) => setValidatingTask((prev) => (prev ? { ...prev, date: d } : prev)) : undefined}
+          minDate={validatingTask.t.actual_completion_date}
+          onChangeConfirmed={validatingTask.editable ? (d) => setValidatingTask((prev) => (prev ? { ...prev, date: d, error: null } : prev)) : undefined}
           busy={validatingBusy}
+          error={validatingTask.error}
           onCancel={() => setValidatingTask(null)}
           onValidate={submitValidation}
         />

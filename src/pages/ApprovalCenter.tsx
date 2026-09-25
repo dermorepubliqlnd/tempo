@@ -398,7 +398,7 @@ function ValidateActionCells({ row, busy, onValidate }: { row: TaskCompletionRow
           value={date}
           onChange={(e) => setDate(e.target.value)}
           max={(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; })()}
-          min={row.start_date ? row.start_date.slice(0, 10) : undefined}
+          min={row.actual_completion_date ? row.actual_completion_date.slice(0, 10) : undefined}
           title="Confirmed Completion Date -- the date that gets locked in when you validate"
           style={{ fontSize: 11.5, padding: "6px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }}
         />
@@ -446,7 +446,7 @@ export default function ApprovalCenter() {
   const [parentTaskIds, setParentTaskIds] = useState<Set<string>>(new Set());
   const [decidingKey, setDecidingKey] = useState<string | null>(null);
   // phase122: the Validate confirm step (ValidateCompletionModal).
-  const [validating, setValidating] = useState<{ row: TaskCompletionRow; date: string } | null>(null);
+  const [validating, setValidating] = useState<{ row: TaskCompletionRow; date: string; error?: string | null } | null>(null);
   const [notesDraft, setNotesDraft] = useState<Record<string, string>>({});
   // Type filter -- clicking a summary card sets this to that kind; click
   // the same card again (or there's nothing else to clear to) resets it
@@ -769,7 +769,8 @@ export default function ApprovalCenter() {
     const { error } = await supabase.rpc("validate_task_completion", { p_task_id: row.id, p_validated_date: new Date(validatedDate).toISOString(), p_adjustment_reason: reason });
     if (error) {
       setDecidingKey(null);
-      await alert(`Couldn't validate "${row.name}": ${error.message}`);
+      // phase122: show inside the modal (an alert would open behind it).
+      setValidating((prev) => (prev ? { ...prev, error: error.message } : prev));
       return;
     }
     const { error: lockError } = await supabase.rpc("lock_task_validation", { p_task_id: row.id });
@@ -1785,6 +1786,7 @@ export default function ApprovalCenter() {
           reportedDate={validating.row.actual_completion_date}
           confirmedDate={validating.date}
           busy={decidingKey === `taskval-${validating.row.id}`}
+          error={validating.error}
           onCancel={() => setValidating(null)}
           onValidate={(reason) => decideTaskCompletion(validating.row, validating.date, reason)}
         />
