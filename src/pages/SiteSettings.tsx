@@ -3,6 +3,7 @@ import { ShieldCheck, ShieldOff, Pencil, Check, X, Plus, ArrowUp, ArrowDown, Tra
 import { supabase } from "../lib/supabaseClient";
 import { archiveItem } from "../lib/archive";
 import { useSession } from "../lib/useSession";
+import ListColorPicker from "../components/ListColorPicker";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_ICON_NAMES, CATEGORY_TONE_NAMES, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 
 function AccessDenied() {
@@ -67,6 +68,7 @@ interface WorkTypeRow {
   sort_order: number;
   is_active: boolean;
   is_fixed_schedule: boolean;
+  color?: string | null;
 }
 
 // Project Source -- admin-configurable lookup (Phase 20, 2026-08-24) for
@@ -80,6 +82,7 @@ interface ProjectSourceRow {
   name: string;
   sort_order: number;
   is_active: boolean;
+  color?: string | null;
 }
 
 // Project Planning Type -- admin-configurable lookup (Phase 38,
@@ -97,6 +100,7 @@ interface ProjectPlanningTypeRow {
   name: string;
   sort_order: number;
   is_active: boolean;
+  color?: string | null;
 }
 
 // Project Type -- admin-configurable lookup (Phase 50, 2026-09-21).
@@ -114,6 +118,7 @@ interface ProjectTypeRow {
   name: string;
   sort_order: number;
   is_active: boolean;
+  color?: string | null;
 }
 
 // Time Logging Reason -- admin-configurable lookup (Phase 37,
@@ -197,6 +202,7 @@ interface ProjectPhaseRow {
   name: string;
   sort_order: number;
   is_active: boolean;
+  color?: string | null;
 }
 
 // Output Type -- admin-configurable lookup (Phase 21, 2026-08-24) for
@@ -210,6 +216,7 @@ interface OutputTypeRow {
   name: string;
   sort_order: number;
   is_active: boolean;
+  color?: string | null;
 }
 
 export default function SiteSettings() {
@@ -396,7 +403,7 @@ export default function SiteSettings() {
 
   async function loadWorkTypes() {
     setWorkTypesLoading(true);
-    const { data } = await supabase.from("work_types").select("id,name,sort_order,is_active,is_fixed_schedule").eq("is_archived", false).order("sort_order");
+    const { data } = await supabase.from("work_types").select("id,name,sort_order,is_active,is_fixed_schedule,color").eq("is_archived", false).order("sort_order");
     setWorkTypes((data as WorkTypeRow[]) ?? []);
     setWorkTypesLoading(false);
   }
@@ -536,7 +543,7 @@ export default function SiteSettings() {
 
   async function loadProjectSources() {
     setProjectSourcesLoading(true);
-    const { data } = await supabase.from("project_sources").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
+    const { data } = await supabase.from("project_sources").select("id,name,sort_order,is_active,color").eq("is_archived", false).order("sort_order");
     setProjectSources((data as ProjectSourceRow[]) ?? []);
     setProjectSourcesLoading(false);
   }
@@ -645,7 +652,7 @@ export default function SiteSettings() {
 
   async function loadProjectPlanningTypes() {
     setProjectPlanningTypesLoading(true);
-    const { data } = await supabase.from("project_planning_types").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
+    const { data } = await supabase.from("project_planning_types").select("id,name,sort_order,is_active,color").eq("is_archived", false).order("sort_order");
     setProjectPlanningTypes((data as ProjectPlanningTypeRow[]) ?? []);
     setProjectPlanningTypesLoading(false);
   }
@@ -749,7 +756,7 @@ export default function SiteSettings() {
 
   async function loadProjectTypes() {
     setProjectTypesLoading(true);
-    const { data } = await supabase.from("project_types").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
+    const { data } = await supabase.from("project_types").select("id,name,sort_order,is_active,color").eq("is_archived", false).order("sort_order");
     setProjectTypes((data as ProjectTypeRow[]) ?? []);
     setProjectTypesLoading(false);
   }
@@ -982,7 +989,7 @@ export default function SiteSettings() {
 
   async function loadProjectPhases() {
     setProjectPhasesLoading(true);
-    const { data } = await supabase.from("project_phases").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
+    const { data } = await supabase.from("project_phases").select("id,name,sort_order,is_active,color").eq("is_archived", false).order("sort_order");
     setProjectPhases((data as ProjectPhaseRow[]) ?? []);
     setProjectPhasesLoading(false);
   }
@@ -1115,7 +1122,7 @@ export default function SiteSettings() {
 
   async function loadOutputTypes() {
     setOutputTypesLoading(true);
-    const { data } = await supabase.from("output_types").select("id,name,sort_order,is_active").eq("is_archived", false).order("sort_order");
+    const { data } = await supabase.from("output_types").select("id,name,sort_order,is_active,color").eq("is_archived", false).order("sort_order");
     setOutputTypes((data as OutputTypeRow[]) ?? []);
     setOutputTypesLoading(false);
   }
@@ -2096,6 +2103,7 @@ export default function SiteSettings() {
                         >
                           <GripVertical size={14} />
                         </span>
+                        <ListColorPicker table="project_sources" id={s.id} name={s.name} color={s.color} onSaved={loadProjectSources} />
                         {isEditing ? (
                           <input
                             value={editProjectSourceName}
@@ -2421,6 +2429,7 @@ export default function SiteSettings() {
                         >
                           <GripVertical size={14} />
                         </span>
+                        <ListColorPicker table="project_phases" id={ph.id} name={ph.name} color={ph.color} onSaved={loadProjectPhases} />
                         {isEditing ? (
                           <input
                             value={editProjectPhaseName}
@@ -3072,6 +3081,7 @@ export default function SiteSettings() {
                         >
                           <GripVertical size={14} />
                         </span>
+                        <ListColorPicker table="project_types" id={t.id} name={t.name} color={t.color} onSaved={loadProjectTypes} />
                         {isEditing ? (
                           <input
                             value={editProjectTypeName}
@@ -3102,6 +3112,117 @@ export default function SiteSettings() {
                           {t.is_active ? <ShieldOff size={13} /> : <ShieldCheck size={13} />}
                         </button>
                         <button onClick={() => deleteProjectType(t)} disabled={projectTypeBusy} title="Delete (only if unused)" style={iconBtnStyle("var(--danger-text)")}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : manageDrawer === "planning_types" ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>Manage Project Planning Types</div>
+                  <button onClick={() => setManageDrawer(null)} style={{ display: "flex", background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+                    <X size={16} />
+                  </button>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 14 }}>
+                  Drag the grip handle to reorder. Deactivating keeps a planning type's label on any project that
+                  already has it set -- it just disappears from the picker on new projects.
+                </div>
+
+                <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                  <input
+                    value={newProjectPlanningTypeName}
+                    onChange={(e) => setNewProjectPlanningTypeName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addProjectPlanningType();
+                    }}
+                    placeholder="New planning type name"
+                    spellCheck={false}
+                    autoComplete="off"
+                    style={{ ...inputStyle, marginTop: 0, flex: 1 }}
+                  />
+                  <button onClick={addProjectPlanningType} disabled={projectPlanningTypeBusy || !newProjectPlanningTypeName.trim()} style={addButtonStyle(!newProjectPlanningTypeName.trim())}>
+                    <Plus size={14} />
+                    Add
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+                  {projectPlanningTypesLoading && <div style={{ padding: 10, fontSize: 11.5, color: "var(--muted)" }}>Loading…</div>}
+                  {!projectPlanningTypesLoading && projectPlanningTypes.length === 0 && (
+                    <div style={{ padding: 10, fontSize: 11.5, color: "var(--muted)" }}>None yet.</div>
+                  )}
+                  {projectPlanningTypes.map((t) => {
+                    const isEditing = editingProjectPlanningTypeId === t.id;
+                    const isDragging = draggedProjectPlanningTypeId === t.id;
+                    return (
+                      <div
+                        key={t.id}
+                        onDragOver={(e) => {
+                          if (!draggedProjectPlanningTypeId || draggedProjectPlanningTypeId === t.id) return;
+                          e.preventDefault();
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (!draggedProjectPlanningTypeId) return;
+                          const ids = projectPlanningTypes.map((x) => x.id);
+                          const without = ids.filter((id) => id !== draggedProjectPlanningTypeId);
+                          without.splice(without.indexOf(t.id), 0, draggedProjectPlanningTypeId);
+                          setDraggedProjectPlanningTypeId(null);
+                          reorderProjectPlanningTypes(without);
+                        }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          padding: "7px 10px",
+                          borderBottom: "1px solid var(--border)",
+                          opacity: isDragging ? 0.4 : t.is_active ? 1 : 0.55,
+                        }}
+                      >
+                        <span
+                          draggable
+                          onDragStart={() => setDraggedProjectPlanningTypeId(t.id)}
+                          onDragEnd={() => setDraggedProjectPlanningTypeId(null)}
+                          title="Drag to reorder"
+                          style={{ display: "flex", cursor: "grab", color: "var(--text-secondary)", flexShrink: 0 }}
+                        >
+                          <GripVertical size={14} />
+                        </span>
+                        <ListColorPicker table="project_planning_types" id={t.id} name={t.name} color={t.color} onSaved={loadProjectPlanningTypes} />
+                        {isEditing ? (
+                          <input
+                            value={editProjectPlanningTypeName}
+                            onChange={(e) => setEditProjectPlanningTypeName(e.target.value)}
+                            onBlur={() => saveProjectPlanningTypeRename(t.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveProjectPlanningTypeRename(t.id);
+                              if (e.key === "Escape") setEditingProjectPlanningTypeId(null);
+                            }}
+                            autoFocus
+                            spellCheck={false}
+                            autoComplete="off"
+                            style={{ ...inputStyle, marginTop: 0, flex: 1, fontWeight: 600 }}
+                          />
+                        ) : (
+                          <span
+                            onClick={() => startEditProjectPlanningType(t)}
+                            title="Click to rename"
+                            style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: "var(--navy)", cursor: "pointer" }}
+                          >
+                            {t.name}
+                          </span>
+                        )}
+                        <span className={`status-pill ${t.is_active ? "success" : "neutral"}`} style={{ fontSize: 10 }}>
+                          {t.is_active ? "Active" : "Off"}
+                        </span>
+                        <button onClick={() => toggleProjectPlanningTypeActive(t)} disabled={projectPlanningTypeBusy} title={t.is_active ? "Deactivate" : "Reactivate"} style={iconBtnStyle(t.is_active ? "var(--danger-text)" : "var(--success-text)")}>
+                          {t.is_active ? <ShieldOff size={13} /> : <ShieldCheck size={13} />}
+                        </button>
+                        <button onClick={() => deleteProjectPlanningType(t)} disabled={projectPlanningTypeBusy} title="Delete (only if unused)" style={iconBtnStyle("var(--danger-text)")}>
                           <Trash2 size={13} />
                         </button>
                       </div>
@@ -3196,6 +3317,7 @@ export default function SiteSettings() {
                               }}
                             >
                               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                                <ListColorPicker table="output_types" id={o.id} name={o.name} color={o.color} onSaved={loadOutputTypes} />
                                 {isEditingCol ? (
                                   <input
                                     value={editOutputTypeName}
@@ -3291,6 +3413,7 @@ export default function SiteSettings() {
                                 >
                                   <GripVertical size={13} />
                                 </span>
+                                <ListColorPicker table="work_types" id={w.id} name={w.name} color={w.color} onSaved={loadWorkTypes} />
                                 {isEditingRow ? (
                                   <input
                                     value={editWorkTypeName}

@@ -98,6 +98,7 @@ interface WorkTypeOption {
   name: string;
   is_active: boolean;
   sort_order: number;
+  color?: string | null;
 }
 // 2026-09-22 (Sandra: show Output Type/Output Count on the Task list,
 // outside WBS Planning) -- same admin-configurable lookup WbsPlanning.tsx
@@ -107,6 +108,7 @@ interface OutputTypeOption {
   name: string;
   is_active: boolean;
   sort_order: number;
+  color?: string | null;
 }
 
 // Project Source (Phase 20, 2026-08-24) -- admin-configurable lookup for
@@ -119,6 +121,7 @@ interface ProjectSourceOption {
   name: string;
   is_active: boolean;
   sort_order: number;
+  color?: string | null;
 }
 
 // Project Planning Type (Phase 38, 2026-09-03) -- admin-configurable
@@ -133,6 +136,7 @@ interface ProjectPlanningTypeOption {
   name: string;
   is_active: boolean;
   sort_order: number;
+  color?: string | null;
 }
 
 // Project Type (Phase 50, 2026-09-21) -- admin-configurable lookup for
@@ -146,6 +150,7 @@ interface ProjectTypeOption {
   name: string;
   is_active: boolean;
   sort_order: number;
+  color?: string | null;
 }
 
 // Project Category (2026-09-03) -- admin-configurable lookup, mirrors
@@ -187,6 +192,7 @@ interface ProjectPhaseOption {
   name: string;
   is_active: boolean;
   sort_order: number;
+  color?: string | null;
 }
 
 export interface ProjectRow {
@@ -690,7 +696,23 @@ function priorityTone(priority: string | null): "success" | "warning" | "danger"
 // same convenience PROJECT_EFFORT_LEVEL_TONES/PROJECT_STATUS_TONES apply
 // to their own admin-extendable-in-spirit enums. Any other name (e.g. a
 // future "Urgent" tier) just falls back to neutral rather than erroring.
-function planningTypeTone(name: string | null): "success" | "warning" | "neutral" {
+// phase124 (2026-09-29): admin-chosen pill colors from Site Settings,
+// keyed by option name. Filled in loadAll (module-level so the existing
+// name-based tone helpers below keep their signatures); the hardcoded
+// names underneath are only a fallback before the first load.
+const LIST_PILL_COLORS: { planningType: Record<string, string>; projectType: Record<string, string>; phase: Record<string, string> } = {
+  planningType: {},
+  projectType: {},
+  phase: {},
+};
+
+function phaseTone(name: string | null): string {
+  if (!name) return "neutral";
+  return LIST_PILL_COLORS.phase[name] ?? PROJECT_PHASE_TONES[name] ?? "neutral";
+}
+
+function planningTypeTone(name: string | null): string {
+  if (name && LIST_PILL_COLORS.planningType[name]) return LIST_PILL_COLORS.planningType[name];
   if (name === "Planned") return "success";
   if (name === "Ad Hoc") return "warning";
   return "neutral";
@@ -701,7 +723,8 @@ function planningTypeTone(name: string | null): "success" | "warning" | "neutral
 // convenience for the 2 default names Sandra seeded (BAU/Development),
 // same convention as planningTypeTone above. Any other name just falls
 // back to neutral rather than erroring.
-function projectTypeTone(name: string | null): "success" | "accent" | "neutral" {
+function projectTypeTone(name: string | null): string {
+  if (name && LIST_PILL_COLORS.projectType[name]) return LIST_PILL_COLORS.projectType[name];
   if (name === "BAU") return "success";
   if (name === "Development") return "accent";
   return "neutral";
@@ -1316,11 +1339,11 @@ export default function Projects() {
       supabase.from("project_notes").select("project_id"),
       // Deletion archive (2026-08-14c) -- see DeletedSpentHourRow above.
       supabase.from("deleted_project_spent_hours_archive").select("project_id,person_id,hours"),
-      supabase.from("work_types").select("id,name,is_active,sort_order").order("sort_order"),
-      supabase.from("output_types").select("id,name,is_active,sort_order").order("sort_order"),
-      supabase.from("project_sources").select("id,name,is_active,sort_order").order("sort_order"),
+      supabase.from("work_types").select("id,name,is_active,sort_order,color").order("sort_order"),
+      supabase.from("output_types").select("id,name,is_active,sort_order,color").order("sort_order"),
+      supabase.from("project_sources").select("id,name,is_active,sort_order,color").order("sort_order"),
       supabase.from("project_categories").select("id,name,is_active,sort_order,icon,color").order("sort_order"),
-      supabase.from("project_phases").select("id,name,is_active,sort_order").order("sort_order"),
+      supabase.from("project_phases").select("id,name,is_active,sort_order,color").order("sort_order"),
       supabase.from("project_status_phase_mapping").select("status,phase_id"),
       // 2026-09-03 (Sandra: "can WBS Status also update to Awaiting
       // Baseline Approval if it's queued for approval") -- display-only:
@@ -1330,8 +1353,8 @@ export default function Projects() {
       // status that still means "waiting" (decide_baseline_request
       // immediately flips it to approved/rejected).
       supabase.from("project_baseline_requests").select("project_id").eq("status", "pending"),
-      supabase.from("project_planning_types").select("id,name,is_active,sort_order").order("sort_order"),
-      supabase.from("project_types").select("id,name,is_active,sort_order").order("sort_order"),
+      supabase.from("project_planning_types").select("id,name,is_active,sort_order,color").order("sort_order"),
+      supabase.from("project_types").select("id,name,is_active,sort_order,color").order("sort_order"),
       // 2026-09-07 (Sandra: Sign Off Date) -- see closedAtByProjectId above.
       supabase.from("project_closeouts").select("project_id,closed_at"),
       // 2026-09-08 (Sandra: "I want baseline approvals be captured like
@@ -1370,6 +1393,9 @@ export default function Projects() {
     setPendingBaselineProjectIds(new Set(((pendingBaselineData as { project_id: string }[]) ?? []).map((r) => r.project_id)));
     setProjectPlanningTypes((projectPlanningTypeData as ProjectPlanningTypeOption[]) ?? []);
     setProjectTypes((projectTypeData as ProjectTypeOption[]) ?? []);
+    LIST_PILL_COLORS.projectType = Object.fromEntries(((projectTypeData as ProjectTypeOption[]) ?? []).map((r) => [r.name, r.color || "neutral"]));
+    LIST_PILL_COLORS.planningType = Object.fromEntries(((projectPlanningTypeData as ProjectPlanningTypeOption[]) ?? []).map((r) => [r.name, r.color || "neutral"]));
+    LIST_PILL_COLORS.phase = Object.fromEntries(((projectPhaseData as ProjectPhaseOption[]) ?? []).map((r) => [r.name, r.color || "neutral"]));
     // 2026-09-07 (Sandra: Sign Off Date).
     const nextClosedAt: Record<string, string> = {};
     for (const row of (closeoutData as { project_id: string; closed_at: string }[]) ?? []) {
@@ -2532,7 +2558,7 @@ export default function Projects() {
             editable={canEditPhase(p)}
             allowEmpty
             options={phaseOptionsForStatus(projectStatusOf(p), p.phase)}
-            renderReadOnly={() => (p.phase ? <span className={`status-pill ${PROJECT_PHASE_TONES[p.phase ?? ""] ?? "neutral"}`}>{p.phase}</span> : "—")}
+            renderReadOnly={() => (p.phase ? <span className={`status-pill ${phaseTone(p.phase)}`}>{p.phase}</span> : "—")}
             onCommit={async (v) => {
               // 2026-09-08: Phase used to be fully locked while Draft (see
               // canEditPhase's doc comment) -- now allowed, but the options
@@ -2687,7 +2713,7 @@ export default function Projects() {
               editable={canEditProjectSetupField(p)}
               allowEmpty
               options={activeSourceOptions}
-              renderReadOnly={() => (currentName ? <span className="status-pill neutral">{currentName}</span> : "—")}
+              renderReadOnly={() => (currentName ? <span className={`status-pill ${projectSources.find((s) => s.id === p.source_id)?.color || "neutral"}`}>{currentName}</span> : "—")}
               onCommit={(v) => {
                 const match = projectSources.find((s) => s.name === v);
                 updateProject(p.id, { source_id: match?.id ?? null });
@@ -2985,7 +3011,7 @@ export default function Projects() {
       key: "phase",
       label: "Phase",
       getGroup: (p) => p.phase ?? "No phase",
-      getTone: (p) => PROJECT_PHASE_TONES[p.phase ?? ""] ?? "neutral",
+      getTone: (p) => phaseTone(p.phase),
       allGroups: () => [...activePhaseNames, "No phase"],
     },
     {
@@ -3013,7 +3039,7 @@ export default function Projects() {
       key: "source",
       label: "Source",
       getGroup: (p) => projectSources.find((s) => s.id === p.source_id)?.name ?? "Not set",
-      getTone: () => "neutral",
+      getTone: (p) => projectSources.find((s) => s.id === p.source_id)?.color || "neutral",
       allGroups: () => [...projectSources.filter((s) => s.is_active).map((s) => s.name), "Not set"],
     },
     {
@@ -3096,7 +3122,7 @@ export default function Projects() {
       key: "phase",
       label: "Phase",
       getGroup: (p) => p.phase ?? "No phase",
-      getTone: (p) => PROJECT_PHASE_TONES[p.phase ?? ""] ?? "neutral",
+      getTone: (p) => phaseTone(p.phase),
       boardGroupable: true,
     },
     {
@@ -3118,7 +3144,7 @@ export default function Projects() {
       key: "source",
       label: "Source",
       getGroup: (p) => projectSources.find((s) => s.id === p.source_id)?.name ?? "Not set",
-      getTone: () => "neutral",
+      getTone: (p) => projectSources.find((s) => s.id === p.source_id)?.color || "neutral",
       boardGroupable: true,
     },
     {
@@ -3170,7 +3196,7 @@ export default function Projects() {
     if (groupBy === "priority") return PROJECT_PRIORITY_OPTIONS.map((v) => ({ value: v, label: priorityLabel(v), tone: priorityTone(v) }));
     if (groupBy === "category") return projectCategoryOptions.map((v) => ({ value: v, label: v, tone: categoryToneMap[v] ?? "neutral" }));
     if (groupBy === "source")
-      return projectSources.filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name, tone: "neutral" }));
+      return projectSources.filter((s) => s.is_active).map((s) => ({ value: s.id, label: s.name, tone: s.color || "neutral" }));
     if (groupBy === "planning_type")
       return projectPlanningTypes.filter((t) => t.is_active).map((t) => ({ value: t.id, label: t.name, tone: planningTypeTone(t.name) }));
     if (groupBy === "project_type")
@@ -3192,7 +3218,7 @@ export default function Projects() {
         value: ph.name,
         label: ph.name,
         clusterLabel: ph.name === "Done" ? "Completed" : notStartedNames.has(ph.name) ? "Not Started" : inProgressNames.has(ph.name) ? "In Progress" : "In Progress",
-        tone: PROJECT_PHASE_TONES[ph.name] ?? "neutral",
+        tone: phaseTone(ph.name),
       }));
   }
 
@@ -3642,7 +3668,7 @@ export default function Projects() {
         render: (t) => {
           if (t._depth === 0 && hasChildren(t.id)) return <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="Not applicable -- set on the sub-tasks.">N/A</span>;
           const wt = workTypes.find((w) => w.id === t.work_type_id);
-          return wt ? <span className="status-pill neutral">{wt.name}</span> : <span style={{ color: "var(--muted)" }}>—</span>;
+          return wt ? <span className={`status-pill ${wt.color || "neutral"}`}>{wt.name}</span> : <span style={{ color: "var(--muted)" }}>—</span>;
         },
       },
       // 2026-09-22 (Sandra: "enable output count and output type to be
@@ -3661,7 +3687,7 @@ export default function Projects() {
         render: (t) => {
           if (t._depth === 0 && hasChildren(t.id)) return <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="Not applicable -- outputs are counted on the sub-tasks.">N/A</span>;
           const ot = outputTypes.find((o) => o.id === t.output_type_id);
-          return ot ? <span className="status-pill neutral">{ot.name}</span> : <span style={{ color: "var(--muted)" }}>—</span>;
+          return ot ? <span className={`status-pill ${ot.color || "neutral"}`}>{ot.name}</span> : <span style={{ color: "var(--muted)" }}>—</span>;
         },
       },
       {
@@ -4554,6 +4580,7 @@ export default function Projects() {
       key: "work_type",
       label: "Work Type",
       getGroup: (t) => workTypes.find((w) => w.id === t.work_type_id)?.name ?? "No work type set",
+      getTone: (t) => workTypes.find((w) => w.id === t.work_type_id)?.color || "neutral",
       // workTypes is already alphabetized (Phase 23's one-time DB re-sort
       // + everything reads .order("sort_order")), so this just carries
       // that same order into the grouped Table view's section headers.
@@ -4639,6 +4666,7 @@ export default function Projects() {
       key: "work_type",
       label: "Work Type",
       getGroup: (t) => workTypes.find((w) => w.id === t.work_type_id)?.name ?? "No work type set",
+      getTone: (t) => workTypes.find((w) => w.id === t.work_type_id)?.color || "neutral",
       boardGroupable: true,
     },
   ];
@@ -4658,7 +4686,7 @@ export default function Projects() {
   function getTaskBoardColumns(groupBy: string): BoardColumnDef[] {
     if (groupBy === "assignee") return people.map((person) => ({ value: person.id, label: person.name, tone: "neutral" }));
     if (groupBy === "effort") return TASK_EFFORT_OPTIONS.map((v) => ({ value: v, label: v, tone: TASK_EFFORT_DEFAULT_TONES[v] ?? "neutral" }));
-    if (groupBy === "work_type") return workTypes.filter((w) => w.is_active).map((w) => ({ value: w.id, label: w.name, tone: "neutral" }));
+    if (groupBy === "work_type") return workTypes.filter((w) => w.is_active).map((w) => ({ value: w.id, label: w.name, tone: w.color || "neutral" }));
     if (groupBy === "project") return projects.map((p) => ({ value: p.id, label: p.name ?? "Untitled", tone: "neutral" }));
     if (groupBy === "timing") return TASK_TIMING_BOARD_COLUMNS;
     if (groupBy === "due_date_ext") return DUE_DATE_EXT_BOARD_COLUMNS;
