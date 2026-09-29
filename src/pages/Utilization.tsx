@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown, Minus, Circle, CheckCircle2, TrendingUp, Gauge, AlertTriangle, Clock } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Minus, Circle, CheckCircle2, TrendingUp, Gauge, AlertTriangle, Info, X, Search } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
@@ -44,6 +44,8 @@ interface TaskRow {
   is_archived: boolean;
   sort_order: number | null;
   work_type_id: string | null;
+  created_at: string;
+  created_by: string | null;
 }
 interface AvailabilityRow {
   id: string;
@@ -112,7 +114,7 @@ const WEEKDAY_LABEL = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 // these two in lockstep with the same constants in DayPlanner.tsx so the
 // two grids stay visually matched.
 const CELL_W = 58;
-const LABEL_W = 275;
+const LABEL_W = 360;
 // Weekly-mode columns need more room than a daily cell (two lines: avg %
 // and a "planned / available" hours summary underneath).
 const WEEK_CELL_W = 108;
@@ -204,6 +206,11 @@ export default function Utilization() {
   const [workTypes, setWorkTypes] = useState<{ id: string; is_fixed_schedule: boolean }[]>([]);
   const [ownerHistory, setOwnerHistory] = useState<OwnerHistoryRow[]>([]);
   const [assigneeHistory, setAssigneeHistory] = useState<AssigneeHistoryRow[]>([]);
+  // Always-retained assignment history for workload-entry diagnostics. The
+  // allocation engine may intentionally ignore history while historical
+  // locking is disabled, but "when did this task enter this person's
+  // workload?" must remain independently observable.
+  const [workloadAssigneeHistory, setWorkloadAssigneeHistory] = useState<AssigneeHistoryRow[]>([]);
   const [deletedHours, setDeletedHours] = useState<DeletedHourRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -246,10 +253,12 @@ export default function Utilization() {
   // Role filter (2026-09-18, Sandra: "add option to filter by role") --
   // filters by the same job_title field shown under each name.
   const [roleFilter, setRoleFilter] = useState<string | null>(null);
-  // Hours toggle (2026-09-03, Sandra: "allow toggle to view hours too or
-  // hide it" in both Daily and Weekly) -- same pattern/default (on) as the
-  // WBS snapshot's own Hours toggle (WbsPlanning.tsx utilShowHours).
-  const [showHours, setShowHours] = useState(true);
+  // Phase 1 utilization UX: make the display intent explicit instead of
+  // treating hours as a secondary on/off decoration.
+  const [displayMode, setDisplayMode] = useState<"both" | "utilization" | "hours">("both");
+  const [taskSort, setTaskSort] = useState<"project" | "oldest" | "newest">("project");
+  const [taskSearch, setTaskSearch] = useState("");
+  const [selectedCell, setSelectedCell] = useState<{ personId: string; dateStr: string } | null>(null);
 
   async function loadAll() {
     setLoading(true);
@@ -257,7 +266,7 @@ export default function Utilization() {
       supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").eq("is_active", true).order("name"),
       supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").order("name"),
       supabase.from("projects").select("id,name,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at").eq("is_archived", false),
-      supabase.from("tasks").select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,sort_order,work_type_id").eq("is_archived", false),
+      supabase.from("tasks").select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,sort_order,work_type_id,created_at,created_by").eq("is_archived", false),
       supabase.from("person_availability").select("*"),
       supabase.from("holidays").select("*"),
       supabase.from("work_types").select("id,is_fixed_schedule"),
@@ -281,6 +290,7 @@ export default function Utilization() {
     // owner_id/assignee_id everywhere below (their pre-history behavior).
     const historicalLockingEnabled = (settings as { historical_locking_enabled?: boolean } | null)?.historical_locking_enabled ?? false;
     setOwnerHistory(historicalLockingEnabled ? (ownHist as OwnerHistoryRow[]) ?? [] : []);
+    setWorkloadAssigneeHistory((assHist as AssigneeHistoryRow[]) ?? []);
     setAssigneeHistory(historicalLockingEnabled ? (assHist as AssigneeHistoryRow[]) ?? [] : []);
     setDeletedHours((delHrs as DeletedHourRow[]) ?? []);
     setLoading(false);
@@ -480,6 +490,47 @@ export default function Utilization() {
     return engineProjects.filter((p) => p.owner_id === personId || historicalOwnerIds(p.id).has(personId));
   }
 
+  type WorkloadEntry = { date: string | null; estimated: boolean };
+
+  function workloadEntryFor(t: TaskRow, personId: string): WorkloadEntry {
+    const assignment = workloadAssigneeHistory
+      .filter((h) => h.task_id === t.id && h.person_id === personId)
+      .sort((a, b) => a.effective_from.localeCompare(b.effective_from))[0];
+    if (assignment) return { date: assignment.effective_from.slice(0, 10), estimated: false };
+
+    const date = t.created_at ? t.created_at.slice(0, 10) : null;
+    // created_at was introduced on Sep 21 and older rows were reconstructed
+    // from their historical epoch-ms sort_order. Keep that useful history,
+    // but surface its approximate nature rather than presenting it as audit
+    // certainty.
+    return { date, estimated: !!date && date < "2026-09-21" };
+  }
+
+  function formatWorkloadDate(entry: WorkloadEntry): string {
+    if (!entry.date) return "—";
+    const d = parseLocalDate(entry.date);
+    const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    return entry.estimated ? `~${label}` : label;
+  }
+
+  function orderedTasksFor(personId: string): TaskRow[] {
+    const q = taskSearch.trim().toLowerCase();
+    const rows = openTasksFor(personId).filter((t) => {
+      if (!q) return true;
+      const projectName = projects.find((p) => p.id === t.project_id)?.name ?? "";
+      return t.name.toLowerCase().includes(q) || projectName.toLowerCase().includes(q);
+    });
+    return [...rows].sort((a, b) => {
+      const aEntry = workloadEntryFor(a, personId).date ?? "9999-12-31";
+      const bEntry = workloadEntryFor(b, personId).date ?? "9999-12-31";
+      if (taskSort === "oldest") return aEntry.localeCompare(bEntry) || a.name.localeCompare(b.name);
+      if (taskSort === "newest") return bEntry.localeCompare(aEntry) || a.name.localeCompare(b.name);
+      const ap = projects.find((p) => p.id === a.project_id)?.name ?? "";
+      const bp = projects.find((p) => p.id === b.project_id)?.name ?? "";
+      return ap.localeCompare(bp) || aEntry.localeCompare(bEntry) || a.name.localeCompare(b.name);
+    });
+  }
+
   function taskHoursOnDate(t: TaskRow, dateStr: string, forPersonId: string): number {
     return engine.taskHoursOnDate(forPersonId, t as UtilTaskRow, dateStr);
   }
@@ -570,147 +621,137 @@ export default function Utilization() {
 
   const columnCount = viewMode === "daily" ? days.length : weeks.length;
 
+  const selectedPerson = selectedCell ? allPeople.find((p) => p.id === selectedCell.personId) ?? people.find((p) => p.id === selectedCell.personId) : null;
+  const selectedAvailability = selectedCell && selectedPerson ? availabilityFor(selectedPerson.id, selectedCell.dateStr) : undefined;
+  const selectedCapacity = selectedCell && selectedPerson ? dailyCapacityFor(selectedPerson, selectedAvailability?.status === "half_day") : 0;
+  const selectedAllocated = selectedCell && selectedPerson ? valueForDate(selectedPerson, selectedCell.dateStr) : 0;
+  const selectedPct = selectedCapacity > 0 ? (selectedAllocated / selectedCapacity) * 100 : selectedAllocated > 0 ? 999 : 0;
+  const selectedContributions = selectedCell && selectedPerson
+    ? [
+        ...openTasksFor(selectedPerson.id)
+          .map((t) => {
+            const hours = taskValueForDate(selectedPerson, t, selectedCell.dateStr);
+            const projectName = projects.find((p) => p.id === t.project_id)?.name ?? "No project";
+            return { id: t.id, label: t.name, projectName, hours, entry: workloadEntryFor(t, selectedPerson.id), kind: "task" as const };
+          })
+          .filter((r) => r.hours > 0),
+        ...ownedProjectsFor(selectedPerson.id)
+          .map((p) => ({
+            id: `pm-${p.id}`,
+            label: "Project management",
+            projectName: p.name,
+            hours: pmValueForDate(selectedPerson, p.id, selectedCell.dateStr),
+            entry: { date: p.start_date, estimated: false } as WorkloadEntry,
+            kind: "pm" as const,
+          }))
+          .filter((r) => r.hours > 0),
+      ].sort((a, b) => (a.entry.date ?? "9999-12-31").localeCompare(b.entry.date ?? "9999-12-31"))
+    : [];
+
   return (
     <div>
-      <h1>Utilization</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-start", marginBottom: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ marginBottom: 3 }}>Utilization</h1>
+          <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
+            View scoped task effort across your team to plan capacity and identify potential overloads.
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, maxWidth: 455, padding: "9px 11px", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", background: "var(--surface)" }}>
+          <Info size={15} style={{ color: "var(--accent)", flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}>
+            Utilization shows planned/scoped task effort based on hours. It does not show actual time worked.
+          </div>
+        </div>
+      </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
-        <button
-          onClick={() => shiftRange(-1)}
-          className="planner-nav-btn"
-          disabled={isAtEarliestAnchor}
-          title={isAtEarliestAnchor ? "Can't go earlier than Jan 2026" : "Previous"}
-          style={isAtEarliestAnchor ? { opacity: 0.4, cursor: "default" } : undefined}
-        >
-          <ChevronLeft size={14} />
-        </button>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--navy)", minWidth: 150 }}>
-          {days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} –{" "}
-          {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-        </span>
-        <button onClick={() => shiftRange(1)} className="planner-nav-btn" title="Next">
-          <ChevronRight size={14} />
-        </button>
-        <button
-          onClick={resetToCurrentMonth}
-          style={{ fontSize: 11, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}
-        >
-          This month
-        </button>
+      <div className="card" style={{ padding: 10, marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => shiftRange(-1)} className="planner-nav-btn" disabled={isAtEarliestAnchor} title={isAtEarliestAnchor ? "Can't go earlier than Jan 2026" : "Previous"} style={isAtEarliestAnchor ? { opacity: 0.4, cursor: "default" } : undefined}>
+              <ChevronLeft size={14} />
+            </button>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)", minWidth: 165 }}>
+              {days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} –{" "}
+              {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+            </span>
+            <button onClick={() => shiftRange(1)} className="planner-nav-btn" title="Next"><ChevronRight size={14} /></button>
+            <button onClick={resetToCurrentMonth} style={{ fontSize: 11, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontWeight: 700 }}>This month</button>
+            <div style={{ width: 1, height: 18, background: "var(--border)" }} />
+            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
+              From
+              <input type="date" min="2026-01-01" value={toISO(rangeStart)} onChange={(e) => setRangeStartFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
+              To
+              <input type="date" min="2026-01-01" value={toISO(rangeEnd)} onChange={(e) => setRangeEndFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
+            </label>
+          </div>
 
-        <div style={{ width: 1, height: 18, background: "var(--border)" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
+              {(["daily", "weekly"] as const).map((mode) => (
+                <button key={mode} onClick={() => setViewMode(mode)} style={{ fontSize: 11, fontWeight: 700, textTransform: "capitalize", padding: "5px 12px", border: "none", cursor: "pointer", background: viewMode === mode ? "var(--accent)" : "transparent", color: viewMode === mode ? "#fff" : "var(--muted)" }}>{mode}</button>
+              ))}
+            </div>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>Display:</span>
+            <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
+              {([
+                ["both", "Both"],
+                ["utilization", "Utilization"],
+                ["hours", "Hours"],
+              ] as const).map(([mode, label]) => (
+                <button key={mode} onClick={() => setDisplayMode(mode)} style={{ fontSize: 11, fontWeight: 700, padding: "5px 10px", border: "none", cursor: "pointer", background: displayMode === mode ? "var(--accent)" : "transparent", color: displayMode === mode ? "#fff" : "var(--muted)" }}>{label}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
-          From
-          <input
-            type="date"
-            min="2026-01-01"
-            value={toISO(rangeStart)}
-            onChange={(e) => setRangeStartFromInput(e.target.value)}
-            style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "3px 6px" }}
-          />
-        </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
-          To
-          <input
-            type="date"
-            min="2026-01-01"
-            value={toISO(rangeEnd)}
-            onChange={(e) => setRangeEndFromInput(e.target.value)}
-            style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "3px 6px" }}
-          />
-        </label>
-
-        <div style={{ width: 1, height: 18, background: "var(--border)" }} />
-
-        <UtilPersonFilterButton
-          people={scopedPeople}
-          selected={personFilter}
-          open={personFilterOpen}
-          setOpen={setPersonFilterOpen}
-          search={personFilterSearch}
-          setSearch={setPersonFilterSearch}
-          onChange={setPersonFilter}
-        />
-
-        <MultiSelectFilter
-          options={projects.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name))}
-          selected={projectFilter}
-          onChange={setProjectFilter}
-          noun="projects"
-          singular="Project"
-        />
-
-        <div style={{ width: 1, height: 18, background: "var(--border)" }} />
-
-        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
-          <select
-            value={showAllPeople ? "all" : "active"}
-            onChange={(e) => setShowAllPeople(e.target.value === "all")}
-            title="Deactivated team members' past hours are always kept -- this only controls whether they're shown here"
-            style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "3px 6px" }}
-          >
+      <div className="card" style={{ padding: 9, marginBottom: 8 }}>
+        <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
+          <UtilPersonFilterButton people={scopedPeople} selected={personFilter} open={personFilterOpen} setOpen={setPersonFilterOpen} search={personFilterSearch} setSearch={setPersonFilterSearch} onChange={setPersonFilter} />
+          <MultiSelectFilter options={projects.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name))} selected={projectFilter} onChange={setProjectFilter} noun="projects" singular="Project" />
+          <select value={showAllPeople ? "all" : "active"} onChange={(e) => setShowAllPeople(e.target.value === "all")} title="Deactivated team members' past hours are retained" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
             <option value="active">Active team members only</option>
             <option value="all">Show all (incl. deactivated)</option>
           </select>
-        </label>
-
-        {roleOptions.length > 0 && (
-          <>
-            <div style={{ width: 1, height: 18, background: "var(--border)" }} />
-            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
-              <select
-                value={roleFilter ?? "__all__"}
-                onChange={(e) => setRoleFilter(e.target.value === "__all__" ? null : e.target.value)}
-                title="Filter by role"
-                style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "3px 6px" }}
-              >
-                <option value="__all__">All roles</option>
-                {roleOptions.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        )}
-
-        <div style={{ width: 1, height: 18, background: "var(--border)" }} />
-
-        <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
-          {(["daily", "weekly"] as const).map((mode) => (
+          {roleOptions.length > 0 && (
+            <select value={roleFilter ?? "__all__"} onChange={(e) => setRoleFilter(e.target.value === "__all__" ? null : e.target.value)} title="Filter by role" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
+              <option value="__all__">All roles</option>
+              {roleOptions.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          )}
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+            <div style={{ position: "relative" }}>
+              <Search size={13} style={{ position: "absolute", left: 8, top: 7, color: "var(--muted)" }} />
+              <input value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} placeholder="Search expanded tasks…" style={{ width: 190, fontSize: 11, padding: "5px 8px 5px 27px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }} />
+            </div>
+            <select value={taskSort} onChange={(e) => setTaskSort(e.target.value as "project" | "oldest" | "newest")} title="Order expanded task details" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
+              <option value="project">Tasks: Project</option>
+              <option value="oldest">Tasks: Added oldest</option>
+              <option value="newest">Tasks: Added newest</option>
+            </select>
             <button
-              key={mode}
-              onClick={() => setViewMode(mode)}
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                textTransform: "capitalize",
-                padding: "4px 10px",
-                border: "none",
-                cursor: "pointer",
-                background: viewMode === mode ? "var(--accent)" : "transparent",
-                color: viewMode === mode ? "#fff" : "var(--muted)",
-              }}
+              onClick={() => { setPersonFilter(null); setProjectFilter([]); setRoleFilter(null); setShowAllPeople(false); setTaskSearch(""); setTaskSort("project"); }}
+              style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
             >
-              {mode}
+              Clear filters
             </button>
-          ))}
+          </div>
         </div>
+      </div>
 
-        <div style={{ width: 1, height: 18, background: "var(--border)" }} />
-
-        <button
-          onClick={() => setShowHours((v) => !v)}
-          className={`timeline-segmented-btn${showHours ? " active" : ""}`}
-          style={{ borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}
-          title="Show/hide planned and capacity hours under each percentage"
-        >
-          <Clock size={12} style={{ marginRight: 4, verticalAlign: -2 }} />
-          Hours
-        </button>
-
+      <div className="card" style={{ padding: "7px 10px", marginBottom: 8, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+        {UTIL_LEGEND.map(({ pct, label, tone }) => {
+          const Icon = LEGEND_ICON_BY_LABEL[label] ?? Minus;
+          return (
+            <div key={label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5 }}>
+              <span className={`status-pill ${tone}`} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Icon size={11} />{pct}</span>
+              <span style={{ color: "var(--muted)" }}>{label}</span>
+            </div>
+          );
+        })}
       </div>
 
       <div ref={utilScrollRef} className="card" style={{ padding: 0, overflowX: "auto", overflowY: "visible" }}>
@@ -747,7 +788,8 @@ export default function Utilization() {
                           borderLeft: "1px solid var(--border)",
                         }}
                       >
-                        Week of {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} –{" "}
+                        {week[week.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                       </th>
                     ))
                   : weeks.map((week, wi) => (
@@ -863,7 +905,7 @@ export default function Utilization() {
                 visiblePeople.map((person) => {
                   const isExpanded = expanded.includes(person.id);
                   const ownedProjects = ownedProjectsFor(person.id);
-                  const assignedTasks = openTasksFor(person.id);
+                  const assignedTasks = orderedTasksFor(person.id);
                   return (
                     <Fragment key={person.id}>
                       <tr style={{ background: "#fafbfc" }}>
@@ -929,24 +971,31 @@ export default function Utilization() {
                               return (
                                 <td
                                   key={i}
+                                  title={`${tier.label} · ${value.toFixed(1)}h allocated / ${capacity.toFixed(1)}h capacity`}
+                                  onClick={() => setSelectedCell({ personId: person.id, dateStr })}
+                                  role="button"
                                   style={{
                                     ...rollupCellStyle(i),
                                     background: tier.bg,
                                     color: tier.fg,
                                     fontSize: 12.5,
                                     fontWeight: 600,
+                                    cursor: "pointer",
+                                    outline: selectedCell?.personId === person.id && selectedCell?.dateStr === dateStr ? "2px solid var(--accent)" : undefined,
+                                    outlineOffset: -2,
                                   }}
-                                  title={tier.label}
                                 >
                                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
                                     <Icon size={13} />
-                                    <span>
-                                      {tier.key === "unallocated" ? "–" : `${displayPct(pct)}%`}
-                                      {av?.status === "half_day" && <span style={{ fontSize: 9, marginLeft: 2 }}>½</span>}
-                                    </span>
-                                    {showHours && (
-                                      <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.75 }}>
-                                        {value.toFixed(1)}h / {capacity.toFixed(1)}h
+                                    {displayMode !== "hours" && (
+                                      <span>
+                                        {tier.key === "unallocated" ? "–" : `${displayPct(pct)}%`}
+                                        {av?.status === "half_day" && <span style={{ fontSize: 9, marginLeft: 2 }}>½</span>}
+                                      </span>
+                                    )}
+                                    {displayMode !== "utilization" && (
+                                      <span style={{ fontSize: displayMode === "hours" ? 11 : 9, fontWeight: displayMode === "hours" ? 700 : 500, opacity: displayMode === "hours" ? 1 : 0.78 }}>
+                                        {value.toFixed(1)}h
                                       </span>
                                     )}
                                   </div>
@@ -977,10 +1026,10 @@ export default function Utilization() {
                                 >
                                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
                                     <Icon size={13} />
-                                    <span>{stats.workingDaysCount === 0 ? "–" : `${displayPct(stats.avgPct)}%`}</span>
-                                    {showHours && (
-                                      <span style={{ fontSize: 9, fontWeight: 500, opacity: 0.75 }}>
-                                        {stats.plannedHours.toFixed(1)}h / {stats.availableHours.toFixed(1)}h
+                                    {displayMode !== "hours" && <span>{stats.workingDaysCount === 0 ? "–" : `${displayPct(stats.avgPct)}%`}</span>}
+                                    {displayMode !== "utilization" && (
+                                      <span style={{ fontSize: displayMode === "hours" ? 11 : 9, fontWeight: displayMode === "hours" ? 700 : 500, opacity: displayMode === "hours" ? 1 : 0.78 }}>
+                                        {stats.plannedHours.toFixed(1)}h{displayMode === "both" ? ` / ${stats.availableHours.toFixed(1)}h` : ""}
                                       </span>
                                     )}
                                   </div>
@@ -1080,8 +1129,14 @@ export default function Utilization() {
                                       textOverflow: "ellipsis",
                                     }}
                                   >
-                                    {t.name}
+                                    <span>{t.name}</span>
                                     {proj && <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)", marginLeft: 6 }}>{proj.name}</span>}
+                                    <span
+                                      title={workloadEntryFor(t, person.id).estimated ? "Estimated from historical task order; exact creation timestamp was not available before Sep 21, 2026." : "Date this task entered this person's workload"}
+                                      style={{ fontSize: 9.5, color: "var(--accent)", marginLeft: 7, fontWeight: 600 }}
+                                    >
+                                      {formatWorkloadDate(workloadEntryFor(t, person.id))}
+                                    </span>
                                     {!t.estimated_hours && <span style={{ fontSize: 9.5, color: "var(--warning-text)", marginLeft: 6 }}>no effort</span>}
                                   </td>
                                   {viewMode === "daily"
@@ -1163,20 +1218,85 @@ export default function Utilization() {
         )}
       </div>
 
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 12, alignItems: "center" }}>
-        {UTIL_LEGEND.map(({ pct, label, tone }) => {
-          const Icon = LEGEND_ICON_BY_LABEL[label] ?? Minus;
-          return (
-            <div key={label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11 }}>
-              <span className={`status-pill ${tone}`} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                <Icon size={11} />
-                {pct}
-              </span>
-              <span style={{ color: "var(--muted)" }}>{label}</span>
+      {selectedCell && selectedPerson && (
+        <div
+          style={{
+            position: "fixed",
+            right: 22,
+            top: 92,
+            zIndex: 30,
+            width: 360,
+            maxHeight: "calc(100vh - 120px)",
+            overflowY: "auto",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-md)",
+            boxShadow: "0 16px 38px rgba(15, 35, 65, 0.18)",
+          }}
+        >
+          <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 2 }}>{selectedPerson.name}</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "var(--navy)" }}>
+                {parseLocalDate(selectedCell.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+              </div>
             </div>
-          );
-        })}
-      </div>
+            <button onClick={() => setSelectedCell(null)} title="Close" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 2 }}><X size={16} /></button>
+          </div>
+
+          <div style={{ padding: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              {selectedPct > 100 ? <AlertTriangle size={16} style={{ color: "var(--danger)" }} /> : <Gauge size={16} style={{ color: "var(--accent)" }} />}
+              <span style={{ fontSize: 24, lineHeight: 1, fontWeight: 800, color: selectedPct > 100 ? "var(--danger)" : "var(--navy)" }}>{displayPct(selectedPct)}%</span>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>{selectedAllocated.toFixed(1)}h allocated / {selectedCapacity.toFixed(1)}h capacity</span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 7, marginBottom: 14 }}>
+              <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "var(--navy)" }}>{selectedCapacity.toFixed(1)}h</div>
+                <div style={{ fontSize: 9.5, color: "var(--muted)" }}>Capacity</div>
+              </div>
+              <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "var(--navy)" }}>{selectedAllocated.toFixed(1)}h</div>
+                <div style={{ fontSize: 9.5, color: "var(--muted)" }}>Allocated</div>
+              </div>
+              <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: selectedAllocated > selectedCapacity ? "var(--danger)" : "var(--success)" }}>
+                  {selectedAllocated > selectedCapacity ? "+" : ""}{(selectedAllocated - selectedCapacity).toFixed(1)}h
+                </div>
+                <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{selectedAllocated > selectedCapacity ? "Over capacity" : "Remaining"}</div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--navy)", marginBottom: 7 }}>Work contributing to this day</div>
+            {selectedContributions.length === 0 ? (
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>No scoped work contributes to this date.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {selectedContributions.map((r, idx) => (
+                  <div key={r.id} style={{ display: "grid", gridTemplateColumns: "22px 1fr 52px", gap: 7, alignItems: "start", padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)" }}>{idx + 1}</div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--navy)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</div>
+                      <div style={{ fontSize: 9.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.projectName}</div>
+                      <div title={r.entry.estimated ? "Estimated from historical task order" : undefined} style={{ fontSize: 9.5, color: "var(--accent)", marginTop: 2 }}>Added {formatWorkloadDate(r.entry)}</div>
+                    </div>
+                    <div style={{ textAlign: "right", fontSize: 10.5, fontWeight: 800, color: "var(--navy)" }}>{r.hours.toFixed(1)}h</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {selectedContributions.some((r) => r.entry.estimated) && (
+              <div style={{ display: "flex", gap: 6, marginTop: 11, padding: 8, borderRadius: "var(--radius-sm)", background: "var(--hover-bg)", fontSize: 9.5, color: "var(--muted)", lineHeight: 1.4 }}>
+                <Info size={12} style={{ flexShrink: 0, marginTop: 1 }} />
+                Dates prefixed with ~ are historical estimates reconstructed from the old task ordering before exact task creation timestamps were introduced.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
