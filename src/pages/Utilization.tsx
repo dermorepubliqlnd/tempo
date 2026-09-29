@@ -1036,7 +1036,7 @@ export default function Utilization() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginBottom: 10 }}>
-        <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "linear-gradient(180deg, var(--surface), rgba(59,130,246,.035))" }}>
+        <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "var(--surface)" }}>
           <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>TEAM UTILIZATION</div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
             <span style={{ fontSize: 23, fontWeight: 850, color: tierOf(teamPlanningSummary.utilizationPct).fg }}>{displayPct(teamPlanningSummary.utilizationPct)}%</span>
@@ -1045,13 +1045,13 @@ export default function Utilization() {
           <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>{summaryDays.length ? `${summaryDays[0].toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${summaryDays[summaryDays.length-1].toLocaleDateString("en-US",{month:"short",day:"numeric"})}` : "Selected period"}</div>
         </div>
 
-        <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "linear-gradient(180deg, var(--surface), rgba(16,185,129,.04))" }}>
+        <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "var(--surface)" }}>
           <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>AVAILABLE CAPACITY</div>
           <div style={{ fontSize: 23, fontWeight: 850, color: "#059669" }}>{teamPlanningSummary.availableCapacityHours.toFixed(1)}h</div>
           <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>Remaining positive capacity in the planning period</div>
         </div>
 
-        <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: teamPlanningSummary.overloadedMembers > 0 ? "linear-gradient(180deg, var(--surface), rgba(239,68,68,.045))" : "linear-gradient(180deg, var(--surface), rgba(16,185,129,.04))" }}>
+        <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "var(--surface)" }}>
           <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>OVERALLOCATED MEMBERS</div>
           <div style={{ fontSize: 23, fontWeight: 850, color: teamPlanningSummary.overloadedMembers > 0 ? "var(--danger)" : "#059669" }}>{teamPlanningSummary.overloadedMembers}</div>
           <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>Members with at least one day above 100%</div>
@@ -1721,6 +1721,92 @@ export default function Utilization() {
                   <input value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} placeholder="Search projects or tasks…" style={{ width: 240, fontSize: 11, padding: "7px 12px 7px 31px", border: "1px solid var(--border)", borderRadius: 999, color: "var(--navy)", background: "var(--surface)" }} />
                 </div>
                 {detailTab === "workload" && (
+                  <select value={taskSort} onChange={(e) => setTaskSort(e.target.value as "project" | "oldest" | "newest")} style={{ fontSize: 11, fontWeight: 650, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 999, padding: "7px 30px 7px 12px", background: "var(--surface)" }}>
+                    <option value="project">Project (A–Z)</option>
+                    <option value="oldest">Added oldest</option>
+                    <option value="newest">Added newest</option>
+                  </select>
+                )}
+              </div>
+            </div>
+
+            {detailTab !== "workload" && (
+              <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--border)", background: "var(--hover-bg)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)" }}>
+                    {detailTab === "timeline" ? "SELECT WEEK TO VIEW" : "SELECT WEEK FOR PIPELINE IMPACT"}
+                  </div>
+                  <span style={{
+                    fontSize: 9.5,
+                    fontWeight: 800,
+                    padding: "4px 9px",
+                    borderRadius: 999,
+                    background: detailPeriodKind === "historical" ? "rgba(100,116,139,.12)" : detailPeriodKind === "current" ? "rgba(20,184,166,.12)" : "rgba(59,130,246,.12)",
+                    color: detailPeriodKind === "historical" ? "var(--muted)" : detailPeriodKind === "current" ? "var(--success)" : "var(--accent)"
+                  }}>
+                    {detailPeriodKind === "historical" ? "Historical" : detailPeriodKind === "current" ? "Current week" : "Forecast"}
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", gap: 9, overflowX: "auto", paddingBottom: 8 }}>
+                  {detailWeekStats.map(({ week, stats }, wi) => {
+                    const tier = tierOf(stats.avgPct);
+                    const active = wi === safeDetailWeekIndex;
+                    return (
+                      <button
+                        key={wi}
+                        onClick={() => { setDetailWeekIndex(wi); setSelectedCell(null); }}
+                        style={{
+                          minWidth: 158,
+                          textAlign: "left",
+                          padding: "9px 11px",
+                          border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
+                          borderRadius: 14,
+                          background: tier.bg,
+                          cursor: "pointer",
+                          boxShadow: active ? "0 4px 12px rgba(15,35,65,.08)" : "none",
+                        }}
+                      >
+                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginBottom: 3 }}>
+                          {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {week[week.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                          <span style={{ fontSize: 17, fontWeight: 800, color: tier.fg }}>{displayPct(stats.avgPct)}%</span>
+                          <span style={{ fontSize: 10, color: "var(--muted)" }}>{stats.plannedHours.toFixed(1)}h / {stats.availableHours.toFixed(1)}h</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {detailSelectedWeekStats && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 9.5, fontWeight: 800, color: "var(--muted)", marginRight: 2 }}>MIX</span>
+                    <span style={{ fontSize: 9.5, fontWeight: 750, padding: "5px 9px", borderRadius: 999, background: "rgba(15,35,65,.06)", color: "var(--navy)" }}>
+                      Task {selectedWeekTaskHours.toFixed(1)}h
+                    </span>
+                    <span style={{ fontSize: 9.5, fontWeight: 750, padding: "5px 9px", borderRadius: 999, background: "rgba(99,102,241,.10)", color: "#4f46e5" }}>
+                      PM {selectedWeekPmHours.toFixed(1)}h
+                    </span>
+                    {projectTypeMix.map((mix, mi) => {
+                      const tone = PROJECT_TYPE_TONES[mi % PROJECT_TYPE_TONES.length];
+                      const share = projectTypeMixTotal > 0 ? Math.round((mix.totalHours / projectTypeMixTotal) * 100) : 0;
+                      return (
+                        <span key={mix.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 9.5, fontWeight: 800, padding: "5px 9px", borderRadius: 999, background: tone.bg, color: tone.fg }}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: tone.dot }} />
+                          {mix.name} {mix.totalHours.toFixed(1)}h · {share}%
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: selectedCell?.personId === detailPerson.id && detailTab === "timeline" ? "minmax(0, 1fr) 330px" : "1fr" }}>
+              <div style={{ minWidth: 0, overflow: "auto", padding: "16px 20px 22px" }}>
+
+                {detailTab === "workload" && (
                   <div style={{ maxWidth: "none" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 14, marginBottom: 14 }}>
                       <div>
@@ -1763,7 +1849,6 @@ export default function Utilization() {
                               <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--accent)" }}>{earliest ? formatWorkloadDate(earliest) : "—"}</div>
                             </div>
                           </div>
-
                           <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 120px 110px 135px 150px", gap: 10, alignItems: "center", padding: "8px 12px", background: "rgba(15,35,65,.025)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
                             <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Task</div>
                             <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Status</div>
@@ -1771,28 +1856,21 @@ export default function Utilization() {
                             <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Date Assigned</div>
                             <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Week Coverage</div>
                           </div>
-
-                          <div>
-                            {pTasks.map((t) => {
-                              const entry = workloadEntryFor(t, detailPerson.id);
-                              const tone = taskStatusTone(t.status);
-                              return (
-                                <div key={t.id} style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 120px 110px 135px 150px", gap: 10, alignItems: "center", padding: "8px 12px", borderBottom: "1px solid var(--border)" }}>
-                                  <div style={{ fontSize: 12.5, color: "var(--text-secondary)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</div>
-                                  <div>
-                                    <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>
-                                      {t.status ?? "—"}
-                                    </span>
-                                  </div>
-                                  <div style={{ textAlign: "right", fontSize: 12.5, fontWeight: 750, color: "var(--navy)" }}>{(t.estimated_hours ?? 0).toFixed(1)}h</div>
-                                  <div title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ fontSize: 12, color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 650, whiteSpace: "nowrap" }}>{formatWorkloadDate(entry)}</div>
-                                  <div style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
-                                    {t.start_date ? parseLocalDate(t.start_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"} – {t.current_due_date ? parseLocalDate(t.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
-                                  </div>
+                          {pTasks.map((t) => {
+                            const entry = workloadEntryFor(t, detailPerson.id);
+                            const tone = taskStatusTone(t.status);
+                            return (
+                              <div key={t.id} style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 120px 110px 135px 150px", gap: 10, alignItems: "center", padding: "8px 12px", borderBottom: "1px solid var(--border)" }}>
+                                <div style={{ fontSize: 12.5, color: "var(--text-secondary)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</div>
+                                <div><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span></div>
+                                <div style={{ textAlign: "right", fontSize: 12.5, fontWeight: 750, color: "var(--navy)" }}>{(t.estimated_hours ?? 0).toFixed(1)}h</div>
+                                <div title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ fontSize: 12, color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 650, whiteSpace: "nowrap" }}>{formatWorkloadDate(entry)}</div>
+                                <div style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
+                                  {t.start_date ? parseLocalDate(t.start_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"} – {t.current_due_date ? parseLocalDate(t.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
                                 </div>
-                              );
-                            })}
-                          </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       );
                     })}
@@ -1861,9 +1939,7 @@ export default function Utilization() {
                                     return (
                                       <tr key={t.id}>
                                         <td style={{ padding: "8px 10px 8px 18px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)", fontSize: 12.5 }}>{t.name}</td>
-                                        <td style={{ padding: "8px", borderBottom: "1px solid var(--border)" }}>
-                                          <span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span>
-                                        </td>
+                                        <td style={{ padding: "8px", borderBottom: "1px solid var(--border)" }}><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span></td>
                                         <td title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ padding: "8px", borderBottom: "1px solid var(--border)", color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 700, whiteSpace: "nowrap", fontSize: 12 }}>{formatWorkloadDate(entry)}</td>
                                         {detailDayStats.map((ds) => {
                                           const value = taskValueForDate(detailPerson, t, ds.dateStr);
@@ -1897,69 +1973,38 @@ export default function Utilization() {
                         Work contributing to the selected period, shown in the order it entered {detailPerson.name}'s workload. Completed work remains available in historical periods but is excluded from future planning once it no longer consumes capacity.
                       </div>
                     </div>
-
                     {detailSelectedWeekStats && (
                       <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-                        <div style={{ padding: "10px 13px", border: "1px solid var(--border)", borderRadius: 10 }}>
-                          <div style={{ fontSize: 11, color: "var(--muted)" }}>Selected week capacity</div>
-                          <div style={{ fontSize: 15, fontWeight: 800, color: "var(--navy)" }}>{detailSelectedWeekStats.availableHours.toFixed(1)}h</div>
-                        </div>
-                        <div style={{ padding: "10px 13px", border: "1px solid var(--border)", borderRadius: 10 }}>
-                          <div style={{ fontSize: 11, color: "var(--muted)" }}>Planned this week</div>
-                          <div style={{ fontSize: 15, fontWeight: 800, color: "var(--navy)" }}>{detailSelectedWeekStats.plannedHours.toFixed(1)}h</div>
-                        </div>
+                        <div style={{ padding: "10px 13px", border: "1px solid var(--border)", borderRadius: 10 }}><div style={{ fontSize: 11, color: "var(--muted)" }}>Selected week capacity</div><div style={{ fontSize: 15, fontWeight: 800, color: "var(--navy)" }}>{detailSelectedWeekStats.availableHours.toFixed(1)}h</div></div>
+                        <div style={{ padding: "10px 13px", border: "1px solid var(--border)", borderRadius: 10 }}><div style={{ fontSize: 11, color: "var(--muted)" }}>Planned this week</div><div style={{ fontSize: 15, fontWeight: 800, color: "var(--navy)" }}>{detailSelectedWeekStats.plannedHours.toFixed(1)}h</div></div>
                       </div>
                     )}
-
                     {pipelineRows.length === 0 ? (
                       <div style={{ padding: 18, border: "1px dashed var(--border)", borderRadius: 10, color: "var(--muted)", fontSize: 12.5 }}>No scoped tasks contribute hours to the selected period.</div>
                     ) : (
                       <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--surface)" }}>
                         <div style={{ display: "grid", gridTemplateColumns: "56px minmax(240px,1fr) 120px 105px 130px 150px 125px", gap: 10, padding: "8px 12px", background: "var(--hover-bg)", borderBottom: "1px solid var(--border)", alignItems: "center" }}>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Seq.</div>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Task</div>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Status</div>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "right" }}>Scoped Hours</div>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Date Assigned</div>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Week Coverage</div>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "right" }}>Selected Impact</div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Seq.</div><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Task</div><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Status</div><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "right" }}>Scoped Hours</div><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Date Assigned</div><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Week Coverage</div><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "right" }}>Selected Impact</div>
                         </div>
-
                         {pipelineRows.map((row, idx) => {
                           const project = projects.find((p) => p.id === row.task.project_id);
                           const crossed = row.cumulativePct > 100 && (idx === 0 || pipelineRows[idx - 1].cumulativePct <= 100);
                           const tone = taskStatusTone(row.task.status);
                           return (
                             <div key={row.task.id} style={{ display: "grid", gridTemplateColumns: "56px minmax(240px,1fr) 120px 105px 130px 150px 125px", gap: 10, padding: "10px 12px", alignItems: "center", borderBottom: "1px solid var(--border)", background: crossed ? "rgba(210,55,55,.045)" : "var(--surface)" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                <span style={{ width: 9, height: 9, borderRadius: "50%", background: crossed ? "var(--danger)" : "var(--accent)" }} />
-                                <span style={{ fontSize: 12, fontWeight: 800, color: "var(--navy)" }}>{idx + 1}</span>
-                              </div>
-                              <div style={{ minWidth: 0 }}>
-                                <div style={{ fontSize: 13, fontWeight: 800, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.task.name}</div>
-                                <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>{project?.name ?? "No project"}</div>
-                                {crossed && <div style={{ marginTop: 4, fontSize: 11, fontWeight: 700, color: "var(--danger)" }}>First task taking selected-week task allocation above capacity.</div>}
-                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: crossed ? "var(--danger)" : "var(--accent)" }} /><span style={{ fontSize: 12, fontWeight: 800, color: "var(--navy)" }}>{idx + 1}</span></div>
+                              <div style={{ minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 800, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.task.name}</div><div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>{project?.name ?? "No project"}</div>{crossed && <div style={{ marginTop: 4, fontSize: 11, fontWeight: 700, color: "var(--danger)" }}>First task taking selected-week task allocation above capacity.</div>}</div>
                               <div><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>{row.task.status ?? "—"}</span></div>
                               <div style={{ textAlign: "right", fontSize: 12.5, fontWeight: 750, color: "var(--navy)" }}>{(row.task.estimated_hours ?? 0).toFixed(1)}h</div>
                               <div title={row.entry.estimated ? "Estimated from historical task order" : undefined} style={{ fontSize: 12, fontWeight: 700, color: row.entry.estimated ? "var(--muted)" : "var(--accent)", whiteSpace: "nowrap" }}>{formatWorkloadDate(row.entry)}</div>
-                              <div style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
-                                {row.task.start_date ? parseLocalDate(row.task.start_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"} – {row.task.current_due_date ? parseLocalDate(row.task.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
-                              </div>
-                              <div style={{ textAlign: "right" }}>
-                                <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--navy)" }}>+{row.weekHours.toFixed(1)}h</div>
-                                <div style={{ fontSize: 11, color: row.cumulativePct > 100 ? "var(--danger)" : "var(--muted)", marginTop: 2 }}>{displayPct(row.cumulativePct)}% cumulative</div>
-                              </div>
+                              <div style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>{row.task.start_date ? parseLocalDate(row.task.start_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"} – {row.task.current_due_date ? parseLocalDate(row.task.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}</div>
+                              <div style={{ textAlign: "right" }}><div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--navy)" }}>+{row.weekHours.toFixed(1)}h</div><div style={{ fontSize: 11, color: row.cumulativePct > 100 ? "var(--danger)" : "var(--muted)", marginTop: 2 }}>{displayPct(row.cumulativePct)}% cumulative</div></div>
                             </div>
                           );
                         })}
                       </div>
                     )}
-
-                    <div style={{ display: "flex", gap: 7, marginTop: 10, padding: 10, borderRadius: 10, background: "var(--hover-bg)", fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45 }}>
-                      <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                      Pipeline sequence is based on task allocation for the selected week. PM overhead is shown separately in Capacity Mix and is attributed to each project's project type; it is not used to decide which task first pushed task allocation over capacity.
-                    </div>
+                    <div style={{ display: "flex", gap: 7, marginTop: 10, padding: 10, borderRadius: 10, background: "var(--hover-bg)", fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45 }}><Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />Pipeline sequence is based on task allocation for the selected week. PM overhead is shown separately in Capacity Mix and is attributed to each project's project type; it is not used to decide which task first pushed task allocation over capacity.</div>
                   </div>
                 )}
               </div>
