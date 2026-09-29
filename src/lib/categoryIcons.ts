@@ -101,6 +101,13 @@ export const CATEGORY_TONE_NAMES = [
   "pink",
   "gold",
   "mint",
+  // 2026-09-29 (phase124): widened so list pill colors (Project Types,
+  // Phases, etc.) have more distinct hues. All exist as .status-pill.* in
+  // index.css.
+  "orange",
+  "blue",
+  "skyblue",
+  "slate",
 ] as const;
 export type CategoryTone = (typeof CATEGORY_TONE_NAMES)[number];
 
@@ -121,4 +128,7 @@ export const CATEGORY_TONE_ICON_COLOR: Record<string, string> = {
   // this map (reused by Dashboard.tsx for donut-chart fill colors, not
   // just category icons) never falls back to a mismatched color for it.
   slate: "#5b6472",
+  orange: "var(--orange-text)",
+  blue: "var(--blue-text)",
+  skyblue: "var(--skyblue-text)",
 };
