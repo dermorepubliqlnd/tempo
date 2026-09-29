@@ -56,6 +56,7 @@ export default function TimeTrackerBar() {
             <Clock size={14} color="var(--teal, #4fd1c5)" />
             <span>
               Timing <strong>{running.task_name}</strong>
+              {running.is_non_project && <span style={{ opacity: 0.75 }}> · Non-project</span>}
             </span>
             <span style={{ fontVariantNumeric: "tabular-nums", opacity: 0.85 }}>{elapsedLabel(running.started_at, now)}</span>
           </div>
@@ -93,6 +94,10 @@ export default function TimeTrackerBar() {
             bumpVersion();
           }}
           onContinue={() => {
+            setOpenConfirmModalFor(null);
+            refresh();
+          }}
+          onDiscarded={() => {
             setOpenConfirmModalFor(null);
             refresh();
           }}
