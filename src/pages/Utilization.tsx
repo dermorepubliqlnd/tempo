@@ -1117,37 +1117,7 @@ export default function Utilization() {
               <button onClick={() => { setDetailPersonId(null); setSelectedCell(null); }} title="Close" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 3 }}><X size={18} /></button>
             </div>
 
-            <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--border)", display: "flex", gap: 9, overflowX: "auto" }}>
-              {detailWeekStats.map(({ week, stats }, wi) => {
-                const tier = tierOf(stats.avgPct);
-                const active = wi === safeDetailWeekIndex;
-                return (
-                  <button
-                    key={wi}
-                    onClick={() => { setDetailWeekIndex(wi); if (detailTab === "workload") setDetailTab("timeline"); }}
-                    style={{
-                      minWidth: 165,
-                      textAlign: "left",
-                      padding: "9px 11px",
-                      border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
-                      borderRadius: "var(--radius-sm)",
-                      background: tier.bg,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <div style={{ fontSize: 9.5, color: "var(--muted)", marginBottom: 3 }}>
-                      {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {week[week.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                      <span style={{ fontSize: 17, fontWeight: 800, color: tier.fg }}>{displayPct(stats.avgPct)}%</span>
-                      <span style={{ fontSize: 10, color: "var(--muted)" }}>{stats.plannedHours.toFixed(1)}h / {stats.availableHours.toFixed(1)}h</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div style={{ padding: "0 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, minHeight: 48 }}>
+            <div style={{ padding: "0 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, minHeight: 50 }}>
               {([
                 ["workload", "Workload"],
                 ["timeline", "Timeline"],
@@ -1155,10 +1125,10 @@ export default function Utilization() {
               ] as const).map(([tab, label]) => (
                 <button
                   key={tab}
-                  onClick={() => setDetailTab(tab)}
+                  onClick={() => { setDetailTab(tab); setSelectedCell(null); }}
                   style={{
-                    height: 48,
-                    padding: "0 12px",
+                    height: 50,
+                    padding: "0 13px",
                     border: "none",
                     borderBottom: detailTab === tab ? "2px solid var(--accent)" : "2px solid transparent",
                     background: "transparent",
@@ -1177,7 +1147,7 @@ export default function Utilization() {
                   <Search size={13} style={{ position: "absolute", left: 8, top: 8, color: "var(--muted)" }} />
                   <input value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} placeholder="Search projects or tasks…" style={{ width: 230, fontSize: 11, padding: "6px 8px 6px 27px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }} />
                 </div>
-                {detailTab !== "timeline" && (
+                {detailTab === "workload" && (
                   <select value={taskSort} onChange={(e) => setTaskSort(e.target.value as "project" | "oldest" | "newest")} style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 7px" }}>
                     <option value="project">Project (A–Z)</option>
                     <option value="oldest">Added oldest</option>
@@ -1186,6 +1156,43 @@ export default function Utilization() {
                 )}
               </div>
             </div>
+
+            {detailTab !== "workload" && (
+              <div style={{ padding: "11px 20px", borderBottom: "1px solid var(--border)", background: "var(--hover-bg)" }}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--muted)", marginBottom: 7 }}>
+                  {detailTab === "timeline" ? "SELECT WEEK TO VIEW" : "SELECT WEEK FOR PIPELINE IMPACT"}
+                </div>
+                <div style={{ display: "flex", gap: 9, overflowX: "auto" }}>
+                  {detailWeekStats.map(({ week, stats }, wi) => {
+                    const tier = tierOf(stats.avgPct);
+                    const active = wi === safeDetailWeekIndex;
+                    return (
+                      <button
+                        key={wi}
+                        onClick={() => { setDetailWeekIndex(wi); setSelectedCell(null); }}
+                        style={{
+                          minWidth: 165,
+                          textAlign: "left",
+                          padding: "9px 11px",
+                          border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
+                          borderRadius: "var(--radius-sm)",
+                          background: tier.bg,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginBottom: 3 }}>
+                          {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {week[week.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                          <span style={{ fontSize: 17, fontWeight: 800, color: tier.fg }}>{displayPct(stats.avgPct)}%</span>
+                          <span style={{ fontSize: 10, color: "var(--muted)" }}>{stats.plannedHours.toFixed(1)}h / {stats.availableHours.toFixed(1)}h</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: selectedCell?.personId === detailPerson.id && detailTab === "timeline" ? "minmax(0, 1fr) 330px" : "1fr" }}>
               <div style={{ minWidth: 0, overflow: "auto", padding: "16px 20px 22px" }}>
