@@ -10,7 +10,7 @@ import { loggedHoursTier } from "../lib/loggedHoursBands";
 import { expectedHoursForDay } from "../lib/dailyAllocation";
 import { buildHolidayNameMap, nonWorkingDayConfirmMessage, type HolidayNameMap } from "../lib/workingDays";
 import { useSearchParams } from "react-router-dom";
-import { useTimeTracking } from "../lib/TimeTrackingContext";
+import NonProjectTimerQuickStart from "../components/NonProjectTimerQuickStart";
 import MultiSelectFilter from "../components/MultiSelectFilter";
 import Modal from "../components/Modal";
 
@@ -824,17 +824,6 @@ export default function TimeTracking() {
   // Activity Type picker instead. Everything else (date/start/end,
   // notes, the pending_approval lifecycle) is unchanged.
   const [logMode, setLogMode] = useState<"project" | "non_project" | null>(null);
-  // 2026-09-29 (phase123, Sandra: "if non project is selected option will
-  // be start timer or log manual time") -- second choice, only for
-  // Non-project. Starts unselected (same fewest-clicks pattern as the
-  // mode toggle). Manual = unchanged flow (approval-routed); Timer = pick
-  // an Activity Type and start, notes are forced when it stops, and the
-  // confirmed entry needs no approval.
-  const [npEntryMode, setNpEntryMode] = useState<"timer" | "manual" | null>(null);
-  const { running: myRunningTimer, busy: timerBusy, startNonProject } = useTimeTracking();
-  useEffect(() => {
-    if (logMode !== "non_project") setNpEntryMode(null);
-  }, [logMode]);
   // 2026-09-24: My Dashboard's Add Time button links here with
   // ?add=project|non_project -- open that form once, then drop the param
   // so a refresh doesn't reopen it.
@@ -1898,6 +1887,12 @@ export default function TimeTracking() {
       {confirmDialog}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <h1 style={{ margin: 0 }}>Time Tracking</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* 2026-09-29 (Sandra: "revert the add time to limit to manual adds
+            only ... add the start nonproject timer in the time tracking page
+            too") -- timers start here (or My Dashboard); Add Time is manual
+            logging only. */}
+        <NonProjectTimerQuickStart />
         {/* 2026-09-23 (Sandra: "let's revert to one button with dropdown
             so they can select if it's Project or Non project") -- a
             single Add Time button replaces the old always-visible Log
@@ -1943,6 +1938,7 @@ export default function TimeTracking() {
             </div>
           )}
         </div>
+        </div>
       </div>
 
       {logMode && (
@@ -1977,38 +1973,7 @@ export default function TimeTracking() {
                 </button>
               ))}
             </div>
-            {logMode === "non_project" && (
-              <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-                {(["timer", "manual"] as const).map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => {
-                      setNpEntryMode(m);
-                      setLogError(null);
-                    }}
-                    style={{
-                      flex: 1,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 6,
-                      padding: "8px 0",
-                      borderRadius: "var(--radius-sm)",
-                      border: `1px solid ${npEntryMode === m ? "var(--accent)" : "var(--border)"}`,
-                      background: npEntryMode === m ? "var(--accent-bg, #eaf2fb)" : "transparent",
-                      fontSize: 12,
-                      fontWeight: npEntryMode === m ? 600 : 500,
-                      color: npEntryMode === m ? "var(--accent)" : "var(--text-secondary)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {m === "timer" ? <Timer size={13} /> : <FilePen size={13} />}
-                    {m === "timer" ? "Start timer" : "Log manual time"}
-                  </button>
-                ))}
-              </div>
-            )}
-            {logMode && (logMode === "project" || npEntryMode) && (
+            {logMode && (
               <>
             {logMode === "non_project" ? (
               <label style={{ display: "block", marginBottom: 8 }}>
@@ -2104,54 +2069,6 @@ export default function TimeTracking() {
                 collapsed Date/Start time/End time into one row so it
                 reads as one work session rather than a start-day/end-day
                 pair. */}
-            {logMode === "non_project" && npEntryMode === "timer" && (
-              <>
-                <div style={{ fontSize: 11.5, color: "var(--text-secondary)", background: "var(--surface-2, #f5f6f8)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px", marginBottom: 10, lineHeight: 1.5 }}>
-                  The timer starts now. You'll add notes when you stop it. Timer entries don't need approval.
-                </div>
-                {myRunningTimer && (
-                  <div style={{ color: "var(--danger-text)", fontSize: 11.5, marginBottom: 8 }}>
-                    You already have a timer running on "{myRunningTimer.task_name}". Stop it first -- only one timer can run at a time.
-                  </div>
-                )}
-                {logError && <div style={{ color: "var(--danger-text)", fontSize: 11.5, marginBottom: 8 }}>{logError}</div>}
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    onClick={async () => {
-                      setLogError(null);
-                      const activityType = nonProjectActivityTypes.find((a) => a.id === logActivityTypeId);
-                      if (!activityType) {
-                        setLogError("Choose an activity type.");
-                        return;
-                      }
-                      // Weekend/holiday soft check (never blocks), against TODAY -- same as task timers.
-                      const warnMsg = nonWorkingDayConfirmMessage(toDateInputValue(), holidayNames);
-                      if (warnMsg && !(await confirm({ message: warnMsg, confirmLabel: "Yes, start" }))) return;
-                      const res = await startNonProject({ id: activityType.id, name: activityType.name });
-                      if (res.error) {
-                        setLogError(res.error);
-                        return;
-                      }
-                      setLogMode(null);
-                      setNpEntryMode(null);
-                      setLogNotes("");
-                    }}
-                    disabled={timerBusy || Boolean(myRunningTimer)}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: timerBusy || myRunningTimer ? "default" : "pointer", opacity: myRunningTimer ? 0.45 : 1 }}
-                  >
-                    <Timer size={13} /> {timerBusy ? "Starting…" : "Start timer"}
-                  </button>
-                  <button
-                    onClick={() => setLogMode(null)}
-                    style={{ fontSize: 12, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer" }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </>
-            )}
-            {!(logMode === "non_project" && npEntryMode === "timer") && (
-              <>
             <div style={{ display: "flex", gap: 8 }}>
               <label style={{ display: "block", marginBottom: 4, flex: 1.3 }}>
                 <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Log date</span>
@@ -2293,8 +2210,6 @@ export default function TimeTracking() {
                 Cancel
               </button>
             </div>
-              </>
-            )}
               </>
             )}
         </Modal>
