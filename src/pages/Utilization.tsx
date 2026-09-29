@@ -230,7 +230,7 @@ export default function Utilization() {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth() + 1, 0);
   });
-  const [expanded, setExpanded] = useState<string[]>([]);
+  const [detailPersonId, setDetailPersonId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"daily" | "weekly">("daily");
   // Person filter (2026-09-03, Sandra: "add a name filter so we can just
   // select who we want to view") -- reuses the same searchable multi-select
@@ -621,6 +621,11 @@ export default function Utilization() {
 
   const columnCount = viewMode === "daily" ? days.length : weeks.length;
 
+  const detailPerson = detailPersonId ? allPeople.find((p) => p.id === detailPersonId) ?? people.find((p) => p.id === detailPersonId) : null;
+  const detailTasks = detailPerson ? orderedTasksFor(detailPerson.id) : [];
+  const detailOwnedProjects = detailPerson ? ownedProjectsFor(detailPerson.id) : [];
+  const detailWeekStats = detailPerson ? weeks.map((week) => ({ week, stats: weekStatsForPerson(detailPerson, week) })) : [];
+
   const selectedPerson = selectedCell ? allPeople.find((p) => p.id === selectedCell.personId) ?? people.find((p) => p.id === selectedCell.personId) : null;
   const selectedAvailability = selectedCell && selectedPerson ? availabilityFor(selectedPerson.id, selectedCell.dateStr) : undefined;
   const selectedCapacity = selectedCell && selectedPerson ? dailyCapacityFor(selectedPerson, selectedAvailability?.status === "half_day") : 0;
@@ -903,9 +908,7 @@ export default function Utilization() {
                 </tr>
               ) : (
                 visiblePeople.map((person) => {
-                  const isExpanded = expanded.includes(person.id);
-                  const ownedProjects = ownedProjectsFor(person.id);
-                  const assignedTasks = orderedTasksFor(person.id);
+                  const isOpen = detailPersonId === person.id;
                   return (
                     <Fragment key={person.id}>
                       <tr style={{ background: "#fafbfc" }}>
@@ -923,10 +926,13 @@ export default function Utilization() {
                             cursor: "pointer",
                             whiteSpace: "nowrap",
                           }}
-                          onClick={() => setExpanded((prev) => (isExpanded ? prev.filter((id) => id !== person.id) : [...prev, person.id]))}
+                          onClick={() => {
+                            setDetailPersonId(person.id);
+                            setSelectedCell((prev) => (prev?.personId === person.id ? prev : null));
+                          }}
                         >
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                            {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                             <span>
                               {person.name}
                               {person.job_title && (
@@ -972,7 +978,10 @@ export default function Utilization() {
                                 <td
                                   key={i}
                                   title={`${tier.label} · ${value.toFixed(1)}h allocated / ${capacity.toFixed(1)}h capacity`}
-                                  onClick={() => setSelectedCell({ personId: person.id, dateStr })}
+                                  onClick={() => {
+                                    setDetailPersonId(person.id);
+                                    setSelectedCell({ personId: person.id, dateStr });
+                                  }}
                                   role="button"
                                   style={{
                                     ...rollupCellStyle(i),
@@ -1037,178 +1046,6 @@ export default function Utilization() {
                               );
                             })}
                       </tr>
-                      {isExpanded &&
-                        (ownedProjects.length === 0 && assignedTasks.length === 0 && !hasDeletedHistory(person.id) ? (
-                          <tr>
-                            <td
-                              style={{
-                                position: "sticky",
-                                left: 0,
-                                background: "var(--surface)",
-                                padding: "5px 13px 5px 35px",
-                                fontSize: 11,
-                                color: "var(--muted)",
-                                borderBottom: "1px solid var(--border)",
-                              }}
-                            >
-                              No owned projects or assigned tasks.
-                            </td>
-                            {viewMode === "daily"
-                              ? days.map((_, i) => <td key={i} style={subCellStyle(i)} />)
-                              : weeks.map((_, wi) => <td key={wi} style={subWeekCellStyle(wi)} />)}
-                          </tr>
-                        ) : (
-                          <>
-                            {ownedProjects.map((p) => {
-                              const workingDays = engine.pmDays(person.id, p);
-                              return (
-                                <tr key={`pm-${p.id}`}>
-                                  <td
-                                    title={workingDays.size === 0 ? `${p.name} — set start/due dates to count project-management time` : `${p.name} — project management`}
-                                    style={{
-                                      position: "sticky",
-                                      left: 0,
-                                      zIndex: 1,
-                                      background: "var(--surface)",
-                                      padding: "5px 13px 5px 35px",
-                                      fontSize: 11,
-                                      color: "var(--text-secondary)",
-                                      borderBottom: "1px solid var(--border)",
-                                      whiteSpace: "nowrap",
-                                      maxWidth: LABEL_W,
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                    }}
-                                  >
-                                    {p.name}
-                                    <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)", marginLeft: 6 }}>(PM)</span>
-                                  </td>
-                                  {viewMode === "daily"
-                                    ? days.map((d, i) => {
-                                        const dateStr = toISO(d);
-                                        const dow = d.getDay();
-                                        const blocked = dayBlocked(person.id, dateStr, dow);
-                                        const win = workingDays.has(dateStr);
-                                        const value = win ? pmValueForDate(person, p.id, dateStr) : 0;
-                                        return (
-                                          <td key={i} style={{ ...subCellStyle(i), background: blocked ? "var(--hover-bg)" : !win ? "#f7f8fa" : undefined, fontSize: 12, color: "var(--muted)" }}>
-                                            {value > 0 ? value.toFixed(2) : ""}
-                                          </td>
-                                        );
-                                      })
-                                    : weeks.map((week, wi) => {
-                                        const value = weekSum(week, (dateStr) => (workingDays.has(dateStr) ? pmValueForDate(person, p.id, dateStr) : 0));
-                                        return (
-                                          <td key={wi} style={{ ...subWeekCellStyle(wi), fontSize: 12, color: "var(--muted)" }}>
-                                            {value > 0 ? value.toFixed(2) : ""}
-                                          </td>
-                                        );
-                                      })}
-                                </tr>
-                              );
-                            })}
-                            {assignedTasks.map((t) => {
-                              const proj = projects.find((p) => p.id === t.project_id);
-                              const workingDays = engine.taskDays(person.id, t as UtilTaskRow);
-                              return (
-                                <tr key={t.id}>
-                                  <td
-                                    title={!t.estimated_hours ? `${t.name} — no effort hours set yet` : t.name}
-                                    style={{
-                                      position: "sticky",
-                                      left: 0,
-                                      zIndex: 1,
-                                      background: "var(--surface)",
-                                      padding: "5px 13px 5px 35px",
-                                      fontSize: 11,
-                                      color: "var(--text-secondary)",
-                                      borderBottom: "1px solid var(--border)",
-                                      whiteSpace: "nowrap",
-                                      maxWidth: LABEL_W,
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                    }}
-                                  >
-                                    <span>{t.name}</span>
-                                    {proj && <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)", marginLeft: 6 }}>{proj.name}</span>}
-                                    <span
-                                      title={workloadEntryFor(t, person.id).estimated ? "Estimated from historical task order; exact creation timestamp was not available before Sep 21, 2026." : "Date this task entered this person's workload"}
-                                      style={{ fontSize: 9.5, color: "var(--accent)", marginLeft: 7, fontWeight: 600 }}
-                                    >
-                                      {formatWorkloadDate(workloadEntryFor(t, person.id))}
-                                    </span>
-                                    {!t.estimated_hours && <span style={{ fontSize: 9.5, color: "var(--warning-text)", marginLeft: 6 }}>no effort</span>}
-                                  </td>
-                                  {viewMode === "daily"
-                                    ? days.map((d, i) => {
-                                        const dateStr = toISO(d);
-                                        const dow = d.getDay();
-                                        const blocked = dayBlocked(person.id, dateStr, dow);
-                                        const win = dateStr >= today ? true : workingDays.has(dateStr);
-                                        const value = taskValueForDate(person, t, dateStr);
-                                        return (
-                                          <td key={i} style={{ ...subCellStyle(i), background: blocked ? "var(--hover-bg)" : !win ? "#f7f8fa" : undefined, fontSize: 12, color: "var(--muted)" }}>
-                                            {value > 0 ? value.toFixed(1) : ""}
-                                          </td>
-                                        );
-                                      })
-                                    : weeks.map((week, wi) => {
-                                        const value = weekSum(week, (dateStr) => taskValueForDate(person, t, dateStr));
-                                        return (
-                                          <td key={wi} style={{ ...subWeekCellStyle(wi), fontSize: 12, color: "var(--muted)" }}>
-                                            {value > 0 ? value.toFixed(1) : ""}
-                                          </td>
-                                        );
-                                      })}
-                                </tr>
-                              );
-                            })}
-                            {hasDeletedHistory(person.id) && (
-                              <tr>
-                                <td
-                                  title="Hours from tasks/projects that have since been permanently deleted — numbers only, no name retained"
-                                  style={{
-                                    position: "sticky",
-                                    left: 0,
-                                    zIndex: 1,
-                                    background: "var(--surface)",
-                                    padding: "5px 13px 5px 35px",
-                                    fontSize: 11,
-                                    color: "var(--muted)",
-                                    fontStyle: "italic",
-                                    borderBottom: "1px solid var(--border)",
-                                    whiteSpace: "nowrap",
-                                    maxWidth: LABEL_W,
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                  }}
-                                >
-                                  Deleted items
-                                </td>
-                                {viewMode === "daily"
-                                  ? days.map((d, i) => {
-                                      const dateStr = toISO(d);
-                                      const dow = d.getDay();
-                                      const blocked = dayBlocked(person.id, dateStr, dow);
-                                      const value = deletedHoursFor(person.id, dateStr);
-                                      return (
-                                        <td key={i} style={{ ...subCellStyle(i), background: blocked ? "var(--hover-bg)" : undefined, fontSize: 12, color: "var(--muted)" }}>
-                                          {value > 0 ? value.toFixed(2) : ""}
-                                        </td>
-                                      );
-                                    })
-                                  : weeks.map((week, wi) => {
-                                      const value = weekSum(week, (dateStr) => deletedHoursFor(person.id, dateStr));
-                                      return (
-                                        <td key={wi} style={{ ...subWeekCellStyle(wi), fontSize: 12, color: "var(--muted)" }}>
-                                          {value > 0 ? value.toFixed(2) : ""}
-                                        </td>
-                                      );
-                                    })}
-                              </tr>
-                            )}
-                          </>
-                        ))}
                     </Fragment>
                   );
                 })
@@ -1218,84 +1055,199 @@ export default function Utilization() {
         )}
       </div>
 
-      {selectedCell && selectedPerson && (
-        <div
-          style={{
-            position: "fixed",
-            right: 22,
-            top: 92,
-            zIndex: 30,
-            width: 360,
-            maxHeight: "calc(100vh - 120px)",
-            overflowY: "auto",
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-md)",
-            boxShadow: "0 16px 38px rgba(15, 35, 65, 0.18)",
-          }}
-        >
-          <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-            <div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 2 }}>{selectedPerson.name}</div>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "var(--navy)" }}>
-                {parseLocalDate(selectedCell.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
-              </div>
-            </div>
-            <button onClick={() => setSelectedCell(null)} title="Close" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 2 }}><X size={16} /></button>
-          </div>
 
-          <div style={{ padding: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              {selectedPct > 100 ? <AlertTriangle size={16} style={{ color: "var(--danger)" }} /> : <Gauge size={16} style={{ color: "var(--accent)" }} />}
-              <span style={{ fontSize: 24, lineHeight: 1, fontWeight: 800, color: selectedPct > 100 ? "var(--danger)" : "var(--navy)" }}>{displayPct(selectedPct)}%</span>
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>{selectedAllocated.toFixed(1)}h allocated / {selectedCapacity.toFixed(1)}h capacity</span>
+      {detailPerson && (
+        <>
+          <div
+            onClick={() => { setDetailPersonId(null); setSelectedCell(null); }}
+            style={{ position: "fixed", inset: 0, zIndex: 39, background: "rgba(15, 35, 65, 0.22)" }}
+          />
+          <aside
+            style={{
+              position: "fixed",
+              top: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 40,
+              width: "min(80vw, 1480px)",
+              minWidth: "720px",
+              background: "var(--surface)",
+              boxShadow: "-18px 0 42px rgba(15, 35, 65, 0.18)",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div style={{ padding: "16px 18px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "var(--navy)", marginBottom: 2 }}>{detailPerson.name}</div>
+                <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{detailPerson.job_title ?? "Team member"}</div>
+              </div>
+              <button onClick={() => { setDetailPersonId(null); setSelectedCell(null); }} title="Close" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 3 }}><X size={18} /></button>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 7, marginBottom: 14 }}>
-              <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: "var(--navy)" }}>{selectedCapacity.toFixed(1)}h</div>
-                <div style={{ fontSize: 9.5, color: "var(--muted)" }}>Capacity</div>
-              </div>
-              <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: "var(--navy)" }}>{selectedAllocated.toFixed(1)}h</div>
-                <div style={{ fontSize: 9.5, color: "var(--muted)" }}>Allocated</div>
-              </div>
-              <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: selectedAllocated > selectedCapacity ? "var(--danger)" : "var(--success)" }}>
-                  {selectedAllocated > selectedCapacity ? "+" : ""}{(selectedAllocated - selectedCapacity).toFixed(1)}h
-                </div>
-                <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{selectedAllocated > selectedCapacity ? "Over capacity" : "Remaining"}</div>
-              </div>
-            </div>
-
-            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--navy)", marginBottom: 7 }}>Work contributing to this day</div>
-            {selectedContributions.length === 0 ? (
-              <div style={{ fontSize: 11, color: "var(--muted)" }}>No scoped work contributes to this date.</div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {selectedContributions.map((r, idx) => (
-                  <div key={r.id} style={{ display: "grid", gridTemplateColumns: "22px 1fr 52px", gap: 7, alignItems: "start", padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
-                    <div style={{ fontSize: 10, color: "var(--muted)" }}>{idx + 1}</div>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--navy)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</div>
-                      <div style={{ fontSize: 9.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.projectName}</div>
-                      <div title={r.entry.estimated ? "Estimated from historical task order" : undefined} style={{ fontSize: 9.5, color: "var(--accent)", marginTop: 2 }}>Added {formatWorkloadDate(r.entry)}</div>
+            <div style={{ padding: "12px 18px", borderBottom: "1px solid var(--border)", display: "flex", gap: 10, overflowX: "auto" }}>
+              {detailWeekStats.map(({ week, stats }, wi) => {
+                const tier = tierOf(stats.avgPct);
+                return (
+                  <div key={wi} style={{ minWidth: 165, padding: "9px 11px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", background: tier.bg }}>
+                    <div style={{ fontSize: 9.5, color: "var(--muted)", marginBottom: 3 }}>
+                      {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {week[week.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                     </div>
-                    <div style={{ textAlign: "right", fontSize: 10.5, fontWeight: 800, color: "var(--navy)" }}>{r.hours.toFixed(1)}h</div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                      <span style={{ fontSize: 17, fontWeight: 800, color: tier.fg }}>{displayPct(stats.avgPct)}%</span>
+                      <span style={{ fontSize: 10, color: "var(--muted)" }}>{stats.plannedHours.toFixed(1)}h / {stats.availableHours.toFixed(1)}h</span>
+                    </div>
                   </div>
-                ))}
-              </div>
-            )}
+                );
+              })}
+            </div>
 
-            {selectedContributions.some((r) => r.entry.estimated) && (
-              <div style={{ display: "flex", gap: 6, marginTop: 11, padding: 8, borderRadius: "var(--radius-sm)", background: "var(--hover-bg)", fontSize: 9.5, color: "var(--muted)", lineHeight: 1.4 }}>
-                <Info size={12} style={{ flexShrink: 0, marginTop: 1 }} />
-                Dates prefixed with ~ are historical estimates reconstructed from the old task ordering before exact task creation timestamps were introduced.
+            <div style={{ padding: "10px 18px", borderBottom: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 4 }}>
+                <button style={{ padding: "6px 10px", border: "none", borderBottom: "2px solid var(--accent)", background: "transparent", color: "var(--accent)", fontSize: 11, fontWeight: 700 }}>Tasks by Project</button>
+                <button disabled style={{ padding: "6px 10px", border: "none", background: "transparent", color: "var(--muted)", fontSize: 11 }}>Tasks by Date</button>
+                <button disabled style={{ padding: "6px 10px", border: "none", background: "transparent", color: "var(--muted)", fontSize: 11 }}>Pipeline Sequence</button>
               </div>
-            )}
-          </div>
-        </div>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 7, alignItems: "center" }}>
+                <div style={{ position: "relative" }}>
+                  <Search size={13} style={{ position: "absolute", left: 8, top: 7, color: "var(--muted)" }} />
+                  <input value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} placeholder="Search projects or tasks…" style={{ width: 220, fontSize: 11, padding: "5px 8px 5px 27px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }} />
+                </div>
+                <select value={taskSort} onChange={(e) => setTaskSort(e.target.value as "project" | "oldest" | "newest")} style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
+                  <option value="project">Project (A–Z)</option>
+                  <option value="oldest">Added oldest</option>
+                  <option value="newest">Added newest</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: selectedCell?.personId === detailPerson.id ? "minmax(0, 1fr) 330px" : "1fr" }}>
+              <div style={{ minWidth: 0, overflow: "auto", padding: "0 18px 18px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
+                  <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--surface)" }}>
+                    <tr>
+                      <th style={{ textAlign: "left", padding: "9px 8px", borderBottom: "1px solid var(--border)", minWidth: 250 }}>Project / Task</th>
+                      <th style={{ textAlign: "right", padding: "9px 8px", borderBottom: "1px solid var(--border)", width: 90 }}>Planned</th>
+                      <th style={{ textAlign: "left", padding: "9px 8px", borderBottom: "1px solid var(--border)", width: 130 }}>Added to Workload</th>
+                      {days.map((d) => <th key={toISO(d)} style={{ textAlign: "center", padding: "9px 5px", borderBottom: "1px solid var(--border)", minWidth: 48 }}>{WEEKDAY_LABEL[d.getDay()]}<br />{d.getDate()}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detailOwnedProjects.map((p) => {
+                      const pTasks = detailTasks.filter((t) => t.project_id === p.id);
+                      const pmDays = engine.pmDays(detailPerson.id, p);
+                      if (taskSort === "project" && pTasks.length === 0 && !pmDays.size) return null;
+                      return (
+                        <Fragment key={p.id}>
+                          <tr style={{ background: "var(--hover-bg)" }}>
+                            <td style={{ padding: "8px", borderBottom: "1px solid var(--border)", fontWeight: 800, color: "var(--navy)" }}>{p.name}</td>
+                            <td style={{ padding: "8px", borderBottom: "1px solid var(--border)", textAlign: "right", fontWeight: 700 }}>
+                              {pTasks.reduce((s, t) => s + (t.estimated_hours ?? 0), 0).toFixed(1)}h
+                            </td>
+                            <td style={{ padding: "8px", borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>—</td>
+                            {days.map((d) => {
+                              const v = pmValueForDate(detailPerson, p.id, toISO(d));
+                              return <td key={toISO(d)} style={{ textAlign: "center", padding: "8px 4px", borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>{v > 0 ? v.toFixed(2) : ""}</td>;
+                            })}
+                          </tr>
+                          {pTasks.map((t) => {
+                            const entry = workloadEntryFor(t, detailPerson.id);
+                            return (
+                              <tr key={t.id}>
+                                <td style={{ padding: "7px 8px 7px 24px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>{t.name}</td>
+                                <td style={{ padding: "7px 8px", borderBottom: "1px solid var(--border)", textAlign: "right", color: "var(--navy)" }}>{(t.estimated_hours ?? 0).toFixed(1)}h</td>
+                                <td title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ padding: "7px 8px", borderBottom: "1px solid var(--border)", color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 600 }}>{formatWorkloadDate(entry)}</td>
+                                {days.map((d) => {
+                                  const v = taskValueForDate(detailPerson, t, toISO(d));
+                                  return <td key={toISO(d)} style={{ textAlign: "center", padding: "7px 4px", borderBottom: "1px solid var(--border)", color: "var(--muted)", background: selectedCell?.personId === detailPerson.id && selectedCell?.dateStr === toISO(d) ? "var(--hover-bg)" : undefined }}>{v > 0 ? v.toFixed(1) : ""}</td>;
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </Fragment>
+                      );
+                    })}
+                    {detailTasks.filter((t) => !detailOwnedProjects.some((p) => p.id === t.project_id)).map((t) => {
+                      const proj = projects.find((p) => p.id === t.project_id);
+                      const entry = workloadEntryFor(t, detailPerson.id);
+                      return (
+                        <tr key={t.id}>
+                          <td style={{ padding: "7px 8px", borderBottom: "1px solid var(--border)" }}>
+                            <div style={{ color: "var(--text-secondary)" }}>{t.name}</div>
+                            <div style={{ color: "var(--muted)", fontSize: 9.5 }}>{proj?.name ?? "No project"}</div>
+                          </td>
+                          <td style={{ padding: "7px 8px", borderBottom: "1px solid var(--border)", textAlign: "right" }}>{(t.estimated_hours ?? 0).toFixed(1)}h</td>
+                          <td style={{ padding: "7px 8px", borderBottom: "1px solid var(--border)", color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 600 }}>{formatWorkloadDate(entry)}</td>
+                          {days.map((d) => {
+                            const v = taskValueForDate(detailPerson, t, toISO(d));
+                            return <td key={toISO(d)} style={{ textAlign: "center", padding: "7px 4px", borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>{v > 0 ? v.toFixed(1) : ""}</td>;
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {detailTasks.some((t) => workloadEntryFor(t, detailPerson.id).estimated) && (
+                  <div style={{ display: "flex", gap: 7, marginTop: 12, padding: 9, borderRadius: "var(--radius-sm)", background: "var(--hover-bg)", fontSize: 9.5, color: "var(--muted)" }}>
+                    <Info size={12} style={{ flexShrink: 0, marginTop: 1 }} />
+                    Dates prefixed with ~ are historical estimates reconstructed from the previous task ordering before exact task creation timestamps were introduced.
+                  </div>
+                )}
+              </div>
+
+              {selectedCell?.personId === detailPerson.id && selectedPerson && (
+                <div style={{ borderLeft: "1px solid var(--border)", overflowY: "auto", padding: 16 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--navy)" }}>
+                        {parseLocalDate(selectedCell.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+                      </div>
+                      <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>Selected utilization day</div>
+                    </div>
+                    <button onClick={() => setSelectedCell(null)} title="Close day details" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)" }}><X size={14} /></button>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
+                    {selectedPct > 100 ? <AlertTriangle size={15} style={{ color: "var(--danger)" }} /> : <Gauge size={15} style={{ color: "var(--accent)" }} />}
+                    <span style={{ fontSize: 22, fontWeight: 800, color: selectedPct > 100 ? "var(--danger)" : "var(--navy)" }}>{displayPct(selectedPct)}%</span>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 14 }}>
+                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}>
+                      <div style={{ fontSize: 12, fontWeight: 800 }}>{selectedCapacity.toFixed(1)}h</div>
+                      <div style={{ fontSize: 9, color: "var(--muted)" }}>Capacity</div>
+                    </div>
+                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}>
+                      <div style={{ fontSize: 12, fontWeight: 800 }}>{selectedAllocated.toFixed(1)}h</div>
+                      <div style={{ fontSize: 9, color: "var(--muted)" }}>Allocated</div>
+                    </div>
+                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: selectedAllocated > selectedCapacity ? "var(--danger)" : "var(--success)" }}>{selectedAllocated > selectedCapacity ? "+" : ""}{(selectedAllocated - selectedCapacity).toFixed(1)}h</div>
+                      <div style={{ fontSize: 9, color: "var(--muted)" }}>{selectedAllocated > selectedCapacity ? "Over" : "Remaining"}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--navy)", marginBottom: 6 }}>Work contributing to this day</div>
+                  {selectedContributions.map((r, i) => (
+                    <div key={r.id} style={{ padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{i + 1}. {r.label}</div>
+                          <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{r.projectName}</div>
+                          <div style={{ fontSize: 9.5, color: "var(--accent)", marginTop: 2 }}>Added {formatWorkloadDate(r.entry)}</div>
+                        </div>
+                        <div style={{ fontSize: 10.5, fontWeight: 800 }}>{r.hours.toFixed(1)}h</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </aside>
+        </>
       )}
+
 
     </div>
   );
