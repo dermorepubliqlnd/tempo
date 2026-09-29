@@ -7,7 +7,7 @@ import { buildHolidaySet } from "../lib/workingDays";
 // One shared allocation engine for all three utilization surfaces
 // (this page, Scoped vs Logged, and WBS Planning's Utilization snapshot).
 // See src/lib/dailyAllocation.ts for what used to be duplicated here.
-import { createAllocationEngine, dailyCapacityHours, parentTaskIdsOf, type UtilTaskRow } from "../lib/dailyAllocation";
+import { createAllocationEngine, dailyCapacityHours, isOpenTask, parentTaskIdsOf, type UtilTaskRow } from "../lib/dailyAllocation";
 import UtilPersonFilterButton from "../components/UtilPersonFilterButton";
 import MultiSelectFilter from "../components/MultiSelectFilter";
 import { displayPct, tierOf, UTIL_LEGEND } from "../lib/utilizationBands";
@@ -30,6 +30,10 @@ interface ProjectRow {
   // projects, same as WBS Planning -- see capacityScheduler.ts's
   // SchedProjectRow for the rationale.
   wbs_status?: string | null;
+  status?: string | null;
+  paused_at?: string | null;
+  resumed_at?: string | null;
+  project_type_id?: string | null;
 }
 interface TaskRow {
   id: string;
@@ -200,6 +204,7 @@ export default function Utilization() {
   const [allPeople, setAllPeople] = useState<PersonRow[]>([]);
   const [showAllPeople, setShowAllPeople] = useState(false);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [projectTypes, setProjectTypes] = useState<{ id: string; name: string; sort_order: number | null }[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
   const [holidays, setHolidays] = useState<HolidayRow[]>([]);
@@ -259,15 +264,17 @@ export default function Utilization() {
   const [taskSort, setTaskSort] = useState<"project" | "oldest" | "newest">("project");
   const [taskSearch, setTaskSearch] = useState("");
   const [detailTab, setDetailTab] = useState<"workload" | "timeline" | "pipeline">("workload");
+  const [workloadScope, setWorkloadScope] = useState<"active" | "historical">("active");
   const [detailWeekIndex, setDetailWeekIndex] = useState(0);
   const [selectedCell, setSelectedCell] = useState<{ personId: string; dateStr: string } | null>(null);
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: p }, { data: ap }, { data: pr }, { data: tk }, { data: av }, { data: hol }, { data: wts }, { data: ownHist }, { data: assHist }, { data: delHrs }, { data: settings }] = await Promise.all([
+    const [{ data: p }, { data: ap }, { data: pr }, { data: pt }, { data: tk }, { data: av }, { data: hol }, { data: wts }, { data: ownHist }, { data: assHist }, { data: delHrs }, { data: settings }] = await Promise.all([
       supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").eq("is_active", true).order("name"),
       supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").order("name"),
-      supabase.from("projects").select("id,name,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at").eq("is_archived", false),
+      supabase.from("projects").select("id,name,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at,project_type_id").eq("is_archived", false),
+      supabase.from("project_types").select("id,name,sort_order").eq("is_active", true).order("sort_order"),
       supabase.from("tasks").select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,sort_order,work_type_id,created_at,created_by").eq("is_archived", false),
       supabase.from("person_availability").select("*"),
       supabase.from("holidays").select("*"),
@@ -280,6 +287,7 @@ export default function Utilization() {
     setPeople((p as PersonRow[]) ?? []);
     setAllPeople((ap as PersonRow[]) ?? []);
     setProjects((pr as ProjectRow[]) ?? []);
+    setProjectTypes((pt as { id: string; name: string; sort_order: number | null }[]) ?? []);
     setTasks((tk as TaskRow[]) ?? []);
     setAvailability((av as AvailabilityRow[]) ?? []);
     setHolidays((hol as HolidayRow[]) ?? []);
@@ -625,28 +633,69 @@ export default function Utilization() {
 
   const detailPerson = detailPersonId ? allPeople.find((p) => p.id === detailPersonId) ?? people.find((p) => p.id === detailPersonId) : null;
   const detailTasks = detailPerson ? orderedTasksFor(detailPerson.id) : [];
+  const detailActiveTasks = detailTasks.filter((t) => isOpenTask(t));
+  const detailHistoricalTasks = detailTasks.filter((t) => !isOpenTask(t));
+  const detailWorkloadTasks = workloadScope === "active" ? detailActiveTasks : detailHistoricalTasks;
   const detailOwnedProjects = detailPerson ? ownedProjectsFor(detailPerson.id) : [];
   const detailWeekStats = detailPerson ? weeks.map((week) => ({ week, stats: weekStatsForPerson(detailPerson, week) })) : [];
   const safeDetailWeekIndex = Math.min(detailWeekIndex, Math.max(detailWeekStats.length - 1, 0));
   const detailWeek = detailWeekStats[safeDetailWeekIndex]?.week ?? [];
   const detailSelectedWeekStats = detailWeekStats[safeDetailWeekIndex]?.stats ?? null;
-  const detailProjectIds = detailPerson ? Array.from(new Set(detailTasks.map((t) => t.project_id))) : [];
+  const detailProjectIds = detailPerson ? Array.from(new Set(detailWorkloadTasks.map((t) => t.project_id))) : [];
+
+  const detailPeriodKind: "historical" | "current" | "forecast" = (() => {
+    if (!detailWeek.length) return "forecast";
+    const start = toISO(detailWeek[0]);
+    const end = toISO(detailWeek[detailWeek.length - 1]);
+    if (end < today) return "historical";
+    if (start > today) return "forecast";
+    return "current";
+  })();
+
+  const selectedWeekTaskHours = detailPerson
+    ? detailActiveTasks.reduce((sum, task) => sum + weekSum(detailWeek, (dateStr) => taskValueForDate(detailPerson, task, dateStr)), 0)
+    : 0;
+  const selectedWeekPmHours = detailPerson
+    ? detailOwnedProjects.reduce((sum, project) => sum + weekSum(detailWeek, (dateStr) => pmValueForDate(detailPerson, project.id, dateStr)), 0)
+    : 0;
+
+  const projectTypeMix = projectTypes.map((type) => {
+    let taskHours = 0;
+    let pmHours = 0;
+    if (detailPerson) {
+      detailTasks.forEach((task) => {
+        const project = projects.find((p) => p.id === task.project_id);
+        if (project?.project_type_id !== type.id) return;
+        taskHours += weekSum(detailWeek, (dateStr) => taskValueForDate(detailPerson, task, dateStr));
+      });
+      detailOwnedProjects.forEach((project) => {
+        if (project.project_type_id !== type.id) return;
+        pmHours += weekSum(detailWeek, (dateStr) => pmValueForDate(detailPerson, project.id, dateStr));
+      });
+    }
+    return { ...type, taskHours, pmHours, totalHours: taskHours + pmHours };
+  }).filter((x) => x.totalHours > 0);
+  const projectTypeMixTotal = projectTypeMix.reduce((sum, x) => sum + x.totalHours, 0);
+
   const pipelineRows = (() => {
     if (!detailPerson || !detailSelectedWeekStats) return [] as Array<{ task: TaskRow; entry: WorkloadEntry; weekHours: number; cumulativeHours: number; cumulativePct: number }>;
     let cumulativeHours = 0;
     return [...detailTasks]
+      .map((task) => ({
+        task,
+        entry: workloadEntryFor(task, detailPerson.id),
+        weekHours: weekSum(detailWeek, (dateStr) => taskValueForDate(detailPerson, task, dateStr)),
+      }))
+      .filter((row) => row.weekHours > 0)
       .sort((a, b) => {
-        const ae = workloadEntryFor(a, detailPerson.id).date ?? "9999-12-31";
-        const be = workloadEntryFor(b, detailPerson.id).date ?? "9999-12-31";
-        return ae.localeCompare(be) || a.name.localeCompare(b.name);
+        const ae = a.entry.date ?? "9999-12-31";
+        const be = b.entry.date ?? "9999-12-31";
+        return ae.localeCompare(be) || a.task.name.localeCompare(b.task.name);
       })
-      .map((task) => {
-        const weekHours = weekSum(detailWeek, (dateStr) => taskValueForDate(detailPerson, task, dateStr));
-        cumulativeHours += weekHours;
+      .map((row) => {
+        cumulativeHours += row.weekHours;
         return {
-          task,
-          entry: workloadEntryFor(task, detailPerson.id),
-          weekHours,
+          ...row,
           cumulativeHours,
           cumulativePct: detailSelectedWeekStats.availableHours > 0 ? (cumulativeHours / detailSelectedWeekStats.availableHours) * 100 : 0,
         };
@@ -956,7 +1005,9 @@ export default function Utilization() {
                           onClick={() => {
                             setDetailPersonId(person.id);
                             setDetailTab("workload");
-                            setDetailWeekIndex(0);
+                            setWorkloadScope("active");
+                            const currentWeekIndex = weeks.findIndex((week) => week.some((wd) => toISO(wd) === today));
+                            setDetailWeekIndex(currentWeekIndex >= 0 ? currentWeekIndex : 0);
                             setSelectedCell((prev) => (prev?.personId === person.id ? prev : null));
                           }}
                         >
@@ -1104,7 +1155,9 @@ export default function Utilization() {
               width: "min(80vw, 1480px)",
               minWidth: "760px",
               background: "var(--surface)",
-              boxShadow: "-18px 0 42px rgba(15, 35, 65, 0.18)",
+              boxShadow: "-22px 0 56px rgba(15, 35, 65, 0.18)",
+              borderRadius: "20px 0 0 20px",
+              overflow: "hidden",
               display: "flex",
               flexDirection: "column",
             }}
@@ -1117,38 +1170,40 @@ export default function Utilization() {
               <button onClick={() => { setDetailPersonId(null); setSelectedCell(null); }} title="Close" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 3 }}><X size={18} /></button>
             </div>
 
-            <div style={{ padding: "0 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, minHeight: 50 }}>
-              {([
-                ["workload", "Workload"],
-                ["timeline", "Timeline"],
-                ["pipeline", "Pipeline Sequence"],
-              ] as const).map(([tab, label]) => (
-                <button
-                  key={tab}
-                  onClick={() => { setDetailTab(tab); setSelectedCell(null); }}
-                  style={{
-                    height: 50,
-                    padding: "0 13px",
-                    border: "none",
-                    borderBottom: detailTab === tab ? "2px solid var(--accent)" : "2px solid transparent",
-                    background: "transparent",
-                    color: detailTab === tab ? "var(--accent)" : "var(--muted)",
-                    fontSize: 11.5,
-                    fontWeight: detailTab === tab ? 800 : 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
+            <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10, minHeight: 58, background: "var(--surface)" }}>
+              <div style={{ display: "inline-flex", gap: 4, padding: 4, background: "var(--hover-bg)", borderRadius: 999 }}>
+                {([
+                  ["workload", "Workload"],
+                  ["timeline", "Timeline"],
+                  ["pipeline", "Pipeline Sequence"],
+                ] as const).map(([tab, label]) => (
+                  <button
+                    key={tab}
+                    onClick={() => { setDetailTab(tab); setSelectedCell(null); }}
+                    style={{
+                      padding: "8px 14px",
+                      border: "none",
+                      borderRadius: 999,
+                      background: detailTab === tab ? "var(--surface)" : "transparent",
+                      color: detailTab === tab ? "var(--accent)" : "var(--muted)",
+                      boxShadow: detailTab === tab ? "0 2px 8px rgba(15,35,65,.10)" : "none",
+                      fontSize: 11.5,
+                      fontWeight: detailTab === tab ? 800 : 650,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
 
-              <div style={{ marginLeft: "auto", display: "flex", gap: 7, alignItems: "center" }}>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
                 <div style={{ position: "relative" }}>
-                  <Search size={13} style={{ position: "absolute", left: 8, top: 8, color: "var(--muted)" }} />
-                  <input value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} placeholder="Search projects or tasks…" style={{ width: 230, fontSize: 11, padding: "6px 8px 6px 27px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }} />
+                  <Search size={13} style={{ position: "absolute", left: 11, top: 9, color: "var(--muted)" }} />
+                  <input value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} placeholder="Search projects or tasks…" style={{ width: 240, fontSize: 11, padding: "7px 12px 7px 31px", border: "1px solid var(--border)", borderRadius: 999, color: "var(--navy)", background: "var(--surface)" }} />
                 </div>
                 {detailTab === "workload" && (
-                  <select value={taskSort} onChange={(e) => setTaskSort(e.target.value as "project" | "oldest" | "newest")} style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 7px" }}>
+                  <select value={taskSort} onChange={(e) => setTaskSort(e.target.value as "project" | "oldest" | "newest")} style={{ fontSize: 11, fontWeight: 650, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 999, padding: "7px 30px 7px 12px", background: "var(--surface)" }}>
                     <option value="project">Project (A–Z)</option>
                     <option value="oldest">Added oldest</option>
                     <option value="newest">Added newest</option>
@@ -1158,9 +1213,21 @@ export default function Utilization() {
             </div>
 
             {detailTab !== "workload" && (
-              <div style={{ padding: "11px 20px", borderBottom: "1px solid var(--border)", background: "var(--hover-bg)" }}>
-                <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--muted)", marginBottom: 7 }}>
-                  {detailTab === "timeline" ? "SELECT WEEK TO VIEW" : "SELECT WEEK FOR PIPELINE IMPACT"}
+              <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--border)", background: "var(--hover-bg)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)" }}>
+                    {detailTab === "timeline" ? "SELECT WEEK TO VIEW" : "SELECT WEEK FOR PIPELINE IMPACT"}
+                  </div>
+                  <span style={{
+                    fontSize: 9.5,
+                    fontWeight: 800,
+                    padding: "4px 9px",
+                    borderRadius: 999,
+                    background: detailPeriodKind === "historical" ? "rgba(100,116,139,.12)" : detailPeriodKind === "current" ? "rgba(20,184,166,.12)" : "rgba(59,130,246,.12)",
+                    color: detailPeriodKind === "historical" ? "var(--muted)" : detailPeriodKind === "current" ? "var(--success)" : "var(--accent)"
+                  }}>
+                    {detailPeriodKind === "historical" ? "Historical" : detailPeriodKind === "current" ? "Current week" : "Forecast"}
+                  </span>
                 </div>
                 <div style={{ display: "flex", gap: 9, overflowX: "auto" }}>
                   {detailWeekStats.map(({ week, stats }, wi) => {
@@ -1175,7 +1242,7 @@ export default function Utilization() {
                           textAlign: "left",
                           padding: "9px 11px",
                           border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
-                          borderRadius: "var(--radius-sm)",
+                          borderRadius: 14,
                           background: tier.bg,
                           cursor: "pointer",
                         }}
@@ -1194,30 +1261,79 @@ export default function Utilization() {
               </div>
             )}
 
+            {detailTab !== "workload" && detailSelectedWeekStats && (
+              <div style={{ padding: "12px 20px 10px", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 12, alignItems: "stretch" }}>
+                  <div style={{ border: "1px solid var(--border)", borderRadius: 14, padding: "11px 13px", background: "linear-gradient(180deg, var(--surface), var(--hover-bg))" }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--muted)", marginBottom: 7 }}>CAPACITY MIX</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, marginBottom: 5 }}>
+                      <span style={{ color: "var(--muted)" }}>Task effort</span><strong style={{ color: "var(--navy)" }}>{selectedWeekTaskHours.toFixed(1)}h</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5 }}>
+                      <span style={{ color: "var(--muted)" }}>PM overhead</span><strong style={{ color: "var(--navy)" }}>{selectedWeekPmHours.toFixed(1)}h</strong>
+                    </div>
+                  </div>
+
+                  <div style={{ border: "1px solid var(--border)", borderRadius: 14, padding: "11px 13px" }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--muted)", marginBottom: 8 }}>EFFORT BY PROJECT TYPE</div>
+                    {projectTypeMix.length === 0 ? (
+                      <div style={{ fontSize: 10.5, color: "var(--muted)" }}>No project-type effort in this period.</div>
+                    ) : (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {projectTypeMix.map((mix) => (
+                          <div key={mix.id} style={{ minWidth: 130, flex: "1 1 130px", background: "var(--hover-bg)", borderRadius: 12, padding: "8px 10px" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--navy)" }}>{mix.name}</span>
+                              <span style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)" }}>{mix.totalHours.toFixed(1)}h</span>
+                            </div>
+                            <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 3 }}>
+                              {projectTypeMixTotal > 0 ? Math.round((mix.totalHours / projectTypeMixTotal) * 100) : 0}% of selected-period effort
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: selectedCell?.personId === detailPerson.id && detailTab === "timeline" ? "minmax(0, 1fr) 330px" : "1fr" }}>
               <div style={{ minWidth: 0, overflow: "auto", padding: "16px 20px 22px" }}>
 
                 {detailTab === "workload" && (
                   <div style={{ maxWidth: 980 }}>
-                    <div style={{ marginBottom: 14 }}>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: "var(--navy)" }}>Current scoped workload</div>
-                      <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Projects and tasks currently contributing to this person's planned capacity.</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 14, marginBottom: 14 }}>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: "var(--navy)" }}>{workloadScope === "active" ? "Active scoped workload" : "Completed / historical workload"}</div>
+                        <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
+                          {workloadScope === "active" ? "Work that can still consume future capacity." : "Completed and cancelled work retained for historical reference."}
+                        </div>
+                      </div>
+                      <div style={{ display: "inline-flex", gap: 3, padding: 3, background: "var(--hover-bg)", borderRadius: 999 }}>
+                        <button onClick={() => setWorkloadScope("active")} style={{ border: "none", borderRadius: 999, padding: "6px 11px", background: workloadScope === "active" ? "var(--surface)" : "transparent", boxShadow: workloadScope === "active" ? "0 2px 7px rgba(15,35,65,.09)" : "none", color: workloadScope === "active" ? "var(--accent)" : "var(--muted)", fontSize: 10.5, fontWeight: 750, cursor: "pointer" }}>Active ({detailActiveTasks.length})</button>
+                        <button onClick={() => setWorkloadScope("historical")} style={{ border: "none", borderRadius: 999, padding: "6px 11px", background: workloadScope === "historical" ? "var(--surface)" : "transparent", boxShadow: workloadScope === "historical" ? "0 2px 7px rgba(15,35,65,.09)" : "none", color: workloadScope === "historical" ? "var(--accent)" : "var(--muted)", fontSize: 10.5, fontWeight: 750, cursor: "pointer" }}>Historical ({detailHistoricalTasks.length})</button>
+                      </div>
                     </div>
 
                     {detailProjectIds.length === 0 ? (
                       <div style={{ padding: 18, border: "1px dashed var(--border)", borderRadius: "var(--radius-sm)", color: "var(--muted)", fontSize: 11 }}>No scoped tasks found for this person.</div>
                     ) : detailProjectIds.map((projectId) => {
                       const project = projects.find((p) => p.id === projectId);
-                      const pTasks = detailTasks.filter((t) => t.project_id === projectId);
+                      const pTasks = detailWorkloadTasks.filter((t) => t.project_id === projectId);
+                      const projectType = projectTypes.find((type) => type.id === project?.project_type_id);
                       const totalHours = pTasks.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
                       const entries = pTasks.map((t) => workloadEntryFor(t, detailPerson.id)).filter((e) => e.date);
                       const earliest = entries.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""))[0];
                       return (
-                        <div key={projectId} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-md)", marginBottom: 10, overflow: "hidden" }}>
+                        <div key={projectId} style={{ border: "1px solid var(--border)", borderRadius: 16, marginBottom: 12, overflow: "hidden", boxShadow: "0 3px 12px rgba(15,35,65,.045)" }}>
                           <div style={{ padding: "11px 13px", background: "var(--hover-bg)", display: "grid", gridTemplateColumns: "1fr 90px 150px", gap: 12, alignItems: "center" }}>
                             <div>
-                              <div style={{ fontSize: 12, fontWeight: 800, color: "var(--navy)" }}>{project?.name ?? "Unknown project"}</div>
-                              <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>{pTasks.length} task{pTasks.length === 1 ? "" : "s"}</div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                                <div style={{ fontSize: 12, fontWeight: 800, color: "var(--navy)" }}>{project?.name ?? "Unknown project"}</div>
+                                {projectType && <span style={{ fontSize: 8.5, fontWeight: 800, padding: "3px 7px", borderRadius: 999, background: "rgba(59,130,246,.09)", color: "var(--accent)" }}>{projectType.name}</span>}
+                              </div>
+                              <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3 }}>{pTasks.length} task{pTasks.length === 1 ? "" : "s"} · {workloadScope === "active" ? "Planning" : "Historical"}</div>
                             </div>
                             <div style={{ textAlign: "right" }}>
                               <div style={{ fontSize: 12, fontWeight: 800, color: "var(--navy)" }}>{totalHours.toFixed(1)}h</div>
@@ -1312,7 +1428,7 @@ export default function Utilization() {
                     <div style={{ marginBottom: 14 }}>
                       <div style={{ fontSize: 14, fontWeight: 800, color: "var(--navy)" }}>Pipeline sequence</div>
                       <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
-                        Work shown in the order it entered {detailPerson.name}'s workload. Capacity impact below uses the selected week.
+                        Work contributing to the selected period, shown in the order it entered {detailPerson.name}'s workload. Completed work remains available in historical periods but is excluded from future planning once it no longer consumes capacity.
                       </div>
                     </div>
 
@@ -1329,6 +1445,9 @@ export default function Utilization() {
                       </div>
                     )}
 
+                    {pipelineRows.length === 0 ? (
+                      <div style={{ padding: 18, border: "1px dashed var(--border)", borderRadius: 14, color: "var(--muted)", fontSize: 10.5 }}>No scoped tasks contribute hours to the selected period.</div>
+                    ) : (
                     <div style={{ position: "relative", paddingLeft: 22 }}>
                       <div style={{ position: "absolute", left: 7, top: 8, bottom: 8, width: 2, background: "var(--border)" }} />
                       {pipelineRows.map((row, idx) => {
@@ -1357,10 +1476,11 @@ export default function Utilization() {
                         );
                       })}
                     </div>
+                    )}
 
-                    <div style={{ display: "flex", gap: 7, marginTop: 10, padding: 9, borderRadius: "var(--radius-sm)", background: "var(--hover-bg)", fontSize: 9.5, color: "var(--muted)", lineHeight: 1.4 }}>
+                    <div style={{ display: "flex", gap: 7, marginTop: 10, padding: 10, borderRadius: 12, background: "var(--hover-bg)", fontSize: 9.5, color: "var(--muted)", lineHeight: 1.4 }}>
                       <Info size={12} style={{ flexShrink: 0, marginTop: 1 }} />
-                      Pipeline impact uses task allocation for the selected week. Project-management overhead and deleted historical items are not included in the cumulative task percentage, so the main utilization total can be slightly higher.
+                      Pipeline sequence is based on task allocation for the selected week. PM overhead is shown separately in Capacity Mix and is attributed to each project's project type; it is not used to decide which task first pushed task allocation over capacity.
                     </div>
                   </div>
                 )}
