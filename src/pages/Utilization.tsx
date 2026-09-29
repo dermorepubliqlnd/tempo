@@ -1832,7 +1832,7 @@ export default function Utilization() {
                       const earliest = entries.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""))[0];
                       return (
                         <div key={projectId} style={{ border: "1px solid var(--border)", borderRadius: 10, marginBottom: 12, overflow: "hidden", boxShadow: "0 2px 8px rgba(15,35,65,.04)", background: "var(--surface)" }}>
-                          <div style={{ padding: "10px 12px", background: "var(--hover-bg)", display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 110px 150px", gap: 12, alignItems: "center" }}>
+                          <div style={{ padding: "10px 12px", background: "var(--hover-bg)", display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 130px 170px", gap: 16, alignItems: "center" }}>
                             <div>
                               <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
                                 <div style={{ fontSize: 14, fontWeight: 800, color: "var(--navy)" }}>{project?.name ?? "Unknown project"}</div>
@@ -1840,32 +1840,32 @@ export default function Utilization() {
                               </div>
                               <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3 }}>{pTasks.length} task{pTasks.length === 1 ? "" : "s"} · {workloadScope === "active" ? "Planning" : "Historical"}</div>
                             </div>
-                            <div>
+                            <div style={{ textAlign: "center" }}>
                               <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 2 }}>Scoped</div>
                               <div style={{ fontSize: 14, fontWeight: 800, color: "var(--navy)" }}>{totalHours.toFixed(1)}h</div>
                             </div>
-                            <div>
+                            <div style={{ textAlign: "center" }}>
                               <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 2 }}>First Added</div>
                               <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--accent)" }}>{earliest ? formatWorkloadDate(earliest) : "—"}</div>
                             </div>
                           </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 120px 110px 135px 150px", gap: 10, alignItems: "center", padding: "8px 12px", background: "rgba(15,35,65,.025)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 130px 125px 165px 165px", columnGap: 18, alignItems: "center", padding: "8px 12px", background: "rgba(15,35,65,.025)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
                             <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Task</div>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Status</div>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "right" }}>Scoped Hours</div>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Date Assigned</div>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Week Coverage</div>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "center" }}>Status</div>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "center" }}>Scoped Hours</div>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "center" }}>Date Assigned</div>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "center" }}>Week Coverage</div>
                           </div>
                           {pTasks.map((t) => {
                             const entry = workloadEntryFor(t, detailPerson.id);
                             const tone = taskStatusTone(t.status);
                             return (
-                              <div key={t.id} style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 120px 110px 135px 150px", gap: 10, alignItems: "center", padding: "8px 12px", borderBottom: "1px solid var(--border)" }}>
+                              <div key={t.id} style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 130px 125px 165px 165px", columnGap: 18, alignItems: "center", padding: "8px 12px", borderBottom: "1px solid var(--border)" }}>
                                 <div style={{ fontSize: 12.5, color: "var(--text-secondary)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</div>
-                                <div><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span></div>
-                                <div style={{ textAlign: "right", fontSize: 12.5, fontWeight: 750, color: "var(--navy)" }}>{(t.estimated_hours ?? 0).toFixed(1)}h</div>
-                                <div title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ fontSize: 12, color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 650, whiteSpace: "nowrap" }}>{formatWorkloadDate(entry)}</div>
-                                <div style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
+                                <div style={{ textAlign: "center" }}><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span></div>
+                                <div style={{ textAlign: "center", fontSize: 12.5, fontWeight: 750, color: "var(--navy)" }}>{(t.estimated_hours ?? 0).toFixed(1)}h</div>
+                                <div title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ textAlign: "center", fontSize: 12, color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 650, whiteSpace: "nowrap" }}>{formatWorkloadDate(entry)}</div>
+                                <div style={{ textAlign: "center", fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
                                   {t.start_date ? parseLocalDate(t.start_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"} – {t.current_due_date ? parseLocalDate(t.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
                                 </div>
                               </div>
