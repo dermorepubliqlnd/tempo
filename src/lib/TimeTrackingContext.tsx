@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { supabase } from "./supabaseClient";
 import { useSession } from "./useSession";
-import { startTimer as rpcStart, stopTimer as rpcStop } from "./timeTracking";
+import { startTimer as rpcStart, stopTimer as rpcStop, startNonProjectTimer as rpcStartNonProject, discardTimerEntry as rpcDiscard } from "./timeTracking";
 import type { TimeEntryRow } from "./timeTracking";
 
 // App-wide timer state: which task (if any) the current person has
@@ -15,17 +15,27 @@ import type { TimeEntryRow } from "./timeTracking";
 // unique index -- see [[project_capaciq_time_tracking]]), so "the running
 // entry" is always at most one row.
 
+// 2026-09-29 (phase123): a running/pending timer can now be a
+// NON-PROJECT timer (task_id null, activity_type_id set). task_name
+// carries the display label either way (task name or Activity Type
+// name) so every existing "Timing X" / "Stop the timer running on X
+// first" string keeps working unchanged.
 interface RunningEntry {
   id: string;
-  task_id: string;
+  task_id: string | null;
+  activity_type_id: string | null;
+  is_non_project: boolean;
   task_name: string;
   started_at: string;
 }
 
 interface PendingConfirmEntry {
   id: string;
-  task_id: string;
+  task_id: string | null;
+  activity_type_id: string | null;
+  is_non_project: boolean;
   task_name: string;
+  notes: string | null;
   started_at: string;
   ended_at: string;
   duration_minutes: number;
@@ -37,6 +47,8 @@ interface TimeTrackingContextValue {
   pendingConfirm: PendingConfirmEntry[];
   busy: boolean;
   start: (task: { id: string; name: string }) => Promise<{ error?: string }>;
+  startNonProject: (activityType: { id: string; name: string }) => Promise<{ error?: string }>;
+  discard: (entryId: string) => Promise<{ error?: string }>;
   requestStop: () => Promise<{ error?: string }>;
   refresh: () => Promise<void>;
   openConfirmModalFor: string | null;
@@ -83,20 +95,28 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
 
     const { data } = await supabase
       .from("time_entries")
-      .select("id, task_id, started_at, ended_at, duration_minutes, auto_stopped, status, task:tasks(name)")
+      .select("id, task_id, activity_type_id, started_at, ended_at, duration_minutes, auto_stopped, status, reason_notes, task:tasks(name), activity_type:non_project_activity_types(name)")
       .eq("person_id", me.id)
+      .eq("is_archived", false)
       .in("status", ["running", "pending_confirm"])
       .order("started_at", { ascending: false });
 
-    const rows = (data as unknown as (TimeEntryRow & { task: { name: string } | null })[]) ?? [];
+    const rows = (data as unknown as (TimeEntryRow & { task: { name: string } | null; activity_type: { name: string } | null })[]) ?? [];
     const runningRow = rows.find((r) => r.status === "running");
-    // 2026-09-22: task_id is nullable on TimeEntryRow now (non-project
-    // entries), but running/pending_confirm rows are always timer-based
-    // and timers only ever run against a task -- non-project logging is
-    // manual-only and lands straight in pending_approval. Safe to assert.
+    // 2026-09-29 (phase123): timers can run against a task OR a
+    // non-project Activity Type, so task_id may be null here now.
+    const labelOf = (r: (typeof rows)[number]) =>
+      r.task_id ? r.task?.name ?? "Untitled task" : r.activity_type?.name ?? "Non-project";
     setRunning(
       runningRow
-        ? { id: runningRow.id, task_id: runningRow.task_id as string, task_name: runningRow.task?.name ?? "Untitled task", started_at: runningRow.started_at }
+        ? {
+            id: runningRow.id,
+            task_id: runningRow.task_id,
+            activity_type_id: runningRow.activity_type_id ?? null,
+            is_non_project: !runningRow.task_id,
+            task_name: labelOf(runningRow),
+            started_at: runningRow.started_at,
+          }
         : null
     );
     setPendingConfirm(
@@ -104,8 +124,11 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
         .filter((r) => r.status === "pending_confirm")
         .map((r) => ({
           id: r.id,
-          task_id: r.task_id as string,
-          task_name: r.task?.name ?? "Untitled task",
+          task_id: r.task_id,
+          activity_type_id: r.activity_type_id ?? null,
+          is_non_project: !r.task_id,
+          task_name: labelOf(r),
+          notes: r.reason_notes,
           started_at: r.started_at,
           ended_at: r.ended_at!,
           duration_minutes: r.duration_minutes ?? 0,
@@ -142,6 +165,24 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
     return {};
   }
 
+  async function startNonProject(activityType: { id: string; name: string }) {
+    setBusy(true);
+    const res = await rpcStartNonProject(activityType.id);
+    setBusy(false);
+    if (res.error) return { error: res.error };
+    await refresh();
+    return {};
+  }
+
+  async function discard(entryId: string) {
+    setBusy(true);
+    const res = await rpcDiscard(entryId);
+    setBusy(false);
+    if (res.error) return { error: res.error };
+    await refresh();
+    return {};
+  }
+
   async function requestStop() {
     if (!running) return { error: "No timer is running" };
     setBusy(true);
@@ -154,7 +195,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
 
   return (
     <TimeTrackingContext.Provider
-      value={{ running, pendingConfirm, busy, start, requestStop, refresh, openConfirmModalFor, setOpenConfirmModalFor, version, bumpVersion }}
+      value={{ running, pendingConfirm, busy, start, startNonProject, discard, requestStop, refresh, openConfirmModalFor, setOpenConfirmModalFor, version, bumpVersion }}
     >
       {children}
     </TimeTrackingContext.Provider>

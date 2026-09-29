@@ -202,6 +202,27 @@ export async function resumeTimer(entryId: string): Promise<{ error?: string }> 
   return {};
 }
 
+// 2026-09-29 (phase123, Sandra: "people can use timer for non-proj task
+// rather than plotting it after the fact") -- same running ->
+// pending_confirm -> confirmed lifecycle as a task timer (no approval),
+// keyed to an Activity Type instead of a task. Notes are required at
+// confirm time (DB-enforced in confirm_time_entry), not at start.
+export async function startNonProjectTimer(activityTypeId: string): Promise<{ id?: string; error?: string }> {
+  const { data, error } = await supabase.rpc("start_non_project_timer", { p_activity_type_id: activityTypeId });
+  if (error) return { error: error.message };
+  return { id: data as unknown as string };
+}
+
+// Accidental start: a timer under 2 minutes can be thrown away without
+// notes. Server moves it to the Archive (no hard delete) -- see
+// discard_timer_entry in supabase/phase123_migration.sql.
+export const DISCARD_TIMER_MAX_SECONDS = 120;
+export async function discardTimerEntry(entryId: string): Promise<{ error?: string }> {
+  const { error } = await supabase.rpc("discard_timer_entry", { p_entry_id: entryId });
+  if (error) return { error: error.message };
+  return {};
+}
+
 export async function confirmTimeEntry(
   entryId: string,
   overrides: { startedAt?: string; endedAt?: string; notes?: string } = {}
