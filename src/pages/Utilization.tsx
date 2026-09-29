@@ -109,6 +109,13 @@ function startOfWeek(d: Date): Date {
   const diff = day === 0 ? -6 : 1 - day;
   return addDays(r, diff);
 }
+function isoWeekNumber(d: Date): number {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
 function parseLocalDate(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d);
@@ -398,8 +405,17 @@ export default function Utilization() {
   }
   const isAtEarliestAnchor = rangeStart <= EARLIEST_ANCHOR;
 
+  // Daily view keeps the selected range exactly as chosen. Weekly planning,
+  // Timeline and Pipeline use true ISO-style calendar weeks: Monday–Sunday.
+  const dayChunks: Date[][] = [];
+  for (let i = 0; i < days.length; i += 7) dayChunks.push(days.slice(i, i + 7));
+
   const weeks: Date[][] = [];
-  for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
+  const firstWeekStart = startOfWeek(rangeStart);
+  const lastWeekStart = startOfWeek(rangeEnd);
+  for (let ws = new Date(firstWeekStart); ws <= lastWeekStart; ws = addDays(ws, 7)) {
+    weeks.push(Array.from({ length: 7 }, (_, i) => addDays(ws, i)));
+  }
 
   // Auto-scroll-to-today (2026-08-25, same fix as WbsPlanning.tsx's
   // Utilization snapshot panel -- see that file's comment for the full
@@ -1156,10 +1172,10 @@ export default function Utilization() {
                   }}
                 />
                 {viewMode === "daily"
-                  ? weeks.map((week, wi) => (
+                  ? dayChunks.map((week, wi) => (
                       <th
                         key={wi}
-                        colSpan={7}
+                        colSpan={week.length}
                         style={{
                           fontSize: 12,
                           fontWeight: 600,
@@ -1189,17 +1205,10 @@ export default function Utilization() {
                           borderLeft: wi === 0 ? undefined : "1px solid var(--border)",
                         }}
                       >
-                        {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} –{" "}
-                        {/* Fix (2026-09-03, Sandra: "weekly view comes out blank"):
-                            hardcoded week[6] assumed every week chunk is a full 7
-                            days, but `weeks` is just days.length sliced into 7s --
-                            the trailing week of a range whose day count isn't a
-                            multiple of 7 (e.g. "This month" on a 30-day month is
-                            4 full weeks + a 2-day remainder) is shorter than 7,
-                            so week[6] was undefined and .toLocaleDateString()
-                            threw, crashing the whole page to blank. Use the
-                            week's own last day instead. */}
-                        {week[week.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        <div style={{ fontWeight: 800 }}>Week {isoWeekNumber(week[0])}</div>
+                        <div style={{ marginTop: 2, fontSize: 9.5, color: "var(--muted)", fontWeight: 600 }}>
+                          {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {week[6].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        </div>
                       </th>
                     ))}
               </tr>
@@ -1767,8 +1776,9 @@ export default function Utilization() {
                           boxShadow: active ? "0 4px 12px rgba(15,35,65,.08)" : "none",
                         }}
                       >
+                        <div style={{ fontSize: 10, fontWeight: 800, color: "var(--navy)", marginBottom: 2 }}>Week {isoWeekNumber(week[0])}</div>
                         <div style={{ fontSize: 9.5, color: "var(--muted)", marginBottom: 3 }}>
-                          {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {week[week.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {week[6].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                         </div>
                         <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                           <span style={{ fontSize: 17, fontWeight: 800, color: tier.fg }}>{displayPct(stats.avgPct)}%</span>
@@ -1890,7 +1900,7 @@ export default function Utilization() {
                       <div>
                         <div style={{ fontSize: 16, fontWeight: 800, color: "var(--navy)" }}>Weekly timeline</div>
                         <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
-                          {detailWeek.length ? `${detailWeek[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${detailWeek[detailWeek.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
+                          {detailWeek.length ? `Week ${isoWeekNumber(detailWeek[0])} · ${detailWeek[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${detailWeek[6].toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 5 }}>
