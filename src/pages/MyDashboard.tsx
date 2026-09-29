@@ -25,6 +25,7 @@ import { tierOf, displayPct, UTIL_LEGEND } from "../lib/utilizationBands";
 import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { supabase } from "../lib/supabaseClient";
 import Modal from "../components/Modal";
+import NonProjectTimerQuickStart from "../components/NonProjectTimerQuickStart";
 import { useSession } from "../lib/useSession";
 import { useApprovalAuthority } from "../lib/useApprovalAuthority";
 import { useConfirm } from "../lib/useConfirm";
@@ -206,7 +207,7 @@ export default function MyDashboard() {
   // 2026-09-24: Approval Center is hidden for users without approval
   // authority, so the Pending Approvals header links elsewhere for them.
   const hasApprovalAuthority = useApprovalAuthority();
-  const { running, busy: timerBusy, start: startTaskTimer, requestStop } = useTimeTracking();
+  const { running, busy: timerBusy, start: startTaskTimer, requestStop, pendingConfirm, setOpenConfirmModalFor } = useTimeTracking();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -654,6 +655,7 @@ export default function MyDashboard() {
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <NonProjectTimerQuickStart />
           {/* 2026-09-24 (Sandra): Add Time shortcut. Same Project task /
               Non-project choice as Time Tracking; opens that page's own Log
               time form (via ?add=) so all the overlap/cap/holiday checks stay
@@ -735,7 +737,7 @@ export default function MyDashboard() {
         <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Items" value={overdueTasks.length} sub="Needs attention" />
       </div>
 
-      {(tasksDueToday.length > 0 || overdueTasks.length > 0 || missingLogHours > 0.1 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
+      {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || missingLogHours > 0.1 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
           {/* 2026-09-23 (Sandra: "Pending approvals, remove and use the
@@ -748,6 +750,22 @@ export default function MyDashboard() {
               Missing logs now always routes to MY Time specifically
               (?scope=mine), not whatever Team/All scope was last viewed --
               same experience for every task/project owner. */}
+          {/* 2026-09-29 (phase123): stopped/auto-stopped timers not yet
+              confirmed -- a non-project one can't be confirmed without
+              notes, so it stays a Pending log until notes are added. */}
+          {pendingConfirm.length > 0 && (
+            <AttentionPill
+              tone="warning"
+              icon={<Clock3 size={12} />}
+              value={pendingConfirm.length}
+              label={
+                pendingConfirm.some((e) => e.is_non_project)
+                  ? `Unconfirmed timer ${pendingConfirm.length === 1 ? "entry" : "entries"} (notes needed)`
+                  : `Unconfirmed timer ${pendingConfirm.length === 1 ? "entry" : "entries"}`
+              }
+              onClick={() => setOpenConfirmModalFor(pendingConfirm[0].id)}
+            />
+          )}
           {tasksDueToday.length > 0 && (
             <AttentionPill tone="danger" icon={<Calendar size={12} />} value={tasksDueToday.length} label="Tasks due today" onClick={() => setAttentionModal("due_today")} />
           )}
