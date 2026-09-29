@@ -143,6 +143,13 @@ const LEGEND_ICON_BY_LABEL: Record<string, typeof Minus> = {
   Overloaded: AlertTriangle,
 };
 
+const PROJECT_TYPE_TONES = [
+  { bg: "rgba(59,130,246,.10)", fg: "#2563eb", dot: "#3b82f6" },
+  { bg: "rgba(16,185,129,.10)", fg: "#059669", dot: "#10b981" },
+  { bg: "rgba(245,158,11,.12)", fg: "#b7791f", dot: "#f59e0b" },
+  { bg: "rgba(139,92,246,.10)", fg: "#7c3aed", dot: "#8b5cf6" },
+];
+
 function rollupCellStyle(i: number): CSSProperties {
   return {
     width: CELL_W,
@@ -676,6 +683,17 @@ export default function Utilization() {
     return { ...type, taskHours, pmHours, totalHours: taskHours + pmHours };
   }).filter((x) => x.totalHours > 0);
   const projectTypeMixTotal = projectTypeMix.reduce((sum, x) => sum + x.totalHours, 0);
+
+  const detailDayStats = detailPerson
+    ? detailWeek.map((d) => {
+        const dateStr = toISO(d);
+        const av = availabilityFor(detailPerson.id, dateStr);
+        const capacity = dailyCapacityFor(detailPerson, av?.status === "half_day");
+        const allocated = valueForDate(detailPerson, dateStr);
+        const pct = capacity > 0 ? (allocated / capacity) * 100 : allocated > 0 ? 999 : 0;
+        return { dateStr, allocated, capacity, pct, tier: tierOf(pct), availability: av };
+      })
+    : [];
 
   const pipelineRows = (() => {
     if (!detailPerson || !detailSelectedWeekStats) return [] as Array<{ task: TaskRow; entry: WorkloadEntry; weekHours: number; cumulativeHours: number; cumulativePct: number }>;
@@ -1229,7 +1247,8 @@ export default function Utilization() {
                     {detailPeriodKind === "historical" ? "Historical" : detailPeriodKind === "current" ? "Current week" : "Forecast"}
                   </span>
                 </div>
-                <div style={{ display: "flex", gap: 9, overflowX: "auto" }}>
+
+                <div style={{ display: "flex", gap: 9, overflowX: "auto", paddingBottom: 8 }}>
                   {detailWeekStats.map(({ week, stats }, wi) => {
                     const tier = tierOf(stats.avgPct);
                     const active = wi === safeDetailWeekIndex;
@@ -1238,13 +1257,14 @@ export default function Utilization() {
                         key={wi}
                         onClick={() => { setDetailWeekIndex(wi); setSelectedCell(null); }}
                         style={{
-                          minWidth: 165,
+                          minWidth: 158,
                           textAlign: "left",
                           padding: "9px 11px",
                           border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
                           borderRadius: 14,
                           background: tier.bg,
                           cursor: "pointer",
+                          boxShadow: active ? "0 4px 12px rgba(15,35,65,.08)" : "none",
                         }}
                       >
                         <div style={{ fontSize: 9.5, color: "var(--muted)", marginBottom: 3 }}>
@@ -1258,43 +1278,28 @@ export default function Utilization() {
                     );
                   })}
                 </div>
-              </div>
-            )}
 
-            {detailTab !== "workload" && detailSelectedWeekStats && (
-              <div style={{ padding: "12px 20px 10px", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 12, alignItems: "stretch" }}>
-                  <div style={{ border: "1px solid var(--border)", borderRadius: 14, padding: "11px 13px", background: "linear-gradient(180deg, var(--surface), var(--hover-bg))" }}>
-                    <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--muted)", marginBottom: 7 }}>CAPACITY MIX</div>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5, marginBottom: 5 }}>
-                      <span style={{ color: "var(--muted)" }}>Task effort</span><strong style={{ color: "var(--navy)" }}>{selectedWeekTaskHours.toFixed(1)}h</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 10.5 }}>
-                      <span style={{ color: "var(--muted)" }}>PM overhead</span><strong style={{ color: "var(--navy)" }}>{selectedWeekPmHours.toFixed(1)}h</strong>
-                    </div>
+                {detailSelectedWeekStats && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 9.5, fontWeight: 800, color: "var(--muted)", marginRight: 2 }}>MIX</span>
+                    <span style={{ fontSize: 9.5, fontWeight: 750, padding: "5px 9px", borderRadius: 999, background: "rgba(15,35,65,.06)", color: "var(--navy)" }}>
+                      Task {selectedWeekTaskHours.toFixed(1)}h
+                    </span>
+                    <span style={{ fontSize: 9.5, fontWeight: 750, padding: "5px 9px", borderRadius: 999, background: "rgba(99,102,241,.10)", color: "#4f46e5" }}>
+                      PM {selectedWeekPmHours.toFixed(1)}h
+                    </span>
+                    {projectTypeMix.map((mix, mi) => {
+                      const tone = PROJECT_TYPE_TONES[mi % PROJECT_TYPE_TONES.length];
+                      const share = projectTypeMixTotal > 0 ? Math.round((mix.totalHours / projectTypeMixTotal) * 100) : 0;
+                      return (
+                        <span key={mix.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 9.5, fontWeight: 800, padding: "5px 9px", borderRadius: 999, background: tone.bg, color: tone.fg }}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: tone.dot }} />
+                          {mix.name} {mix.totalHours.toFixed(1)}h · {share}%
+                        </span>
+                      );
+                    })}
                   </div>
-
-                  <div style={{ border: "1px solid var(--border)", borderRadius: 14, padding: "11px 13px" }}>
-                    <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--muted)", marginBottom: 8 }}>EFFORT BY PROJECT TYPE</div>
-                    {projectTypeMix.length === 0 ? (
-                      <div style={{ fontSize: 10.5, color: "var(--muted)" }}>No project-type effort in this period.</div>
-                    ) : (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {projectTypeMix.map((mix) => (
-                          <div key={mix.id} style={{ minWidth: 130, flex: "1 1 130px", background: "var(--hover-bg)", borderRadius: 12, padding: "8px 10px" }}>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--navy)" }}>{mix.name}</span>
-                              <span style={{ fontSize: 11, fontWeight: 800, color: "var(--accent)" }}>{mix.totalHours.toFixed(1)}h</span>
-                            </div>
-                            <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 3 }}>
-                              {projectTypeMixTotal > 0 ? Math.round((mix.totalHours / projectTypeMixTotal) * 100) : 0}% of selected-period effort
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                )}
               </div>
             )}
 
@@ -1387,39 +1392,66 @@ export default function Utilization() {
                       </div>
                     </div>
 
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
-                      <thead>
-                        <tr>
-                          <th style={{ textAlign: "left", padding: "9px 8px", borderBottom: "1px solid var(--border)", minWidth: 260 }}>Task</th>
-                          <th style={{ textAlign: "left", padding: "9px 8px", borderBottom: "1px solid var(--border)", width: 150 }}>Project</th>
-                          {detailWeek.map((d) => <th key={toISO(d)} style={{ textAlign: "center", padding: "9px 5px", borderBottom: "1px solid var(--border)", minWidth: 72 }}>{WEEKDAY_LABEL[d.getDay()]}<br />{d.getDate()}</th>)}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {detailTasks.filter((t) => detailWeek.some((d) => taskValueForDate(detailPerson, t, toISO(d)) > 0)).map((t) => {
-                          const project = projects.find((p) => p.id === t.project_id);
-                          return (
-                            <tr key={t.id}>
-                              <td style={{ padding: "9px 8px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>{t.name}</td>
-                              <td style={{ padding: "9px 8px", borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>{project?.name ?? "—"}</td>
-                              {detailWeek.map((d) => {
-                                const dateStr = toISO(d);
-                                const value = taskValueForDate(detailPerson, t, dateStr);
-                                return (
-                                  <td
-                                    key={dateStr}
-                                    onClick={() => setSelectedCell({ personId: detailPerson.id, dateStr })}
-                                    style={{ textAlign: "center", padding: "9px 5px", borderBottom: "1px solid var(--border)", cursor: "pointer", background: selectedCell?.personId === detailPerson.id && selectedCell?.dateStr === dateStr ? "var(--hover-bg)" : undefined, color: value > 0 ? "var(--navy)" : "var(--muted)" }}
-                                  >
-                                    {value > 0 ? `${value.toFixed(1)}h` : "–"}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                    <div style={{ border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden", background: "var(--surface)" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
+                        <thead>
+                          <tr style={{ background: "var(--hover-bg)" }}>
+                            <th style={{ textAlign: "left", padding: "9px 10px", borderBottom: "1px solid var(--border)", minWidth: 230 }}>Task</th>
+                            <th style={{ textAlign: "left", padding: "9px 8px", borderBottom: "1px solid var(--border)", width: 110 }}>Added</th>
+                            {detailDayStats.map((ds) => (
+                              <th key={ds.dateStr} style={{ textAlign: "center", padding: "8px 5px", borderBottom: "1px solid var(--border)", minWidth: 76, background: ds.tier.bg }}>
+                                <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--navy)" }}>{WEEKDAY_LABEL[parseLocalDate(ds.dateStr).getDay()]} {parseLocalDate(ds.dateStr).getDate()}</div>
+                                <div style={{ marginTop: 3, fontSize: 11.5, fontWeight: 850, color: ds.tier.fg }}>{ds.capacity > 0 ? `${displayPct(ds.pct)}%` : "—"}</div>
+                                <div style={{ fontSize: 8.5, fontWeight: 600, color: ds.tier.fg, opacity: .8 }}>{ds.allocated.toFixed(1)}h / {ds.capacity.toFixed(1)}h</div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Array.from(new Set(detailTasks
+                            .filter((t) => detailWeek.some((d) => taskValueForDate(detailPerson, t, toISO(d)) > 0))
+                            .map((t) => t.project_id)))
+                            .map((projectId) => {
+                              const project = projects.find((p) => p.id === projectId);
+                              const projectType = projectTypes.find((pt) => pt.id === project?.project_type_id);
+                              const pTasks = detailTasks.filter((t) => t.project_id === projectId && detailWeek.some((d) => taskValueForDate(detailPerson, t, toISO(d)) > 0));
+                              return (
+                                <Fragment key={projectId}>
+                                  <tr style={{ background: "rgba(15,35,65,.035)" }}>
+                                    <td colSpan={2 + detailDayStats.length} style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+                                      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                                        <span style={{ fontSize: 10.5, fontWeight: 850, color: "var(--navy)" }}>{project?.name ?? "Unknown project"}</span>
+                                        {projectType && <span style={{ fontSize: 8.5, fontWeight: 800, padding: "3px 7px", borderRadius: 999, background: "rgba(59,130,246,.09)", color: "var(--accent)" }}>{projectType.name}</span>}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  {pTasks.map((t) => {
+                                    const entry = workloadEntryFor(t, detailPerson.id);
+                                    return (
+                                      <tr key={t.id}>
+                                        <td style={{ padding: "8px 10px 8px 18px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>{t.name}</td>
+                                        <td title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ padding: "8px", borderBottom: "1px solid var(--border)", color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 700, whiteSpace: "nowrap" }}>{formatWorkloadDate(entry)}</td>
+                                        {detailDayStats.map((ds) => {
+                                          const value = taskValueForDate(detailPerson, t, ds.dateStr);
+                                          return (
+                                            <td
+                                              key={ds.dateStr}
+                                              onClick={() => setSelectedCell({ personId: detailPerson.id, dateStr: ds.dateStr })}
+                                              style={{ textAlign: "center", padding: "8px 5px", borderBottom: "1px solid var(--border)", cursor: "pointer", background: selectedCell?.personId === detailPerson.id && selectedCell?.dateStr === ds.dateStr ? "rgba(59,130,246,.08)" : undefined, color: value > 0 ? "var(--navy)" : "var(--muted)", fontWeight: value > 0 ? 700 : 500 }}
+                                            >
+                                              {value > 0 ? `${value.toFixed(1)}h` : "–"}
+                                            </td>
+                                          );
+                                        })}
+                                      </tr>
+                                    );
+                                  })}
+                                </Fragment>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
 
