@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronLeft, ChevronRight, Minus, Plus, Circle, CheckCircle2, TrendingUp, Gauge, AlertTriangle, Info, X, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Minus, Plus, Circle, CheckCircle2, TrendingUp, Gauge, AlertTriangle, Info, X, Search, ArrowRight, Sparkles } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
@@ -275,6 +275,9 @@ export default function Utilization() {
   const [workloadScope, setWorkloadScope] = useState<"active" | "historical">("active");
   const [detailWeekIndex, setDetailWeekIndex] = useState(0);
   const [selectedCell, setSelectedCell] = useState<{ personId: string; dateStr: string } | null>(null);
+  const [scenarioTaskId, setScenarioTaskId] = useState<string | null>(null);
+  const [scenarioStart, setScenarioStart] = useState("");
+  const [scenarioDue, setScenarioDue] = useState("");
 
   async function loadAll() {
     setLoading(true);
@@ -824,6 +827,70 @@ export default function Utilization() {
           cumulativePct: detailSelectedWeekStats.availableHours > 0 ? (cumulativeHours / detailSelectedWeekStats.availableHours) * 100 : 0,
         };
       });
+  })();
+
+  const scenarioTask = scenarioTaskId ? tasks.find((t) => t.id === scenarioTaskId) ?? null : null;
+  const scenarioPerson = scenarioTask?.assignee_id ? allPeople.find((p) => p.id === scenarioTask.assignee_id) ?? people.find((p) => p.id === scenarioTask.assignee_id) ?? null : null;
+  const scenarioProject = scenarioTask ? projects.find((p) => p.id === scenarioTask.project_id) ?? null : null;
+
+  const scenarioEngine = useMemo(() => {
+    if (!scenarioTask || !scenarioStart || !scenarioDue) return null;
+    const patchedTasks = engineTasks.map((t) => t.id === scenarioTask.id ? { ...t, start_date: scenarioStart, current_due_date: scenarioDue } : t);
+    return createAllocationEngine({
+      tasks: patchedTasks as UtilTaskRow[],
+      projects: engineProjects,
+      holidays: holidaySet,
+      availability,
+      assigneeHistory,
+      ownerHistory,
+      todayStr: today,
+      deletedHours: projectFilterSet ? [] : deletedHours,
+    });
+  }, [scenarioTask, scenarioStart, scenarioDue, engineTasks, engineProjects, holidaySet, availability, assigneeHistory, ownerHistory, today, projectFilterSet, deletedHours]);
+
+  const scenarioImpact = (() => {
+    if (!scenarioTask || !scenarioPerson || !scenarioEngine || !scenarioStart || !scenarioDue) return null;
+    const oldStart = scenarioTask.start_date ?? scenarioTask.current_due_date;
+    const oldDue = scenarioTask.current_due_date;
+    const earliest = [oldStart, scenarioStart, today].sort()[0];
+    const latest = [oldDue, scenarioDue].sort().slice(-1)[0];
+    const impactDays: Date[] = [];
+    for (let d = parseLocalDate(earliest); d <= parseLocalDate(latest); d = addDays(d, 1)) impactDays.push(new Date(d));
+
+    const rows = impactDays.map((d) => {
+      const dateStr = toISO(d);
+      const dow = d.getDay();
+      if (dayBlocked(scenarioPerson.id, dateStr, dow)) return null;
+      const av = availabilityFor(scenarioPerson.id, dateStr);
+      const capacity = dailyCapacityFor(scenarioPerson, av?.status === "half_day");
+      const current = engine.totalFor(scenarioPerson.id, dateStr);
+      const proposed = scenarioEngine.totalFor(scenarioPerson.id, dateStr);
+      const currentPct = capacity > 0 ? (current / capacity) * 100 : 0;
+      const proposedPct = capacity > 0 ? (proposed / capacity) * 100 : 0;
+      return { dateStr, capacity, current, proposed, currentPct, proposedPct, delta: proposed - current };
+    }).filter((r): r is NonNullable<typeof r> => !!r && Math.abs(r.delta) > 0.001);
+
+    const allWorking = impactDays.map((d) => {
+      const dateStr = toISO(d);
+      const dow = d.getDay();
+      if (dayBlocked(scenarioPerson.id, dateStr, dow)) return null;
+      const av = availabilityFor(scenarioPerson.id, dateStr);
+      const capacity = dailyCapacityFor(scenarioPerson, av?.status === "half_day");
+      const current = engine.totalFor(scenarioPerson.id, dateStr);
+      const proposed = scenarioEngine.totalFor(scenarioPerson.id, dateStr);
+      return {
+        currentPct: capacity > 0 ? (current / capacity) * 100 : 0,
+        proposedPct: capacity > 0 ? (proposed / capacity) * 100 : 0,
+      };
+    }).filter((r): r is NonNullable<typeof r> => !!r);
+
+    return {
+      rows,
+      currentPeak: allWorking.reduce((m, r) => Math.max(m, r.currentPct), 0),
+      proposedPeak: allWorking.reduce((m, r) => Math.max(m, r.proposedPct), 0),
+      currentOverDays: allWorking.filter((r) => r.currentPct > 100).length,
+      proposedOverDays: allWorking.filter((r) => r.proposedPct > 100).length,
+    };
   })();
 
   const selectedPerson = selectedCell ? allPeople.find((p) => p.id === selectedCell.personId) ?? people.find((p) => p.id === selectedCell.personId) : null;
@@ -1460,12 +1527,26 @@ export default function Utilization() {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
                 {selectedContributions.map((r, i) => (
-                  <div key={r.id} style={{ display: "grid", gridTemplateColumns: "22px 1fr 54px", gap: 8, alignItems: "start", padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
+                  <div key={r.id} style={{ display: "grid", gridTemplateColumns: "22px 1fr 70px", gap: 8, alignItems: "start", padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
                     <div style={{ fontSize: 9.5, color: "var(--muted)", paddingTop: 1 }}>{i + 1}</div>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 10.5, fontWeight: 750, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.label}</div>
                       <div style={{ fontSize: 9.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.projectName}</div>
                       <div style={{ fontSize: 9.2, color: "var(--accent)", marginTop: 2 }}>Added {formatWorkloadDate(r.entry)}</div>
+                      {r.kind === "task" && (
+                        <button
+                          onClick={() => {
+                            const task = tasks.find((t) => t.id === r.id);
+                            if (!task) return;
+                            setScenarioTaskId(task.id);
+                            setScenarioStart(task.start_date ?? task.current_due_date);
+                            setScenarioDue(task.current_due_date);
+                          }}
+                          style={{ marginTop: 5, border: "none", background: "rgba(59,130,246,.08)", color: "var(--accent)", borderRadius: 999, padding: "4px 8px", fontSize: 8.8, fontWeight: 800, cursor: "pointer" }}
+                        >
+                          Preview rebalance
+                        </button>
+                      )}
                     </div>
                     <div style={{ textAlign: "right", fontSize: 10.5, fontWeight: 850, color: "var(--navy)" }}>{r.hours.toFixed(1)}h</div>
                   </div>
@@ -1474,6 +1555,104 @@ export default function Utilization() {
             )}
           </div>
         </aside>
+      )}
+
+      {scenarioTask && scenarioPerson && scenarioProject && (
+        <>
+          <div
+            onClick={() => setScenarioTaskId(null)}
+            style={{ position: "fixed", inset: 0, zIndex: 48, background: "rgba(15,35,65,.28)" }}
+          />
+          <aside
+            style={{
+              position: "fixed",
+              top: 18,
+              right: 18,
+              bottom: 18,
+              zIndex: 49,
+              width: 520,
+              maxWidth: "calc(100vw - 36px)",
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderRadius: 20,
+              boxShadow: "0 24px 64px rgba(15,35,65,.24)",
+              overflowY: "auto",
+            }}
+          >
+            <div style={{ padding: "16px 18px 13px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+                  <Sparkles size={15} style={{ color: "var(--accent)" }} />
+                  <span style={{ fontSize: 10, fontWeight: 850, color: "var(--accent)", letterSpacing: ".04em" }}>SCENARIO PREVIEW</span>
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 850, color: "var(--navy)" }}>{scenarioTask.name}</div>
+                <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>{scenarioProject.name} · {scenarioPerson.name}</div>
+              </div>
+              <button onClick={() => setScenarioTaskId(null)} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer" }}><X size={17} /></button>
+            </div>
+
+            <div style={{ padding: 18 }}>
+              <div style={{ padding: "10px 12px", borderRadius: 13, background: "rgba(59,130,246,.06)", border: "1px solid rgba(59,130,246,.12)", fontSize: 10, color: "var(--text-secondary)", lineHeight: 1.45, marginBottom: 14 }}>
+                Preview only. This does not change the WBS, task list, baseline, assignee history, or audit trail.
+              </div>
+
+              <div style={{ fontSize: 10, fontWeight: 850, color: "var(--navy)", marginBottom: 8 }}>Try a different schedule</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 28px 1fr", gap: 8, alignItems: "end", marginBottom: 15 }}>
+                <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
+                  Proposed start
+                  <input type="date" value={scenarioStart} min={today} onChange={(e) => setScenarioStart(e.target.value)} style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 9px", fontSize: 11, color: "var(--navy)" }} />
+                </label>
+                <ArrowRight size={15} style={{ color: "var(--muted)", marginBottom: 10 }} />
+                <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
+                  Proposed due
+                  <input type="date" value={scenarioDue} min={scenarioStart || today} onChange={(e) => setScenarioDue(e.target.value)} style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 9px", fontSize: 11, color: "var(--navy)" }} />
+                </label>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 14 }}>
+                <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 14, background: "var(--hover-bg)" }}>
+                  <div style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", marginBottom: 4 }}>CURRENT PEAK</div>
+                  <div style={{ fontSize: 21, fontWeight: 850, color: tierOf(scenarioImpact?.currentPeak ?? 0).fg }}>{displayPct(scenarioImpact?.currentPeak ?? 0)}%</div>
+                  <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>{scenarioImpact?.currentOverDays ?? 0} overloaded day{(scenarioImpact?.currentOverDays ?? 0) === 1 ? "" : "s"}</div>
+                </div>
+                <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 14, background: (scenarioImpact?.proposedPeak ?? 0) > 100 ? "rgba(239,68,68,.04)" : "rgba(16,185,129,.05)" }}>
+                  <div style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", marginBottom: 4 }}>PROPOSED PEAK</div>
+                  <div style={{ fontSize: 21, fontWeight: 850, color: tierOf(scenarioImpact?.proposedPeak ?? 0).fg }}>{displayPct(scenarioImpact?.proposedPeak ?? 0)}%</div>
+                  <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>{scenarioImpact?.proposedOverDays ?? 0} overloaded day{(scenarioImpact?.proposedOverDays ?? 0) === 1 ? "" : "s"}</div>
+                </div>
+              </div>
+
+              <div style={{ fontSize: 10, fontWeight: 850, color: "var(--navy)", marginBottom: 7 }}>Affected days</div>
+              {!scenarioImpact || scenarioImpact.rows.length === 0 ? (
+                <div style={{ padding: 14, border: "1px dashed var(--border)", borderRadius: 12, color: "var(--muted)", fontSize: 10 }}>Change the proposed dates to see the capacity impact.</div>
+              ) : (
+                <div style={{ border: "1px solid var(--border)", borderRadius: 13, overflow: "hidden" }}>
+                  {scenarioImpact.rows.slice(0, 12).map((row) => (
+                    <div key={row.dateStr} style={{ display: "grid", gridTemplateColumns: "110px 1fr 24px 1fr", gap: 8, alignItems: "center", padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 750, color: "var(--navy)" }}>{parseLocalDate(row.dateStr).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
+                        <div style={{ fontSize: 8.8, color: "var(--muted)" }}>{row.capacity.toFixed(1)}h capacity</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, color: tierOf(row.currentPct).fg }}>{displayPct(row.currentPct)}%</div>
+                        <div style={{ fontSize: 8.8, color: "var(--muted)" }}>{row.current.toFixed(1)}h</div>
+                      </div>
+                      <ArrowRight size={12} style={{ color: "var(--muted)" }} />
+                      <div>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, color: tierOf(row.proposedPct).fg }}>{displayPct(row.proposedPct)}%</div>
+                        <div style={{ fontSize: 8.8, color: row.delta > 0 ? "var(--danger)" : "#059669" }}>{row.proposed.toFixed(1)}h ({row.delta > 0 ? "+" : ""}{row.delta.toFixed(1)}h)</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ marginTop: 14, padding: "10px 12px", borderRadius: 12, background: "var(--hover-bg)", fontSize: 9.5, color: "var(--muted)", lineHeight: 1.45 }}>
+                Phase 2 starts with schedule simulation only. Reassignment, dependency-aware cascading, and Apply to WBS will be added after this preview behavior is validated.
+              </div>
+            </div>
+          </aside>
+        </>
       )}
 
       {detailPerson && (
