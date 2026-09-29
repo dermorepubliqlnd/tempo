@@ -243,6 +243,7 @@ export default function Utilization() {
     return new Date(d.getFullYear(), d.getMonth() + 1, 0);
   });
   const [detailPersonId, setDetailPersonId] = useState<string | null>(null);
+  const [planningPreset, setPlanningPreset] = useState<"month" | "this_week" | "next_week" | "next_2_weeks" | "custom">("month");
   const [viewMode, setViewMode] = useState<"daily" | "weekly">("daily");
   // Person filter (2026-09-03, Sandra: "add a name filter so we can just
   // select who we want to view") -- reuses the same searchable multi-select
@@ -335,27 +336,52 @@ export default function Utilization() {
   // Shift the whole window backward/forward by its own current width (in
   // days) -- a custom-filtered range pages by its own size instead of an
   // unrelated fixed week count.
+  function mondayOf(date: Date): Date {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    const dow = d.getDay();
+    return addDays(d, dow === 0 ? -6 : 1 - dow);
+  }
+  function applyPlanningPreset(preset: "month" | "this_week" | "next_week" | "next_2_weeks") {
+    const now = new Date();
+    if (preset === "month") {
+      setRangeStart(new Date(now.getFullYear(), now.getMonth(), 1));
+      setRangeEnd(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+    } else {
+      const thisMonday = mondayOf(now);
+      const start = preset === "this_week" ? thisMonday : addDays(thisMonday, 7);
+      const end = preset === "next_2_weeks" ? addDays(start, 13) : addDays(start, 6);
+      setRangeStart(start);
+      setRangeEnd(end);
+    }
+    setPlanningPreset(preset);
+  }
   function shiftRange(direction: -1 | 1) {
     const spanDays = Math.round((rangeEnd.getTime() - rangeStart.getTime()) / (24 * 60 * 60 * 1000)) + 1;
     setRangeStart((s) => addDays(s, direction * spanDays));
     setRangeEnd((e) => addDays(e, direction * spanDays));
+    setPlanningPreset("custom");
   }
   function resetToCurrentMonth() {
-    const d = new Date();
-    setRangeStart(new Date(d.getFullYear(), d.getMonth(), 1));
-    setRangeEnd(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+    applyPlanningPreset("month");
   }
   function setRangeStartFromInput(dateStr: string) {
     if (!dateStr) return;
     const [y, m, d] = dateStr.split("-").map(Number);
     const chosen = new Date(y, (m ?? 1) - 1, d ?? 1);
-    if (chosen <= rangeEnd) setRangeStart(chosen);
+    if (chosen <= rangeEnd) {
+      setRangeStart(chosen);
+      setPlanningPreset("custom");
+    }
   }
   function setRangeEndFromInput(dateStr: string) {
     if (!dateStr) return;
     const [y, m, d] = dateStr.split("-").map(Number);
     const chosen = new Date(y, (m ?? 1) - 1, d ?? 1);
-    if (chosen >= rangeStart) setRangeEnd(chosen);
+    if (chosen >= rangeStart) {
+      setRangeEnd(chosen);
+      setPlanningPreset("custom");
+    }
   }
   const isAtEarliestAnchor = rangeStart <= EARLIEST_ANCHOR;
 
@@ -690,6 +716,32 @@ export default function Utilization() {
   }).filter((x) => x.hours > 0);
   const teamProjectTypeTotal = teamProjectTypeMix.reduce((sum, x) => sum + x.hours, 0);
 
+  const capacityRisks = visiblePeople.flatMap((person) =>
+    summaryDays.flatMap((d) => {
+      const dateStr = toISO(d);
+      const dow = d.getDay();
+      if (dayBlocked(person.id, dateStr, dow)) return [];
+      const av = availabilityFor(person.id, dateStr);
+      const capacity = dailyCapacityFor(person, av?.status === "half_day");
+      const allocated = valueForDate(person, dateStr);
+      if (capacity <= 0 || allocated <= capacity) return [];
+      const taskHours = openTasksFor(person.id).reduce((sum, task) => sum + taskValueForDate(person, task, dateStr), 0);
+      const pmHours = ownedProjectsFor(person.id).reduce((sum, project) => sum + pmValueForDate(person, project.id, dateStr), 0);
+      return [{
+        person,
+        dateStr,
+        capacity,
+        allocated,
+        overHours: allocated - capacity,
+        pct: (allocated / capacity) * 100,
+        taskHours,
+        pmHours,
+      }];
+    })
+  ).sort((a, b) => b.overHours - a.overHours || b.pct - a.pct);
+
+  const topCapacityRisks = capacityRisks.slice(0, 5);
+
   const columnCount = viewMode === "daily" ? days.length : weeks.length;
 
   const detailPerson = detailPersonId ? allPeople.find((p) => p.id === detailPersonId) ?? people.find((p) => p.id === detailPersonId) : null;
@@ -821,6 +873,37 @@ export default function Utilization() {
       <div className="card" style={{ padding: 10, marginBottom: 8 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", letterSpacing: ".03em" }}>PLANNING PERIOD</span>
+            <div style={{ display: "inline-flex", gap: 3, padding: 3, background: "var(--hover-bg)", borderRadius: 999 }}>
+              {([
+                ["this_week", "This week"],
+                ["next_week", "Next week"],
+                ["next_2_weeks", "Next 2 weeks"],
+                ["month", "This month"],
+              ] as const).map(([preset, label]) => (
+                <button
+                  key={preset}
+                  onClick={() => applyPlanningPreset(preset)}
+                  style={{
+                    border: "none",
+                    borderRadius: 999,
+                    padding: "6px 10px",
+                    background: planningPreset === preset ? "var(--surface)" : "transparent",
+                    boxShadow: planningPreset === preset ? "0 2px 7px rgba(15,35,65,.09)" : "none",
+                    color: planningPreset === preset ? "var(--accent)" : "var(--muted)",
+                    fontSize: 10,
+                    fontWeight: 750,
+                    cursor: "pointer",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {planningPreset === "custom" && (
+              <span style={{ fontSize: 9.5, fontWeight: 800, color: "var(--accent)", padding: "4px 7px", borderRadius: 999, background: "rgba(59,130,246,.08)" }}>Custom</span>
+            )}
+            <div style={{ width: 1, height: 20, background: "var(--border)" }} />
             <button onClick={() => shiftRange(-1)} className="planner-nav-btn" disabled={isAtEarliestAnchor} title={isAtEarliestAnchor ? "Can't go earlier than Jan 2026" : "Previous"} style={isAtEarliestAnchor ? { opacity: 0.4, cursor: "default" } : undefined}>
               <ChevronLeft size={14} />
             </button>
@@ -829,7 +912,6 @@ export default function Utilization() {
               {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
             </span>
             <button onClick={() => shiftRange(1)} className="planner-nav-btn" title="Next"><ChevronRight size={14} /></button>
-            <button onClick={resetToCurrentMonth} style={{ fontSize: 11, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontWeight: 700 }}>This month</button>
             <div style={{ width: 1, height: 18, background: "var(--border)" }} />
             <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
               From
@@ -925,6 +1007,53 @@ export default function Utilization() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="card" style={{ padding: "12px 14px", marginBottom: 10, borderRadius: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: topCapacityRisks.length ? 10 : 0 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <AlertTriangle size={14} style={{ color: topCapacityRisks.length ? "var(--danger)" : "#059669" }} />
+              <span style={{ fontSize: 11, fontWeight: 850, color: "var(--navy)" }}>Needs Attention</span>
+            </div>
+            <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>Highest daily capacity risks in the selected planning period. Click one for the daily allocation.</div>
+          </div>
+          <span style={{ fontSize: 9.5, fontWeight: 800, color: topCapacityRisks.length ? "var(--danger)" : "#059669", padding: "5px 9px", borderRadius: 999, background: topCapacityRisks.length ? "rgba(239,68,68,.07)" : "rgba(16,185,129,.08)" }}>
+            {capacityRisks.length} risk{capacityRisks.length === 1 ? "" : "s"}
+          </span>
+        </div>
+
+        {topCapacityRisks.length === 0 ? (
+          <div style={{ fontSize: 10.5, color: "#059669", fontWeight: 700 }}>No team member exceeds daily capacity in this planning period.</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(150px, 1fr))", gap: 8, overflowX: "auto" }}>
+            {topCapacityRisks.map((risk) => (
+              <button
+                key={`${risk.person.id}-${risk.dateStr}`}
+                onClick={() => {
+                  setDetailPersonId(null);
+                  setSelectedCell({ personId: risk.person.id, dateStr: risk.dateStr });
+                }}
+                style={{
+                  textAlign: "left",
+                  border: "1px solid rgba(239,68,68,.18)",
+                  borderRadius: 13,
+                  background: "linear-gradient(180deg, var(--surface), rgba(239,68,68,.035))",
+                  padding: "9px 10px",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ fontSize: 10.5, fontWeight: 850, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{risk.person.name}</div>
+                <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 1 }}>{parseLocalDate(risk.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginTop: 6 }}>
+                  <span style={{ fontSize: 18, fontWeight: 850, color: "var(--danger)" }}>{displayPct(risk.pct)}%</span>
+                  <span style={{ fontSize: 9, fontWeight: 750, color: "var(--danger)" }}>+{risk.overHours.toFixed(1)}h</span>
+                </div>
+                <div style={{ fontSize: 8.8, color: "var(--muted)", marginTop: 4 }}>Task {risk.taskHours.toFixed(1)}h · PM {risk.pmHours.toFixed(1)}h</div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="card" style={{ padding: "7px 10px", marginBottom: 8, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
