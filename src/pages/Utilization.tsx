@@ -636,6 +636,60 @@ export default function Utilization() {
     return week.reduce((sum, d) => sum + getValue(toISO(d)), 0);
   }
 
+  const summaryDays = (() => {
+    const forward = days.filter((d) => toISO(d) >= today);
+    return forward.length > 0 ? forward : days;
+  })();
+
+  const teamPlanningSummary = (() => {
+    let plannedHours = 0;
+    let capacityHours = 0;
+    let availableCapacityHours = 0;
+    let overloadedMembers = 0;
+
+    visiblePeople.forEach((person) => {
+      let personOverloaded = false;
+      summaryDays.forEach((d) => {
+        const dateStr = toISO(d);
+        const dow = d.getDay();
+        if (dayBlocked(person.id, dateStr, dow)) return;
+        const av = availabilityFor(person.id, dateStr);
+        const capacity = dailyCapacityFor(person, av?.status === "half_day");
+        const planned = valueForDate(person, dateStr);
+        capacityHours += capacity;
+        plannedHours += planned;
+        availableCapacityHours += Math.max(0, capacity - planned);
+        if (capacity > 0 && planned / capacity > 1) personOverloaded = true;
+      });
+      if (personOverloaded) overloadedMembers++;
+    });
+
+    return {
+      plannedHours,
+      capacityHours,
+      utilizationPct: capacityHours > 0 ? (plannedHours / capacityHours) * 100 : 0,
+      availableCapacityHours,
+      overloadedMembers,
+    };
+  })();
+
+  const teamProjectTypeMix = projectTypes.map((type) => {
+    let hours = 0;
+    visiblePeople.forEach((person) => {
+      openTasksFor(person.id).forEach((task) => {
+        const project = projects.find((p) => p.id === task.project_id);
+        if (project?.project_type_id !== type.id) return;
+        hours += summaryDays.reduce((sum, d) => sum + taskValueForDate(person, task, toISO(d)), 0);
+      });
+      ownedProjectsFor(person.id).forEach((project) => {
+        if (project.project_type_id !== type.id) return;
+        hours += summaryDays.reduce((sum, d) => sum + pmValueForDate(person, project.id, toISO(d)), 0);
+      });
+    });
+    return { ...type, hours };
+  }).filter((x) => x.hours > 0);
+  const teamProjectTypeTotal = teamProjectTypeMix.reduce((sum, x) => sum + x.hours, 0);
+
   const columnCount = viewMode === "daily" ? days.length : weeks.length;
 
   const detailPerson = detailPersonId ? allPeople.find((p) => p.id === detailPersonId) ?? people.find((p) => p.id === detailPersonId) : null;
@@ -821,23 +875,55 @@ export default function Utilization() {
               {roleOptions.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
           )}
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-            <div style={{ position: "relative" }}>
-              <Search size={13} style={{ position: "absolute", left: 8, top: 7, color: "var(--muted)" }} />
-              <input value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} placeholder="Search expanded tasks…" style={{ width: 190, fontSize: 11, padding: "5px 8px 5px 27px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }} />
-            </div>
-            <select value={taskSort} onChange={(e) => setTaskSort(e.target.value as "project" | "oldest" | "newest")} title="Order expanded task details" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
-              <option value="project">Tasks: Project</option>
-              <option value="oldest">Tasks: Added oldest</option>
-              <option value="newest">Tasks: Added newest</option>
-            </select>
-            <button
-              onClick={() => { setPersonFilter(null); setProjectFilter([]); setRoleFilter(null); setShowAllPeople(false); setTaskSearch(""); setTaskSort("project"); }}
-              style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
-            >
-              Clear filters
-            </button>
+          <button
+            onClick={() => { setPersonFilter(null); setProjectFilter([]); setRoleFilter(null); setShowAllPeople(false); }}
+            style={{ marginLeft: "auto", border: "1px solid var(--border)", borderRadius: 999, background: "var(--surface)", color: "var(--accent)", fontSize: 10.5, fontWeight: 750, cursor: "pointer", padding: "6px 11px" }}
+          >
+            Clear filters
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginBottom: 10 }}>
+        <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "linear-gradient(180deg, var(--surface), rgba(59,130,246,.035))" }}>
+          <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>TEAM UTILIZATION</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+            <span style={{ fontSize: 23, fontWeight: 850, color: tierOf(teamPlanningSummary.utilizationPct).fg }}>{displayPct(teamPlanningSummary.utilizationPct)}%</span>
+            <span style={{ fontSize: 9.5, color: "var(--muted)" }}>{teamPlanningSummary.plannedHours.toFixed(1)}h / {teamPlanningSummary.capacityHours.toFixed(1)}h</span>
           </div>
+          <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>{summaryDays.length ? `${summaryDays[0].toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${summaryDays[summaryDays.length-1].toLocaleDateString("en-US",{month:"short",day:"numeric"})}` : "Selected period"}</div>
+        </div>
+
+        <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "linear-gradient(180deg, var(--surface), rgba(16,185,129,.04))" }}>
+          <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>AVAILABLE CAPACITY</div>
+          <div style={{ fontSize: 23, fontWeight: 850, color: "#059669" }}>{teamPlanningSummary.availableCapacityHours.toFixed(1)}h</div>
+          <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>Remaining positive capacity in the planning period</div>
+        </div>
+
+        <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: teamPlanningSummary.overloadedMembers > 0 ? "linear-gradient(180deg, var(--surface), rgba(239,68,68,.045))" : "linear-gradient(180deg, var(--surface), rgba(16,185,129,.04))" }}>
+          <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>OVERALLOCATED MEMBERS</div>
+          <div style={{ fontSize: 23, fontWeight: 850, color: teamPlanningSummary.overloadedMembers > 0 ? "var(--danger)" : "#059669" }}>{teamPlanningSummary.overloadedMembers}</div>
+          <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>Members with at least one day above 100%</div>
+        </div>
+
+        <div className="card" style={{ padding: "12px 14px", borderRadius: 16 }}>
+          <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 7 }}>PROJECT TYPE MIX</div>
+          {teamProjectTypeMix.length === 0 ? (
+            <div style={{ fontSize: 10, color: "var(--muted)" }}>No typed project effort in this period.</div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {teamProjectTypeMix.map((mix, mi) => {
+                const tone = PROJECT_TYPE_TONES[mi % PROJECT_TYPE_TONES.length];
+                const share = teamProjectTypeTotal > 0 ? Math.round((mix.hours / teamProjectTypeTotal) * 100) : 0;
+                return (
+                  <span key={mix.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 9.5, fontWeight: 800 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: tone.dot }} />
+                    {mix.name} {share}%
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
