@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown, Minus, Circle, CheckCircle2, TrendingUp, Gauge, AlertTriangle, Info, X, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Minus, Plus, Circle, CheckCircle2, TrendingUp, Gauge, AlertTriangle, Info, X, Search } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
@@ -1112,11 +1112,27 @@ export default function Utilization() {
                             setWorkloadScope("active");
                             const currentWeekIndex = weeks.findIndex((week) => week.some((wd) => toISO(wd) === today));
                             setDetailWeekIndex(currentWeekIndex >= 0 ? currentWeekIndex : 0);
-                            setSelectedCell((prev) => (prev?.personId === person.id ? prev : null));
+                            setSelectedCell(null);
                           }}
                         >
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                            {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            <span
+                              title="Open member utilization details"
+                              style={{
+                                width: 20,
+                                height: 20,
+                                borderRadius: "50%",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                background: isOpen ? "rgba(59,130,246,.12)" : "var(--surface)",
+                                border: "1px solid var(--border)",
+                                color: "var(--accent)",
+                                flexShrink: 0,
+                              }}
+                            >
+                              <Plus size={12} strokeWidth={2.4} />
+                            </span>
                             <span>
                               {person.name}
                               {person.job_title && (
@@ -1163,10 +1179,7 @@ export default function Utilization() {
                                   key={i}
                                   title={`${tier.label} · ${value.toFixed(1)}h allocated / ${capacity.toFixed(1)}h capacity`}
                                   onClick={() => {
-                                    setDetailPersonId(person.id);
-                                    setDetailTab("timeline");
-                                    const clickedWeek = weeks.findIndex((week) => week.some((wd) => toISO(wd) === dateStr));
-                                    if (clickedWeek >= 0) setDetailWeekIndex(clickedWeek);
+                                    setDetailPersonId(null);
                                     setSelectedCell({ personId: person.id, dateStr });
                                   }}
                                   role="button"
@@ -1242,6 +1255,97 @@ export default function Utilization() {
         )}
       </div>
 
+
+      {selectedCell && selectedPerson && !detailPerson && (
+        <aside
+          style={{
+            position: "fixed",
+            top: 82,
+            right: 18,
+            zIndex: 38,
+            width: 390,
+            maxHeight: "calc(100vh - 104px)",
+            overflowY: "auto",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 18,
+            boxShadow: "0 18px 48px rgba(15,35,65,.18)",
+          }}
+        >
+          <div style={{ padding: "14px 15px 12px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 2 }}>{selectedPerson.name}</div>
+              <div style={{ fontSize: 14, fontWeight: 850, color: "var(--navy)" }}>
+                {parseLocalDate(selectedCell.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+              </div>
+              <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3 }}>Daily allocation</div>
+            </div>
+            <button onClick={() => setSelectedCell(null)} title="Close" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 3 }}>
+              <X size={16} />
+            </button>
+          </div>
+
+          <div style={{ padding: 15 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              {selectedPct > 100 ? <AlertTriangle size={16} style={{ color: "var(--danger)" }} /> : <Gauge size={16} style={{ color: "var(--accent)" }} />}
+              <span style={{ fontSize: 25, lineHeight: 1, fontWeight: 850, color: selectedPct > 100 ? "var(--danger)" : tierOf(selectedPct).fg }}>
+                {displayPct(selectedPct)}%
+              </span>
+              <span style={{ fontSize: 10, color: "var(--muted)" }}>{selectedAllocated.toFixed(1)}h allocated / {selectedCapacity.toFixed(1)}h capacity</span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 7, marginBottom: 15 }}>
+              <div style={{ padding: 9, border: "1px solid var(--border)", borderRadius: 12, textAlign: "center", background: "var(--hover-bg)" }}>
+                <div style={{ fontSize: 13, fontWeight: 850, color: "var(--navy)" }}>{selectedCapacity.toFixed(1)}h</div>
+                <div style={{ fontSize: 9, color: "var(--muted)" }}>Capacity</div>
+              </div>
+              <div style={{ padding: 9, border: "1px solid var(--border)", borderRadius: 12, textAlign: "center", background: "var(--hover-bg)" }}>
+                <div style={{ fontSize: 13, fontWeight: 850, color: "var(--navy)" }}>{selectedAllocated.toFixed(1)}h</div>
+                <div style={{ fontSize: 9, color: "var(--muted)" }}>Allocated</div>
+              </div>
+              <div style={{ padding: 9, border: "1px solid var(--border)", borderRadius: 12, textAlign: "center", background: selectedAllocated > selectedCapacity ? "rgba(239,68,68,.06)" : "rgba(16,185,129,.06)" }}>
+                <div style={{ fontSize: 13, fontWeight: 850, color: selectedAllocated > selectedCapacity ? "var(--danger)" : "#059669" }}>
+                  {selectedAllocated > selectedCapacity ? "+" : ""}{(selectedAllocated - selectedCapacity).toFixed(1)}h
+                </div>
+                <div style={{ fontSize: 9, color: "var(--muted)" }}>{selectedAllocated > selectedCapacity ? "Over" : "Remaining"}</div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 7 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 850, color: "var(--navy)" }}>Work assigned this day</div>
+              <button
+                onClick={() => {
+                  setDetailPersonId(selectedPerson.id);
+                  setDetailTab("timeline");
+                  const clickedWeek = weeks.findIndex((week) => week.some((wd) => toISO(wd) === selectedCell.dateStr));
+                  if (clickedWeek >= 0) setDetailWeekIndex(clickedWeek);
+                }}
+                style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}
+              >
+                Open full view
+              </button>
+            </div>
+
+            {selectedContributions.length === 0 ? (
+              <div style={{ padding: "14px 10px", border: "1px dashed var(--border)", borderRadius: 12, color: "var(--muted)", fontSize: 10 }}>No scoped work contributes to this day.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                {selectedContributions.map((r, i) => (
+                  <div key={r.id} style={{ display: "grid", gridTemplateColumns: "22px 1fr 54px", gap: 8, alignItems: "start", padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ fontSize: 9.5, color: "var(--muted)", paddingTop: 1 }}>{i + 1}</div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 750, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.label}</div>
+                      <div style={{ fontSize: 9.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.projectName}</div>
+                      <div style={{ fontSize: 9.2, color: "var(--accent)", marginTop: 2 }}>Added {formatWorkloadDate(r.entry)}</div>
+                    </div>
+                    <div style={{ textAlign: "right", fontSize: 10.5, fontWeight: 850, color: "var(--navy)" }}>{r.hours.toFixed(1)}h</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
 
       {detailPerson && (
         <>
