@@ -258,6 +258,8 @@ export default function Utilization() {
   const [displayMode, setDisplayMode] = useState<"both" | "utilization" | "hours">("both");
   const [taskSort, setTaskSort] = useState<"project" | "oldest" | "newest">("project");
   const [taskSearch, setTaskSearch] = useState("");
+  const [detailTab, setDetailTab] = useState<"workload" | "timeline" | "pipeline">("workload");
+  const [detailWeekIndex, setDetailWeekIndex] = useState(0);
   const [selectedCell, setSelectedCell] = useState<{ personId: string; dateStr: string } | null>(null);
 
   async function loadAll() {
@@ -625,6 +627,31 @@ export default function Utilization() {
   const detailTasks = detailPerson ? orderedTasksFor(detailPerson.id) : [];
   const detailOwnedProjects = detailPerson ? ownedProjectsFor(detailPerson.id) : [];
   const detailWeekStats = detailPerson ? weeks.map((week) => ({ week, stats: weekStatsForPerson(detailPerson, week) })) : [];
+  const safeDetailWeekIndex = Math.min(detailWeekIndex, Math.max(detailWeekStats.length - 1, 0));
+  const detailWeek = detailWeekStats[safeDetailWeekIndex]?.week ?? [];
+  const detailSelectedWeekStats = detailWeekStats[safeDetailWeekIndex]?.stats ?? null;
+  const detailProjectIds = detailPerson ? Array.from(new Set(detailTasks.map((t) => t.project_id))) : [];
+  const pipelineRows = (() => {
+    if (!detailPerson || !detailSelectedWeekStats) return [] as Array<{ task: TaskRow; entry: WorkloadEntry; weekHours: number; cumulativeHours: number; cumulativePct: number }>;
+    let cumulativeHours = 0;
+    return [...detailTasks]
+      .sort((a, b) => {
+        const ae = workloadEntryFor(a, detailPerson.id).date ?? "9999-12-31";
+        const be = workloadEntryFor(b, detailPerson.id).date ?? "9999-12-31";
+        return ae.localeCompare(be) || a.name.localeCompare(b.name);
+      })
+      .map((task) => {
+        const weekHours = weekSum(detailWeek, (dateStr) => taskValueForDate(detailPerson, task, dateStr));
+        cumulativeHours += weekHours;
+        return {
+          task,
+          entry: workloadEntryFor(task, detailPerson.id),
+          weekHours,
+          cumulativeHours,
+          cumulativePct: detailSelectedWeekStats.availableHours > 0 ? (cumulativeHours / detailSelectedWeekStats.availableHours) * 100 : 0,
+        };
+      });
+  })();
 
   const selectedPerson = selectedCell ? allPeople.find((p) => p.id === selectedCell.personId) ?? people.find((p) => p.id === selectedCell.personId) : null;
   const selectedAvailability = selectedCell && selectedPerson ? availabilityFor(selectedPerson.id, selectedCell.dateStr) : undefined;
@@ -928,6 +955,8 @@ export default function Utilization() {
                           }}
                           onClick={() => {
                             setDetailPersonId(person.id);
+                            setDetailTab("workload");
+                            setDetailWeekIndex(0);
                             setSelectedCell((prev) => (prev?.personId === person.id ? prev : null));
                           }}
                         >
@@ -980,6 +1009,9 @@ export default function Utilization() {
                                   title={`${tier.label} · ${value.toFixed(1)}h allocated / ${capacity.toFixed(1)}h capacity`}
                                   onClick={() => {
                                     setDetailPersonId(person.id);
+                                    setDetailTab("timeline");
+                                    const clickedWeek = weeks.findIndex((week) => week.some((wd) => toISO(wd) === dateStr));
+                                    if (clickedWeek >= 0) setDetailWeekIndex(clickedWeek);
                                     setSelectedCell({ personId: person.id, dateStr });
                                   }}
                                   role="button"
@@ -1060,7 +1092,7 @@ export default function Utilization() {
         <>
           <div
             onClick={() => { setDetailPersonId(null); setSelectedCell(null); }}
-            style={{ position: "fixed", inset: 0, zIndex: 39, background: "rgba(15, 35, 65, 0.22)" }}
+            style={{ position: "fixed", inset: 0, zIndex: 39, background: "rgba(15, 35, 65, 0.20)" }}
           />
           <aside
             style={{
@@ -1070,14 +1102,14 @@ export default function Utilization() {
               bottom: 0,
               zIndex: 40,
               width: "min(80vw, 1480px)",
-              minWidth: "720px",
+              minWidth: "760px",
               background: "var(--surface)",
               boxShadow: "-18px 0 42px rgba(15, 35, 65, 0.18)",
               display: "flex",
               flexDirection: "column",
             }}
           >
-            <div style={{ padding: "16px 18px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+            <div style={{ padding: "16px 20px 13px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
               <div>
                 <div style={{ fontSize: 18, fontWeight: 800, color: "var(--navy)", marginBottom: 2 }}>{detailPerson.name}</div>
                 <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{detailPerson.job_title ?? "Team member"}</div>
@@ -1085,11 +1117,24 @@ export default function Utilization() {
               <button onClick={() => { setDetailPersonId(null); setSelectedCell(null); }} title="Close" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 3 }}><X size={18} /></button>
             </div>
 
-            <div style={{ padding: "12px 18px", borderBottom: "1px solid var(--border)", display: "flex", gap: 10, overflowX: "auto" }}>
+            <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--border)", display: "flex", gap: 9, overflowX: "auto" }}>
               {detailWeekStats.map(({ week, stats }, wi) => {
                 const tier = tierOf(stats.avgPct);
+                const active = wi === safeDetailWeekIndex;
                 return (
-                  <div key={wi} style={{ minWidth: 165, padding: "9px 11px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", background: tier.bg }}>
+                  <button
+                    key={wi}
+                    onClick={() => { setDetailWeekIndex(wi); if (detailTab === "workload") setDetailTab("timeline"); }}
+                    style={{
+                      minWidth: 165,
+                      textAlign: "left",
+                      padding: "9px 11px",
+                      border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
+                      borderRadius: "var(--radius-sm)",
+                      background: tier.bg,
+                      cursor: "pointer",
+                    }}
+                  >
                     <div style={{ fontSize: 9.5, color: "var(--muted)", marginBottom: 3 }}>
                       {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {week[week.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                     </div>
@@ -1097,137 +1142,242 @@ export default function Utilization() {
                       <span style={{ fontSize: 17, fontWeight: 800, color: tier.fg }}>{displayPct(stats.avgPct)}%</span>
                       <span style={{ fontSize: 10, color: "var(--muted)" }}>{stats.plannedHours.toFixed(1)}h / {stats.availableHours.toFixed(1)}h</span>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
 
-            <div style={{ padding: "10px 18px", borderBottom: "1px solid var(--border)", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ display: "flex", gap: 4 }}>
-                <button style={{ padding: "6px 10px", border: "none", borderBottom: "2px solid var(--accent)", background: "transparent", color: "var(--accent)", fontSize: 11, fontWeight: 700 }}>Tasks by Project</button>
-                <button disabled style={{ padding: "6px 10px", border: "none", background: "transparent", color: "var(--muted)", fontSize: 11 }}>Tasks by Date</button>
-                <button disabled style={{ padding: "6px 10px", border: "none", background: "transparent", color: "var(--muted)", fontSize: 11 }}>Pipeline Sequence</button>
-              </div>
+            <div style={{ padding: "0 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, minHeight: 48 }}>
+              {([
+                ["workload", "Workload"],
+                ["timeline", "Timeline"],
+                ["pipeline", "Pipeline Sequence"],
+              ] as const).map(([tab, label]) => (
+                <button
+                  key={tab}
+                  onClick={() => setDetailTab(tab)}
+                  style={{
+                    height: 48,
+                    padding: "0 12px",
+                    border: "none",
+                    borderBottom: detailTab === tab ? "2px solid var(--accent)" : "2px solid transparent",
+                    background: "transparent",
+                    color: detailTab === tab ? "var(--accent)" : "var(--muted)",
+                    fontSize: 11.5,
+                    fontWeight: detailTab === tab ? 800 : 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+
               <div style={{ marginLeft: "auto", display: "flex", gap: 7, alignItems: "center" }}>
                 <div style={{ position: "relative" }}>
-                  <Search size={13} style={{ position: "absolute", left: 8, top: 7, color: "var(--muted)" }} />
-                  <input value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} placeholder="Search projects or tasks…" style={{ width: 220, fontSize: 11, padding: "5px 8px 5px 27px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }} />
+                  <Search size={13} style={{ position: "absolute", left: 8, top: 8, color: "var(--muted)" }} />
+                  <input value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} placeholder="Search projects or tasks…" style={{ width: 230, fontSize: 11, padding: "6px 8px 6px 27px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }} />
                 </div>
-                <select value={taskSort} onChange={(e) => setTaskSort(e.target.value as "project" | "oldest" | "newest")} style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
-                  <option value="project">Project (A–Z)</option>
-                  <option value="oldest">Added oldest</option>
-                  <option value="newest">Added newest</option>
-                </select>
+                {detailTab !== "timeline" && (
+                  <select value={taskSort} onChange={(e) => setTaskSort(e.target.value as "project" | "oldest" | "newest")} style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 7px" }}>
+                    <option value="project">Project (A–Z)</option>
+                    <option value="oldest">Added oldest</option>
+                    <option value="newest">Added newest</option>
+                  </select>
+                )}
               </div>
             </div>
 
-            <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: selectedCell?.personId === detailPerson.id ? "minmax(0, 1fr) 330px" : "1fr" }}>
-              <div style={{ minWidth: 0, overflow: "auto", padding: "0 18px 18px" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
-                  <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--surface)" }}>
-                    <tr>
-                      <th style={{ textAlign: "left", padding: "9px 8px", borderBottom: "1px solid var(--border)", minWidth: 250 }}>Project / Task</th>
-                      <th style={{ textAlign: "right", padding: "9px 8px", borderBottom: "1px solid var(--border)", width: 90 }}>Planned</th>
-                      <th style={{ textAlign: "left", padding: "9px 8px", borderBottom: "1px solid var(--border)", width: 130 }}>Added to Workload</th>
-                      {days.map((d) => <th key={toISO(d)} style={{ textAlign: "center", padding: "9px 5px", borderBottom: "1px solid var(--border)", minWidth: 48 }}>{WEEKDAY_LABEL[d.getDay()]}<br />{d.getDate()}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detailOwnedProjects.map((p) => {
-                      const pTasks = detailTasks.filter((t) => t.project_id === p.id);
-                      const pmDays = engine.pmDays(detailPerson.id, p);
-                      if (taskSort === "project" && pTasks.length === 0 && !pmDays.size) return null;
-                      return (
-                        <Fragment key={p.id}>
-                          <tr style={{ background: "var(--hover-bg)" }}>
-                            <td style={{ padding: "8px", borderBottom: "1px solid var(--border)", fontWeight: 800, color: "var(--navy)" }}>{p.name}</td>
-                            <td style={{ padding: "8px", borderBottom: "1px solid var(--border)", textAlign: "right", fontWeight: 700 }}>
-                              {pTasks.reduce((s, t) => s + (t.estimated_hours ?? 0), 0).toFixed(1)}h
-                            </td>
-                            <td style={{ padding: "8px", borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>—</td>
-                            {days.map((d) => {
-                              const v = pmValueForDate(detailPerson, p.id, toISO(d));
-                              return <td key={toISO(d)} style={{ textAlign: "center", padding: "8px 4px", borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>{v > 0 ? v.toFixed(2) : ""}</td>;
-                            })}
-                          </tr>
-                          {pTasks.map((t) => {
-                            const entry = workloadEntryFor(t, detailPerson.id);
-                            return (
-                              <tr key={t.id}>
-                                <td style={{ padding: "7px 8px 7px 24px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>{t.name}</td>
-                                <td style={{ padding: "7px 8px", borderBottom: "1px solid var(--border)", textAlign: "right", color: "var(--navy)" }}>{(t.estimated_hours ?? 0).toFixed(1)}h</td>
-                                <td title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ padding: "7px 8px", borderBottom: "1px solid var(--border)", color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 600 }}>{formatWorkloadDate(entry)}</td>
-                                {days.map((d) => {
-                                  const v = taskValueForDate(detailPerson, t, toISO(d));
-                                  return <td key={toISO(d)} style={{ textAlign: "center", padding: "7px 4px", borderBottom: "1px solid var(--border)", color: "var(--muted)", background: selectedCell?.personId === detailPerson.id && selectedCell?.dateStr === toISO(d) ? "var(--hover-bg)" : undefined }}>{v > 0 ? v.toFixed(1) : ""}</td>;
-                                })}
-                              </tr>
-                            );
-                          })}
-                        </Fragment>
-                      );
-                    })}
-                    {detailTasks.filter((t) => !detailOwnedProjects.some((p) => p.id === t.project_id)).map((t) => {
-                      const proj = projects.find((p) => p.id === t.project_id);
-                      const entry = workloadEntryFor(t, detailPerson.id);
-                      return (
-                        <tr key={t.id}>
-                          <td style={{ padding: "7px 8px", borderBottom: "1px solid var(--border)" }}>
-                            <div style={{ color: "var(--text-secondary)" }}>{t.name}</div>
-                            <div style={{ color: "var(--muted)", fontSize: 9.5 }}>{proj?.name ?? "No project"}</div>
-                          </td>
-                          <td style={{ padding: "7px 8px", borderBottom: "1px solid var(--border)", textAlign: "right" }}>{(t.estimated_hours ?? 0).toFixed(1)}h</td>
-                          <td style={{ padding: "7px 8px", borderBottom: "1px solid var(--border)", color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 600 }}>{formatWorkloadDate(entry)}</td>
-                          {days.map((d) => {
-                            const v = taskValueForDate(detailPerson, t, toISO(d));
-                            return <td key={toISO(d)} style={{ textAlign: "center", padding: "7px 4px", borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>{v > 0 ? v.toFixed(1) : ""}</td>;
-                          })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: selectedCell?.personId === detailPerson.id && detailTab === "timeline" ? "minmax(0, 1fr) 330px" : "1fr" }}>
+              <div style={{ minWidth: 0, overflow: "auto", padding: "16px 20px 22px" }}>
 
-                {detailTasks.some((t) => workloadEntryFor(t, detailPerson.id).estimated) && (
-                  <div style={{ display: "flex", gap: 7, marginTop: 12, padding: 9, borderRadius: "var(--radius-sm)", background: "var(--hover-bg)", fontSize: 9.5, color: "var(--muted)" }}>
-                    <Info size={12} style={{ flexShrink: 0, marginTop: 1 }} />
-                    Dates prefixed with ~ are historical estimates reconstructed from the previous task ordering before exact task creation timestamps were introduced.
+                {detailTab === "workload" && (
+                  <div style={{ maxWidth: 980 }}>
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "var(--navy)" }}>Current scoped workload</div>
+                      <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Projects and tasks currently contributing to this person's planned capacity.</div>
+                    </div>
+
+                    {detailProjectIds.length === 0 ? (
+                      <div style={{ padding: 18, border: "1px dashed var(--border)", borderRadius: "var(--radius-sm)", color: "var(--muted)", fontSize: 11 }}>No scoped tasks found for this person.</div>
+                    ) : detailProjectIds.map((projectId) => {
+                      const project = projects.find((p) => p.id === projectId);
+                      const pTasks = detailTasks.filter((t) => t.project_id === projectId);
+                      const totalHours = pTasks.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
+                      const entries = pTasks.map((t) => workloadEntryFor(t, detailPerson.id)).filter((e) => e.date);
+                      const earliest = entries.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""))[0];
+                      return (
+                        <div key={projectId} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-md)", marginBottom: 10, overflow: "hidden" }}>
+                          <div style={{ padding: "11px 13px", background: "var(--hover-bg)", display: "grid", gridTemplateColumns: "1fr 90px 150px", gap: 12, alignItems: "center" }}>
+                            <div>
+                              <div style={{ fontSize: 12, fontWeight: 800, color: "var(--navy)" }}>{project?.name ?? "Unknown project"}</div>
+                              <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>{pTasks.length} task{pTasks.length === 1 ? "" : "s"}</div>
+                            </div>
+                            <div style={{ textAlign: "right" }}>
+                              <div style={{ fontSize: 12, fontWeight: 800, color: "var(--navy)" }}>{totalHours.toFixed(1)}h</div>
+                              <div style={{ fontSize: 9, color: "var(--muted)" }}>Scoped</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 9, color: "var(--muted)" }}>First added</div>
+                              <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--accent)" }}>{earliest ? formatWorkloadDate(earliest) : "—"}</div>
+                            </div>
+                          </div>
+                          <div>
+                            {pTasks.map((t) => {
+                              const entry = workloadEntryFor(t, detailPerson.id);
+                              return (
+                                <div key={t.id} style={{ display: "grid", gridTemplateColumns: "1fr 90px 150px 150px", gap: 12, alignItems: "center", padding: "9px 13px", borderTop: "1px solid var(--border)" }}>
+                                  <div style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>{t.name}</div>
+                                  <div style={{ textAlign: "right", fontSize: 10.5, fontWeight: 700, color: "var(--navy)" }}>{(t.estimated_hours ?? 0).toFixed(1)}h</div>
+                                  <div title={entry.estimated ? "Estimated from historical task order" : undefined} style={{ fontSize: 10, color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 600 }}>{formatWorkloadDate(entry)}</div>
+                                  <div style={{ fontSize: 10, color: "var(--muted)" }}>
+                                    {t.start_date ? parseLocalDate(t.start_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"} – {t.current_due_date ? parseLocalDate(t.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {detailTasks.some((t) => workloadEntryFor(t, detailPerson.id).estimated) && (
+                      <div style={{ display: "flex", gap: 7, marginTop: 12, padding: 9, borderRadius: "var(--radius-sm)", background: "var(--hover-bg)", fontSize: 9.5, color: "var(--muted)" }}>
+                        <Info size={12} style={{ flexShrink: 0, marginTop: 1 }} />
+                        Dates prefixed with ~ are historical estimates reconstructed from the previous task ordering before exact task creation timestamps were introduced.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {detailTab === "timeline" && (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: "var(--navy)" }}>Weekly timeline</div>
+                        <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
+                          {detailWeek.length ? `${detailWeek[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${detailWeek[detailWeek.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 5 }}>
+                        <button className="planner-nav-btn" disabled={safeDetailWeekIndex === 0} onClick={() => { setDetailWeekIndex(Math.max(0, safeDetailWeekIndex - 1)); setSelectedCell(null); }}><ChevronLeft size={13} /></button>
+                        <button className="planner-nav-btn" disabled={safeDetailWeekIndex >= detailWeekStats.length - 1} onClick={() => { setDetailWeekIndex(Math.min(detailWeekStats.length - 1, safeDetailWeekIndex + 1)); setSelectedCell(null); }}><ChevronRight size={13} /></button>
+                      </div>
+                    </div>
+
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10.5 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: "left", padding: "9px 8px", borderBottom: "1px solid var(--border)", minWidth: 260 }}>Task</th>
+                          <th style={{ textAlign: "left", padding: "9px 8px", borderBottom: "1px solid var(--border)", width: 150 }}>Project</th>
+                          {detailWeek.map((d) => <th key={toISO(d)} style={{ textAlign: "center", padding: "9px 5px", borderBottom: "1px solid var(--border)", minWidth: 72 }}>{WEEKDAY_LABEL[d.getDay()]}<br />{d.getDate()}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detailTasks.filter((t) => detailWeek.some((d) => taskValueForDate(detailPerson, t, toISO(d)) > 0)).map((t) => {
+                          const project = projects.find((p) => p.id === t.project_id);
+                          return (
+                            <tr key={t.id}>
+                              <td style={{ padding: "9px 8px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" }}>{t.name}</td>
+                              <td style={{ padding: "9px 8px", borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>{project?.name ?? "—"}</td>
+                              {detailWeek.map((d) => {
+                                const dateStr = toISO(d);
+                                const value = taskValueForDate(detailPerson, t, dateStr);
+                                return (
+                                  <td
+                                    key={dateStr}
+                                    onClick={() => setSelectedCell({ personId: detailPerson.id, dateStr })}
+                                    style={{ textAlign: "center", padding: "9px 5px", borderBottom: "1px solid var(--border)", cursor: "pointer", background: selectedCell?.personId === detailPerson.id && selectedCell?.dateStr === dateStr ? "var(--hover-bg)" : undefined, color: value > 0 ? "var(--navy)" : "var(--muted)" }}
+                                  >
+                                    {value > 0 ? `${value.toFixed(1)}h` : "–"}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {detailTab === "pipeline" && (
+                  <div style={{ maxWidth: 900 }}>
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "var(--navy)" }}>Pipeline sequence</div>
+                      <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
+                        Work shown in the order it entered {detailPerson.name}'s workload. Capacity impact below uses the selected week.
+                      </div>
+                    </div>
+
+                    {detailSelectedWeekStats && (
+                      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+                        <div style={{ padding: "9px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+                          <div style={{ fontSize: 9, color: "var(--muted)" }}>Selected week capacity</div>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--navy)" }}>{detailSelectedWeekStats.availableHours.toFixed(1)}h</div>
+                        </div>
+                        <div style={{ padding: "9px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+                          <div style={{ fontSize: 9, color: "var(--muted)" }}>Planned this week</div>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--navy)" }}>{detailSelectedWeekStats.plannedHours.toFixed(1)}h</div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ position: "relative", paddingLeft: 22 }}>
+                      <div style={{ position: "absolute", left: 7, top: 8, bottom: 8, width: 2, background: "var(--border)" }} />
+                      {pipelineRows.map((row, idx) => {
+                        const project = projects.find((p) => p.id === row.task.project_id);
+                        const crossed = row.cumulativePct > 100 && (idx === 0 || pipelineRows[idx - 1].cumulativePct <= 100);
+                        return (
+                          <div key={row.task.id} style={{ position: "relative", marginBottom: 10, padding: "10px 12px", border: crossed ? "1px solid var(--danger)" : "1px solid var(--border)", borderRadius: "var(--radius-sm)", background: crossed ? "rgba(210, 55, 55, 0.05)" : "var(--surface)" }}>
+                            <div style={{ position: "absolute", left: -20, top: 15, width: 10, height: 10, borderRadius: "50%", background: crossed ? "var(--danger)" : "var(--accent)", border: "2px solid var(--surface)" }} />
+                            <div style={{ display: "grid", gridTemplateColumns: "130px 1fr 90px 120px", gap: 12, alignItems: "center" }}>
+                              <div title={row.entry.estimated ? "Estimated from historical task order" : undefined} style={{ fontSize: 10, fontWeight: 700, color: row.entry.estimated ? "var(--muted)" : "var(--accent)" }}>{formatWorkloadDate(row.entry)}</div>
+                              <div>
+                                <div style={{ fontSize: 11, fontWeight: 800, color: "var(--navy)" }}>{row.task.name}</div>
+                                <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>{project?.name ?? "No project"}</div>
+                              </div>
+                              <div style={{ textAlign: "right" }}>
+                                <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--navy)" }}>+{row.weekHours.toFixed(1)}h</div>
+                                <div style={{ fontSize: 9, color: "var(--muted)" }}>this week</div>
+                              </div>
+                              <div style={{ textAlign: "right" }}>
+                                <div style={{ fontSize: 11, fontWeight: 800, color: row.cumulativePct > 100 ? "var(--danger)" : "var(--navy)" }}>{displayPct(row.cumulativePct)}%</div>
+                                <div style={{ fontSize: 9, color: "var(--muted)" }}>cumulative task load</div>
+                              </div>
+                            </div>
+                            {crossed && <div style={{ marginTop: 7, fontSize: 9.5, fontWeight: 700, color: "var(--danger)" }}>This is the first task in the sequence that takes the selected week's task allocation above capacity.</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div style={{ display: "flex", gap: 7, marginTop: 10, padding: 9, borderRadius: "var(--radius-sm)", background: "var(--hover-bg)", fontSize: 9.5, color: "var(--muted)", lineHeight: 1.4 }}>
+                      <Info size={12} style={{ flexShrink: 0, marginTop: 1 }} />
+                      Pipeline impact uses task allocation for the selected week. Project-management overhead and deleted historical items are not included in the cumulative task percentage, so the main utilization total can be slightly higher.
+                    </div>
                   </div>
                 )}
               </div>
 
-              {selectedCell?.personId === detailPerson.id && selectedPerson && (
+              {selectedCell?.personId === detailPerson.id && selectedPerson && detailTab === "timeline" && (
                 <div style={{ borderLeft: "1px solid var(--border)", overflowY: "auto", padding: 16 }}>
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 12 }}>
                     <div>
-                      <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--navy)" }}>
-                        {parseLocalDate(selectedCell.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
-                      </div>
+                      <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--navy)" }}>{parseLocalDate(selectedCell.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</div>
                       <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>Selected utilization day</div>
                     </div>
                     <button onClick={() => setSelectedCell(null)} title="Close day details" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)" }}><X size={14} /></button>
                   </div>
-
                   <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
                     {selectedPct > 100 ? <AlertTriangle size={15} style={{ color: "var(--danger)" }} /> : <Gauge size={15} style={{ color: "var(--accent)" }} />}
                     <span style={{ fontSize: 22, fontWeight: 800, color: selectedPct > 100 ? "var(--danger)" : "var(--navy)" }}>{displayPct(selectedPct)}%</span>
+                    <span style={{ fontSize: 9.5, color: "var(--muted)" }}>{selectedAllocated.toFixed(1)}h / {selectedCapacity.toFixed(1)}h</span>
                   </div>
-
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 14 }}>
-                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}>
-                      <div style={{ fontSize: 12, fontWeight: 800 }}>{selectedCapacity.toFixed(1)}h</div>
-                      <div style={{ fontSize: 9, color: "var(--muted)" }}>Capacity</div>
-                    </div>
-                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}>
-                      <div style={{ fontSize: 12, fontWeight: 800 }}>{selectedAllocated.toFixed(1)}h</div>
-                      <div style={{ fontSize: 9, color: "var(--muted)" }}>Allocated</div>
-                    </div>
-                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: selectedAllocated > selectedCapacity ? "var(--danger)" : "var(--success)" }}>{selectedAllocated > selectedCapacity ? "+" : ""}{(selectedAllocated - selectedCapacity).toFixed(1)}h</div>
-                      <div style={{ fontSize: 9, color: "var(--muted)" }}>{selectedAllocated > selectedCapacity ? "Over" : "Remaining"}</div>
-                    </div>
+                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}><div style={{ fontSize: 12, fontWeight: 800 }}>{selectedCapacity.toFixed(1)}h</div><div style={{ fontSize: 9, color: "var(--muted)" }}>Capacity</div></div>
+                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}><div style={{ fontSize: 12, fontWeight: 800 }}>{selectedAllocated.toFixed(1)}h</div><div style={{ fontSize: 9, color: "var(--muted)" }}>Allocated</div></div>
+                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}><div style={{ fontSize: 12, fontWeight: 800, color: selectedAllocated > selectedCapacity ? "var(--danger)" : "var(--success)" }}>{selectedAllocated > selectedCapacity ? "+" : ""}{(selectedAllocated - selectedCapacity).toFixed(1)}h</div><div style={{ fontSize: 9, color: "var(--muted)" }}>{selectedAllocated > selectedCapacity ? "Over" : "Remaining"}</div></div>
                   </div>
-
                   <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--navy)", marginBottom: 6 }}>Work contributing to this day</div>
                   {selectedContributions.map((r, i) => (
                     <div key={r.id} style={{ padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
@@ -1247,7 +1397,6 @@ export default function Utilization() {
           </aside>
         </>
       )}
-
 
     </div>
   );
