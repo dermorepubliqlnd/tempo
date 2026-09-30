@@ -1918,9 +1918,26 @@ export default function Utilization() {
                 Preview only. This does not change the WBS, task list, baseline, assignee history, or audit trail.
               </div>
 
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", marginBottom: 8 }}>Try a different assignment or schedule</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", marginBottom: 8 }}>Current plotted schedule</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 28px 1fr", gap: 8, alignItems: "end", marginBottom: 14 }}>
+                <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
+                  Plotted Start
+                  <div style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 9px", fontSize: 11, color: "var(--navy)", background: "var(--hover-bg)" }}>
+                    {parseLocalDate(scenarioTask.start_date ?? scenarioTask.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  </div>
+                </label>
+                <ArrowRight size={15} style={{ color: "var(--muted)", marginBottom: 10 }} />
+                <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
+                  Plotted Due
+                  <div style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 9px", fontSize: 11, color: "var(--navy)", background: "var(--hover-bg)" }}>
+                    {parseLocalDate(scenarioTask.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  </div>
+                </label>
+              </div>
+
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", marginBottom: 8 }}>Rebalance scenario</div>
               <label style={{ display: "block", fontSize: 9.5, color: "var(--muted)", marginBottom: 12 }}>
-                Proposed assignee
+                Rebalance Assignee
                 <select
                   value={scenarioAssigneeId ?? scenarioTask.assignee_id ?? ""}
                   onChange={(e) => setScenarioAssigneeId(e.target.value || null)}
@@ -1933,12 +1950,12 @@ export default function Utilization() {
               </label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 28px 1fr", gap: 8, alignItems: "end", marginBottom: 15 }}>
                 <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
-                  Proposed start
+                  Rebalance Start
                   <input type="date" value={scenarioStart} min={today} onChange={(e) => setScenarioStart(e.target.value)} style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 9px", fontSize: 11, color: "var(--navy)" }} />
                 </label>
                 <ArrowRight size={15} style={{ color: "var(--muted)", marginBottom: 10 }} />
                 <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
-                  Proposed due
+                  Rebalance Due
                   <input type="date" value={scenarioDue} min={scenarioStart || today} onChange={(e) => setScenarioDue(e.target.value)} style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 9px", fontSize: 11, color: "var(--navy)" }} />
                 </label>
               </div>
@@ -1968,7 +1985,7 @@ export default function Utilization() {
 
               <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)", marginBottom: 7 }}>Affected days</div>
               {!scenarioImpact || scenarioImpact.rows.length === 0 ? (
-                <div style={{ padding: 14, border: "1px dashed var(--border)", borderRadius: 12, color: "var(--muted)", fontSize: 10 }}>Change the proposed dates to see the capacity impact.</div>
+                <div style={{ padding: 14, border: "1px dashed var(--border)", borderRadius: 12, color: "var(--muted)", fontSize: 10 }}>Change the rebalance assignee or dates to see the capacity impact.</div>
               ) : (
                 <div style={{ border: "1px solid var(--border)", borderRadius: 13, overflow: "hidden" }}>
                   {scenarioImpact.rows.slice(0, 16).map((row) => (
