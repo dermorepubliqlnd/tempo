@@ -25,6 +25,9 @@ export interface Person {
   // distinct from access_level's Admin/Limited permission tier).
   employee_id: string | null;
   job_title: string | null;
+  // phase126d: false = not expected to log time (excluded from expected /
+  // missing hours). Capacity & utilization are unaffected.
+  tracks_time?: boolean;
 }
 
 // Tracks the current Supabase Auth session and the matching `people` row

@@ -57,6 +57,7 @@ export interface UserDrawerProps {
   onChangeAccessLevel: (level: "limited" | "full") => void;
   onToggleApprovalFlag: (field: "can_approve_closures" | "can_approve_rebaseline", value: boolean) => void;
   onSaveColor: (hex: string | null) => void;
+  onToggleTracksTime: (value: boolean) => void;
 }
 
 function initialsFor(name: string): string {
@@ -133,6 +134,7 @@ export default function UserDrawer({
   onChangeAccessLevel,
   onToggleApprovalFlag,
   onSaveColor,
+  onToggleTracksTime,
 }: UserDrawerProps) {
   const manager = people.find((x) => x.id === person.reports_to);
   const approvalCount = [person.can_approve_closures, person.can_approve_rebaseline].filter(Boolean).length;
@@ -245,6 +247,18 @@ export default function UserDrawer({
             ) : (
               <Field label="Daily capacity">{person.daily_capacity_hours} hrs/day</Field>
             )}
+            <Field label="Expected to log time">
+              {isEdit ? (
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }} title="Untick for people who don't log time (e.g. leadership). They're left out of expected hours and Missing Hours. Capacity and utilization are unaffected.">
+                  <input type="checkbox" checked={person.tracks_time !== false} onChange={(e) => onToggleTracksTime(e.target.checked)} />
+                  {person.tracks_time !== false ? "Yes" : "No"}
+                </label>
+              ) : person.tracks_time !== false ? (
+                "Yes"
+              ) : (
+                <span className="status-pill neutral">No time logging</span>
+              )}
+            </Field>
             <Field label="Planner color">
               {isEdit ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

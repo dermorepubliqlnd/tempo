@@ -382,6 +382,16 @@ export default function Admin() {
     }
   }
 
+  // phase126d (Sandra 2026-09-30): "Expected to log time" tag.
+  async function toggleTracksTime(p: Person, value: boolean) {
+    setPeople((prev) => prev.map((x) => (x.id === p.id ? { ...x, tracks_time: value } : x)));
+    const { error } = await supabase.from("people").update({ tracks_time: value }).eq("id", p.id);
+    if (error) {
+      window.alert(`Couldn't save: ${error.message}`);
+      loadPeople();
+    }
+  }
+
   // Per-person color for the WBS Gantt chart's assignee-based bar
   // coloring (Sandra, 2026-07-24) -- stored as a nullable hex string;
   // `null` means "use the deterministic default," not "no color."
@@ -870,7 +880,14 @@ export default function Admin() {
                   </td>
                   <td>{p.job_title ?? "—"}</td>
                   <td>{manager?.name ?? "—"}</td>
-                  <td>{p.daily_capacity_hours}</td>
+                  <td>
+                    {p.daily_capacity_hours}
+                    {p.tracks_time === false && (
+                      <span className="status-pill neutral" style={{ marginLeft: 6, fontSize: 10 }} title="Not expected to log time -- excluded from expected and missing hours">
+                        No time logging
+                      </span>
+                    )}
+                  </td>
                   <td>
                     <span className={`status-pill ${p.access_level === "full" ? "success" : "neutral"}`}>
                       {p.access_level === "full" ? "Full" : "Limited"}
@@ -922,6 +939,7 @@ export default function Admin() {
           onSaveEdit={() => saveEdit(selectedPerson)}
           onChangeAccessLevel={(level) => changeAccessLevel(selectedPerson, level)}
           onToggleApprovalFlag={(field, value) => toggleApprovalFlag(selectedPerson, field, value)}
+          onToggleTracksTime={(value) => toggleTracksTime(selectedPerson, value)}
           onSaveColor={(hex) => saveColor(selectedPerson, hex)}
         />
       )}
