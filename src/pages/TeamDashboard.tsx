@@ -662,7 +662,10 @@ function ExecutiveDashboard() {
   // Next 2 weeks (same horizon + engine as the KPI cards), split into the
   // calendar weeks it touches, plus per-person utilization.
   const capacity = useMemo(() => {
-    const days = eachDay(todayIso, toISO(addDays(today, HORIZON_DAYS - 1)));
+    // Full calendar weeks (Sandra 2026-10-01): this week from Monday, plus
+    // the next 2 weeks -- so the view always covers 3 whole Mon-Fri weeks.
+    const monday = addDays(today, -((today.getDay() + 6) % 7));
+    const days = eachDay(toISO(monday), toISO(addDays(monday, 18)));
     const weekKey = (d: string) => toISO(addDays(parseLocalDate(d), -((parseLocalDate(d).getDay() + 6) % 7)));
     const weeks: { key: string; label: string; range: string; planned: number; cap: number }[] = [];
     const people: { person: Person; planned: number; cap: number; peak: number; peakDay: string }[] = [];
@@ -676,6 +679,8 @@ function ExecutiveDashboard() {
         weeks.push(w);
       }
       w.range = w.range ? `${w.range.split(" – ")[0]} – ${fmtShort(d)}` : fmtShort(d);
+      // Past days of this week: planned load comes from the engine as it
+      // stood (historical allocation); capacity counts the whole week.
       for (const row of people) {
         const c = capacityOn(row.person, d);
         const a = c > 0 ? (moreActive ? projectScopedAlloc(row.person.id, d) : engine.totalFor(row.person.id, d)) : 0;
@@ -691,9 +696,9 @@ function ExecutiveDashboard() {
       }
     }
     const withPct = people.filter((r) => r.cap > 0).map((r) => ({ ...r, pct: (r.planned / r.cap) * 100, free: Math.max(0, r.cap - r.planned) }));
-    const over = withPct.filter((r) => r.pct > 100.5 || r.peak > 100.5).sort((a, b) => b.pct - a.pct || b.peak - a.peak);
+    const over = withPct.filter((r) => r.peak > 100.5).sort((a, b) => b.peak - a.peak);
     const avail = withPct.filter((r) => r.pct < 100).sort((a, b) => b.free - a.free);
-    return { weeks: weeks.map((w) => ({ ...w, available: Math.max(0, w.cap - w.planned), util: w.cap > 0 ? (w.planned / w.cap) * 100 : 0 })), over, avail };
+    return { from: toISO(monday), to: toISO(addDays(monday, 18)), weeks: weeks.map((w) => ({ ...w, available: Math.max(0, w.cap - w.planned), util: w.cap > 0 ? (w.planned / w.cap) * 100 : 0 })), over, avail };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggers, engine, availStatus, holidaySet, todayIso, moreActive, scopedProjectIds]);
 
@@ -1091,18 +1096,6 @@ function ExecutiveDashboard() {
             })()}
           </section>
 
-          <section className="exec-section">
-            <SectionTitle title="Capacity & Utilization (Next 2 weeks)" caption={`Planned workload vs available capacity · ${fmtShort(todayIso)} – ${fmtShort(horizon.end)} · based on current task allocations`} />
-            <div className="exec-cap">
-              <div className="exec-chart-card">
-                <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)" }}>2-Week Outlook</div>
-                <div className="exec-kpi-context" style={{ marginBottom: 6 }}>Planned load vs available capacity by week · line = utilization %</div>
-                <OutlookChart weeks={capacity.weeks} />
-              </div>
-              <PeopleBarList title="Most Overallocated Members" subtitle="2-week utilization · over 100% on at least one day" rows={capacity.over.map((r) => ({ person: r.person, pct: r.pct, note: `Peak ${Math.round(r.peak)}% on ${r.peakDay ? fmtShort(r.peakDay) : "—"} · ${fmtH(r.planned)} of ${fmtH(r.cap)}` }))} tone="over" empty="Nobody is over 100% in the next 2 weeks." />
-              <PeopleBarList title="Most Available Capacity" subtitle="Most free hours in the next 2 weeks" rows={capacity.avail.map((r) => ({ person: r.person, pct: r.pct, note: `${fmtH(r.free)} free of ${fmtH(r.cap)}`, right: fmtH(r.free) }))} tone="avail" empty="Nobody has free capacity in the next 2 weeks." />
-            </div>
-          </section>
 
           <section className="exec-section">
             <div className="exec-section-title" style={{ justifyContent: "space-between" }}>
@@ -1140,6 +1133,18 @@ function ExecutiveDashboard() {
               ] as const).map(([t, segs]) => (
                 <MixDonut key={t} title={t} segments={[...segs]} total={activeHealth.total} fmt={(n) => String(Math.round(n))} centerSub="active" />
               ))}
+            </div>
+          </section>
+          <section className="exec-section">
+            <SectionTitle title="Capacity & Utilization (this week + next 2)" caption={`Planned workload vs available capacity · full weeks ${fmtShort(capacity.from)} – ${fmtShort(capacity.to)} · based on current task allocations`} />
+            <div className="exec-cap">
+              <div className="exec-chart-card">
+                <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)" }}>3-Week Outlook</div>
+                <div className="exec-kpi-context" style={{ marginBottom: 6 }}>Planned load vs available capacity by week · line = utilization %</div>
+                <OutlookChart weeks={capacity.weeks} />
+              </div>
+              <PeopleBarList title="Most Overallocated Members" subtitle="Peak day utilization · members over 100% on at least one day" rows={capacity.over.map((r) => ({ person: r.person, pct: r.peak, note: `3-week average ${Math.round(r.pct)}% · ${fmtH(r.planned)} planned of ${fmtH(r.cap)}`, right: `${Math.round(r.peak)}%`, sub: r.peakDay ? `Peak ${parseLocalDate(r.peakDay).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}` : undefined }))} tone="over" empty="Nobody is over 100% on any day." />
+              <PeopleBarList title="Most Available Capacity" subtitle="Most free hours across the 3 weeks" rows={capacity.avail.map((r) => ({ person: r.person, pct: r.pct, note: `${fmtH(r.free)} free of ${fmtH(r.cap)}`, right: fmtH(r.free) }))} tone="avail" empty="Nobody has free capacity in these weeks." />
             </div>
           </section>
         </>
@@ -1259,7 +1264,7 @@ function initials(name: string) {
   const p = name.trim().split(/\s+/);
   return (p.length === 1 ? p[0].slice(0, 2) : p[0][0] + p[p.length - 1][0]).toUpperCase();
 }
-function PeopleBarList({ title, subtitle, rows, tone, empty }: { title: string; subtitle: string; rows: { person: Person; pct: number; note: string; right?: string }[]; tone: "over" | "avail"; empty: string }) {
+function PeopleBarList({ title, subtitle, rows, tone, empty }: { title: string; subtitle: string; rows: { person: Person; pct: number; note: string; right?: string; sub?: string }[]; tone: "over" | "avail"; empty: string }) {
   const shown = rows.slice(0, LIST_MAX);
   const more = rows.length - shown.length;
   const barColor = tone === "over" ? "#ef4444" : "#34c78a";
@@ -1268,12 +1273,15 @@ function PeopleBarList({ title, subtitle, rows, tone, empty }: { title: string; 
     <div className="exec-chart-card exec-people-card">
       <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)" }}>{title}</div>
       <div className="exec-kpi-context" style={{ marginBottom: 10 }}>{subtitle}</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
         {shown.length === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{empty}</div>}
         {shown.map((r) => (
           <div key={r.person.id} title={r.note} style={{ display: "grid", gridTemplateColumns: "26px minmax(0,1fr) minmax(60px,110px) 46px", alignItems: "center", gap: 8 }}>
             <span style={{ width: 26, height: 26, borderRadius: "50%", background: colorForPerson(r.person), color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{initials(r.person.name)}</span>
-            <span style={{ fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.person.name}</span>
+            <span style={{ minWidth: 0, lineHeight: 1.2 }}>
+              <span style={{ display: "block", fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.person.name}</span>
+              {r.sub && <span style={{ display: "block", fontSize: 10, color: "var(--muted)" }}>{r.sub}</span>}
+            </span>
             <span style={{ height: 8, borderRadius: 4, background: "var(--hover-bg)", overflow: "hidden" }}>
               <span style={{ display: "block", height: "100%", width: `${Math.min(100, (r.pct / (tone === "over" ? 150 : 100)) * 100)}%`, background: barColor, borderRadius: 4 }} />
             </span>
