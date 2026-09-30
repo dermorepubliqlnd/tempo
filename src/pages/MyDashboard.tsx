@@ -222,6 +222,12 @@ export default function MyDashboard() {
   const [deletedHours, setDeletedHours] = useState<DeletedHourRow[]>([]);
   const [outputTypes, setOutputTypes] = useState<OutputTypeRow[]>([]);
   const [monthEntries, setMonthEntries] = useState<TimeEntryRow[]>([]);
+  // monthEntries now holds ~6 months (see loadAll); this-month-only view:
+  const thisMonthEntries = useMemo(() => {
+    const d = new Date();
+    const ms = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+    return monthEntries.filter((e) => new Date(e.started_at).getTime() >= ms);
+  }, [monthEntries]);
 
   const [extensions, setExtensions] = useState<ExtensionRow[]>([]);
   const [pendingTimeEntries, setPendingTimeEntries] = useState<PendingTimeEntryRow[]>([]);
@@ -265,6 +271,13 @@ export default function MyDashboard() {
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
+    // Bugfix (Sandra 2026-10-01: "why did I lose my logged hours this week?"):
+    // entries used to be fetched from the 1st of the month only, so a week
+    // that crosses a month boundary (Sep 28 - Oct 2) lost its September days,
+    // and browsing to an earlier week showed nothing. Fetch 6 months back;
+    // month-only rollups filter to this month themselves (see thisMonthEntries).
+    const fetchFrom = new Date(monthStart);
+    fetchFrom.setMonth(fetchFrom.getMonth() - 6);
 
     const [
       { data: peopleData },
@@ -303,7 +316,7 @@ export default function MyDashboard() {
             .eq("person_id", me.id)
             .in("status", ["confirmed", "approved"])
             .eq("is_archived", false)
-            .gte("started_at", monthStart.toISOString())
+            .gte("started_at", fetchFrom.toISOString())
         : Promise.resolve({ data: [] as TimeEntryRow[] }),
       supabase
         .from("extension_requests")
@@ -540,14 +553,14 @@ export default function MyDashboard() {
         if (!proj) return;
         const entry = map.get(proj.id) ?? { projectId: proj.id, name: proj.name, scoped: 0, logged: 0 };
         entry.scoped += t.estimated_hours ?? 0;
-        entry.logged += monthEntries.filter((e) => e.task_id === t.id).reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);
+        entry.logged += thisMonthEntries.filter((e) => e.task_id === t.id).reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);
         map.set(proj.id, entry);
       });
     return Array.from(map.values())
       .filter((r) => r.scoped > 0 || r.logged > 0)
       .sort((a, b) => Math.abs(b.logged - b.scoped) - Math.abs(a.logged - a.scoped))
       .slice(0, 6);
-  }, [tasks, me, projectById, monthEntries]);
+  }, [tasks, me, projectById, thisMonthEntries]);
 
   // ---- My Deliverables (This Month) -- grouped by Output Type among my
   // tasks due this calendar month. -----------------------------------
