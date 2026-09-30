@@ -5,6 +5,7 @@ import RequireAuth from "./components/RequireAuth";
 import Dashboard from "./pages/Dashboard";
 import MaterialsOutput from "./pages/MaterialsOutput";
 import MyDashboard from "./pages/MyDashboard";
+import TeamDashboard from "./pages/TeamDashboard";
 import Projects from "./pages/Projects";
 import { useApprovalAuthority } from "./lib/useApprovalAuthority";
 import ApprovalCenter from "./pages/ApprovalCenter";
@@ -75,7 +76,8 @@ export default function App() {
           }
         >
           <Route path="/" element={<MyDashboard />} />
-          <Route path="/team-dashboard" element={<Dashboard />} />
+          <Route path="/projects-portfolio" element={<Dashboard />} />
+          <Route path="/team-dashboard" element={<TeamDashboard />} />
           <Route path="/materials-output" element={<MaterialsOutput />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:projectId" element={<Projects />} />

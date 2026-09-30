@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LogOut,
   LayoutDashboard,
+  PieChart,
   BarChart3,
   FolderKanban,
   Timer,
@@ -32,7 +33,8 @@ type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 // combined into one "Time Off & Holidays" item.
 const mainItems: NavItem[] = [
   { to: "/", label: "My Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/team-dashboard", label: "Team Dashboard", icon: BarChart3 },
+  { to: "/projects-portfolio", label: "Projects Portfolio", icon: BarChart3 },
+  { to: "/team-dashboard", label: "Team Dashboard", icon: PieChart },
   { to: "/projects", label: "Projects & Tasks", icon: FolderKanban },
   { to: "/time-tracking", label: "Time Tracking", icon: Timer },
   { to: "/approval-center", label: "Approval Center", icon: ClipboardCheck },
