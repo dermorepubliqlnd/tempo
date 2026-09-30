@@ -1218,8 +1218,10 @@ function OutlookChart({ weeks }: { weeks: { key: string; label: string; range: s
           <g key={t}>
             <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--border)" />
             <text x={padL - 6} y={y(t) + 3.5} textAnchor="end" fontSize={10} fill="var(--muted)">{t}</text>
-            <text x={W - padR + 6} y={y(t) + 3.5} fontSize={10} fill="var(--muted)">{Math.round((t / max) * pMax)}%</text>
           </g>
+        ))}
+        {Array.from({ length: pMax / 50 + 1 }, (_, i) => i * 50).map((pt) => (
+          <text key={`p${pt}`} x={W - padR + 6} y={yp(pt) + 3.5} fontSize={10} fill="#ea580c" opacity={0.75}>{pt}%</text>
         ))}
         {weeks.map((w, i) => (
           <g key={w.key}>
