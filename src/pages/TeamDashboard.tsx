@@ -39,6 +39,7 @@ import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from ".
 import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, isOpenTask, type UtilTaskRow, type UtilProjectRow } from "../lib/dailyAllocation";
 import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { healthOf, type ProjectRow, type TaskRow } from "./Projects";
+import { MonthlyBarChart } from "./Dashboard";
 
 // ---------------------------------------------------------------- types
 interface Person {
@@ -533,6 +534,55 @@ export default function TeamDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries, loggers, availStatus, holidaySet, todayIso, trackingStart]);
 
+  // Portfolio Movement: projects started (Start date reached) vs completed
+  // (Actual Close Date / completion stamp) per bucket inside the period.
+  // Monthly buckets; weekly when the period is 2 months or shorter.
+  const movement = useMemo(() => {
+    const end = range.end < todayIso ? range.end : todayIso;
+    const days = Math.round((parseLocalDate(range.end).getTime() - parseLocalDate(range.start).getTime()) / 86400000) + 1;
+    const weekly = days <= 62;
+    const buckets: { key: string; label: string; from: string; to: string }[] = [];
+    if (weekly) {
+      for (let d = parseLocalDate(range.start); toISO(d) <= range.end; d = addDays(d, 7)) {
+        const from = toISO(d);
+        const toD = addDays(d, 6);
+        const to = toISO(toD) > range.end ? range.end : toISO(toD);
+        buckets.push({ key: from, label: fmtShort(from), from, to });
+      }
+    } else {
+      const s0 = parseLocalDate(range.start);
+      for (let m = new Date(s0.getFullYear(), s0.getMonth(), 1); toISO(m) <= range.end; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
+        const from = toISO(m) < range.start ? range.start : toISO(m);
+        const last = toISO(new Date(m.getFullYear(), m.getMonth() + 1, 0));
+        buckets.push({ key: from, label: m.toLocaleDateString("en-US", { month: "short" }), from, to: last > range.end ? range.end : last });
+      }
+    }
+    const started = buckets.map(() => 0);
+    const completed = buckets.map(() => 0);
+    for (const p of scopedProjects) {
+      if (statusOf(p) === "Cancelled") continue;
+      const sd = p.start_date?.slice(0, 10);
+      if (sd && sd <= end && p.wbs_status !== "draft") {
+        const i = buckets.findIndex((b) => sd >= b.from && sd <= b.to);
+        if (i >= 0) started[i]++;
+      }
+      if (statusOf(p) === "Completed") {
+        const cd = completionDateOf(p);
+        const i = buckets.findIndex((b) => cd >= b.from && cd <= b.to);
+        if (i >= 0) completed[i]++;
+      }
+    }
+    return {
+      unit: weekly ? "week" : "month",
+      buckets: buckets.map(({ key, label }) => ({ key, label })),
+      series: [
+        { name: "Started", color: "#2f6fed", values: started },
+        { name: "Completed", color: "#16a34a", values: completed },
+      ],
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedProjects, range, todayIso]);
+
   // ---------------------------------------------------------- render
   // measure(start,end) -> value. Uses the period's own comparison; for YTD
   // with no prior-year data, falls back to QTD vs same point last quarter.
@@ -593,13 +643,20 @@ export default function TeamDashboard() {
         <>
           <section className="exec-section">
             <SectionTitle title={`Portfolio Overview (${periodTag})`} caption={`Projects relevant to the selected period (${fmtShort(range.start)} – ${fmtLong(range.end)})`} />
-            <div className="exec-grid">
+            <div className="exec-portfolio">
+            <div className="exec-grid exec-grid-3">
               <Kpi to="/projects" tone="blue" icon={<Folder size={18} />} label="Total Projects" value={t} sub="Completed + open in period" title="Completed in period + open projects (In Progress, Not Started, Paused) that started by period end. Cancelled excluded." />
               <Kpi to="/projects" tone="green" icon={<CheckCircle2 size={18} />} label="Completed" value={portfolio.completed.length} sub={`${pctOf(portfolio.completed.length, t)}% of total`} trend={trend(completedIn)} title="Projects whose Actual Close Date (or completion stamp) falls in the period." />
               <Kpi to="/projects" tone="indigo" icon={<Activity size={18} />} label="Active" value={portfolio.active.length} sub={`${pctOf(portfolio.active.length, t)}% of total`} title="Status = In Progress (current state)." />
               <Kpi to="/projects" tone="slate" icon={<CircleDashed size={18} />} label="Not Started" value={portfolio.notStarted.length} sub={`${pctOf(portfolio.notStarted.length, t)}% of total`} title="Status = Not Started, or WBS still in Draft." />
               <Kpi to="/projects" tone="orange" icon={<PauseCircle size={18} />} label="Paused" value={portfolio.paused.length} sub={`${pctOf(portfolio.paused.length, t)}% of total`} />
               <Kpi to="/projects" tone="red" icon={<Clock3 size={18} />} label="Overdue" value={portfolio.overdue.length} sub={`${pctOf(portfolio.overdue.length, portfolio.active.length)}% of active`} title="Active projects whose Health is Overdue (past End Date, not complete). Health is separate from Status." />
+            </div>
+            <div className="exec-chart-card">
+              <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)" }}>Portfolio Movement ({periodTag})</div>
+              <div className="exec-kpi-context" style={{ marginBottom: 6 }}>Projects started vs. completed, by {movement.unit}</div>
+              <MonthlyBarChart months={movement.buckets} series={movement.series} />
+            </div>
             </div>
           </section>
 
@@ -902,8 +959,12 @@ const EXEC_CSS = `
 .exec-title{font-size:14.5px;font-weight:700;color:var(--navy)}
 .exec-caption{font-size:11px;color:var(--muted)}
 .exec-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.exec-portfolio{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.exec-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.exec-chart-card{border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px;min-width:0}
+@media (max-width:1100px){.exec-portfolio{grid-template-columns:minmax(0,1fr)}}
 .exec-grid-7{grid-template-columns:repeat(7,minmax(0,1fr))}
-@media (max-width:1180px){.exec-grid,.exec-grid-7{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media (max-width:1180px){.exec-grid:not(.exec-grid-3),.exec-grid-7{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:820px){.exec-grid,.exec-grid-7{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .exec-kpi{min-width:0;overflow:hidden;display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);text-decoration:none;color:inherit;transition:box-shadow .15s,border-color .15s}
 .exec-kpi:hover{border-color:#c9d3df;box-shadow:0 3px 10px rgba(15,41,66,.08)}

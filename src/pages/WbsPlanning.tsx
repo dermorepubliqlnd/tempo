@@ -5966,7 +5966,8 @@ export default function WbsPlanning() {
                           <InlineSelect
                             value={assignee?.name ?? ""}
                             editable={rowEditable}
-                            allowEmpty
+                            // phase126k: after Start Project an assignee can be changed, never removed.
+                            allowEmpty={project?.wbs_status === "draft" || !t.assignee_id}
                             emptyLabel="Unassigned"
                             options={people.map((p) => p.name)}
                             renderReadOnly={(v) =>

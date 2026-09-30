@@ -289,7 +289,7 @@ function DonutLegend({ segments, total }: { segments: { label: string; value: nu
   );
 }
 
-function MonthlyBarChart({ months, series }: { months: { key: string; label: string }[]; series: { name: string; color: string; values: number[] }[] }) {
+export function MonthlyBarChart({ months, series }: { months: { key: string; label: string }[]; series: { name: string; color: string; values: number[] }[] }) {
   const max = Math.max(1, ...series.flatMap((s) => s.values));
   const chartH = 140;
   // 2026-09-21 (Sandra: "no axis labels for count, can we just add data
