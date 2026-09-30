@@ -249,7 +249,7 @@ export default function UserDrawer({
             )}
             <Field label="Expected to log time">
               {isEdit ? (
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }} title="Untick for people who don't log time (e.g. leadership). They're left out of expected hours and Missing Hours. Capacity and utilization are unaffected.">
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }} title="Untick for people who don't log time and aren't part of delivery capacity (e.g. leadership). They're left out of expected hours, Missing Hours, Utilization and capacity.">
                   <input type="checkbox" checked={person.tracks_time !== false} onChange={(e) => onToggleTracksTime(e.target.checked)} />
                   {person.tracks_time !== false ? "Yes" : "No"}
                 </label>

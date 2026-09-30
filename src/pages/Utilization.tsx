@@ -18,6 +18,7 @@ interface PersonRow {
   daily_capacity_hours: number;
   is_active: boolean;
   job_title?: string | null;
+  tracks_time?: boolean | null;
 }
 interface ProjectRow {
   id: string;
@@ -254,8 +255,8 @@ export default function Utilization() {
   async function loadAll() {
     setLoading(true);
     const [{ data: p }, { data: ap }, { data: pr }, { data: tk }, { data: av }, { data: hol }, { data: wts }, { data: ownHist }, { data: assHist }, { data: delHrs }, { data: settings }] = await Promise.all([
-      supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").eq("is_active", true).order("name"),
-      supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").order("name"),
+      supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title,tracks_time").eq("is_active", true).order("name"),
+      supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title,tracks_time").order("name"),
       supabase.from("projects").select("id,name,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at").eq("is_archived", false),
       supabase.from("tasks").select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,sort_order,work_type_id").eq("is_archived", false),
       supabase.from("person_availability").select("*"),
@@ -266,8 +267,11 @@ export default function Utilization() {
       supabase.from("deleted_person_day_hours").select("person_id,date,hours"),
       supabase.from("app_settings").select("historical_locking_enabled").eq("id", true).single(),
     ]);
-    setPeople((p as PersonRow[]) ?? []);
-    setAllPeople((ap as PersonRow[]) ?? []);
+    // phase126h (Sandra): people tagged "not expected to log time" are not
+    // part of delivery capacity -- left out of Utilization entirely.
+    const inCapacity = (x: PersonRow) => x.tracks_time !== false;
+    setPeople(((p as PersonRow[]) ?? []).filter(inCapacity));
+    setAllPeople(((ap as PersonRow[]) ?? []).filter(inCapacity));
     setProjects((pr as ProjectRow[]) ?? []);
     setTasks((tk as TaskRow[]) ?? []);
     setAvailability((av as AvailabilityRow[]) ?? []);

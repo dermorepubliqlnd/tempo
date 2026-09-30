@@ -386,7 +386,8 @@ export default function TeamDashboard() {
     let cap = 0;
     let available = 0;
     const over: { person: Person; days: number; peak: number }[] = [];
-    for (const p of popPeople) {
+    // phase126h: "not expected to log time" people are outside delivery capacity.
+    for (const p of loggers) {
       let overDays = 0;
       let peak = 0;
       for (const d of days) {
@@ -403,7 +404,7 @@ export default function TeamDashboard() {
     }
     return { planned, cap, available, util: cap > 0 ? (planned / cap) * 100 : 0, over, end: days[days.length - 1] };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [popPeople, engine, availStatus, holidaySet, todayIso, moreActive, scopedProjectIds]);
+  }, [loggers, engine, availStatus, holidaySet, todayIso, moreActive, scopedProjectIds]);
 
   // When project-level More Filters are on, planned load only counts those projects.
   function projectScopedAlloc(personId: string, d: string): number {

@@ -883,7 +883,7 @@ export default function Admin() {
                   <td>
                     {p.daily_capacity_hours}
                     {p.tracks_time === false && (
-                      <span className="status-pill neutral" style={{ marginLeft: 6, fontSize: 10 }} title="Not expected to log time -- excluded from expected and missing hours">
+                      <span className="status-pill neutral" style={{ marginLeft: 6, fontSize: 10 }} title="Not expected to log time -- excluded from expected/missing hours, Utilization and capacity">
                         No time logging
                       </span>
                     )}
