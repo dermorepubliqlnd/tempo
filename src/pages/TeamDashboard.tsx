@@ -443,7 +443,11 @@ export default function TeamDashboard() {
 
   // Logged Hours = finalized (Confirmed/Approved, not archived) only.
   const entryDay = (e: Entry) => toISO(new Date(e.started_at)); // local date, never started_at.slice(0,10)
-  function loggedIn(start: string, end: string, personFilter?: Set<string>): number {
+  // Logged hours only count from the Time tracking start date (Sep 1, 2026):
+  // August + early-September logs were backfilled manually during the
+  // mid-September migration and aren't reliable (Sandra 2026-09-30).
+  function loggedIn(startRaw: string, end: string, personFilter?: Set<string>): number {
+    const start = startRaw > trackingStart ? startRaw : trackingStart;
     let min = 0;
     for (const e of entries) {
       if (!(personFilter ?? popIds).has(e.person_id)) continue;
@@ -457,7 +461,7 @@ export default function TeamDashboard() {
     }
     return min / 60;
   }
-  const logged = useMemo(() => loggedIn(range.start, range.end), [entries, popIds, range, moreActive, scopedProjectIds, taskProject]); // eslint-disable-line react-hooks/exhaustive-deps
+  const logged = useMemo(() => loggedIn(range.start, range.end), [entries, popIds, range, moreActive, scopedProjectIds, taskProject, trackingStart]); // eslint-disable-line react-hooks/exhaustive-deps
   // Expected hours across the elapsed part of the period (through today).
   const expectedInPeriod = useMemo(() => {
     const end = range.end < todayIso ? range.end : todayIso;
@@ -603,7 +607,7 @@ export default function TeamDashboard() {
             <SectionTitle title="Executive Operating Summary" caption="Key capacity, effort and execution metrics" />
             <div className="exec-grid exec-grid-7">
               <Kpi to="/time-tracking?scope=all" tone="slate" icon={<CalendarClock size={18} />} label="Expected Hours" context={periodTag} value={fmtH(expectedInPeriod)} sub={`${loggers.length} ${loggers.length === 1 ? "person" : "people"} · from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)}`} title={`Each person's daily shift (usually 7.5h), adjusted for half-days, approved time off, holidays and weekends, from the Time tracking start date (${fmtShort(trackingStart)}) or period start, whichever is later, to today. People tagged "not expected to log time" are excluded.`} />
-              <Kpi to="/hours-overview" tone="teal" icon={<Timer size={18} />} label="Logged Hours" context={periodTag} value={fmtH(logged)} sub={expectedInPeriod > 0 ? `${pctOf(loggedIn(range.start > trackingStart ? range.start : trackingStart, range.end, new Set(loggers.map((p) => p.id))), expectedInPeriod)}% of expected` : undefined} trend={trend((a, b) => loggedIn(a, b))} title={`Finalized (Confirmed/Approved) time only${moreActive ? ", project time within filtered projects" : ", incl. non-project time"}. Expected = ${fmtH(expectedInPeriod)}: each person's daily capacity (adjusted for half-days, time off, holidays, weekends) across working days from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)} (time tracking start) to today.`} />
+              <Kpi to="/hours-overview" tone="teal" icon={<Timer size={18} />} label="Logged Hours" context={`${periodTag} · from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)}`} value={fmtH(logged)} sub={expectedInPeriod > 0 ? `${pctOf(loggedIn(range.start, range.end, new Set(loggers.map((p) => p.id))), expectedInPeriod)}% of expected` : undefined} trend={trend((a, b) => loggedIn(a, b))} title={`Finalized (Confirmed/Approved) time only${moreActive ? ", project time within filtered projects" : ", incl. non-project time"}. Expected = ${fmtH(expectedInPeriod)}: each person's daily capacity (adjusted for half-days, time off, holidays, weekends) across working days from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)} (time tracking start) to today.`} />
               <Kpi to="/utilization" tone="purple" icon={<Users size={18} />} label="Planned Utilization" context="Next 2 weeks" value={`${Math.round(horizon.util)}%`} sub={`${fmtH(horizon.planned)} of ${fmtH(horizon.cap)} capacity`} valueTone={horizon.util > 100 ? "red" : undefined} title={`Planned workload vs available capacity, ${fmtShort(todayIso)} – ${fmtShort(horizon.end)}. Same engine as the Utilization page.`} />
               <Kpi to="/utilization" tone="green" icon={<BatteryCharging size={18} />} label="Available Capacity" context="Next 2 weeks" value={fmtH(horizon.available)} sub={`${pctOf(horizon.available, horizon.cap)}% of capacity open`} title="Sum of unallocated hours per person per working day (an overloaded day doesn't cancel out someone else's free time)." />
               <Kpi to="/utilization" tone="orange" icon={<UserX size={18} />} label="Overallocated Members" context="Next 2 weeks" value={horizon.over.length} sub="> 100% on at least 1 day" valueTone={horizon.over.length ? "orange" : undefined} title={horizon.over.length ? horizon.over.map((o) => `${o.person.name}: ${o.days} day(s), peak ${Math.round(o.peak)}%`).join("\n") : "Nobody above 100% in the next 2 weeks."} />

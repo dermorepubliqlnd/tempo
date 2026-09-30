@@ -247,7 +247,7 @@ export default function UserDrawer({
             ) : (
               <Field label="Daily capacity">{person.daily_capacity_hours} hrs/day</Field>
             )}
-            <Field label="Expected to log time">
+            <Field label="Capacity and Time Tracking">
               {isEdit ? (
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }} title="Untick for people who don't log time and aren't part of delivery capacity (e.g. leadership). They're left out of expected hours, Missing Hours, Utilization and capacity.">
                   <input type="checkbox" checked={person.tracks_time !== false} onChange={(e) => onToggleTracksTime(e.target.checked)} />
@@ -256,7 +256,7 @@ export default function UserDrawer({
               ) : person.tracks_time !== false ? (
                 "Yes"
               ) : (
-                <span className="status-pill neutral">No time logging</span>
+                <span className="status-pill neutral">Excluded</span>
               )}
             </Field>
             <Field label="Planner color">
