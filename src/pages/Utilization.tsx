@@ -309,6 +309,7 @@ export default function Utilization() {
   const [scenarioTaskId, setScenarioTaskId] = useState<string | null>(null);
   const [scenarioStart, setScenarioStart] = useState("");
   const [scenarioDue, setScenarioDue] = useState("");
+  const [scenarioAssigneeId, setScenarioAssigneeId] = useState<string | null>(null);
   const [showAllRisks, setShowAllRisks] = useState(false);
   const [savedViews, setSavedViews] = useState<SavedUtilView[]>([]);
   const [activeViewId, setActiveViewId] = useState("system:all");
@@ -974,65 +975,98 @@ export default function Utilization() {
 
   const scenarioTask = scenarioTaskId ? tasks.find((t) => t.id === scenarioTaskId) ?? null : null;
   const scenarioPerson = scenarioTask?.assignee_id ? allPeople.find((p) => p.id === scenarioTask.assignee_id) ?? people.find((p) => p.id === scenarioTask.assignee_id) ?? null : null;
+  const scenarioTargetPerson = scenarioAssigneeId ? allPeople.find((p) => p.id === scenarioAssigneeId) ?? people.find((p) => p.id === scenarioAssigneeId) ?? null : scenarioPerson;
   const scenarioProject = scenarioTask ? projects.find((p) => p.id === scenarioTask.project_id) ?? null : null;
+
+  const scenarioAssigneeHistory = useMemo(() => {
+    if (!scenarioTask || !scenarioAssigneeId || assigneeHistory.length === 0) return assigneeHistory;
+    const yesterday = toISO(addDays(parseLocalDate(today), -1));
+    const preserved = assigneeHistory.flatMap((h) => {
+      if (h.task_id !== scenarioTask.id) return [h];
+      if (h.effective_to && h.effective_to < today) return [h];
+      if (h.effective_from >= today) return [];
+      return [{ ...h, effective_to: yesterday }];
+    });
+    preserved.push({
+      task_id: scenarioTask.id,
+      person_id: scenarioAssigneeId,
+      effective_from: today,
+      effective_to: null,
+    });
+    return preserved;
+  }, [scenarioTask, scenarioAssigneeId, assigneeHistory, today]);
 
   const scenarioEngine = useMemo(() => {
     if (!scenarioTask || !scenarioStart || !scenarioDue) return null;
-    const patchedTasks = engineTasks.map((t) => t.id === scenarioTask.id ? { ...t, start_date: scenarioStart, current_due_date: scenarioDue } : t);
+    const proposedAssignee = scenarioAssigneeId ?? scenarioTask.assignee_id;
+    const patchedTasks = engineTasks.map((t) => t.id === scenarioTask.id
+      ? { ...t, start_date: scenarioStart, current_due_date: scenarioDue, assignee_id: proposedAssignee }
+      : t
+    );
     return createAllocationEngine({
       tasks: patchedTasks as UtilTaskRow[],
       projects: engineProjects,
       holidays: holidaySet,
       availability,
-      assigneeHistory,
+      assigneeHistory: scenarioAssigneeHistory,
       ownerHistory,
       todayStr: today,
       deletedHours: projectFilterSet ? [] : deletedHours,
     });
-  }, [scenarioTask, scenarioStart, scenarioDue, engineTasks, engineProjects, holidaySet, availability, assigneeHistory, ownerHistory, today, projectFilterSet, deletedHours]);
+  }, [scenarioTask, scenarioStart, scenarioDue, scenarioAssigneeId, engineTasks, engineProjects, holidaySet, availability, scenarioAssigneeHistory, ownerHistory, today, projectFilterSet, deletedHours]);
 
   const scenarioImpact = (() => {
-    if (!scenarioTask || !scenarioPerson || !scenarioEngine || !scenarioStart || !scenarioDue) return null;
-    const oldStart = scenarioTask.start_date ?? scenarioTask.current_due_date;
+    if (!scenarioTask || !scenarioPerson || !scenarioTargetPerson || !scenarioEngine || !scenarioStart || !scenarioDue) return null;
     const oldDue = scenarioTask.current_due_date;
-    const earliest = [oldStart, scenarioStart, today].sort()[0];
-    const latest = [oldDue, scenarioDue].sort().slice(-1)[0];
+    const latest = [oldDue, scenarioDue, today].sort().slice(-1)[0];
     const impactDays: Date[] = [];
-    for (let d = parseLocalDate(earliest); d <= parseLocalDate(latest); d = addDays(d, 1)) impactDays.push(new Date(d));
+    for (let d = parseLocalDate(today); d <= parseLocalDate(latest); d = addDays(d, 1)) impactDays.push(new Date(d));
 
-    const rows = impactDays.map((d) => {
-      const dateStr = toISO(d);
-      const dow = d.getDay();
-      if (dayBlocked(scenarioPerson.id, dateStr, dow)) return null;
-      const av = availabilityFor(scenarioPerson.id, dateStr);
-      const capacity = dailyCapacityFor(scenarioPerson, av?.status === "half_day");
-      const current = engine.totalFor(scenarioPerson.id, dateStr);
-      const proposed = scenarioEngine.totalFor(scenarioPerson.id, dateStr);
-      const currentPct = capacity > 0 ? (current / capacity) * 100 : 0;
-      const proposedPct = capacity > 0 ? (proposed / capacity) * 100 : 0;
-      return { dateStr, capacity, current, proposed, currentPct, proposedPct, delta: proposed - current };
-    }).filter((r): r is NonNullable<typeof r> => !!r && Math.abs(r.delta) > 0.001);
+    const affectedPeople = scenarioPerson.id === scenarioTargetPerson.id
+      ? [scenarioPerson]
+      : [scenarioPerson, scenarioTargetPerson];
 
-    const allWorking = impactDays.map((d) => {
-      const dateStr = toISO(d);
-      const dow = d.getDay();
-      if (dayBlocked(scenarioPerson.id, dateStr, dow)) return null;
-      const av = availabilityFor(scenarioPerson.id, dateStr);
-      const capacity = dailyCapacityFor(scenarioPerson, av?.status === "half_day");
-      const current = engine.totalFor(scenarioPerson.id, dateStr);
-      const proposed = scenarioEngine.totalFor(scenarioPerson.id, dateStr);
+    const peopleImpact = affectedPeople.map((person) => {
+      const workingRows = impactDays.map((d) => {
+        const dateStr = toISO(d);
+        const dow = d.getDay();
+        if (dayBlocked(person.id, dateStr, dow)) return null;
+        const av = availabilityFor(person.id, dateStr);
+        const capacity = dailyCapacityFor(person, av?.status === "half_day");
+        const current = engine.totalFor(person.id, dateStr);
+        const proposed = scenarioEngine.totalFor(person.id, dateStr);
+        return {
+          person,
+          dateStr,
+          capacity,
+          current,
+          proposed,
+          currentPct: capacity > 0 ? (current / capacity) * 100 : current > 0 ? 999 : 0,
+          proposedPct: capacity > 0 ? (proposed / capacity) * 100 : proposed > 0 ? 999 : 0,
+          delta: proposed - current,
+        };
+      }).filter((r): r is NonNullable<typeof r> => !!r);
+
       return {
-        currentPct: capacity > 0 ? (current / capacity) * 100 : 0,
-        proposedPct: capacity > 0 ? (proposed / capacity) * 100 : 0,
+        person,
+        currentPeak: workingRows.reduce((m, r) => Math.max(m, r.currentPct), 0),
+        proposedPeak: workingRows.reduce((m, r) => Math.max(m, r.proposedPct), 0),
+        currentOverDays: workingRows.filter((r) => r.currentPct > 100).length,
+        proposedOverDays: workingRows.filter((r) => r.proposedPct > 100).length,
+        netHours: workingRows.reduce((sum, r) => sum + r.delta, 0),
+        rows: workingRows.filter((r) => Math.abs(r.delta) > 0.001),
       };
-    }).filter((r): r is NonNullable<typeof r> => !!r);
+    });
 
+    const rows = peopleImpact.flatMap((p) => p.rows).sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.person.name.localeCompare(b.person.name));
     return {
+      people: peopleImpact,
       rows,
-      currentPeak: allWorking.reduce((m, r) => Math.max(m, r.currentPct), 0),
-      proposedPeak: allWorking.reduce((m, r) => Math.max(m, r.proposedPct), 0),
-      currentOverDays: allWorking.filter((r) => r.currentPct > 100).length,
-      proposedOverDays: allWorking.filter((r) => r.proposedPct > 100).length,
+      currentPeak: peopleImpact.reduce((m, p) => Math.max(m, p.currentPeak), 0),
+      proposedPeak: peopleImpact.reduce((m, p) => Math.max(m, p.proposedPeak), 0),
+      currentOverDays: peopleImpact.reduce((sum, p) => sum + p.currentOverDays, 0),
+      proposedOverDays: peopleImpact.reduce((sum, p) => sum + p.proposedOverDays, 0),
+      isReassignment: scenarioPerson.id !== scenarioTargetPerson.id,
     };
   })();
 
@@ -1825,6 +1859,7 @@ export default function Utilization() {
                             setScenarioTaskId(task.id);
                             setScenarioStart(task.start_date ?? task.current_due_date);
                             setScenarioDue(task.current_due_date);
+                            setScenarioAssigneeId(task.assignee_id);
                           }}
                           style={{ border: "1px solid rgba(59,130,246,.16)", background: "rgba(59,130,246,.07)", color: "var(--accent)", borderRadius: 999, padding: "5px 8px", fontSize: 9.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
                         >
@@ -1842,10 +1877,10 @@ export default function Utilization() {
         </aside>
       )}
 
-      {scenarioTask && scenarioPerson && scenarioProject && (
+      {scenarioTask && scenarioPerson && scenarioTargetPerson && scenarioProject && (
         <>
           <div
-            onClick={() => setScenarioTaskId(null)}
+            onClick={() => { setScenarioTaskId(null); setScenarioAssigneeId(null); }}
             style={{ position: "fixed", inset: 0, zIndex: 48, background: "rgba(15,35,65,.28)" }}
           />
           <aside
@@ -1871,9 +1906,11 @@ export default function Utilization() {
                   <span style={{ fontSize: 10, fontWeight: 600, color: "var(--accent)", letterSpacing: ".04em" }}>SCENARIO PREVIEW</span>
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 600, color: "var(--navy)" }}>{scenarioTask.name}</div>
-                <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 2 }}>{scenarioProject.name} · {scenarioPerson.name}</div>
+                <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 2 }}>
+                  {scenarioProject.name} · {scenarioPerson.name}{scenarioTargetPerson.id !== scenarioPerson.id ? ` → ${scenarioTargetPerson.name}` : ""}
+                </div>
               </div>
-              <button onClick={() => setScenarioTaskId(null)} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer" }}><X size={17} /></button>
+              <button onClick={() => { setScenarioTaskId(null); setScenarioAssigneeId(null); }} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer" }}><X size={17} /></button>
             </div>
 
             <div style={{ padding: 18 }}>
@@ -1881,7 +1918,19 @@ export default function Utilization() {
                 Preview only. This does not change the WBS, task list, baseline, assignee history, or audit trail.
               </div>
 
-              <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)", marginBottom: 8 }}>Try a different schedule</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", marginBottom: 8 }}>Try a different assignment or schedule</div>
+              <label style={{ display: "block", fontSize: 9.5, color: "var(--muted)", marginBottom: 12 }}>
+                Proposed assignee
+                <select
+                  value={scenarioAssigneeId ?? scenarioTask.assignee_id ?? ""}
+                  onChange={(e) => setScenarioAssigneeId(e.target.value || null)}
+                  style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 9px", fontSize: 11, color: "var(--navy)", background: "var(--surface)" }}
+                >
+                  {people.map((person) => (
+                    <option key={person.id} value={person.id}>{person.name}{person.job_title ? ` · ${person.job_title}` : ""}</option>
+                  ))}
+                </select>
+              </label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 28px 1fr", gap: 8, alignItems: "end", marginBottom: 15 }}>
                 <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
                   Proposed start
@@ -1894,17 +1943,27 @@ export default function Utilization() {
                 </label>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 14 }}>
-                <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 14, background: "var(--hover-bg)" }}>
-                  <div style={{ fontSize: 9, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>CURRENT PEAK</div>
-                  <div style={{ fontSize: 21, fontWeight: 600, color: tierOf(scenarioImpact?.currentPeak ?? 0).fg }}>{displayPct(scenarioImpact?.currentPeak ?? 0)}%</div>
-                  <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>{scenarioImpact?.currentOverDays ?? 0} overloaded day{(scenarioImpact?.currentOverDays ?? 0) === 1 ? "" : "s"}</div>
-                </div>
-                <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 14, background: (scenarioImpact?.proposedPeak ?? 0) > 100 ? "rgba(239,68,68,.04)" : "rgba(16,185,129,.05)" }}>
-                  <div style={{ fontSize: 9, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>PROPOSED PEAK</div>
-                  <div style={{ fontSize: 21, fontWeight: 600, color: tierOf(scenarioImpact?.proposedPeak ?? 0).fg }}>{displayPct(scenarioImpact?.proposedPeak ?? 0)}%</div>
-                  <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>{scenarioImpact?.proposedOverDays ?? 0} overloaded day{(scenarioImpact?.proposedOverDays ?? 0) === 1 ? "" : "s"}</div>
-                </div>
+              <div style={{ display: "grid", gridTemplateColumns: scenarioImpact?.people.length === 2 ? "1fr 1fr" : "1fr", gap: 9, marginBottom: 14 }}>
+                {(scenarioImpact?.people ?? []).map((impact) => (
+                  <div key={impact.person.id} style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 10, background: impact.proposedPeak > 100 ? "rgba(239,68,68,.04)" : "rgba(16,185,129,.04)" }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)", marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{impact.person.name}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 22px 1fr", alignItems: "center", gap: 5 }}>
+                      <div>
+                        <div style={{ fontSize: 8.8, color: "var(--muted)" }}>Current peak</div>
+                        <div style={{ fontSize: 17, fontWeight: 600, color: tierOf(impact.currentPeak).fg }}>{displayPct(impact.currentPeak)}%</div>
+                      </div>
+                      <ArrowRight size={12} style={{ color: "var(--muted)" }} />
+                      <div>
+                        <div style={{ fontSize: 8.8, color: "var(--muted)" }}>Proposed</div>
+                        <div style={{ fontSize: 17, fontWeight: 600, color: tierOf(impact.proposedPeak).fg }}>{displayPct(impact.proposedPeak)}%</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 6, display: "flex", justifyContent: "space-between", gap: 8, fontSize: 9.2, color: "var(--muted)" }}>
+                      <span>{impact.currentOverDays} → {impact.proposedOverDays} overloaded days</span>
+                      <span style={{ color: impact.netHours > 0 ? "var(--danger)" : impact.netHours < 0 ? "#059669" : "var(--muted)", fontWeight: 600 }}>{impact.netHours > 0 ? "+" : ""}{impact.netHours.toFixed(1)}h</span>
+                    </div>
+                  </div>
+                ))}
               </div>
 
               <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)", marginBottom: 7 }}>Affected days</div>
@@ -1912,8 +1971,13 @@ export default function Utilization() {
                 <div style={{ padding: 14, border: "1px dashed var(--border)", borderRadius: 12, color: "var(--muted)", fontSize: 10 }}>Change the proposed dates to see the capacity impact.</div>
               ) : (
                 <div style={{ border: "1px solid var(--border)", borderRadius: 13, overflow: "hidden" }}>
-                  {scenarioImpact.rows.slice(0, 12).map((row) => (
-                    <div key={row.dateStr} style={{ display: "grid", gridTemplateColumns: "110px 1fr 24px 1fr", gap: 8, alignItems: "center", padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+                  {scenarioImpact.rows.slice(0, 16).map((row) => (
+                    <div key={`${row.person.id}-${row.dateStr}`} style={{ display: "grid", gridTemplateColumns: scenarioImpact.isReassignment ? "105px 100px 1fr 24px 1fr" : "110px 1fr 24px 1fr", gap: 8, alignItems: "center", padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+                      {scenarioImpact.isReassignment && (
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 9.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.person.name}</div>
+                        </div>
+                      )}
                       <div>
                         <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)" }}>{parseLocalDate(row.dateStr).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
                         <div style={{ fontSize: 8.8, color: "var(--muted)" }}>{row.capacity.toFixed(1)}h capacity</div>
@@ -1933,7 +1997,7 @@ export default function Utilization() {
               )}
 
               <div style={{ marginTop: 14, padding: "10px 12px", borderRadius: 10, background: "var(--hover-bg)", fontSize: 9.5, color: "var(--muted)", lineHeight: 1.45 }}>
-                Phase 2 starts with schedule simulation only. Reassignment, dependency-aware cascading, and Apply to WBS will be added after this preview behavior is validated.
+                Preview only. Schedule and reassignment scenarios affect today forward and do not rewrite historical allocation. Dependency-aware cascading and Apply to WBS remain disabled until the preview logic is validated.
               </div>
             </div>
           </aside>
