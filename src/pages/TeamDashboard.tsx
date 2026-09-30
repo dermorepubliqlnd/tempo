@@ -46,6 +46,7 @@ import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { healthOf, type ProjectRow, type TaskRow } from "./Projects";
 import { MonthlyBarChart } from "./Dashboard";
 import Modal from "../components/Modal";
+import { CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 
 // ---------------------------------------------------------------- types
 interface Person {
@@ -58,6 +59,7 @@ interface Person {
 interface Lookup {
   id: string;
   name: string;
+  color?: string | null;
 }
 interface Avail {
   person_id: string;
@@ -257,8 +259,8 @@ export default function TeamDashboard() {
       supabase.from("deleted_person_day_hours").select("person_id,date,hours"),
       supabase.from("app_settings").select("historical_locking_enabled,time_tracking_start_date").eq("id", true).single(),
       supabase.from("project_sources").select("id,name").order("sort_order"),
-      supabase.from("project_planning_types").select("id,name").order("sort_order"),
-      supabase.from("project_types").select("id,name").order("sort_order"),
+      supabase.from("project_planning_types").select("id,name,color").order("sort_order"),
+      supabase.from("project_types").select("id,name,color").order("sort_order"),
       supabase.from("project_categories").select("id,name").order("sort_order"),
       fetchAll<Entry>((f, t) =>
         supabase
@@ -610,6 +612,71 @@ export default function TeamDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopedProjects, range, todayIso]);
 
+  // ======================================================== WORK MIX
+  // Scoped Hours by Planning Type / Project Type, for the Reporting Period
+  // (same engine spread as the Scoped Hours figure: leaf tasks only, only
+  // the days inside the period). Toggle: active (In Progress) projects only.
+  const [mixActiveOnly, setMixActiveOnly] = useState(false);
+  const workMix = useMemo(() => {
+    const byProject = new Map<string, number>();
+    for (const t of leafTasks) {
+      if (!t.assignee_id || !popIds.has(t.assignee_id) || !scopedProjectIds.has(t.project_id) || !t.estimated_hours) continue;
+      const proj = projectById.get(t.project_id);
+      if (!proj || statusOf(proj) === "Cancelled") continue;
+      if (mixActiveOnly && statusOf(proj) !== "In Progress") continue;
+      const days = engine.taskDays(t.assignee_id, t as unknown as UtilTaskRow);
+      if (!days.size) continue;
+      let inWin = 0;
+      days.forEach((d) => {
+        if (d >= range.start && d <= range.end) inWin++;
+      });
+      if (!inWin) continue;
+      byProject.set(t.project_id, (byProject.get(t.project_id) ?? 0) + (Number(t.estimated_hours) * inWin) / days.size);
+    }
+    const colorFor = (list: Lookup[]) => {
+      const used = new Set<string>();
+      const m = new Map<string, string>();
+      list.forEach((l, i) => {
+        let c = l.color && l.color !== "neutral" ? CATEGORY_TONE_ICON_COLOR[l.color] ?? "" : "";
+        if (!c || used.has(c)) c = MIX_PALETTE[i % MIX_PALETTE.length];
+        used.add(c);
+        m.set(l.id, c);
+      });
+      m.set("__none", "#c7cdd6");
+      return m;
+    };
+    const ptColor = colorFor(lookups.planningTypes);
+    const prtColor = colorFor(lookups.projectTypes);
+    const plan = new Map<string, number>();
+    const ptype = new Map<string, number>();
+    const matrix = new Map<string, Map<string, number>>();
+    let total = 0;
+    byProject.forEach((h, pid) => {
+      const p = projectById.get(pid)!;
+      const pl = p.planning_type_id ?? "__none";
+      const pr = p.project_type_id ?? "__none";
+      plan.set(pl, (plan.get(pl) ?? 0) + h);
+      ptype.set(pr, (ptype.get(pr) ?? 0) + h);
+      if (!matrix.has(pr)) matrix.set(pr, new Map());
+      matrix.get(pr)!.set(pl, (matrix.get(pr)!.get(pl) ?? 0) + h);
+      total += h;
+    });
+    const nameOf = (list: Lookup[], id: string) => (id === "__none" ? "Not set" : list.find((l) => l.id === id)?.name ?? "Unknown");
+    const segs = (m: Map<string, number>, list: Lookup[], colors: Map<string, string>) =>
+      Array.from(m.entries())
+        .map(([id, v]) => ({ id, label: nameOf(list, id), value: v, color: colors.get(id) ?? "#8a94a6" }))
+        .sort((a, b) => b.value - a.value);
+    const planSegs = segs(plan, lookups.planningTypes, ptColor);
+    const typeSegs = segs(ptype, lookups.projectTypes, prtColor);
+    const bars = typeSegs.map((t) => ({
+      label: t.label,
+      total: t.value,
+      parts: planSegs.map((pl) => ({ label: pl.label, color: pl.color, value: matrix.get(t.id)?.get(pl.id) ?? 0 })).filter((x) => x.value > 0),
+    }));
+    return { total, planSegs, typeSegs, bars, projects: byProject.size };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leafTasks, popIds, scopedProjectIds, projectById, engine, range, mixActiveOnly, lookups]);
+
   // ======================================================== SECTION 3
   // Needs Attention -- current state. Working-day age uses the same
   // holiday calendar as everything else.
@@ -887,6 +954,31 @@ export default function TeamDashboard() {
               );
             })()}
           </section>
+
+          <section className="exec-section">
+            <div className="exec-section-title" style={{ justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                <span className="exec-title">Work Mix &amp; Effort Allocation</span>
+                <span className="exec-caption">
+                  Scoped Hours by type · {periodTag} · {fmtH(workMix.total)} across {workMix.projects} project{workMix.projects === 1 ? "" : "s"}
+                </span>
+              </div>
+              <label className="exec-toggle" title="Only count projects whose Status is In Progress today">
+                <span>Active projects only</span>
+                <input type="checkbox" checked={mixActiveOnly} onChange={(e) => setMixActiveOnly(e.target.checked)} />
+                <span className="exec-toggle-track" />
+              </label>
+            </div>
+            <div className="exec-mix">
+              <MixDonut title="By Planning Type" segments={workMix.planSegs} total={workMix.total} />
+              <MixDonut title="By Project Type" segments={workMix.typeSegs} total={workMix.total} />
+              <div className="exec-chart-card">
+                <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)" }}>Project Type × Planning Type</div>
+                <div className="exec-kpi-context" style={{ marginBottom: 10 }}>Scoped Hours per Project Type, split by Planning Type</div>
+                <StackedBars bars={workMix.bars} legend={workMix.planSegs} />
+              </div>
+            </div>
+          </section>
         </>
       )}
     </div>
@@ -935,6 +1027,80 @@ function AttnCard({ c, onOpen }: { c: AttnSpec; onOpen: () => void }) {
         </div>
       </div>
     </button>
+  );
+}
+
+
+// ---------------------------------------------------------------- Work Mix
+const MIX_PALETTE = ["#2f6fed", "#16a34a", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#ef4444", "#64748b"];
+type MixSeg = { id?: string; label: string; value: number; color: string };
+function MixDonut({ title, segments, total }: { title: string; segments: MixSeg[]; total: number }) {
+  const r = 52;
+  const sw = 18;
+  const C = 2 * Math.PI * r;
+  let off = 0;
+  return (
+    <div className="exec-chart-card">
+      <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)", marginBottom: 8 }}>{title}</div>
+      <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+        <svg viewBox="0 0 140 140" width={130} height={130} style={{ flexShrink: 0 }}>
+          <g transform="translate(70,70) rotate(-90)">
+            {total <= 0 ? (
+              <circle r={r} fill="none" stroke="var(--border)" strokeWidth={sw} />
+            ) : (
+              segments.map((s, i) => {
+                const dash = (s.value / total) * C;
+                const el = <circle key={i} r={r} fill="none" stroke={s.color} strokeWidth={sw} strokeDasharray={`${dash} ${C - dash}`} strokeDashoffset={-off}><title>{`${s.label}: ${fmtH(s.value)}`}</title></circle>;
+                off += dash;
+                return el;
+              })
+            )}
+          </g>
+          <text x={70} y={68} textAnchor="middle" fontSize={17} fontWeight={700} fill="var(--navy)">{fmtH(total)}</text>
+          <text x={70} y={84} textAnchor="middle" fontSize={9.5} fill="var(--muted)">scoped</text>
+        </svg>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 0, flex: 1 }}>
+          {segments.map((s) => (
+            <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
+              <span style={{ color: "var(--text-secondary)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
+              <span style={{ fontWeight: 600, color: "var(--navy)" }}>{fmtH(s.value)}</span>
+              <span style={{ color: "var(--muted)", width: 32, textAlign: "right" }}>{pctOf(s.value, total)}%</span>
+            </div>
+          ))}
+          {total <= 0 && <div style={{ fontSize: 11, color: "var(--muted)" }}>No scoped hours in this period.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+function StackedBars({ bars, legend }: { bars: { label: string; total: number; parts: MixSeg[] }[]; legend: MixSeg[] }) {
+  const max = Math.max(1, ...bars.map((b) => b.total));
+  if (!bars.length) return <div style={{ fontSize: 11, color: "var(--muted)" }}>No scoped hours in this period.</div>;
+  return (
+    <div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {bars.map((b) => (
+          <div key={b.label} style={{ display: "grid", gridTemplateColumns: "130px minmax(0,1fr) 56px", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={b.label}>{b.label}</span>
+            <div style={{ display: "flex", height: 16, borderRadius: 4, overflow: "hidden", width: `${(b.total / max) * 100}%`, background: "var(--hover-bg)" }}>
+              {b.parts.map((p) => (
+                <div key={p.label} title={`${b.label} · ${p.label}: ${fmtH(p.value)} (${pctOf(p.value, b.total)}%)`} style={{ width: `${(p.value / b.total) * 100}%`, background: p.color }} />
+              ))}
+            </div>
+            <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", textAlign: "right" }}>{fmtH(b.total)}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
+        {legend.map((l) => (
+          <span key={l.label} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-secondary)" }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: l.color }} />
+            {l.label}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1236,6 +1402,16 @@ const EXEC_CSS = `
 .exec-attn-table td{padding:7px 8px;border-bottom:1px solid var(--border);color:var(--text)}
 .exec-attn-table a{color:var(--accent);text-decoration:none;font-weight:600}
 @media (max-width:1100px){.exec-attn-row{flex-direction:column}.exec-attn-sep{display:none}.exec-attn-grp{margin-bottom:8px}}
+.exec-mix{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.6fr);gap:10px}
+@media (max-width:1250px){.exec-mix{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.exec-mix>:last-child{grid-column:1 / -1}}
+@media (max-width:760px){.exec-mix{grid-template-columns:minmax(0,1fr)}}
+.exec-toggle{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text-secondary);cursor:pointer;user-select:none;position:relative}
+.exec-toggle input{position:absolute;opacity:0;width:0;height:0}
+.exec-toggle-track{width:34px;height:20px;border-radius:10px;background:#cfd6df;position:relative;transition:background .15s;flex-shrink:0}
+.exec-toggle-track::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
+.exec-toggle input:checked + .exec-toggle-track{background:#34c759}
+.exec-toggle input:checked + .exec-toggle-track::after{transform:translateX(14px)}
+.exec-toggle input:focus-visible + .exec-toggle-track{outline:2px solid var(--accent);outline-offset:2px}
 .exec-grid-7{grid-template-columns:repeat(7,minmax(0,1fr))}
 @media (max-width:1180px){.exec-grid:not(.exec-grid-3),.exec-grid-7{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:820px){.exec-grid,.exec-grid-7{grid-template-columns:repeat(2,minmax(0,1fr))}}
