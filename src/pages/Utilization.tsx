@@ -795,7 +795,7 @@ export default function Utilization() {
   })();
 
   const selectedWeekTaskHours = detailPerson
-    ? detailActiveTasks.reduce((sum, task) => sum + weekSum(detailWeek, (dateStr) => taskValueForDate(detailPerson, task, dateStr)), 0)
+    ? detailTasks.reduce((sum, task) => sum + weekSum(detailWeek, (dateStr) => taskValueForDate(detailPerson, task, dateStr)), 0)
     : 0;
   const selectedWeekPmHours = detailPerson
     ? detailOwnedProjects.reduce((sum, project) => sum + weekSum(detailWeek, (dateStr) => pmValueForDate(detailPerson, project.id, dateStr)), 0)
@@ -1815,11 +1815,15 @@ export default function Utilization() {
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 6 }}>
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--navy)", fontWeight: 600 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#2563eb" }} />Task</span>
-                            <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>{selectedWeekTaskHours.toFixed(1)}h</span>
+                            <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap" }}>
+                              {selectedPeriodEffortTotal > 0 ? Math.round((selectedWeekTaskHours / selectedPeriodEffortTotal) * 100) : 0}% · {selectedWeekTaskHours.toFixed(1)}h
+                            </span>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--navy)", fontWeight: 600 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#8b5cf6" }} />PM</span>
-                            <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>{selectedWeekPmHours.toFixed(1)}h</span>
+                            <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap" }}>
+                              {selectedPeriodEffortTotal > 0 ? Math.round((selectedWeekPmHours / selectedPeriodEffortTotal) * 100) : 0}% · {selectedWeekPmHours.toFixed(1)}h
+                            </span>
                           </div>
                         </div>
                       </div>
