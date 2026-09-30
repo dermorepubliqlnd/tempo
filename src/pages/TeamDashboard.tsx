@@ -10,7 +10,7 @@
 // (lib/dailyAllocation.ts) so they can never disagree with the Utilization page.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Folder,
   CheckCircle2,
@@ -45,7 +45,7 @@ import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from ".
 import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, isOpenTask, type UtilTaskRow, type UtilProjectRow } from "../lib/dailyAllocation";
 import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { healthOf, actualProgress, projectCompletionDate, type ProjectRow, type TaskRow } from "./Projects";
-import { MonthlyBarChart } from "./Dashboard";
+import Dashboard, { MonthlyBarChart } from "./Dashboard";
 import Modal from "../components/Modal";
 import { CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 
@@ -196,7 +196,45 @@ const TONES = {
 type Tone = keyof typeof TONES;
 
 // ================================================================= page
+// phase126q (Sandra 2026-10-01): Team Dashboard hosts two views --
+// Executive Dashboard (default) and Projects Portfolio (the former
+// standalone page, unchanged). ?view=portfolio deep-links the second.
 export default function TeamDashboard() {
+  const [params, setParams] = useSearchParams();
+  const view = params.get("view") === "portfolio" ? "portfolio" : "executive";
+  return (
+    <div>
+      <div className="exec-viewtabs" role="tablist">
+        {([
+          ["executive", "Executive Dashboard"],
+          ["portfolio", "Projects Portfolio"],
+        ] as const).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            aria-selected={view === k}
+            className={view === k ? "on" : ""}
+            onClick={() => setParams(k === "executive" ? {} : { view: k }, { replace: true })}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <style>{VIEWTAB_CSS}</style>
+      {view === "portfolio" ? <Dashboard /> : <ExecutiveDashboard />}
+    </div>
+  );
+}
+
+const VIEWTAB_CSS = `
+.exec-viewtabs{display:inline-flex;gap:2px;padding:3px;background:var(--hover-bg);border:1px solid var(--border);border-radius:9px;margin-bottom:14px}
+.exec-viewtabs button{font:inherit;font-size:12.5px;font-weight:600;padding:6px 14px;border:none;border-radius:7px;background:transparent;color:var(--text-secondary);cursor:pointer}
+.exec-viewtabs button.on{background:var(--surface);color:var(--navy);box-shadow:0 1px 3px rgba(15,41,66,.12)}
+.exec-viewtabs button:not(.on):hover{color:var(--navy)}
+`;
+
+function ExecutiveDashboard() {
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<Date>(new Date());
   const [people, setPeople] = useState<Person[]>([]);
