@@ -1995,12 +1995,12 @@ export default function Utilization() {
           <aside
             style={{
               position: "fixed",
-              top: 18,
-              right: 18,
-              bottom: 18,
+              top: 14,
+              right: 14,
+              bottom: 14,
               zIndex: 49,
-              width: 720,
-              maxWidth: "calc(100vw - 36px)",
+              width: "min(94vw, 1120px)",
+              maxWidth: "calc(100vw - 28px)",
               background: "var(--surface)",
               border: "1px solid var(--border)",
               borderRadius: 12,
@@ -2035,7 +2035,13 @@ export default function Utilization() {
                     <div style={{ fontSize: 9.3, color: "var(--muted)", marginTop: 1 }}>Read-only reference from the current WBS.</div>
                   </div>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 28px 1fr", gap: 8, alignItems: "end" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1.35fr 1fr 28px 1fr .72fr .72fr", gap: 8, alignItems: "end" }}>
+                  <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
+                    Plotted Assignee
+                    <div style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", fontSize: 11, fontWeight: 600, color: "var(--navy)", background: "rgba(255,255,255,.72)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {scenarioPerson.name}
+                    </div>
+                  </label>
                   <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
                     Plotted Start
                     <div style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", fontSize: 11, color: "var(--navy)", background: "rgba(255,255,255,.72)" }}>
@@ -2049,13 +2055,21 @@ export default function Utilization() {
                       {parseLocalDate(scenarioTask.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                     </div>
                   </label>
+                  <div>
+                    <div style={{ fontSize: 9.5, color: "var(--muted)" }}>Duration</div>
+                    <div style={{ marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", background: "rgba(255,255,255,.72)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)" }}>{scenarioPlottedDuration} day{scenarioPlottedDuration === 1 ? "" : "s"}</div>
+                      <div style={{ fontSize: 7.8, color: "var(--muted)", marginTop: 1 }}>working days</div>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 9.5, color: "var(--muted)" }}>Scoped Hours</div>
+                    <div style={{ marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", background: "rgba(255,255,255,.72)", fontSize: 11, fontWeight: 600, color: "var(--navy)" }}>{Number(scenarioTask.estimated_hours ?? 0).toFixed(1)}h</div>
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 9, fontSize: 9.2, color: "var(--muted)" }}>
-                  <span><strong style={{ color: "var(--navy)", fontWeight: 600 }}>{scenarioPlottedDuration}</strong> working day{scenarioPlottedDuration === 1 ? "" : "s"}</span>
-                  <span>·</span>
-                  <span><strong style={{ color: "var(--navy)", fontWeight: 600 }}>{Number(scenarioTask.estimated_hours ?? 0).toFixed(1)}h</strong> scoped</span>
-                  {scenarioPreferredRole && <><span>·</span><span>Preferred role: <strong style={{ color: "var(--navy)", fontWeight: 600 }}>{scenarioPreferredRole}</strong></span></>}
-                </div>
+                {scenarioPreferredRole && (
+                  <div style={{ marginTop: 8, fontSize: 8.8, color: "var(--muted)" }}>Preferred role: <strong style={{ color: "var(--navy)", fontWeight: 600 }}>{scenarioPreferredRole}</strong></div>
+                )}
               </section>
 
               <section style={{ border: "1px solid rgba(59,130,246,.18)", borderRadius: 12, background: "rgba(219,234,254,.48)", padding: 14, marginBottom: 12 }}>
@@ -2147,7 +2161,7 @@ export default function Utilization() {
                         <div style={{ fontSize: 8.8, color: "var(--muted)", marginTop: 1 }}>Existing utilization before applying this scenario.</div>
                       </div>
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 5 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(14, minmax(58px,1fr))", gap: 5 }}>
                       {scenarioForecast.map((day) => {
                         const tone = day.blocked ? null : tierOf(day.pct);
                         return (
@@ -2191,18 +2205,34 @@ export default function Utilization() {
                       </button>
                     )}
                   </div>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    {[...sameRoleScenarioCandidates.slice(0, 4), ...(showOtherRoleCandidates ? otherRoleScenarioCandidates.slice(0, 4) : [])].map(({ person, best }) => {
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 7 }}>
+                    {[...sameRoleScenarioCandidates.slice(0, 3), ...(showOtherRoleCandidates ? otherRoleScenarioCandidates.slice(0, 3) : [])].map(({ person, best }) => {
                       const sameRole = person.job_title === scenarioPreferredRole;
                       return (
-                        <div key={person.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 160px 82px", gap: 8, alignItems: "center", padding: "7px 8px", border: "1px solid var(--border)", borderRadius: 9, background: "rgba(255,255,255,.7)" }}>
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 9.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{person.name}</div>
-                            <div style={{ fontSize: 8.2, color: "var(--muted)", marginTop: 1 }}>{person.job_title ?? "No role"}{sameRole ? " · Same role" : " · Other role"}</div>
+                        <div key={person.id} style={{ padding: 10, border: "1px solid var(--border)", borderRadius: 10, background: sameRole ? "rgba(236,253,245,.72)" : "rgba(255,255,255,.76)" }}>
+                          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 9.8, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{person.name}</div>
+                              <div style={{ fontSize: 8.2, color: "var(--muted)", marginTop: 1 }}>{person.job_title ?? "No role"}</div>
+                            </div>
+                            <span style={{ padding: "3px 6px", borderRadius: 999, fontSize: 7.7, fontWeight: 600, background: sameRole ? "rgba(16,185,129,.10)" : "rgba(100,116,139,.10)", color: sameRole ? "#047857" : "var(--muted)", whiteSpace: "nowrap" }}>{sameRole ? "Same role" : "Other role"}</span>
                           </div>
-                          <div style={{ fontSize: 8.5, color: "var(--muted)" }}>
-                            {best ? <>{parseLocalDate(best.startStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})}–{parseLocalDate(best.dueStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})} · <strong style={{ color: tierOf(best.peakPct).fg }}>{displayPct(best.peakPct)}%</strong> peak</> : "No viable window"}
-                          </div>
+                          {best ? (
+                            <>
+                              <div style={{ marginTop: 8, fontSize: 8.4, color: "var(--muted)" }}>Best window</div>
+                              <div style={{ marginTop: 2, fontSize: 10.2, fontWeight: 600, color: "var(--navy)" }}>{parseLocalDate(best.startStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})} – {parseLocalDate(best.dueStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+                              <div style={{ marginTop: 4, display: "flex", justifyContent: "space-between", gap: 8, fontSize: 8.4 }}>
+                                <span style={{ color: "var(--muted)" }}>Projected peak</span>
+                                <strong style={{ color: tierOf(best.peakPct).fg }}>{displayPct(best.peakPct)}%</strong>
+                              </div>
+                              <div style={{ marginTop: 2, display: "flex", justifyContent: "space-between", gap: 8, fontSize: 8.4 }}>
+                                <span style={{ color: "var(--muted)" }}>Overload days</span>
+                                <strong style={{ color: best.overloadedDays ? "var(--danger)" : "#059669" }}>{best.overloadedDays}</strong>
+                              </div>
+                            </>
+                          ) : (
+                            <div style={{ marginTop: 12, fontSize: 8.5, color: "var(--muted)" }}>No viable 2-week window.</div>
+                          )}
                           <button
                             disabled={!best}
                             onClick={() => {
@@ -2211,9 +2241,9 @@ export default function Utilization() {
                               setScenarioStart(best.startStr);
                               setScenarioDue(best.dueStr);
                             }}
-                            style={{ border: "1px solid rgba(59,130,246,.22)", borderRadius: 7, background: "var(--surface)", color: "var(--accent)", fontSize: 8.5, fontWeight: 600, padding: "5px 6px", cursor: best ? "pointer" : "default", opacity: best ? 1 : .45 }}
+                            style={{ marginTop: 8, width: "100%", border: "1px solid rgba(59,130,246,.22)", borderRadius: 7, background: "var(--surface)", color: "var(--accent)", fontSize: 8.6, fontWeight: 600, padding: "5px 6px", cursor: best ? "pointer" : "default", opacity: best ? 1 : .45 }}
                           >
-                            Use
+                            Use assignee & dates
                           </button>
                         </div>
                       );
@@ -2312,32 +2342,37 @@ export default function Utilization() {
                 </div>
 
                 {scenarioImpact && scenarioImpact.rows.length > 0 && (
-                  <div style={{ marginTop: 10 }}>
-                    <button onClick={() => setShowScenarioDetails((v) => !v)} style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 9.5, fontWeight: 600, cursor: "pointer", padding: 0 }}>
-                      {showScenarioDetails ? "Hide affected-day details" : `View affected-day details (${scenarioImpact.rows.length})`}
-                    </button>
-                    {showScenarioDetails && (
-                      <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--surface)" }}>
-                        {scenarioImpact.rows.slice(0, 20).map((row) => (
-                          <div key={`${row.person.id}-${row.dateStr}`} style={{ display: "grid", gridTemplateColumns: scenarioImpact.isReassignment ? "105px 90px 1fr 22px 1fr" : "95px 1fr 22px 1fr", gap: 8, alignItems: "center", padding: "7px 9px", borderBottom: "1px solid var(--border)" }}>
-                            {scenarioImpact.isReassignment && <div style={{ fontSize: 9.2, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.person.name}</div>}
-                            <div>
-                              <div style={{ fontSize: 9.5, fontWeight: 600, color: "var(--navy)" }}>{parseLocalDate(row.dateStr).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
-                              <div style={{ fontSize: 8.2, color: "var(--muted)" }}>{row.capacity.toFixed(1)}h capacity</div>
-                            </div>
-                            <div style={{ textAlign: "right" }}>
-                              <div style={{ fontSize: 10, fontWeight: 600, color: tierOf(row.currentPct).fg }}>{displayPct(row.currentPct)}%</div>
-                              <div style={{ fontSize: 8.2, color: "var(--muted)" }}>{row.current.toFixed(1)}h</div>
-                            </div>
-                            <ArrowRight size={11} style={{ color: "var(--muted)" }} />
-                            <div>
-                              <div style={{ fontSize: 10, fontWeight: 600, color: tierOf(row.proposedPct).fg }}>{displayPct(row.proposedPct)}%</div>
-                              <div style={{ fontSize: 8.2, color: row.delta > 0 ? "var(--danger)" : "#059669" }}>{row.proposed.toFixed(1)}h ({row.delta > 0 ? "+" : ""}{row.delta.toFixed(1)}h)</div>
-                            </div>
-                          </div>
-                        ))}
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 7 }}>
+                      <div>
+                        <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--navy)" }}>Affected days</div>
+                        <div style={{ fontSize: 8.5, color: "var(--muted)", marginTop: 1 }}>Dates where utilization changes under this scenario.</div>
                       </div>
-                    )}
+                    </div>
+                    <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--surface)" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "110px 1fr 90px 90px 90px 130px", gap: 8, padding: "7px 9px", background: "var(--hover-bg)", borderBottom: "1px solid var(--border)", fontSize: 8.2, fontWeight: 600, color: "var(--muted)" }}>
+                        <span>Date</span><span>Person</span><span style={{ textAlign: "right" }}>Current</span><span style={{ textAlign: "right" }}>Scenario</span><span style={{ textAlign: "right" }}>Change</span><span>Status</span>
+                      </div>
+                      {scenarioImpact.rows.slice(0, 20).map((row) => {
+                        const deltaPct = row.proposedPct - row.currentPct;
+                        const status = row.currentPct > 100 && row.proposedPct <= 100 ? "Overload resolved" : row.currentPct <= 100 && row.proposedPct > 100 ? "New overload" : deltaPct < 0 ? "Improved" : deltaPct > 0 ? "Increased" : "No change";
+                        const good = status === "Overload resolved" || status === "Improved";
+                        const bad = status === "New overload" || status === "Increased";
+                        return (
+                          <div key={`${row.person.id}-${row.dateStr}`} style={{ display: "grid", gridTemplateColumns: "110px 1fr 90px 90px 90px 130px", gap: 8, alignItems: "center", padding: "7px 9px", borderBottom: "1px solid var(--border)", fontSize: 8.8 }}>
+                            <span style={{ color: "var(--navy)", fontWeight: 600 }}>{parseLocalDate(row.dateStr).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span>
+                            <span style={{ color: "var(--navy)" }}>{row.person.name}</span>
+                            <span style={{ textAlign: "right", color: tierOf(row.currentPct).fg, fontWeight: 600 }}>{displayPct(row.currentPct)}%</span>
+                            <span style={{ textAlign: "right", color: tierOf(row.proposedPct).fg, fontWeight: 600 }}>{displayPct(row.proposedPct)}%</span>
+                            <span style={{ textAlign: "right", color: deltaPct > 0 ? "var(--danger)" : deltaPct < 0 ? "#059669" : "var(--muted)", fontWeight: 600 }}>{deltaPct > 0 ? "+" : ""}{displayPct(deltaPct)}%</span>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: bad ? "var(--danger)" : good ? "#059669" : "var(--muted)", fontWeight: 600 }}>
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: bad ? "var(--danger)" : good ? "#10b981" : "#94a3b8" }} />
+                              {status}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </section>
