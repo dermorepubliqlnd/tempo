@@ -295,6 +295,7 @@ export default function Utilization() {
   const [scenarioTaskId, setScenarioTaskId] = useState<string | null>(null);
   const [scenarioStart, setScenarioStart] = useState("");
   const [scenarioDue, setScenarioDue] = useState("");
+  const [showAllRisks, setShowAllRisks] = useState(false);
 
   async function loadAll() {
     setLoading(true);
@@ -770,6 +771,7 @@ export default function Utilization() {
   ).sort((a, b) => b.overHours - a.overHours || b.pct - a.pct);
 
   const topCapacityRisks = capacityRisks.slice(0, 5);
+  const displayedCapacityRisks = showAllRisks ? topCapacityRisks : topCapacityRisks.slice(0, 3);
 
   const columnCount = viewMode === "daily" ? days.length : weeks.length;
 
@@ -1093,82 +1095,125 @@ export default function Utilization() {
           {teamProjectTypeMix.length === 0 ? (
             <div style={{ fontSize: 10, color: "var(--muted)" }}>No typed project effort in this period.</div>
           ) : (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {teamProjectTypeMix.map((mix, mi) => {
-                const tone = PROJECT_TYPE_TONES[mi % PROJECT_TYPE_TONES.length];
-                const share = teamProjectTypeTotal > 0 ? Math.round((mix.hours / teamProjectTypeTotal) * 100) : 0;
-                return (
-                  <span key={mix.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 9.5, fontWeight: 600 }}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: tone.dot }} />
-                    {mix.name} {share}%
-                  </span>
-                );
-              })}
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div
+                title={teamProjectTypeMix.map((mix) => `${mix.name} ${mix.hours.toFixed(1)}h`).join(" · ")}
+                style={{
+                  width: 58,
+                  height: 58,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  background: (() => {
+                    let acc = 0;
+                    const parts = teamProjectTypeMix.map((mix, mi) => {
+                      const tone = PROJECT_TYPE_TONES[mi % PROJECT_TYPE_TONES.length];
+                      const start = acc;
+                      acc += teamProjectTypeTotal > 0 ? (mix.hours / teamProjectTypeTotal) * 100 : 0;
+                      return `${tone.dot} ${start}% ${acc}%`;
+                    });
+                    return `conic-gradient(${parts.join(", ")})`;
+                  })(),
+                  position: "relative",
+                }}
+              >
+                <div style={{ position: "absolute", inset: 9, borderRadius: "50%", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 600, color: "var(--navy)" }}>
+                  {teamProjectTypeTotal.toFixed(1)}h
+                </div>
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                {teamProjectTypeMix.map((mix, mi) => {
+                  const tone = PROJECT_TYPE_TONES[mi % PROJECT_TYPE_TONES.length];
+                  const share = teamProjectTypeTotal > 0 ? Math.round((mix.hours / teamProjectTypeTotal) * 100) : 0;
+                  return (
+                    <div key={mix.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: mi === teamProjectTypeMix.length - 1 ? 0 : 5 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0, fontSize: 10.5, fontWeight: 600, color: "var(--navy)" }}>
+                        <span style={{ width: 7, height: 7, borderRadius: "50%", background: tone.dot, flexShrink: 0 }} />
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mix.name}</span>
+                      </span>
+                      <span style={{ fontSize: 10.5, fontWeight: 600, color: tone.fg, whiteSpace: "nowrap" }}>{share}%</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      <div className="card" style={{ padding: "12px 14px", marginBottom: 10, borderRadius: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: topCapacityRisks.length ? 10 : 0 }}>
+      <div className="card" style={{ padding: "10px 12px", marginBottom: 8, borderRadius: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "220px minmax(0,1fr) auto", gap: 12, alignItems: "center" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
               <AlertTriangle size={14} style={{ color: topCapacityRisks.length ? "var(--danger)" : "#059669" }} />
-              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)" }}>Needs Attention</span>
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>Needs Attention</span>
             </div>
-            <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>Highest daily capacity risks in the selected planning period. Click one for the daily allocation.</div>
+            <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>Highest daily capacity risks</div>
           </div>
-          <span style={{ fontSize: 9.5, fontWeight: 600, color: topCapacityRisks.length ? "var(--danger)" : "#059669", padding: "5px 9px", borderRadius: 999, background: topCapacityRisks.length ? "rgba(239,68,68,.07)" : "rgba(16,185,129,.08)" }}>
-            {capacityRisks.length} risk{capacityRisks.length === 1 ? "" : "s"}
-          </span>
-        </div>
 
-        {topCapacityRisks.length === 0 ? (
-          <div style={{ fontSize: 10.5, color: "#059669", fontWeight: 600 }}>No team member exceeds daily capacity in this planning period.</div>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(150px, 1fr))", gap: 8, overflowX: "auto" }}>
-            {topCapacityRisks.map((risk) => (
-              <button
-                key={`${risk.person.id}-${risk.dateStr}`}
-                onClick={() => {
-                  setDetailPersonId(null);
-                  setSelectedCell({ personId: risk.person.id, dateStr: risk.dateStr });
-                }}
-                style={{
-                  textAlign: "left",
-                  border: "1px solid rgba(239,68,68,.18)",
-                  borderRadius: 13,
-                  background: "linear-gradient(180deg, var(--surface), rgba(239,68,68,.035))",
-                  padding: "9px 10px",
-                  cursor: "pointer",
-                }}
-              >
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{risk.person.name}</div>
-                <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 1 }}>{parseLocalDate(risk.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginTop: 6 }}>
-                  <span style={{ fontSize: 18, fontWeight: 600, color: "var(--danger)" }}>{displayPct(risk.pct)}%</span>
-                  <span style={{ fontSize: 9, fontWeight: 600, color: "var(--danger)" }}>+{risk.overHours.toFixed(1)}h</span>
-                </div>
-                <div style={{ fontSize: 8.8, color: "var(--muted)", marginTop: 4 }}>Task {risk.taskHours.toFixed(1)}h · PM {risk.pmHours.toFixed(1)}h</div>
+          {topCapacityRisks.length === 0 ? (
+            <div style={{ fontSize: 10.5, color: "#059669", fontWeight: 600 }}>No team member exceeds daily capacity in this planning period.</div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(displayedCapacityRisks.length, 3)}, minmax(170px, 1fr))`, gap: 7, minWidth: 0 }}>
+              {displayedCapacityRisks.map((risk) => (
+                <button
+                  key={`${risk.person.id}-${risk.dateStr}`}
+                  onClick={() => {
+                    setDetailPersonId(null);
+                    setSelectedCell({ personId: risk.person.id, dateStr: risk.dateStr });
+                  }}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0,1fr) auto",
+                    gap: 8,
+                    alignItems: "center",
+                    textAlign: "left",
+                    border: "1px solid rgba(239,68,68,.16)",
+                    borderRadius: 10,
+                    background: "var(--surface)",
+                    padding: "7px 9px",
+                    cursor: "pointer",
+                    minWidth: 0,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{risk.person.name}</div>
+                    <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 1 }}>{parseLocalDate(risk.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: "var(--danger)" }}>{displayPct(risk.pct)}%</div>
+                    <div style={{ fontSize: 8.8, color: "var(--danger)" }}>+{risk.overHours.toFixed(1)}h</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 9.5, fontWeight: 600, color: topCapacityRisks.length ? "var(--danger)" : "#059669", padding: "5px 9px", borderRadius: 999, background: topCapacityRisks.length ? "rgba(239,68,68,.07)" : "rgba(16,185,129,.08)", whiteSpace: "nowrap" }}>
+              {capacityRisks.length} risk{capacityRisks.length === 1 ? "" : "s"}
+            </span>
+            {topCapacityRisks.length > 3 && (
+              <button onClick={() => setShowAllRisks((v) => !v)} style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 9.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+                {showAllRisks ? "Show less" : "View all"}
               </button>
-            ))}
+            )}
           </div>
-        )}
-      </div>
-
-      <div className="card" style={{ padding: "7px 10px", marginBottom: 8, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-        {UTIL_LEGEND.map(({ pct, label, tone }) => {
-          const Icon = LEGEND_ICON_BY_LABEL[label] ?? Minus;
-          return (
-            <div key={label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5 }}>
-              <span className={`status-pill ${tone}`} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Icon size={11} />{pct}</span>
-              <span style={{ color: "var(--muted)" }}>{label}</span>
-            </div>
-          );
-        })}
+        </div>
       </div>
 
       <div ref={utilScrollRef} className="card" style={{ padding: 0, overflowX: "auto", overflowY: "visible" }}>
+        <div style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", background: "var(--surface)" }}>
+          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", marginRight: 2 }}>UTILIZATION</span>
+          {UTIL_LEGEND.map(({ pct, label, tone }) => {
+            const Icon = LEGEND_ICON_BY_LABEL[label] ?? Minus;
+            return (
+              <div key={label} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9.5 }}>
+                <span className={`status-pill ${tone}`} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Icon size={10} />{pct}</span>
+                <span style={{ color: "var(--muted)" }}>{label}</span>
+              </div>
+            );
+          })}
+        </div>
         {loading ? (
           <div style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>
         ) : (
