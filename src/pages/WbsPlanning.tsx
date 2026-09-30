@@ -1,3 +1,4 @@
+import { useAssigneePicker } from "../components/AssigneePicker";
 import { useState, useEffect, useCallback, useRef, Fragment, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, Link } from "react-router-dom";
@@ -549,6 +550,7 @@ export default function WbsPlanning() {
   const [project, setProject] = useState<ProjectRow | null>(null);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [people, setPeople] = useState<PersonRow[]>([]);
+  const assigneePicker = useAssigneePicker(people.filter((p) => p.is_active));
   // Work Types (Phase 12, 2026-08-20) -- fetched unfiltered (all rows) so
   // an already-assigned but since-deactivated Work Type still resolves to
   // its historical name here; the dropdown itself (below) filters to
@@ -2779,8 +2781,15 @@ export default function WbsPlanning() {
     // to the Refresh dates button, which had this exact bug independently
     // duplicated in its own re-seeding logic.
     const defaultDue = project.end_date ?? today;
+    // phase126l: started project -> new task needs an Assignee up front.
+    let newAssignee: string | null = null;
+    if (project.wbs_status !== "draft") {
+      newAssignee = await assigneePicker.pick("Assign the new task");
+      if (!newAssignee) return;
+    }
     const { error } = await supabase.from("tasks").insert({
       project_id: project.id,
+      assignee_id: newAssignee,
       name: "Untitled task",
       status: "Not Started",
       start_date: defaultStartFull, // legacy single field -- convenience placeholder for other pages until Save
@@ -2817,9 +2826,15 @@ export default function WbsPlanning() {
     // this parent's own children: no longer advances past a sibling's
     // end for Capacity-Based, since the real scheduler already packs
     // correctly once floors don't artificially skip ahead.
+    let newAssignee: string | null = null;
+    if (project && project.wbs_status !== "draft") {
+      newAssignee = await assigneePicker.pick("Assign the new sub-task", parent.assignee_id);
+      if (!newAssignee) return;
+    }
     const { error } = await supabase.from("tasks").insert({
       project_id: parent.project_id,
       parent_task_id: parent.id,
+      assignee_id: newAssignee,
       name: "Untitled sub-task",
       status: "Not Started",
       start_date: defaultStartFull,
@@ -4409,6 +4424,7 @@ export default function WbsPlanning() {
   return (
     <div>
       {dialog}
+      {assigneePicker.element}
       <CancelTaskDialog
         open={Boolean(cancelTaskDialogOpen)}
         taskLabel={cancelTaskDialogOpen?.label ?? ""}

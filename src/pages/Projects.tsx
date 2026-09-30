@@ -1,3 +1,4 @@
+import { useAssigneePicker } from "../components/AssigneePicker";
 import ValidateCompletionModal from "../components/ValidateCompletionModal";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -1039,6 +1040,7 @@ export default function Projects() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [people, setPeople] = useState<PersonOption[]>([]);
+  const assigneePicker = useAssigneePicker(people);
   // Work Types (Phase 12, 2026-08-20) -- fetched unfiltered (all rows,
   // active or not) so a task referencing a since-deactivated Work Type
   // still resolves to its historical label here; only the WBS Planning
@@ -3373,9 +3375,16 @@ export default function Projects() {
       await alert("This project is closed -- its scope is final, so no more tasks can be added to it.");
       return;
     }
+    // phase126l: started project -> new task needs an Assignee up front.
+    let newAssignee: string | null = null;
+    if (projects.find((p) => p.id === parent.project_id)?.wbs_status !== "draft") {
+      newAssignee = await assigneePicker.pick("Assign the new sub-task", parent.assignee_id);
+      if (!newAssignee) return;
+    }
     const { error } = await supabase.from("tasks").insert({
       project_id: parent.project_id,
       parent_task_id: parent.id,
+      assignee_id: newAssignee,
       name: "Untitled sub-task",
       status: "Not Started",
       original_due_date: parent.current_due_date,
@@ -4844,8 +4853,14 @@ export default function Projects() {
     const today = toISOWorkingDay(new Date());
     const project = projects.find((p) => p.id === projectId);
     const defaultDue = project?.end_date ?? today;
+    let newAssignee: string | null = null;
+    if (project && project.wbs_status !== "draft") {
+      newAssignee = await assigneePicker.pick("Assign the new task");
+      if (!newAssignee) return;
+    }
     const { error } = await supabase.from("tasks").insert({
       project_id: projectId,
+      assignee_id: newAssignee,
       name: "Untitled task",
       status: "Not Started",
       original_due_date: defaultDue,
@@ -5025,6 +5040,7 @@ export default function Projects() {
   return (
     <div>
       {confirmDialog}
+      {assigneePicker.element}
       {validatingTask && (
         <ValidateCompletionModal
           taskName={validatingTask.t.name}
