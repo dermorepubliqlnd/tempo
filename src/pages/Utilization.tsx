@@ -930,7 +930,7 @@ export default function Utilization() {
   const selectedPct = selectedCapacity > 0 ? (selectedAllocated / selectedCapacity) * 100 : selectedAllocated > 0 ? 999 : 0;
   const selectedContributions = selectedCell && selectedPerson
     ? [
-        ...openTasksFor(selectedPerson.id)
+        ...orderedTasksFor(selectedPerson.id)
           .map((t) => {
             const hours = taskValueForDate(selectedPerson, t, selectedCell.dateStr);
             const projectName = projects.find((p) => p.id === t.project_id)?.name ?? "No project";
@@ -947,8 +947,19 @@ export default function Utilization() {
             kind: "pm" as const,
           }))
           .filter((r) => r.hours > 0),
-      ].sort((a, b) => (a.entry.date ?? "9999-12-31").localeCompare(b.entry.date ?? "9999-12-31"))
+      ].sort((a, b) => (a.entry.date ?? "9999-12-31").localeCompare(b.entry.date ?? "9999-12-31") || b.hours - a.hours)
     : [];
+
+  let selectedCumulativeHours = 0;
+  const selectedContributionRows = selectedContributions.map((row) => {
+    const before = selectedCumulativeHours;
+    selectedCumulativeHours += row.hours;
+    return {
+      ...row,
+      cumulativeHours: selectedCumulativeHours,
+      isOverageDriver: selectedCapacity > 0 && before <= selectedCapacity && selectedCumulativeHours > selectedCapacity,
+    };
+  });
 
   return (
     <div>
@@ -1471,59 +1482,72 @@ export default function Utilization() {
         <aside
           style={{
             position: "fixed",
-            top: 82,
-            right: 18,
+            top: 0,
+            right: 0,
+            bottom: 0,
             zIndex: 38,
-            width: 390,
-            maxHeight: "calc(100vh - 104px)",
+            width: "min(46vw, 720px)",
+            minWidth: 560,
             overflowY: "auto",
             background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: 18,
-            boxShadow: "0 18px 48px rgba(15,35,65,.18)",
+            borderLeft: "1px solid var(--border)",
+            borderRadius: "10px 0 0 10px",
+            boxShadow: "-18px 0 48px rgba(15,35,65,.16)",
           }}
         >
-          <div style={{ padding: "14px 15px 12px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ padding: "18px 20px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, position: "sticky", top: 0, background: "var(--surface)", zIndex: 2 }}>
             <div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 2 }}>{selectedPerson.name}</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--navy)" }}>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 3 }}>{selectedPerson.name}</div>
+              <div style={{ fontSize: 18, fontWeight: 600, color: "var(--navy)" }}>
                 {parseLocalDate(selectedCell.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
               </div>
-              <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3 }}>Daily allocation</div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Daily allocation</div>
             </div>
-            <button onClick={() => setSelectedCell(null)} title="Close" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 3 }}>
-              <X size={16} />
+            <button onClick={() => setSelectedCell(null)} title="Close" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 4 }}>
+              <X size={18} />
             </button>
           </div>
 
-          <div style={{ padding: 15 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              {selectedPct > 100 ? <AlertTriangle size={16} style={{ color: "var(--danger)" }} /> : <Gauge size={16} style={{ color: "var(--accent)" }} />}
-              <span style={{ fontSize: 25, lineHeight: 1, fontWeight: 600, color: selectedPct > 100 ? "var(--danger)" : tierOf(selectedPct).fg }}>
+          <div style={{ padding: "18px 20px 24px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              {selectedPct > 100 ? <AlertTriangle size={19} style={{ color: "var(--danger)" }} /> : <Gauge size={19} style={{ color: "var(--accent)" }} />}
+              <span style={{ fontSize: 30, lineHeight: 1, fontWeight: 600, color: selectedPct > 100 ? "var(--danger)" : tierOf(selectedPct).fg }}>
                 {displayPct(selectedPct)}%
               </span>
-              <span style={{ fontSize: 10, color: "var(--muted)" }}>{selectedAllocated.toFixed(1)}h allocated / {selectedCapacity.toFixed(1)}h capacity</span>
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>{selectedAllocated.toFixed(1)}h allocated / {selectedCapacity.toFixed(1)}h capacity</span>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 7, marginBottom: 15 }}>
-              <div style={{ padding: 9, border: "1px solid var(--border)", borderRadius: 12, textAlign: "center", background: "var(--hover-bg)" }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>{selectedCapacity.toFixed(1)}h</div>
-                <div style={{ fontSize: 9, color: "var(--muted)" }}>Capacity</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 9, marginBottom: 18 }}>
+              <div style={{ padding: 11, border: "1px solid var(--border)", borderRadius: 10, textAlign: "center", background: "var(--hover-bg)" }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--navy)" }}>{selectedCapacity.toFixed(1)}h</div>
+                <div style={{ fontSize: 10, color: "var(--muted)" }}>Capacity</div>
               </div>
-              <div style={{ padding: 9, border: "1px solid var(--border)", borderRadius: 12, textAlign: "center", background: "var(--hover-bg)" }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>{selectedAllocated.toFixed(1)}h</div>
-                <div style={{ fontSize: 9, color: "var(--muted)" }}>Allocated</div>
+              <div style={{ padding: 11, border: "1px solid var(--border)", borderRadius: 10, textAlign: "center", background: "var(--hover-bg)" }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--navy)" }}>{selectedAllocated.toFixed(1)}h</div>
+                <div style={{ fontSize: 10, color: "var(--muted)" }}>Allocated</div>
               </div>
-              <div style={{ padding: 9, border: "1px solid var(--border)", borderRadius: 12, textAlign: "center", background: selectedAllocated > selectedCapacity ? "rgba(239,68,68,.06)" : "rgba(16,185,129,.06)" }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: selectedAllocated > selectedCapacity ? "var(--danger)" : "#059669" }}>
+              <div style={{ padding: 11, border: "1px solid var(--border)", borderRadius: 10, textAlign: "center", background: selectedAllocated > selectedCapacity ? "rgba(239,68,68,.06)" : "rgba(16,185,129,.06)" }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: selectedAllocated > selectedCapacity ? "var(--danger)" : "#059669" }}>
                   {selectedAllocated > selectedCapacity ? "+" : ""}{(selectedAllocated - selectedCapacity).toFixed(1)}h
                 </div>
-                <div style={{ fontSize: 9, color: "var(--muted)" }}>{selectedAllocated > selectedCapacity ? "Over" : "Remaining"}</div>
+                <div style={{ fontSize: 10, color: "var(--muted)" }}>{selectedAllocated > selectedCapacity ? "Over" : "Remaining"}</div>
               </div>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 7 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>Work assigned this day</div>
+            {selectedAllocated > selectedCapacity && selectedContributionRows.some((r) => r.isOverageDriver) && (
+              <div style={{ marginBottom: 16, padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(239,68,68,.16)", background: "rgba(239,68,68,.035)", display: "flex", gap: 8, alignItems: "flex-start" }}>
+                <AlertTriangle size={15} style={{ color: "var(--danger)", flexShrink: 0, marginTop: 1 }} />
+                <div>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>Daily overage driver identified</div>
+                  <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2, lineHeight: 1.4 }}>
+                    The highlighted contribution is the point where this day's cumulative planned allocation first exceeds available capacity. This is a planning attribution, not a judgment that the task itself is unnecessary.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>Work assigned this day</div>
               <button
                 onClick={() => {
                   setDetailPersonId(selectedPerson.id);
@@ -1531,24 +1555,53 @@ export default function Utilization() {
                   const clickedWeek = weeks.findIndex((week) => week.some((wd) => toISO(wd) === selectedCell.dateStr));
                   if (clickedWeek >= 0) setDetailWeekIndex(clickedWeek);
                 }}
-                style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 9.5, fontWeight: 600, cursor: "pointer" }}
+                style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 10.5, fontWeight: 600, cursor: "pointer" }}
               >
                 Open full view
               </button>
             </div>
 
-            {selectedContributions.length === 0 ? (
-              <div style={{ padding: "14px 10px", border: "1px dashed var(--border)", borderRadius: 12, color: "var(--muted)", fontSize: 10 }}>No scoped work contributes to this day.</div>
+            {selectedContributionRows.length === 0 ? (
+              <div style={{ padding: 16, border: "1px dashed var(--border)", borderRadius: 10, color: "var(--muted)", fontSize: 11.5 }}>No scoped work contributes to this day.</div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                {selectedContributions.map((r, i) => (
-                  <div key={r.id} style={{ display: "grid", gridTemplateColumns: "22px 1fr 70px", gap: 8, alignItems: "start", padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
-                    <div style={{ fontSize: 9.5, color: "var(--muted)", paddingTop: 1 }}>{i + 1}</div>
+              <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(210px,1fr) 125px 70px 105px 105px", gap: 10, padding: "9px 10px", background: "var(--hover-bg)", borderBottom: "1px solid var(--border)", alignItems: "center" }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)" }}>Task / Project</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>Date Assigned</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)", textAlign: "right" }}>Hours</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>Driver</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>Action</div>
+                </div>
+                {selectedContributionRows.map((r) => (
+                  <div
+                    key={r.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "minmax(210px,1fr) 125px 70px 105px 105px",
+                      gap: 10,
+                      alignItems: "center",
+                      padding: "10px",
+                      borderBottom: "1px solid var(--border)",
+                      background: r.isOverageDriver ? "rgba(239,68,68,.04)" : "var(--surface)",
+                    }}
+                  >
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.label}</div>
-                      <div style={{ fontSize: 9.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.projectName}</div>
-                      <div style={{ fontSize: 9.2, color: "var(--accent)", marginTop: 2 }}>Added {formatWorkloadDate(r.entry)}</div>
-                      {r.kind === "task" && (
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.label}</div>
+                      <div style={{ fontSize: 10.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2 }}>{r.projectName}</div>
+                    </div>
+                    <div title={r.entry.estimated ? "Estimated from historical task order" : "Date this work entered the person's workload"} style={{ textAlign: "center", fontSize: 11, color: r.entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 600, whiteSpace: "nowrap" }}>
+                      {formatWorkloadDate(r.entry)}
+                    </div>
+                    <div style={{ textAlign: "right", fontSize: 12, fontWeight: 600, color: "var(--navy)" }}>{r.hours.toFixed(1)}h</div>
+                    <div style={{ textAlign: "center" }}>
+                      {r.isOverageDriver ? (
+                        <span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: "rgba(239,68,68,.09)", color: "var(--danger)", fontSize: 9.5, fontWeight: 600, whiteSpace: "nowrap" }}>Overage driver</span>
+                      ) : (
+                        <span style={{ fontSize: 10, color: "var(--muted)" }}>—</span>
+                      )}
+                    </div>
+                    <div style={{ textAlign: "center" }}>
+                      {r.kind === "task" ? (
                         <button
                           onClick={() => {
                             const task = tasks.find((t) => t.id === r.id);
@@ -1557,13 +1610,14 @@ export default function Utilization() {
                             setScenarioStart(task.start_date ?? task.current_due_date);
                             setScenarioDue(task.current_due_date);
                           }}
-                          style={{ marginTop: 5, border: "none", background: "rgba(59,130,246,.08)", color: "var(--accent)", borderRadius: 999, padding: "4px 8px", fontSize: 8.8, fontWeight: 600, cursor: "pointer" }}
+                          style={{ border: "1px solid rgba(59,130,246,.16)", background: "rgba(59,130,246,.07)", color: "var(--accent)", borderRadius: 999, padding: "5px 8px", fontSize: 9.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
                         >
-                          Preview rebalance
+                          Rebalance
                         </button>
+                      ) : (
+                        <span style={{ fontSize: 9.5, color: "var(--muted)" }}>PM overhead</span>
                       )}
                     </div>
-                    <div style={{ textAlign: "right", fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>{r.hours.toFixed(1)}h</div>
                   </div>
                 ))}
               </div>
