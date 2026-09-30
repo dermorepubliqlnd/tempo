@@ -310,6 +310,7 @@ export default function Utilization() {
   const [scenarioStart, setScenarioStart] = useState("");
   const [scenarioDue, setScenarioDue] = useState("");
   const [scenarioAssigneeId, setScenarioAssigneeId] = useState<string | null>(null);
+  const [showScenarioDetails, setShowScenarioDetails] = useState(false);
   const [showAllRisks, setShowAllRisks] = useState(false);
   const [savedViews, setSavedViews] = useState<SavedUtilView[]>([]);
   const [activeViewId, setActiveViewId] = useState("system:all");
@@ -1880,7 +1881,7 @@ export default function Utilization() {
       {scenarioTask && scenarioPerson && scenarioTargetPerson && scenarioProject && (
         <>
           <div
-            onClick={() => { setScenarioTaskId(null); setScenarioAssigneeId(null); }}
+            onClick={() => { setScenarioTaskId(null); setScenarioAssigneeId(null); setShowScenarioDetails(false); }}
             style={{ position: "fixed", inset: 0, zIndex: 48, background: "rgba(15,35,65,.28)" }}
           />
           <aside
@@ -1890,11 +1891,11 @@ export default function Utilization() {
               right: 18,
               bottom: 18,
               zIndex: 49,
-              width: 520,
+              width: 720,
               maxWidth: "calc(100vw - 36px)",
               background: "var(--surface)",
               border: "1px solid var(--border)",
-              borderRadius: 20,
+              borderRadius: 12,
               boxShadow: "0 24px 64px rgba(15,35,65,.24)",
               overflowY: "auto",
             }}
@@ -1910,111 +1911,195 @@ export default function Utilization() {
                   {scenarioProject.name} · {scenarioPerson.name}{scenarioTargetPerson.id !== scenarioPerson.id ? ` → ${scenarioTargetPerson.name}` : ""}
                 </div>
               </div>
-              <button onClick={() => { setScenarioTaskId(null); setScenarioAssigneeId(null); }} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer" }}><X size={17} /></button>
+              <button onClick={() => { setScenarioTaskId(null); setScenarioAssigneeId(null); setShowScenarioDetails(false); }} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer" }}><X size={17} /></button>
             </div>
 
             <div style={{ padding: 18 }}>
-              <div style={{ padding: "10px 12px", borderRadius: 13, background: "rgba(59,130,246,.06)", border: "1px solid rgba(59,130,246,.12)", fontSize: 10, color: "var(--text-secondary)", lineHeight: 1.45, marginBottom: 14 }}>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(59,130,246,.06)", border: "1px solid rgba(59,130,246,.12)", fontSize: 10, color: "var(--text-secondary)", lineHeight: 1.45, marginBottom: 14 }}>
                 Preview only. This does not change the WBS, task list, baseline, assignee history, or audit trail.
               </div>
 
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", marginBottom: 8 }}>Current plotted schedule</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 28px 1fr", gap: 8, alignItems: "end", marginBottom: 14 }}>
-                <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
-                  Plotted Start
-                  <div style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 9px", fontSize: 11, color: "var(--navy)", background: "var(--hover-bg)" }}>
-                    {parseLocalDate(scenarioTask.start_date ?? scenarioTask.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              <section style={{ border: "1px solid rgba(59,130,246,.14)", borderRadius: 12, background: "rgba(59,130,246,.045)", padding: 14, marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 11 }}>
+                  <span style={{ width: 23, height: 23, borderRadius: "50%", background: "var(--accent)", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600 }}>1</span>
+                  <div>
+                    <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>Current plotted schedule</div>
+                    <div style={{ fontSize: 9.3, color: "var(--muted)", marginTop: 1 }}>Read-only reference from the current WBS.</div>
                   </div>
-                </label>
-                <ArrowRight size={15} style={{ color: "var(--muted)", marginBottom: 10 }} />
-                <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
-                  Plotted Due
-                  <div style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 9px", fontSize: 11, color: "var(--navy)", background: "var(--hover-bg)" }}>
-                    {parseLocalDate(scenarioTask.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                  </div>
-                </label>
-              </div>
-
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", marginBottom: 8 }}>Planning scenario</div>
-              <label style={{ display: "block", fontSize: 9.5, color: "var(--muted)", marginBottom: 12 }}>
-                Scenario Assignee
-                <select
-                  value={scenarioAssigneeId ?? scenarioTask.assignee_id ?? ""}
-                  onChange={(e) => setScenarioAssigneeId(e.target.value || null)}
-                  style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 9px", fontSize: 11, color: "var(--navy)", background: "var(--surface)" }}
-                >
-                  {people.map((person) => (
-                    <option key={person.id} value={person.id}>{person.name}{person.job_title ? ` · ${person.job_title}` : ""}</option>
-                  ))}
-                </select>
-              </label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 28px 1fr", gap: 8, alignItems: "end", marginBottom: 15 }}>
-                <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
-                  Scenario Start
-                  <input type="date" value={scenarioStart} min={today} onChange={(e) => setScenarioStart(e.target.value)} style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 9px", fontSize: 11, color: "var(--navy)" }} />
-                </label>
-                <ArrowRight size={15} style={{ color: "var(--muted)", marginBottom: 10 }} />
-                <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
-                  Scenario Due
-                  <input type="date" value={scenarioDue} min={scenarioStart || today} onChange={(e) => setScenarioDue(e.target.value)} style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 10, padding: "8px 9px", fontSize: 11, color: "var(--navy)" }} />
-                </label>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: scenarioImpact?.people.length === 2 ? "1fr 1fr" : "1fr", gap: 9, marginBottom: 14 }}>
-                {(scenarioImpact?.people ?? []).map((impact) => (
-                  <div key={impact.person.id} style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 10, background: impact.proposedPeak > 100 ? "rgba(239,68,68,.04)" : "rgba(16,185,129,.04)" }}>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)", marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{impact.person.name}</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 22px 1fr", alignItems: "center", gap: 5 }}>
-                      <div>
-                        <div style={{ fontSize: 8.8, color: "var(--muted)" }}>Current peak</div>
-                        <div style={{ fontSize: 17, fontWeight: 600, color: tierOf(impact.currentPeak).fg }}>{displayPct(impact.currentPeak)}%</div>
-                      </div>
-                      <ArrowRight size={12} style={{ color: "var(--muted)" }} />
-                      <div>
-                        <div style={{ fontSize: 8.8, color: "var(--muted)" }}>Proposed</div>
-                        <div style={{ fontSize: 17, fontWeight: 600, color: tierOf(impact.proposedPeak).fg }}>{displayPct(impact.proposedPeak)}%</div>
-                      </div>
-                    </div>
-                    <div style={{ marginTop: 6, display: "flex", justifyContent: "space-between", gap: 8, fontSize: 9.2, color: "var(--muted)" }}>
-                      <span>{impact.currentOverDays} → {impact.proposedOverDays} overloaded days</span>
-                      <span style={{ color: impact.netHours > 0 ? "var(--danger)" : impact.netHours < 0 ? "#059669" : "var(--muted)", fontWeight: 600 }}>{impact.netHours > 0 ? "+" : ""}{impact.netHours.toFixed(1)}h</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)", marginBottom: 7 }}>Affected days</div>
-              {!scenarioImpact || scenarioImpact.rows.length === 0 ? (
-                <div style={{ padding: 14, border: "1px dashed var(--border)", borderRadius: 12, color: "var(--muted)", fontSize: 10 }}>Change the scenario assignee or dates to see the capacity impact.</div>
-              ) : (
-                <div style={{ border: "1px solid var(--border)", borderRadius: 13, overflow: "hidden" }}>
-                  {scenarioImpact.rows.slice(0, 16).map((row) => (
-                    <div key={`${row.person.id}-${row.dateStr}`} style={{ display: "grid", gridTemplateColumns: scenarioImpact.isReassignment ? "105px 100px 1fr 24px 1fr" : "110px 1fr 24px 1fr", gap: 8, alignItems: "center", padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
-                      {scenarioImpact.isReassignment && (
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 9.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.person.name}</div>
-                        </div>
-                      )}
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)" }}>{parseLocalDate(row.dateStr).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
-                        <div style={{ fontSize: 8.8, color: "var(--muted)" }}>{row.capacity.toFixed(1)}h capacity</div>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 10.5, fontWeight: 600, color: tierOf(row.currentPct).fg }}>{displayPct(row.currentPct)}%</div>
-                        <div style={{ fontSize: 8.8, color: "var(--muted)" }}>{row.current.toFixed(1)}h</div>
-                      </div>
-                      <ArrowRight size={12} style={{ color: "var(--muted)" }} />
-                      <div>
-                        <div style={{ fontSize: 10.5, fontWeight: 600, color: tierOf(row.proposedPct).fg }}>{displayPct(row.proposedPct)}%</div>
-                        <div style={{ fontSize: 8.8, color: row.delta > 0 ? "var(--danger)" : "#059669" }}>{row.proposed.toFixed(1)}h ({row.delta > 0 ? "+" : ""}{row.delta.toFixed(1)}h)</div>
-                      </div>
-                    </div>
-                  ))}
                 </div>
-              )}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 28px 1fr", gap: 8, alignItems: "end" }}>
+                  <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
+                    Plotted Start
+                    <div style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", fontSize: 11, color: "var(--navy)", background: "rgba(255,255,255,.72)" }}>
+                      {parseLocalDate(scenarioTask.start_date ?? scenarioTask.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    </div>
+                  </label>
+                  <ArrowRight size={15} style={{ color: "var(--muted)", marginBottom: 10 }} />
+                  <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
+                    Plotted Due
+                    <div style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", fontSize: 11, color: "var(--navy)", background: "rgba(255,255,255,.72)" }}>
+                      {parseLocalDate(scenarioTask.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    </div>
+                  </label>
+                </div>
+              </section>
 
-              <div style={{ marginTop: 14, padding: "10px 12px", borderRadius: 10, background: "var(--hover-bg)", fontSize: 9.5, color: "var(--muted)", lineHeight: 1.45 }}>
-                Preview only. Schedule and reassignment scenarios affect today forward and do not rewrite historical allocation. Dependency-aware cascading and Apply to WBS remain disabled until the preview logic is validated.
+              <section style={{ border: "1px solid rgba(59,130,246,.18)", borderRadius: 12, background: "rgba(219,234,254,.48)", padding: 14, marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 11 }}>
+                  <span style={{ width: 23, height: 23, borderRadius: "50%", background: "#3b82f6", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600 }}>2</span>
+                  <div>
+                    <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>Planning scenario</div>
+                    <div style={{ fontSize: 9.3, color: "var(--muted)", marginTop: 1 }}>Adjust assignee and/or dates to test an alternative.</div>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 28px 1fr", gap: 8, alignItems: "end" }}>
+                  <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
+                    Scenario Assignee
+                    <select
+                      value={scenarioAssigneeId ?? scenarioTask.assignee_id ?? ""}
+                      onChange={(e) => setScenarioAssigneeId(e.target.value || null)}
+                      style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", fontSize: 11, color: "var(--navy)", background: "var(--surface)" }}
+                    >
+                      {people.map((person) => (
+                        <option key={person.id} value={person.id}>{person.name}{person.job_title ? ` · ${person.job_title}` : ""}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
+                    Scenario Start
+                    <input type="date" value={scenarioStart} min={today} onChange={(e) => setScenarioStart(e.target.value)} style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", fontSize: 11, color: "var(--navy)" }} />
+                  </label>
+                  <ArrowRight size={15} style={{ color: "var(--muted)", marginBottom: 10 }} />
+                  <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
+                    Scenario Due
+                    <input type="date" value={scenarioDue} min={scenarioStart || today} onChange={(e) => setScenarioDue(e.target.value)} style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", fontSize: 11, color: "var(--navy)" }} />
+                  </label>
+                </div>
+              </section>
+
+              <section style={{ border: "1px solid rgba(245,158,11,.16)", borderRadius: 12, background: "rgba(255,247,237,.68)", padding: 14, marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 11 }}>
+                  <span style={{ width: 23, height: 23, borderRadius: "50%", background: "#f59e0b", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600 }}>3</span>
+                  <div>
+                    <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>Utilization impact</div>
+                    <div style={{ fontSize: 9.3, color: "var(--muted)", marginTop: 1 }}>Compare current vs scenario impact for affected people.</div>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: scenarioImpact?.people.length === 2 ? "1fr 1fr" : "1fr", gap: 10 }}>
+                  {(scenarioImpact?.people ?? []).map((impact) => {
+                    const improved = impact.proposedOverDays < impact.currentOverDays || impact.proposedPeak < impact.currentPeak;
+                    const worsened = impact.proposedOverDays > impact.currentOverDays || impact.proposedPeak > impact.currentPeak;
+                    return (
+                      <div key={impact.person.id} style={{ padding: 12, border: `1px solid ${worsened ? "rgba(239,68,68,.18)" : improved ? "rgba(16,185,129,.18)" : "var(--border)"}`, borderRadius: 10, background: worsened ? "rgba(254,242,242,.78)" : improved ? "rgba(236,253,245,.82)" : "rgba(255,255,255,.75)" }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--navy)", marginBottom: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{impact.person.name}</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 24px 1fr", alignItems: "center", gap: 5 }}>
+                          <div>
+                            <div style={{ fontSize: 8.8, color: "var(--muted)" }}>Current peak</div>
+                            <div style={{ fontSize: 19, fontWeight: 600, color: tierOf(impact.currentPeak).fg }}>{displayPct(impact.currentPeak)}%</div>
+                          </div>
+                          <ArrowRight size={13} style={{ color: "var(--muted)" }} />
+                          <div>
+                            <div style={{ fontSize: 8.8, color: "var(--muted)" }}>Scenario</div>
+                            <div style={{ fontSize: 19, fontWeight: 600, color: tierOf(impact.proposedPeak).fg }}>{displayPct(impact.proposedPeak)}%</div>
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr auto", gap: 6, fontSize: 9.3 }}>
+                          <span style={{ color: "var(--muted)" }}>Overloaded days</span>
+                          <span style={{ fontWeight: 600, color: impact.proposedOverDays > impact.currentOverDays ? "var(--danger)" : impact.proposedOverDays < impact.currentOverDays ? "#059669" : "var(--muted)" }}>{impact.currentOverDays} → {impact.proposedOverDays}</span>
+                          <span style={{ color: "var(--muted)" }}>{impact.netHours < 0 ? "Hours released" : impact.netHours > 0 ? "Hours added" : "Hours shifted"}</span>
+                          <span style={{ fontWeight: 600, color: impact.netHours > 0 ? "var(--danger)" : impact.netHours < 0 ? "#059669" : "var(--muted)" }}>{Math.abs(impact.netHours).toFixed(1)}h</span>
+                        </div>
+                        {(improved || worsened) && (
+                          <div style={{ marginTop: 9, padding: "7px 8px", borderRadius: 8, background: worsened ? "rgba(245,158,11,.10)" : "rgba(16,185,129,.10)", color: worsened ? "#b7791f" : "#047857", fontSize: 9.2, lineHeight: 1.35 }}>
+                            {worsened
+                              ? `Scenario adds ${Math.max(0, impact.proposedOverDays - impact.currentOverDays)} overloaded day${Math.max(0, impact.proposedOverDays - impact.currentOverDays) === 1 ? "" : "s"}.`
+                              : `Scenario resolves ${Math.max(0, impact.currentOverDays - impact.proposedOverDays)} overloaded day${Math.max(0, impact.currentOverDays - impact.proposedOverDays) === 1 ? "" : "s"}.`}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section style={{ border: "1px solid rgba(59,130,246,.13)", borderRadius: 12, background: "rgba(248,250,252,.92)", padding: 14, marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span style={{ width: 23, height: 23, borderRadius: "50%", background: "#3b82f6", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600 }}>4</span>
+                  <div>
+                    <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>Daily capacity impact</div>
+                    <div style={{ fontSize: 9.3, color: "var(--muted)", marginTop: 1 }}>Visual comparison of current plan vs scenario.</div>
+                  </div>
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", fontSize: 8.8, color: "var(--muted)" }}>
+                    <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#bfdbfe" }} />Current</span>
+                    <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3b82f6" }} />Scenario</span>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: scenarioImpact?.people.length === 2 ? "1fr 1fr" : "1fr", gap: 10 }}>
+                  {(scenarioImpact?.people ?? []).map((impact) => {
+                    const rows = impact.rows.slice(0, 7);
+                    const maxPct = Math.max(100, ...rows.flatMap((r) => [r.currentPct, r.proposedPct]));
+                    return (
+                      <div key={impact.person.id} style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", padding: 10 }}>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)", marginBottom: 9 }}>{impact.person.name}</div>
+                        {rows.length === 0 ? (
+                          <div style={{ fontSize: 9.3, color: "var(--muted)", padding: "18px 0", textAlign: "center" }}>No daily change in this scenario.</div>
+                        ) : (
+                          <div style={{ height: 126, display: "flex", alignItems: "flex-end", gap: 8, paddingTop: 8, position: "relative" }}>
+                            <div style={{ position: "absolute", left: 0, right: 0, bottom: `${Math.min(100, (100 / maxPct) * 100)}%`, borderTop: "1px dashed rgba(239,68,68,.42)", pointerEvents: "none" }}>
+                              <span style={{ position: "absolute", right: 0, top: -11, fontSize: 7.8, color: "var(--danger)", background: "var(--surface)", paddingLeft: 4 }}>100%</span>
+                            </div>
+                            {rows.map((row) => (
+                              <div key={row.dateStr} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
+                                <div style={{ flex: 1, width: "100%", display: "flex", gap: 2, alignItems: "flex-end", justifyContent: "center" }}>
+                                  <div title={`Current ${displayPct(row.currentPct)}%`} style={{ width: "38%", maxWidth: 18, height: `${Math.max(3, Math.min(100, (row.currentPct / maxPct) * 100))}%`, borderRadius: "4px 4px 1px 1px", background: "#bfdbfe" }} />
+                                  <div title={`Scenario ${displayPct(row.proposedPct)}%`} style={{ width: "38%", maxWidth: 18, height: `${Math.max(3, Math.min(100, (row.proposedPct / maxPct) * 100))}%`, borderRadius: "4px 4px 1px 1px", background: row.proposedPct > 100 ? "#ef4444" : row.proposedPct >= 80 ? "#f59e0b" : "#3b82f6" }} />
+                                </div>
+                                <div style={{ fontSize: 7.8, color: "var(--muted)", marginTop: 4, whiteSpace: "nowrap" }}>{parseLocalDate(row.dateStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {scenarioImpact && scenarioImpact.rows.length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    <button onClick={() => setShowScenarioDetails((v) => !v)} style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 9.5, fontWeight: 600, cursor: "pointer", padding: 0 }}>
+                      {showScenarioDetails ? "Hide affected-day details" : `View affected-day details (${scenarioImpact.rows.length})`}
+                    </button>
+                    {showScenarioDetails && (
+                      <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--surface)" }}>
+                        {scenarioImpact.rows.slice(0, 20).map((row) => (
+                          <div key={`${row.person.id}-${row.dateStr}`} style={{ display: "grid", gridTemplateColumns: scenarioImpact.isReassignment ? "105px 90px 1fr 22px 1fr" : "95px 1fr 22px 1fr", gap: 8, alignItems: "center", padding: "7px 9px", borderBottom: "1px solid var(--border)" }}>
+                            {scenarioImpact.isReassignment && <div style={{ fontSize: 9.2, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.person.name}</div>}
+                            <div>
+                              <div style={{ fontSize: 9.5, fontWeight: 600, color: "var(--navy)" }}>{parseLocalDate(row.dateStr).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
+                              <div style={{ fontSize: 8.2, color: "var(--muted)" }}>{row.capacity.toFixed(1)}h capacity</div>
+                            </div>
+                            <div style={{ textAlign: "right" }}>
+                              <div style={{ fontSize: 10, fontWeight: 600, color: tierOf(row.currentPct).fg }}>{displayPct(row.currentPct)}%</div>
+                              <div style={{ fontSize: 8.2, color: "var(--muted)" }}>{row.current.toFixed(1)}h</div>
+                            </div>
+                            <ArrowRight size={11} style={{ color: "var(--muted)" }} />
+                            <div>
+                              <div style={{ fontSize: 10, fontWeight: 600, color: tierOf(row.proposedPct).fg }}>{displayPct(row.proposedPct)}%</div>
+                              <div style={{ fontSize: 8.2, color: row.delta > 0 ? "var(--danger)" : "#059669" }}>{row.proposed.toFixed(1)}h ({row.delta > 0 ? "+" : ""}{row.delta.toFixed(1)}h)</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(99,102,241,.06)", border: "1px solid rgba(99,102,241,.10)", fontSize: 9.5, color: "var(--muted)", lineHeight: 1.45 }}>
+                This is a simulation only. Schedule and reassignment scenarios affect today forward and do not rewrite historical allocation. Dependency-aware cascading and Apply to WBS remain disabled until the preview logic is validated.
               </div>
             </div>
           </aside>
