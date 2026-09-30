@@ -2265,6 +2265,22 @@ export default function WbsPlanning() {
     // sub-task) still require Output Type, and different sub-tasks under
     // one parent can each carry a different Output Type -- nothing rolls
     // up or is inherited.
+    // phase126j (Sandra 2026-10-01): every LEAF task needs an assignee
+    // before Start Project -- otherwise its hours are invisible to
+    // Utilization. Parent tasks are exempt (their assignee is derived from
+    // children, and can span several people). Cancelled tasks skip.
+    // Hard gate, no Full Access override; also enforced in the DB
+    // (trg_baseline_request_requires_assignees).
+    const missingAssignee = orderedTasks.filter((t) => !t.assignee_id && !hasChildren(t.id) && t.status !== "Cancelled");
+    if (missingAssignee.length) {
+      await alert(
+        `Can't request a baseline yet -- ${missingAssignee.length} task(s) still need an Assignee:\n\n${missingAssignee
+          .slice(0, 8)
+          .map((t) => `• ${t.name || "Untitled task"}`)
+          .join("\n")}${missingAssignee.length > 8 ? `\n…and ${missingAssignee.length - 8} more` : ""}\n\nParent tasks don't need one -- they take their assignees from their sub-tasks.`
+      );
+      return;
+    }
     const missingOutputType = orderedTasks.filter((t) => !t.output_type_id && !(t.depth === 0 && hasChildren(t.id)));
     if (missingOutputType.length) {
       await alert(
