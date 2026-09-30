@@ -72,8 +72,9 @@ interface MoreFilters {
   projectType: string[];
   category: string[];
   status: string[];
+  role: string[]; // person-level (narrows Population), not a project filter
 }
-const EMPTY_MORE: MoreFilters = { owner: [], source: [], planningType: [], projectType: [], category: [], status: [] };
+const EMPTY_MORE: MoreFilters = { owner: [], source: [], planningType: [], projectType: [], category: [], status: [], role: [] };
 const HORIZON_DAYS = 14; // "Next 2 weeks"
 const PROJECT_STATUSES = ["Not Started", "In Progress", "Paused", "Completed", "Cancelled"];
 
@@ -136,7 +137,17 @@ function resolvePeriod(key: PeriodKey, custom: { start: string; end: string }, t
     prevStart = toISO(addDays(s, -days));
     prevLabel = "vs prior period";
   }
-  return { start, end, label, prevStart, prevEnd, prevLabel };
+  // YTD fallback comparison (Sandra 2026-09-30): until Tempo has a full
+  // prior year, YTD cards compare quarter-to-date vs the same number of
+  // days into last quarter. Switches to the year comparison automatically
+  // once prior-year data exists.
+  const qStartD = new Date(y, q * 3, 1);
+  const lqStartD = new Date(y, q * 3 - 3, 1);
+  const elapsed = Math.round((today.getTime() - qStartD.getTime()) / 86400000);
+  const lqEndCap = new Date(y, q * 3, 0);
+  const lqEndD = addDays(lqStartD, elapsed) > lqEndCap ? lqEndCap : addDays(lqStartD, elapsed);
+  const qtd = { curStart: toISO(qStartD), curEnd: toISO(today), prevStart: toISO(lqStartD), prevEnd: toISO(lqEndD), label: "QTD vs last qtr" };
+  return { start, end, label, prevStart, prevEnd, prevLabel, qtd };
 }
 
 function eachDay(start: string, end: string): string[] {
@@ -208,7 +219,7 @@ export default function TeamDashboard() {
     setLoading(true);
     // Time entries: finalized only, from the earliest date any KPI needs.
     const weekStart = toISO(addDays(today, -((today.getDay() + 6) % 7)));
-    const earliest = [range.prevStart, range.start, weekStart].sort()[0];
+    const earliest = [range.prevStart, range.start, range.qtd.prevStart, weekStart].sort()[0];
     const [pe, pr, tk, hol, av, oh, ah, del, settings, src, pt, prt, cat, te] = await Promise.all([
       supabase.from("people").select("id,name,daily_capacity_hours,job_title").eq("is_active", true).order("name"),
       supabase.from("projects").select("*").eq("is_archived", false),
@@ -261,10 +272,13 @@ export default function TeamDashboard() {
   // ---------------------------------------------------------- population
   const roles = useMemo(() => Array.from(new Set(people.map((p) => p.job_title).filter((r): r is string => !!r))).sort(), [people]);
   const popPeople = useMemo(() => {
-    if (popMode === "role" && popRoles.length) return people.filter((p) => p.job_title && popRoles.includes(p.job_title));
-    if (popMode === "members" && popMembers.length) return people.filter((p) => popMembers.includes(p.id));
-    return people;
-  }, [people, popMode, popRoles, popMembers]);
+    let base = people;
+    if (popMode === "role" && popRoles.length) base = people.filter((p) => p.job_title && popRoles.includes(p.job_title));
+    else if (popMode === "members" && popMembers.length) base = people.filter((p) => popMembers.includes(p.id));
+    // More Filters > Role narrows whatever Population is selected.
+    if (more.role.length) base = base.filter((p) => p.job_title && more.role.includes(p.job_title));
+    return base;
+  }, [people, popMode, popRoles, popMembers, more.role]);
   const popIds = useMemo(() => new Set(popPeople.map((p) => p.id)), [popPeople]);
   const popIsAll = popPeople.length === people.length;
 
@@ -276,7 +290,8 @@ export default function TeamDashboard() {
   const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const statusOf = (p: ProjectRow) => (p.wbs_status === "draft" ? "Not Started" : p.status ?? "Not Started");
 
-  const moreActive = Object.values(more).some((v) => v.length > 0);
+  // Project-level More Filters only (Role is person-level -> handled by popPeople).
+  const moreActive = (Object.keys(more) as (keyof MoreFilters)[]).some((k) => k !== "role" && more[k].length > 0);
   // Projects passing More Filters + Population (a project belongs to the
   // population if its owner OR any leaf-task assignee is in it).
   const scopedProjects = useMemo(() => {
@@ -328,7 +343,6 @@ export default function TeamDashboard() {
     return { total: completed.length + active.length + notStarted.length + paused.length, completed, active, notStarted, paused, overdue };
   }
   const portfolio = useMemo(() => portfolioFor(range.start, range.end), [scopedProjects, range, tasks, holidayDates]); // eslint-disable-line react-hooks/exhaustive-deps
-  const prevCompleted = useMemo(() => scopedProjects.filter((p) => statusOf(p) === "Completed" && (() => { const c = completionDateOf(p); return c >= range.prevStart && c <= range.prevEnd; })()).length, [scopedProjects, range]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ======================================================== SECTION 2
   const engine = useMemo(
@@ -418,7 +432,6 @@ export default function TeamDashboard() {
     return sum;
   }
   const scoped = useMemo(() => scopedHoursIn(range.start, range.end), [leafTasks, popIds, scopedProjectIds, engine, range]); // eslint-disable-line react-hooks/exhaustive-deps
-  const scopedPrev = useMemo(() => scopedHoursIn(range.prevStart, range.prevEnd), [leafTasks, popIds, scopedProjectIds, engine, range]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Logged Hours = finalized (Confirmed/Approved, not archived) only.
   const entryDay = (e: Entry) => toISO(new Date(e.started_at)); // local date, never started_at.slice(0,10)
@@ -437,7 +450,6 @@ export default function TeamDashboard() {
     return min / 60;
   }
   const logged = useMemo(() => loggedIn(range.start, range.end), [entries, popIds, range, moreActive, scopedProjectIds, taskProject]); // eslint-disable-line react-hooks/exhaustive-deps
-  const loggedPrev = useMemo(() => loggedIn(range.prevStart, range.prevEnd), [entries, popIds, range, moreActive, scopedProjectIds, taskProject]); // eslint-disable-line react-hooks/exhaustive-deps
   // Expected hours across the elapsed part of the period (through today).
   const expectedInPeriod = useMemo(() => {
     const end = range.end < todayIso ? range.end : todayIso;
@@ -496,11 +508,22 @@ export default function TeamDashboard() {
   }, [entries, popPeople, availStatus, holidaySet, todayIso]);
 
   // ---------------------------------------------------------- render
-  const trend = (cur: number, prev: number) => {
-    if (prev <= 0) return { text: `No ${range.prevLabel.replace("vs ", "")} data`, dir: 0 as const };
-    const d = Math.round(((cur - prev) / prev) * 100);
-    return { text: `${Math.abs(d)}% ${range.prevLabel}`, dir: (d > 0 ? 1 : d < 0 ? -1 : 0) as 1 | -1 | 0 };
+  // measure(start,end) -> value. Uses the period's own comparison; for YTD
+  // with no prior-year data, falls back to QTD vs same point last quarter.
+  const trend = (measure: (start: string, end: string) => number) => {
+    const fmt = (cur: number, prev: number, label: string) => {
+      const d = Math.round(((cur - prev) / prev) * 100);
+      return { text: `${Math.abs(d)}% ${label}`, dir: (d > 0 ? 1 : d < 0 ? -1 : 0) as 1 | -1 | 0 };
+    };
+    const prev = measure(range.prevStart, range.prevEnd);
+    if (prev > 0) return fmt(measure(range.start, range.end), prev, range.prevLabel);
+    if (period === "ytd") {
+      const qp = measure(range.qtd.prevStart, range.qtd.prevEnd);
+      if (qp > 0) return fmt(measure(range.qtd.curStart, range.qtd.curEnd), qp, range.qtd.label);
+    }
+    return { text: "No prior data yet", dir: 0 as const };
   };
+  const completedIn = (a: string, b: string) => scopedProjects.filter((p) => { if (statusOf(p) !== "Completed") return false; const c = completionDateOf(p); return c >= a && c <= b; }).length;
   const periodTag = period === "ytd" ? "YTD" : range.label;
   const t = portfolio.total;
 
@@ -545,8 +568,8 @@ export default function TeamDashboard() {
           <section className="exec-section">
             <SectionTitle n={1} title={`Portfolio Overview (${periodTag})`} caption={`Projects relevant to the selected period (${fmtShort(range.start)} – ${fmtLong(range.end)})`} />
             <div className="exec-grid">
-              <Kpi to="/projects" tone="blue" icon={<Folder size={18} />} label="Total Projects" value={t} trend={trend(t, portfolioFor(range.prevStart, range.prevEnd).total)} title="Completed in period + open projects (In Progress, Not Started, Paused) that started by period end. Cancelled excluded." />
-              <Kpi to="/projects" tone="green" icon={<CheckCircle2 size={18} />} label="Completed" value={portfolio.completed.length} sub={`${pctOf(portfolio.completed.length, t)}% of total`} trend={trend(portfolio.completed.length, prevCompleted)} title="Projects whose Actual Close Date (or completion stamp) falls in the period." />
+              <Kpi to="/projects" tone="blue" icon={<Folder size={18} />} label="Total Projects" value={t} trend={trend((a, b) => portfolioFor(a, b).total)} title="Completed in period + open projects (In Progress, Not Started, Paused) that started by period end. Cancelled excluded." />
+              <Kpi to="/projects" tone="green" icon={<CheckCircle2 size={18} />} label="Completed" value={portfolio.completed.length} sub={`${pctOf(portfolio.completed.length, t)}% of total`} trend={trend(completedIn)} title="Projects whose Actual Close Date (or completion stamp) falls in the period." />
               <Kpi to="/projects" tone="indigo" icon={<Activity size={18} />} label="Active" value={portfolio.active.length} sub={`${pctOf(portfolio.active.length, t)}% of total`} title="Status = In Progress (current state)." />
               <Kpi to="/projects" tone="slate" icon={<CircleDashed size={18} />} label="Not Started" value={portfolio.notStarted.length} sub={`${pctOf(portfolio.notStarted.length, t)}% of total`} title="Status = Not Started, or WBS still in Draft." />
               <Kpi to="/projects" tone="orange" icon={<PauseCircle size={18} />} label="Paused" value={portfolio.paused.length} sub={`${pctOf(portfolio.paused.length, t)}% of total`} />
@@ -559,8 +582,8 @@ export default function TeamDashboard() {
             <div className="exec-grid exec-grid-7">
               <Kpi to="/utilization" tone="purple" icon={<Users size={18} />} label="Planned Utilization" context="Next 2 weeks" value={`${Math.round(horizon.util)}%`} sub={`${fmtH(horizon.planned)} of ${fmtH(horizon.cap)} capacity`} valueTone={horizon.util > 100 ? "red" : undefined} title={`Planned workload vs available capacity, ${fmtShort(todayIso)} – ${fmtShort(horizon.end)}. Same engine as the Utilization page.`} />
               <Kpi to="/utilization" tone="green" icon={<BatteryCharging size={18} />} label="Available Capacity" context="Next 2 weeks" value={fmtH(horizon.available)} sub={`${pctOf(horizon.available, horizon.cap)}% of capacity open`} title="Sum of unallocated hours per person per working day (an overloaded day doesn't cancel out someone else's free time)." />
-              <Kpi to="/hours-overview" tone="blue" icon={<ClipboardList size={18} />} label="Scoped Hours" context={periodTag} value={fmtH(scoped)} trend={trend(scoped, scopedPrev)} title="Leaf-task Scoped Hours spread across each task's working days, counting only days inside the period. Parent tasks excluded (no double count)." />
-              <Kpi to="/hours-overview" tone="teal" icon={<Timer size={18} />} label="Logged Hours" context={periodTag} value={fmtH(logged)} sub={expectedInPeriod > 0 ? `${pctOf(logged, expectedInPeriod)}% of expected` : undefined} trend={trend(logged, loggedPrev)} title={`Finalized (Confirmed/Approved) time only${moreActive ? ", project time within filtered projects" : ", incl. non-project time"}. Expected = ${fmtH(expectedInPeriod)} across elapsed working days.`} />
+              <Kpi to="/hours-overview" tone="blue" icon={<ClipboardList size={18} />} label="Scoped Hours" context={periodTag} value={fmtH(scoped)} trend={trend(scopedHoursIn)} title="Leaf-task Scoped Hours spread across each task's working days, counting only days inside the period. Parent tasks excluded (no double count)." />
+              <Kpi to="/hours-overview" tone="teal" icon={<Timer size={18} />} label="Logged Hours" context={periodTag} value={fmtH(logged)} sub={expectedInPeriod > 0 ? `${pctOf(logged, expectedInPeriod)}% of expected` : undefined} trend={trend((a, b) => loggedIn(a, b))} title={`Finalized (Confirmed/Approved) time only${moreActive ? ", project time within filtered projects" : ", incl. non-project time"}. Expected = ${fmtH(expectedInPeriod)} across elapsed working days.`} />
               <Kpi to="/utilization" tone="orange" icon={<UserX size={18} />} label="Overallocated Members" context="Next 2 weeks" value={horizon.over.length} sub="> 100% on at least 1 day" valueTone={horizon.over.length ? "orange" : undefined} title={horizon.over.length ? horizon.over.map((o) => `${o.person.name}: ${o.days} day(s), peak ${Math.round(o.peak)}%`).join("\n") : "Nobody above 100% in the next 2 weeks."} />
               <Kpi to="/projects" tone="red" icon={<AlertTriangle size={18} />} label="Overdue Tasks" context={`As of ${fmtShort(todayIso)}`} value={overdueTasks.length} sub={`Across ${overdueProjectCount} project${overdueProjectCount === 1 ? "" : "s"}`} valueTone={overdueTasks.length ? "red" : undefined} title="Open leaf tasks with Target Due Date before today. Paused-project tasks excluded." />
               <Kpi to="/time-tracking?scope=all" tone="orange" icon={<Hourglass size={18} />} label="Missing Hours" context="This week" value={fmtH(missing.total)} sub={`${missing.members.length} member${missing.members.length === 1 ? "" : "s"}`} valueTone={missing.total > 0.1 ? "orange" : undefined} title={missing.members.length ? missing.members.sort((a, b) => b.hours - a.hours).map((m) => `${m.person.name}: ${m.hours.toFixed(1)}h`).join("\n") : "No missing hours this week."} />
@@ -749,6 +772,7 @@ function PopulationPicker(props: { mode: PopMode; setMode: (m: PopMode) => void;
 
 type LookupBag = { sources: Lookup[]; planningTypes: Lookup[]; projectTypes: Lookup[]; categories: Lookup[] };
 function moreGroups(people: Person[], l: LookupBag): { key: keyof MoreFilters; label: string; options: Lookup[] }[] {
+  const roles = Array.from(new Set(people.map((p) => p.job_title).filter((r): r is string => !!r))).sort();
   return [
     { key: "owner", label: "Project Owner", options: people.map((p) => ({ id: p.id, name: p.name })) },
     { key: "source", label: "Source", options: l.sources },
@@ -757,6 +781,7 @@ function moreGroups(people: Person[], l: LookupBag): { key: keyof MoreFilters; l
     // category is stored by NAME on projects
     { key: "category", label: "Category", options: l.categories.map((c) => ({ id: c.name, name: c.name })) },
     { key: "status", label: "Project Status", options: PROJECT_STATUSES.map((s) => ({ id: s, name: s })) },
+    { key: "role", label: "Role", options: roles.map((r) => ({ id: r, name: r })) },
   ];
 }
 
@@ -769,7 +794,7 @@ function MoreFiltersPicker({ more, setMore, people, lookups }: { more: MoreFilte
   const g = groups.find((x) => x.key === section)!;
   return (
     <>
-      <FilterButton btnRef={ref} icon={<SlidersHorizontal size={15} color="var(--accent)" />} top="More Filters" bottom={activeCount ? `${activeCount} applied` : "Owner · Source · Type · +3"} active={activeCount > 0} onClick={() => setOpen((v) => !v)} />
+      <FilterButton btnRef={ref} icon={<SlidersHorizontal size={15} color="var(--accent)" />} top="More Filters" bottom={activeCount ? `${activeCount} applied` : "Owner · Source · Type · +4"} active={activeCount > 0} onClick={() => setOpen((v) => !v)} />
       <Popover anchor={ref} open={open} onClose={() => setOpen(false)} width={420}>
         <div style={{ display: "flex", gap: 10 }}>
           <div style={{ width: 140, borderRight: "1px solid var(--border)", paddingRight: 8 }}>
