@@ -310,6 +310,8 @@ export default function Utilization() {
   const [scenarioStart, setScenarioStart] = useState("");
   const [scenarioDue, setScenarioDue] = useState("");
   const [scenarioAssigneeId, setScenarioAssigneeId] = useState<string | null>(null);
+  const [preserveScenarioDuration, setPreserveScenarioDuration] = useState(true);
+  const [showOtherRoleCandidates, setShowOtherRoleCandidates] = useState(false);
   const [showScenarioDetails, setShowScenarioDetails] = useState(false);
   const [showAllRisks, setShowAllRisks] = useState(false);
   const [savedViews, setSavedViews] = useState<SavedUtilView[]>([]);
@@ -978,6 +980,112 @@ export default function Utilization() {
   const scenarioPerson = scenarioTask?.assignee_id ? allPeople.find((p) => p.id === scenarioTask.assignee_id) ?? people.find((p) => p.id === scenarioTask.assignee_id) ?? null : null;
   const scenarioTargetPerson = scenarioAssigneeId ? allPeople.find((p) => p.id === scenarioAssigneeId) ?? people.find((p) => p.id === scenarioAssigneeId) ?? null : scenarioPerson;
   const scenarioProject = scenarioTask ? projects.find((p) => p.id === scenarioTask.project_id) ?? null : null;
+  const scenarioPreferredRole = scenarioPerson?.job_title ?? null;
+
+  function scenarioWorkingDaysBetween(person: PersonRow, startStr: string, dueStr: string): string[] {
+    const result: string[] = [];
+    for (let d = parseLocalDate(startStr); d <= parseLocalDate(dueStr); d = addDays(d, 1)) {
+      const dateStr = toISO(d);
+      if (!dayBlocked(person.id, dateStr, d.getDay())) result.push(dateStr);
+    }
+    return result;
+  }
+
+  const scenarioPlottedDuration = scenarioTask && scenarioPerson
+    ? Math.max(1, scenarioWorkingDaysBetween(
+        scenarioPerson,
+        scenarioTask.start_date ?? scenarioTask.current_due_date,
+        scenarioTask.current_due_date
+      ).length)
+    : 1;
+
+  function scenarioDueFromStart(startStr: string, person: PersonRow, workingDays: number): string {
+    let count = 0;
+    let d = parseLocalDate(startStr);
+    for (let safety = 0; safety < 120; safety++) {
+      const dateStr = toISO(d);
+      if (!dayBlocked(person.id, dateStr, d.getDay())) {
+        count++;
+        if (count >= Math.max(1, workingDays)) return dateStr;
+      }
+      d = addDays(d, 1);
+    }
+    return startStr;
+  }
+
+  function scenarioWindowForPerson(person: PersonRow, startStr: string) {
+    if (!scenarioTask) return null;
+    const dueStr = scenarioDueFromStart(startStr, person, scenarioPlottedDuration);
+    const workDays = scenarioWorkingDaysBetween(person, startStr, dueStr);
+    if (!workDays.length) return null;
+    const scopedHours = Number(scenarioTask.estimated_hours ?? 0);
+    const addedPerDay = workDays.length > 0 ? scopedHours / workDays.length : 0;
+    let peakPct = 0;
+    let overloadedDays = 0;
+    let totalFreeBefore = 0;
+    const rows = workDays.map((dateStr) => {
+      const av = availabilityFor(person.id, dateStr);
+      const capacity = dailyCapacityFor(person, av?.status === "half_day");
+      const current = engine.totalFor(person.id, dateStr);
+      const existingTaskHours = engine.taskHoursOnDate(person.id, scenarioTask as UtilTaskRow, dateStr);
+      const baseWithoutTask = Math.max(0, current - existingTaskHours);
+      const projected = baseWithoutTask + addedPerDay;
+      const pct = capacity > 0 ? (projected / capacity) * 100 : projected > 0 ? 999 : 0;
+      peakPct = Math.max(peakPct, pct);
+      if (pct > 100) overloadedDays++;
+      totalFreeBefore += Math.max(0, capacity - baseWithoutTask);
+      return { dateStr, capacity, current: baseWithoutTask, projected, pct };
+    });
+    return { startStr, dueStr, peakPct, overloadedDays, totalFreeBefore, rows };
+  }
+
+  const scenarioForecast = scenarioTargetPerson
+    ? Array.from({ length: 14 }, (_, i) => addDays(parseLocalDate(today), i)).map((d) => {
+        const dateStr = toISO(d);
+        const blocked = dayBlocked(scenarioTargetPerson.id, dateStr, d.getDay());
+        const av = availabilityFor(scenarioTargetPerson.id, dateStr);
+        const capacity = blocked ? 0 : dailyCapacityFor(scenarioTargetPerson, av?.status === "half_day");
+        const allocated = engine.totalFor(scenarioTargetPerson.id, dateStr);
+        const pct = capacity > 0 ? (allocated / capacity) * 100 : allocated > 0 ? 999 : 0;
+        return { dateStr, blocked, capacity, allocated, pct, free: Math.max(0, capacity - allocated) };
+      })
+    : [];
+
+  function bestScenarioWindowsFor(person: PersonRow) {
+    const windows = Array.from({ length: 14 }, (_, i) => addDays(parseLocalDate(today), i))
+      .filter((d) => !dayBlocked(person.id, toISO(d), d.getDay()))
+      .map((d) => scenarioWindowForPerson(person, toISO(d)))
+      .filter((w): w is NonNullable<typeof w> => !!w);
+    return windows.sort((a, b) =>
+      a.overloadedDays - b.overloadedDays ||
+      a.peakPct - b.peakPct ||
+      a.startStr.localeCompare(b.startStr)
+    ).slice(0, 3);
+  }
+
+  const selectedScenarioWindows = scenarioTargetPerson ? bestScenarioWindowsFor(scenarioTargetPerson) : [];
+  const sameRoleScenarioCandidates = scenarioPerson
+    ? people
+        .filter((p) => p.job_title === scenarioPreferredRole)
+        .map((person) => ({ person, best: bestScenarioWindowsFor(person)[0] ?? null }))
+        .sort((a, b) => {
+          if (!a.best && !b.best) return a.person.name.localeCompare(b.person.name);
+          if (!a.best) return 1;
+          if (!b.best) return -1;
+          return a.best.overloadedDays - b.best.overloadedDays || a.best.peakPct - b.best.peakPct || a.person.name.localeCompare(b.person.name);
+        })
+    : [];
+  const otherRoleScenarioCandidates = scenarioPerson
+    ? people
+        .filter((p) => p.job_title !== scenarioPreferredRole)
+        .map((person) => ({ person, best: bestScenarioWindowsFor(person)[0] ?? null }))
+        .sort((a, b) => {
+          if (!a.best && !b.best) return a.person.name.localeCompare(b.person.name);
+          if (!a.best) return 1;
+          if (!b.best) return -1;
+          return a.best.overloadedDays - b.best.overloadedDays || a.best.peakPct - b.best.peakPct || a.person.name.localeCompare(b.person.name);
+        })
+    : [];
 
   const scenarioAssigneeHistory = useMemo(() => {
     if (!scenarioTask || !scenarioAssigneeId || assigneeHistory.length === 0) return assigneeHistory;
@@ -1881,7 +1989,7 @@ export default function Utilization() {
       {scenarioTask && scenarioPerson && scenarioTargetPerson && scenarioProject && (
         <>
           <div
-            onClick={() => { setScenarioTaskId(null); setScenarioAssigneeId(null); setShowScenarioDetails(false); }}
+            onClick={() => { setScenarioTaskId(null); setScenarioAssigneeId(null); setShowScenarioDetails(false); setShowOtherRoleCandidates(false); }}
             style={{ position: "fixed", inset: 0, zIndex: 48, background: "rgba(15,35,65,.28)" }}
           />
           <aside
@@ -1911,7 +2019,7 @@ export default function Utilization() {
                   {scenarioProject.name} · {scenarioPerson.name}{scenarioTargetPerson.id !== scenarioPerson.id ? ` → ${scenarioTargetPerson.name}` : ""}
                 </div>
               </div>
-              <button onClick={() => { setScenarioTaskId(null); setScenarioAssigneeId(null); setShowScenarioDetails(false); }} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer" }}><X size={17} /></button>
+              <button onClick={() => { setScenarioTaskId(null); setScenarioAssigneeId(null); setShowScenarioDetails(false); setShowOtherRoleCandidates(false); }} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer" }}><X size={17} /></button>
             </div>
 
             <div style={{ padding: 18 }}>
@@ -1942,6 +2050,12 @@ export default function Utilization() {
                     </div>
                   </label>
                 </div>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 9, fontSize: 9.2, color: "var(--muted)" }}>
+                  <span><strong style={{ color: "var(--navy)", fontWeight: 600 }}>{scenarioPlottedDuration}</strong> working day{scenarioPlottedDuration === 1 ? "" : "s"}</span>
+                  <span>·</span>
+                  <span><strong style={{ color: "var(--navy)", fontWeight: 600 }}>{Number(scenarioTask.estimated_hours ?? 0).toFixed(1)}h</strong> scoped</span>
+                  {scenarioPreferredRole && <><span>·</span><span>Preferred role: <strong style={{ color: "var(--navy)", fontWeight: 600 }}>{scenarioPreferredRole}</strong></span></>}
+                </div>
               </section>
 
               <section style={{ border: "1px solid rgba(59,130,246,.18)", borderRadius: 12, background: "rgba(219,234,254,.48)", padding: 14, marginBottom: 12 }}>
@@ -1958,23 +2072,153 @@ export default function Utilization() {
                     Scenario Assignee
                     <select
                       value={scenarioAssigneeId ?? scenarioTask.assignee_id ?? ""}
-                      onChange={(e) => setScenarioAssigneeId(e.target.value || null)}
+                      onChange={(e) => {
+                        const id = e.target.value || null;
+                        setScenarioAssigneeId(id);
+                        const nextPerson = id ? people.find((p) => p.id === id) ?? null : scenarioPerson;
+                        if (preserveScenarioDuration && nextPerson && scenarioStart) {
+                          setScenarioDue(scenarioDueFromStart(scenarioStart, nextPerson, scenarioPlottedDuration));
+                        }
+                      }}
                       style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", fontSize: 11, color: "var(--navy)", background: "var(--surface)" }}
                     >
-                      {people.map((person) => (
-                        <option key={person.id} value={person.id}>{person.name}{person.job_title ? ` · ${person.job_title}` : ""}</option>
-                      ))}
+                      <optgroup label={scenarioPreferredRole ? `Same role · ${scenarioPreferredRole}` : "Same role"}>
+                        {sameRoleScenarioCandidates.map(({ person }) => (
+                          <option key={person.id} value={person.id}>{person.name}{person.job_title ? ` · ${person.job_title}` : ""}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Other roles">
+                        {otherRoleScenarioCandidates.map(({ person }) => (
+                          <option key={person.id} value={person.id}>{person.name}{person.job_title ? ` · ${person.job_title}` : ""}</option>
+                        ))}
+                      </optgroup>
                     </select>
                   </label>
                   <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
                     Scenario Start
-                    <input type="date" value={scenarioStart} min={today} onChange={(e) => setScenarioStart(e.target.value)} style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", fontSize: 11, color: "var(--navy)" }} />
+                    <input
+                      type="date"
+                      value={scenarioStart}
+                      min={today}
+                      onChange={(e) => {
+                        const nextStart = e.target.value;
+                        setScenarioStart(nextStart);
+                        if (preserveScenarioDuration && scenarioTargetPerson && nextStart) {
+                          setScenarioDue(scenarioDueFromStart(nextStart, scenarioTargetPerson, scenarioPlottedDuration));
+                        }
+                      }}
+                      style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", fontSize: 11, color: "var(--navy)" }}
+                    />
                   </label>
                   <ArrowRight size={15} style={{ color: "var(--muted)", marginBottom: 10 }} />
                   <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
                     Scenario Due
-                    <input type="date" value={scenarioDue} min={scenarioStart || today} onChange={(e) => setScenarioDue(e.target.value)} style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", fontSize: 11, color: "var(--navy)" }} />
+                    <input
+                      type="date"
+                      value={scenarioDue}
+                      min={scenarioStart || today}
+                      disabled={preserveScenarioDuration}
+                      onChange={(e) => setScenarioDue(e.target.value)}
+                      style={{ width: "100%", marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", fontSize: 11, color: "var(--navy)", background: preserveScenarioDuration ? "var(--hover-bg)" : "var(--surface)", opacity: preserveScenarioDuration ? .82 : 1 }}
+                    />
                   </label>
+                </div>
+
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 9, fontSize: 9.3, color: "var(--muted)", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={preserveScenarioDuration}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setPreserveScenarioDuration(checked);
+                      if (checked && scenarioTargetPerson && scenarioStart) {
+                        setScenarioDue(scenarioDueFromStart(scenarioStart, scenarioTargetPerson, scenarioPlottedDuration));
+                      }
+                    }}
+                  />
+                  Preserve plotted duration ({scenarioPlottedDuration} working day{scenarioPlottedDuration === 1 ? "" : "s"})
+                </label>
+
+                {scenarioTargetPerson && (
+                  <div style={{ marginTop: 13, paddingTop: 12, borderTop: "1px solid rgba(59,130,246,.14)" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 7 }}>
+                      <div>
+                        <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--navy)" }}>2-week capacity forecast · {scenarioTargetPerson.name}</div>
+                        <div style={{ fontSize: 8.8, color: "var(--muted)", marginTop: 1 }}>Existing utilization before applying this scenario.</div>
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0,1fr))", gap: 5 }}>
+                      {scenarioForecast.map((day) => {
+                        const tone = day.blocked ? null : tierOf(day.pct);
+                        return (
+                          <div key={day.dateStr} title={day.blocked ? day.blocked : `${day.allocated.toFixed(1)}h allocated · ${day.free.toFixed(1)}h free`} style={{ padding: "6px 4px", borderRadius: 8, border: "1px solid var(--border)", textAlign: "center", background: day.blocked ? "var(--hover-bg)" : tone?.bg }}>
+                            <div style={{ fontSize: 8, color: "var(--muted)" }}>{parseLocalDate(day.dateStr).toLocaleDateString("en-US",{weekday:"short"})}</div>
+                            <div style={{ fontSize: 9.2, fontWeight: 600, color: "var(--navy)", marginTop: 1 }}>{parseLocalDate(day.dateStr).getDate()}</div>
+                            <div style={{ fontSize: 9.5, fontWeight: 600, color: day.blocked ? "var(--muted)" : tone?.fg, marginTop: 2 }}>{day.blocked ? "Off" : `${displayPct(day.pct)}%`}</div>
+                            <div style={{ fontSize: 7.7, color: "var(--muted)", marginTop: 1 }}>{day.blocked ? "—" : `${day.free.toFixed(1)}h free`}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {selectedScenarioWindows.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--navy)", marginBottom: 7 }}>Suggested windows</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 7 }}>
+                      {selectedScenarioWindows.map((window, wi) => (
+                        <div key={window.startStr} style={{ padding: 9, borderRadius: 9, border: "1px solid var(--border)", background: wi === 0 ? "rgba(16,185,129,.07)" : "rgba(255,255,255,.7)" }}>
+                          <div style={{ fontSize: 8.5, fontWeight: 600, color: wi === 0 ? "#059669" : "var(--muted)", marginBottom: 3 }}>{wi === 0 ? "BEST CAPACITY FIT" : wi === 1 ? "NEXT BEST" : "ALTERNATIVE"}</div>
+                          <div style={{ fontSize: 10.2, fontWeight: 600, color: "var(--navy)" }}>{parseLocalDate(window.startStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})} – {parseLocalDate(window.dueStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+                          <div style={{ fontSize: 8.5, color: "var(--muted)", marginTop: 3 }}>Projected peak <strong style={{ color: tierOf(window.peakPct).fg }}>{displayPct(window.peakPct)}%</strong> · {window.overloadedDays} overload day{window.overloadedDays === 1 ? "" : "s"}</div>
+                          <button onClick={() => { setScenarioStart(window.startStr); setScenarioDue(window.dueStr); }} style={{ marginTop: 7, width: "100%", border: "1px solid rgba(59,130,246,.22)", borderRadius: 7, background: "var(--surface)", color: "var(--accent)", fontSize: 8.8, fontWeight: 600, padding: "5px 6px", cursor: "pointer" }}>Use dates</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ marginTop: 13, paddingTop: 12, borderTop: "1px solid rgba(59,130,246,.14)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 7 }}>
+                    <div>
+                      <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--navy)" }}>Recommended assignees</div>
+                      <div style={{ fontSize: 8.8, color: "var(--muted)", marginTop: 1 }}>Same-role candidates are prioritized; each recommendation uses that person's best 2-week window.</div>
+                    </div>
+                    {otherRoleScenarioCandidates.length > 0 && (
+                      <button onClick={() => setShowOtherRoleCandidates((v) => !v)} style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 8.8, fontWeight: 600, cursor: "pointer" }}>
+                        {showOtherRoleCandidates ? "Hide other roles" : "View other roles"}
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {[...sameRoleScenarioCandidates.slice(0, 4), ...(showOtherRoleCandidates ? otherRoleScenarioCandidates.slice(0, 4) : [])].map(({ person, best }) => {
+                      const sameRole = person.job_title === scenarioPreferredRole;
+                      return (
+                        <div key={person.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 160px 82px", gap: 8, alignItems: "center", padding: "7px 8px", border: "1px solid var(--border)", borderRadius: 9, background: "rgba(255,255,255,.7)" }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 9.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{person.name}</div>
+                            <div style={{ fontSize: 8.2, color: "var(--muted)", marginTop: 1 }}>{person.job_title ?? "No role"}{sameRole ? " · Same role" : " · Other role"}</div>
+                          </div>
+                          <div style={{ fontSize: 8.5, color: "var(--muted)" }}>
+                            {best ? <>{parseLocalDate(best.startStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})}–{parseLocalDate(best.dueStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})} · <strong style={{ color: tierOf(best.peakPct).fg }}>{displayPct(best.peakPct)}%</strong> peak</> : "No viable window"}
+                          </div>
+                          <button
+                            disabled={!best}
+                            onClick={() => {
+                              if (!best) return;
+                              setScenarioAssigneeId(person.id);
+                              setScenarioStart(best.startStr);
+                              setScenarioDue(best.dueStr);
+                            }}
+                            style={{ border: "1px solid rgba(59,130,246,.22)", borderRadius: 7, background: "var(--surface)", color: "var(--accent)", fontSize: 8.5, fontWeight: 600, padding: "5px 6px", cursor: best ? "pointer" : "default", opacity: best ? 1 : .45 }}
+                          >
+                            Use
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </section>
 
