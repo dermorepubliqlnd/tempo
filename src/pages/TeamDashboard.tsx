@@ -48,6 +48,7 @@ import { healthOf, actualProgress, projectCompletionDate, type ProjectRow, type 
 import Dashboard from "./Dashboard";
 import Modal from "../components/Modal";
 import { CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
+import { colorForPerson } from "../lib/personColors";
 
 // ---------------------------------------------------------------- types
 interface Person {
@@ -56,6 +57,7 @@ interface Person {
   daily_capacity_hours: number;
   job_title: string | null;
   tracks_time?: boolean | null;
+  color?: string | null;
 }
 interface Lookup {
   id: string;
@@ -288,7 +290,7 @@ function ExecutiveDashboard() {
     setPendingBaseline((pbRes.data as typeof pendingBaseline) ?? []);
     setPendingClosure((pcRes.data as typeof pendingClosure) ?? []);
     const [pe, pr, tk, hol, av, oh, ah, del, settings, src, pt, prt, cat, phs, te] = await Promise.all([
-      supabase.from("people").select("id,name,daily_capacity_hours,job_title,tracks_time").eq("is_active", true).order("name"),
+      supabase.from("people").select("id,name,daily_capacity_hours,job_title,tracks_time,color").eq("is_active", true).order("name"),
       supabase.from("projects").select("*").eq("is_archived", false),
       fetchAll<TaskRow>((f, t) => supabase.from("tasks").select("*").eq("is_archived", false).range(f, t)),
       supabase.from("holidays").select("date"),
@@ -655,6 +657,45 @@ function ExecutiveDashboard() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopedProjects, range, todayIso]);
+
+  // ======================================================== CAPACITY
+  // Next 2 weeks (same horizon + engine as the KPI cards), split into the
+  // calendar weeks it touches, plus per-person utilization.
+  const capacity = useMemo(() => {
+    const days = eachDay(todayIso, toISO(addDays(today, HORIZON_DAYS - 1)));
+    const weekKey = (d: string) => toISO(addDays(parseLocalDate(d), -((parseLocalDate(d).getDay() + 6) % 7)));
+    const weeks: { key: string; label: string; range: string; planned: number; cap: number }[] = [];
+    const people: { person: Person; planned: number; cap: number; peak: number; peakDay: string }[] = [];
+    for (const p of loggers) people.push({ person: p, planned: 0, cap: 0, peak: 0, peakDay: "" });
+    for (const d of days) {
+      if (!isWorkingDay(parseLocalDate(d), holidaySet)) continue;
+      const k = weekKey(d);
+      let w = weeks.find((x) => x.key === k);
+      if (!w) {
+        w = { key: k, label: weeks.length === 0 ? "This week" : weeks.length === 1 ? "Next week" : `Week +${weeks.length}`, range: "", planned: 0, cap: 0 };
+        weeks.push(w);
+      }
+      w.range = w.range ? `${w.range.split(" – ")[0]} – ${fmtShort(d)}` : fmtShort(d);
+      for (const row of people) {
+        const c = capacityOn(row.person, d);
+        const a = c > 0 ? (moreActive ? projectScopedAlloc(row.person.id, d) : engine.totalFor(row.person.id, d)) : 0;
+        row.planned += a;
+        row.cap += c;
+        w.planned += a;
+        w.cap += c;
+        const pct = c > 0 ? (a / c) * 100 : 0;
+        if (pct > row.peak) {
+          row.peak = pct;
+          row.peakDay = d;
+        }
+      }
+    }
+    const withPct = people.filter((r) => r.cap > 0).map((r) => ({ ...r, pct: (r.planned / r.cap) * 100, free: Math.max(0, r.cap - r.planned) }));
+    const over = withPct.filter((r) => r.pct > 100.5 || r.peak > 100.5).sort((a, b) => b.pct - a.pct || b.peak - a.peak);
+    const avail = withPct.filter((r) => r.pct < 100).sort((a, b) => b.free - a.free);
+    return { weeks: weeks.map((w) => ({ ...w, available: Math.max(0, w.cap - w.planned), util: w.cap > 0 ? (w.planned / w.cap) * 100 : 0 })), over, avail };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggers, engine, availStatus, holidaySet, todayIso, moreActive, scopedProjectIds]);
 
   // ======================================================== WORK MIX
   // Scoped Hours by Planning Type / Project Type, for the Reporting Period
@@ -1051,6 +1092,19 @@ function ExecutiveDashboard() {
           </section>
 
           <section className="exec-section">
+            <SectionTitle title="Capacity & Utilization (Next 2 weeks)" caption={`Planned workload vs available capacity · ${fmtShort(todayIso)} – ${fmtShort(horizon.end)} · based on current task allocations`} />
+            <div className="exec-cap">
+              <div className="exec-chart-card">
+                <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)" }}>2-Week Outlook</div>
+                <div className="exec-kpi-context" style={{ marginBottom: 6 }}>Planned load vs available capacity by week · line = utilization %</div>
+                <OutlookChart weeks={capacity.weeks} />
+              </div>
+              <PeopleBarList title="Most Overallocated Members" subtitle="2-week utilization · over 100% on at least one day" rows={capacity.over.map((r) => ({ person: r.person, pct: r.pct, note: `Peak ${Math.round(r.peak)}% on ${r.peakDay ? fmtShort(r.peakDay) : "—"} · ${fmtH(r.planned)} of ${fmtH(r.cap)}` }))} tone="over" empty="Nobody is over 100% in the next 2 weeks." />
+              <PeopleBarList title="Most Available Capacity" subtitle="Most free hours in the next 2 weeks" rows={capacity.avail.map((r) => ({ person: r.person, pct: r.pct, note: `${fmtH(r.free)} free of ${fmtH(r.cap)}`, right: fmtH(r.free) }))} tone="avail" empty="Nobody has free capacity in the next 2 weeks." />
+            </div>
+          </section>
+
+          <section className="exec-section">
             <div className="exec-section-title" style={{ justifyContent: "space-between" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
                 <span className="exec-title">Work Mix &amp; Effort Allocation</span>
@@ -1139,6 +1193,98 @@ function AttnCard({ c, onOpen }: { c: AttnSpec; onOpen: () => void }) {
   );
 }
 
+
+
+// ---------------------------------------------------------------- Capacity
+function OutlookChart({ weeks }: { weeks: { key: string; label: string; range: string; planned: number; available: number; util: number }[] }) {
+  const W = 520, H = 210, padL = 36, padR = 40, padT = 26, padB = 34;
+  const rawMax = Math.max(1, ...weeks.flatMap((w) => [w.planned, w.available]));
+  const step = rawMax <= 50 ? 10 : rawMax <= 200 ? 50 : 100;
+  const max = Math.ceil(rawMax / step) * step;
+  const pMax = Math.max(150, Math.ceil(Math.max(0, ...weeks.map((w) => w.util)) / 50) * 50);
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const gw = plotW / Math.max(1, weeks.length);
+  const y = (v: number) => padT + (1 - v / max) * plotH;
+  const yp = (v: number) => padT + (1 - v / pMax) * plotH;
+  const bw = Math.min(46, gw / 3.2);
+  const ticks: number[] = [];
+  for (let v = 0; v <= max; v += step) ticks.push(v);
+  const cx = (i: number) => padL + gw * i + gw / 2;
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={190} preserveAspectRatio="xMidYMid meet" style={{ display: "block" }}>
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--border)" />
+            <text x={padL - 6} y={y(t) + 3.5} textAnchor="end" fontSize={10} fill="var(--muted)">{t}</text>
+            <text x={W - padR + 6} y={y(t) + 3.5} fontSize={10} fill="var(--muted)">{Math.round((t / max) * pMax)}%</text>
+          </g>
+        ))}
+        {weeks.map((w, i) => (
+          <g key={w.key}>
+            <rect x={cx(i) - bw - 3} y={y(w.planned)} width={bw} height={plotH + padT - y(w.planned)} rx={3} fill="#2f6fed"><title>{`${w.label}: ${fmtH(w.planned)} planned`}</title></rect>
+            <text x={cx(i) - bw / 2 - 3} y={y(w.planned) - 5} textAnchor="middle" fontSize={11} fontWeight={700} fill="var(--navy)">{Math.round(w.planned)}</text>
+            <rect x={cx(i) + 3} y={y(w.available)} width={bw} height={plotH + padT - y(w.available)} rx={3} fill="#4fd1a5"><title>{`${w.label}: ${fmtH(w.available)} available`}</title></rect>
+            <text x={cx(i) + bw / 2 + 3} y={y(w.available) - 5} textAnchor="middle" fontSize={11} fontWeight={700} fill="var(--navy)">{Math.round(w.available)}</text>
+            <text x={cx(i)} y={H - 18} textAnchor="middle" fontSize={11} fill="var(--text-secondary)" fontWeight={600}>{w.label}</text>
+            <text x={cx(i)} y={H - 5} textAnchor="middle" fontSize={9.5} fill="var(--muted)">{w.range}</text>
+          </g>
+        ))}
+        <polyline fill="none" stroke="#f97316" strokeWidth={2.2} points={weeks.map((w, i) => `${cx(i)},${yp(w.util)}`).join(" ")} />
+        {weeks.map((w, i) => (
+          <g key={`u${w.key}`}>
+            <circle cx={cx(i)} cy={yp(w.util)} r={4} fill="#f97316" stroke="var(--surface)" strokeWidth={1.5} />
+            <text x={cx(i)} y={yp(w.util) - 9} textAnchor="middle" fontSize={11} fontWeight={700} fill="#ea580c">{Math.round(w.util)}%</text>
+          </g>
+        ))}
+      </svg>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 2 }}>
+        {[["#2f6fed", "Planned load (h)"], ["#4fd1a5", "Available capacity (h)"]].map(([c, l]) => (
+          <span key={l} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-secondary)" }}>
+            <span style={{ width: 9, height: 9, borderRadius: 2, background: c }} />{l}
+          </span>
+        ))}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-secondary)" }}>
+          <svg width="18" height="8"><line x1="0" x2="18" y1="4" y2="4" stroke="#f97316" strokeWidth="2.2" /></svg>Utilization %
+        </span>
+      </div>
+    </div>
+  );
+}
+const LIST_MAX = 5;
+function initials(name: string) {
+  const p = name.trim().split(/\s+/);
+  return (p.length === 1 ? p[0].slice(0, 2) : p[0][0] + p[p.length - 1][0]).toUpperCase();
+}
+function PeopleBarList({ title, subtitle, rows, tone, empty }: { title: string; subtitle: string; rows: { person: Person; pct: number; note: string; right?: string }[]; tone: "over" | "avail"; empty: string }) {
+  const shown = rows.slice(0, LIST_MAX);
+  const more = rows.length - shown.length;
+  const barColor = tone === "over" ? "#ef4444" : "#34c78a";
+  const txtColor = tone === "over" ? "#dc2626" : "#16a34a";
+  return (
+    <div className="exec-chart-card exec-people-card">
+      <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)" }}>{title}</div>
+      <div className="exec-kpi-context" style={{ marginBottom: 10 }}>{subtitle}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 9, flex: 1 }}>
+        {shown.length === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{empty}</div>}
+        {shown.map((r) => (
+          <div key={r.person.id} title={r.note} style={{ display: "grid", gridTemplateColumns: "26px minmax(0,1fr) minmax(60px,110px) 46px", alignItems: "center", gap: 8 }}>
+            <span style={{ width: 26, height: 26, borderRadius: "50%", background: colorForPerson(r.person), color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{initials(r.person.name)}</span>
+            <span style={{ fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.person.name}</span>
+            <span style={{ height: 8, borderRadius: 4, background: "var(--hover-bg)", overflow: "hidden" }}>
+              <span style={{ display: "block", height: "100%", width: `${Math.min(100, (r.pct / (tone === "over" ? 150 : 100)) * 100)}%`, background: barColor, borderRadius: 4 }} />
+            </span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: txtColor, textAlign: "right" }}>{r.right ?? `${Math.round(r.pct)}%`}</span>
+          </div>
+        ))}
+      </div>
+      <Link to="/utilization" style={{ fontSize: 11.5, color: "var(--accent)", textDecoration: "none", marginTop: 8, visibility: more > 0 ? "visible" : "hidden" }}>
+        +{more} more in Utilization →
+      </Link>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------- Portfolio Movement (line)
 function TrendLineChart({ buckets, series }: { buckets: { key: string; label: string }[]; series: { name: string; color: string; values: number[] }[] }) {
@@ -1589,6 +1735,11 @@ const EXEC_CSS = `
 .exec-grid-4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 @media (max-width:1400px){.exec-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:700px){.exec-grid-4{grid-template-columns:minmax(0,1fr)}}
+.exec-cap{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:stretch}
+.exec-people-card{display:flex;flex-direction:column}
+.exec-cap>.exec-chart-card{height:272px;box-sizing:border-box;overflow:hidden}
+@media (max-width:1250px){.exec-cap{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.exec-cap>:first-child{grid-column:1 / -1}}
+@media (max-width:760px){.exec-cap{grid-template-columns:minmax(0,1fr)}}
 .exec-grid-7{grid-template-columns:repeat(7,minmax(0,1fr))}
 @media (max-width:1180px){.exec-grid:not(.exec-grid-3),.exec-grid-7{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:820px){.exec-grid,.exec-grid-7{grid-template-columns:repeat(2,minmax(0,1fr))}}
