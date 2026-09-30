@@ -1322,7 +1322,7 @@ export default function Utilization() {
           {topCapacityRisks.length === 0 ? (
             <div style={{ fontSize: 10.5, color: "#059669", fontWeight: 600 }}>No team member exceeds daily capacity in this planning period.</div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(displayedCapacityRisks.length, 3)}, minmax(170px, 1fr))`, gap: 7, minWidth: 0 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minWidth: 0, alignItems: "stretch" }}>
               {displayedCapacityRisks.map((risk) => (
                 <button
                   key={`${risk.person.id}-${risk.dateStr}`}
@@ -1331,26 +1331,28 @@ export default function Utilization() {
                     setSelectedCell({ personId: risk.person.id, dateStr: risk.dateStr });
                   }}
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "minmax(0,1fr) auto",
-                    gap: 8,
-                    alignItems: "center",
+                    flex: "0 0 190px",
+                    minHeight: 74,
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
                     textAlign: "left",
-                    border: "1px solid rgba(239,68,68,.16)",
-                    borderRadius: 10,
-                    background: "var(--surface)",
-                    padding: "7px 9px",
+                    border: "1px solid rgba(239,68,68,.18)",
+                    borderRadius: 11,
+                    background: "linear-gradient(180deg, var(--surface), rgba(239,68,68,.04))",
+                    padding: "9px 11px",
                     cursor: "pointer",
                     minWidth: 0,
+                    boxShadow: "0 1px 3px rgba(15,35,65,.025)",
                   }}
                 >
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{risk.person.name}</div>
-                    <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 1 }}>{parseLocalDate(risk.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</div>
+                    <div style={{ fontSize: 10.8, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{risk.person.name}</div>
+                    <div style={{ fontSize: 9.2, color: "var(--muted)", marginTop: 2 }}>{parseLocalDate(risk.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 15, fontWeight: 600, color: "var(--danger)" }}>{displayPct(risk.pct)}%</div>
-                    <div style={{ fontSize: 8.8, color: "var(--danger)" }}>+{risk.overHours.toFixed(1)}h</div>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginTop: 8 }}>
+                    <div style={{ fontSize: 17, fontWeight: 600, color: "var(--danger)" }}>{displayPct(risk.pct)}%</div>
+                    <div style={{ fontSize: 9, fontWeight: 600, color: "var(--danger)" }}>+{risk.overHours.toFixed(1)}h</div>
                   </div>
                 </button>
               ))}
