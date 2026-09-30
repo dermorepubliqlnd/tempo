@@ -557,8 +557,17 @@ export function healthOf(
   if (p.wbs_status === "draft") return { label: "Not started", tone: "neutral" };
 
   const actual = actualProgress(p.id, allTasks);
-  // phase115: all work Done but Status not set to Completed yet.
-  if (actual === 100) return { label: "Work complete", tone: "success" };
+  // phase115 -> phase126p (Sandra 2026-10-01): all work Done but Status
+  // not set to Completed yet. Instead of a flat "Work complete", show the
+  // real schedule outcome (last task completion vs End Date -- same rule as
+  // Completed on time/late) plus "close pending" so owners know the only
+  // thing left is marking the project Completed.
+  if (actual === 100) {
+    const doneOn = projectCompletionDate(p.id, allTasks, p);
+    const dueOn = p.end_date ? p.end_date.slice(0, 10) : null;
+    if (doneOn && dueOn && doneOn > dueOn) return { label: "Done late · close pending", tone: "gold" };
+    return { label: "Done on time · close pending", tone: "success" };
+  }
 
   // "Health unavailable" (missing dates / no applicable tasks / zero
   // working days) uses "slate" -- a distinct, cooler grey from "Not
@@ -676,7 +685,7 @@ function healthRank(label: string): number {
   if (label === "Not started") return 3;
   if (label === "On track") return 4;
   if (label === "Completed – open tasks") return 5;
-  if (label === "Work complete") return 5;
+  if (label === "Done on time · close pending" || label === "Done late · close pending") return 5;
   if (label === "Completed late") return 5;
   if (label === "Completed on time") return 5;
   if (label === "Completed") return 5;

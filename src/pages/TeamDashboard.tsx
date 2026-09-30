@@ -38,12 +38,13 @@ import {
   BadgeCheck,
   Flag,
   FileWarning,
+  CheckCheck,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from "../lib/workingDays";
 import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, isOpenTask, type UtilTaskRow, type UtilProjectRow } from "../lib/dailyAllocation";
 import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
-import { healthOf, type ProjectRow, type TaskRow } from "./Projects";
+import { healthOf, actualProgress, projectCompletionDate, type ProjectRow, type TaskRow } from "./Projects";
 import { MonthlyBarChart } from "./Dashboard";
 import Modal from "../components/Modal";
 import { CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
@@ -787,7 +788,17 @@ export default function TeamDashboard() {
       if (!isOpenTask(t)) return false;
       return !t.assignee_id || !t.estimated_hours;
     });
-    return { overdueProjects, atRisk, pausedReview, approvals, validations, readyToClose, planningGaps };
+    // phase126p: all tasks done (100%) but Status still In Progress -- the
+    // work is complete and the project is ready to be marked Completed and closed.
+    const workDone = open
+      .filter((p) => p.wbs_status !== "draft" && actualProgress(p.id, tasks) === 100)
+      .map((p) => {
+        const last = projectCompletionDate(p.id, tasks, p);
+        const late = !!(last && p.end_date && last > p.end_date.slice(0, 10));
+        return { p, last, late, age: last ? workingDaysSince(last) : 0 };
+      })
+      .sort((a, b) => b.age - a.age);
+    return { overdueProjects, atRisk, pausedReview, approvals, validations, readyToClose, planningGaps, workDone };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopedProjects, scopedProjectIds, tasks, leafTasks, holidayDates, holidaySet, todayIso, pendingTime, pendingExt, pendingBaseline, pendingClosure, popIds, popIsAll, people]);
 
@@ -824,6 +835,11 @@ export default function TeamDashboard() {
       { key: "valid", tier: 3, tone: "purple", icon: <BadgeCheck size={16} />, label: "Validations overdue", context: `Done ${AGING_DAYS}+ working days`, value: a.validations.length, sub: "Not yet validated",
         definition: `Tasks marked Done whose Reported Completion Date is ${AGING_DAYS}+ working days ago and nobody has confirmed (validated) yet.`, columns: ["Task", "Project", "Assignee", "Reported done", "Waiting"], to: "/approval-center", toLabel: "Approval Center",
         rows: a.validations.map((x) => taskRow(x.t, [fmtLong(x.reported), `${x.age} days`])) },
+      { key: "workdone", tier: 4, tone: "amber", icon: <CheckCheck size={16} />, label: "Complete, ready to close", context: "100% done · still In Progress", value: a.workDone.length,
+        sub: `${a.workDone.filter((x) => x.late).length} done late · mark Completed`,
+        definition: "Every task is Done (100% progress) but the project's Status is still In Progress. These are complete and ready to be marked Completed, then closed. Waiting = working days since the last task was completed.",
+        columns: ["Project", "Owner", "Last task done", "End date", "Result", "Waiting"], to: "/projects", toLabel: "Projects & Tasks",
+        rows: a.workDone.map((x) => projRow(x.p, [x.last ? fmtLong(x.last) : "—", x.p.end_date ? fmtLong(x.p.end_date.slice(0, 10)) : "—", x.late ? "Done late" : "Done on time", `${x.age} days`])) },
       { key: "rtc", tier: 4, tone: "amber", icon: <Flag size={16} />, label: "Ready to close", context: "Completed, not closed", value: a.readyToClose.length, sub: rtc14 ? `${rtc14} waiting 14+ days` : "None waiting 14+ days",
         definition: "Projects with Status Completed whose WBS hasn't been closed yet.", columns: ["Project", "Owner", "Completed", "Days waiting"], to: "/projects", toLabel: "Projects & Tasks",
         rows: a.readyToClose.map((x) => projRow(x.p, [x.since ? fmtLong(x.since) : "—", String(x.days)])) },
@@ -1084,10 +1100,11 @@ function AttnCard({ c, onOpen }: { c: AttnSpec; onOpen: () => void }) {
 
 
 // ---------------------------------------------------------------- Work Mix
-const HEALTH_ORDER = ["On track", "Work complete", "At risk", "Off track", "Overdue", "Schedule review", "Not started", "Health unavailable", "Paused"];
+const HEALTH_ORDER = ["On track", "Done on time · close pending", "Done late · close pending", "At risk", "Off track", "Overdue", "Schedule review", "Not started", "Health unavailable", "Paused"];
 const HEALTH_COLORS: Record<string, string> = {
   "On track": "#16a34a",
-  "Work complete": "#0d9488",
+  "Done on time · close pending": "#0d9488",
+  "Done late · close pending": "#d4a72c",
   "At risk": "#f59e0b",
   "Off track": "#ea7a16",
   Overdue: "#dc2626",

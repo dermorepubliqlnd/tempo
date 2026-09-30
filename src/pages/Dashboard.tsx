@@ -172,7 +172,8 @@ const HEALTH_TONE: Record<string, { fill: string; pill: string }> = {
   "Completed on time": { fill: CATEGORY_TONE_ICON_COLOR.success, pill: "success" },
   "Completed late": { fill: CATEGORY_TONE_ICON_COLOR.gold, pill: "gold" },
   "Completed – open tasks": { fill: CATEGORY_TONE_ICON_COLOR.warning, pill: "warning" },
-  "Work complete": { fill: CATEGORY_TONE_ICON_COLOR.success, pill: "success" },
+  "Done on time · close pending": { fill: CATEGORY_TONE_ICON_COLOR.success, pill: "success" },
+  "Done late · close pending": { fill: CATEGORY_TONE_ICON_COLOR.gold, pill: "gold" },
   "Schedule review": { fill: CATEGORY_TONE_ICON_COLOR.gold, pill: "gold" },
   Paused: { fill: CATEGORY_TONE_ICON_COLOR.purple, pill: "purple" },
   // Slate, not neutral -- see healthOf() in Projects.tsx.
@@ -208,6 +209,8 @@ const HEALTH_CHART_COLOR: Record<string, string> = {
   "At risk": "#2e75b6",
   Completed: "#06b6d4",
   "Schedule review": "#d4a72c",
+  "Done on time · close pending": "#0d9488",
+  "Done late · close pending": "#b8860b",
 };
 
 // Fixed per-label chart color for the Project Status donut, given
@@ -1334,7 +1337,7 @@ export default function Dashboard() {
                   detail: `${x.n} open task${x.n === 1 ? "" : "s"}`, urgent: true,
                 })),
                 ...completionFlags.workComplete.map((p) => ({
-                  key: `w-${p.id}`, p, tone: "success", flag: "Work complete",
+                  key: `w-${p.id}`, p, tone: "success", flag: "Done · close pending",
                   detail: "All tasks done -- set Status to Completed", urgent: false,
                 })),
                 ...completionFlags.readyToClose.map((x) => ({

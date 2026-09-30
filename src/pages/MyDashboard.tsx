@@ -63,7 +63,7 @@ import { parseLocalDate, calendarDaysBetween } from "../lib/taskTiming";
 // Dashboard.tsx already follows) so this page's numbers can never drift
 // out of sync with what the Projects table itself shows for a project.
 import { wbsStatusMetaFor } from "../lib/wbsStatus";
-import { healthOf, actualProgress, countWorkingDays, type ProjectRow, type TaskRow } from "./Projects";
+import { healthOf, actualProgress, countWorkingDays, projectCompletionDate, type ProjectRow, type TaskRow } from "./Projects";
 import {
   createAllocationEngine,
   dailyCapacityHours,
@@ -237,7 +237,7 @@ export default function MyDashboard() {
   const [hiddenToday, setHiddenToday] = useState<{ task_id: string; hidden_date: string }[]>([]);
   // 2026-09-23 (Sandra: lightbox for Tasks due today / Overdue tasks --
   // see AttentionPill below) -- which list is open, or null when closed.
-  const [attentionModal, setAttentionModal] = useState<"due_today" | "overdue" | "ready_to_close" | "completed_open" | null>(null);
+  const [attentionModal, setAttentionModal] = useState<"due_today" | "overdue" | "ready_to_close" | "completed_open" | "work_done" | null>(null);
   // 2026-09-23 (My Work Today "Logged" column, Sandra: "show logged
   // hours against the tasks") -- same confirmed/approved, not-archived
   // definition Projects.tsx's own Spent Hrs column uses, just scoped to
@@ -645,6 +645,17 @@ export default function MyDashboard() {
       days: p.completed_at ? Math.max(0, Math.floor((Date.now() - new Date(p.completed_at).getTime()) / 86400000)) : null,
     }));
 
+  // phase126p (Sandra 2026-10-01): owner reminder -- every task is Done but
+  // the project is still In Progress. Shown to the OWNER regardless of who
+  // marked the last task Done. Aging = days since the last task was done.
+  const workDoneProjects = projects
+    .filter((p) => p.owner_id === me?.id && p.status === "In Progress" && p.wbs_status !== "closed" && p.wbs_status !== "draft" && actualProgress(p.id, tasks) === 100)
+    .map((p) => {
+      const last = projectCompletionDate(p.id, tasks as unknown as TaskRow[], p as unknown as ProjectRow);
+      return { p, last, days: last ? Math.max(0, Math.floor((Date.now() - new Date(last + "T00:00:00").getTime()) / 86400000)) : null };
+    })
+    .sort((a, b) => (b.days ?? 0) - (a.days ?? 0));
+
   if (loading || !me) return <p style={{ padding: 20, color: "var(--muted)" }}>Loading…</p>;
 
   const greetingHour = new Date().getHours();
@@ -742,7 +753,7 @@ export default function MyDashboard() {
         <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Items" value={overdueTasks.length} sub="Needs attention" />
       </div>
 
-      {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || missingLogHours > 0.1 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
+      {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
           {/* 2026-09-23 (Sandra: "Pending approvals, remove and use the
@@ -779,6 +790,15 @@ export default function MyDashboard() {
           )}
           {missingLogHours > 0.1 && (
             <AttentionPill tone="accent" icon={<Clock3 size={12} />} value={`${missingLogHours.toFixed(1)}h`} label="Missing hours this week" to="/time-tracking?scope=mine" />
+          )}
+          {workDoneProjects.length > 0 && (
+            <AttentionPill
+              tone="success"
+              icon={<CheckCircle2 size={12} />}
+              value={workDoneProjects.length}
+              label={`${workDoneProjects.length === 1 ? "Project" : "Projects"} at 100% — mark Completed${workDoneProjects[0].days !== null ? ` (oldest ${workDoneProjects[0].days}d)` : ""}`}
+              onClick={() => setAttentionModal("work_done")}
+            />
           )}
           {readyToCloseProjects.length > 0 && (
             <AttentionPill tone="success" icon={<CheckCircle2 size={12} />} value={readyToCloseProjects.length} label={readyToCloseProjects.length === 1 ? "Project ready to close" : "Projects ready to close"} onClick={() => setAttentionModal("ready_to_close")} />
@@ -827,6 +847,28 @@ export default function MyDashboard() {
               </span>
               <Link to={`/projects/${x.p.id}/wbs`} style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
                 Review WBS →
+              </Link>
+            </div>
+          ))}
+        </Modal>
+      )}
+
+      {attentionModal === "work_done" && (
+        <Modal title="Projects at 100% — mark Completed" onClose={() => setAttentionModal(null)}>
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 0 }}>
+            Every task in these projects is Done, but the project Status is still In Progress. Set Status to Completed, then review the WBS and request closure.
+          </p>
+          {workDoneProjects.map((x) => (
+            <div key={x.p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 4px", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+              <span style={{ flex: "0 0 64px", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+                {x.p.project_number ? `P-${String(x.p.project_number).padStart(4, "0")}` : "—"}
+              </span>
+              <span style={{ flex: "1 1 auto", fontWeight: 600, color: "var(--navy)" }}>{x.p.name}</span>
+              <span style={{ flex: "0 0 auto", color: x.days !== null && x.days >= 7 ? "var(--danger-text)" : "var(--text-secondary)" }}>
+                {x.days === null ? "—" : `Last task done ${x.days === 0 ? "today" : `${x.days}d ago`}`}
+              </span>
+              <Link to="/projects" style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+                Mark Completed →
               </Link>
             </div>
           ))}
