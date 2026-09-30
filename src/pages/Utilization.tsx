@@ -823,11 +823,14 @@ export default function Utilization() {
   const detailDayStats = detailPerson
     ? detailWeek.map((d) => {
         const dateStr = toISO(d);
+        const dow = d.getDay();
+        const blocked = dayBlocked(detailPerson.id, dateStr, dow);
         const av = availabilityFor(detailPerson.id, dateStr);
-        const capacity = dailyCapacityFor(detailPerson, av?.status === "half_day");
+        const workingCapacity = dailyCapacityFor(detailPerson, av?.status === "half_day");
+        const capacity = blocked ? 0 : workingCapacity;
         const allocated = valueForDate(detailPerson, dateStr);
         const pct = capacity > 0 ? (allocated / capacity) * 100 : allocated > 0 ? 999 : 0;
-        return { dateStr, allocated, capacity, pct, tier: tierOf(pct), availability: av };
+        return { dateStr, allocated, capacity, pct, tier: tierOf(pct), availability: av, blocked };
       })
     : [];
 
@@ -1985,15 +1988,29 @@ export default function Utilization() {
                         <thead>
                           <tr style={{ background: "var(--hover-bg)" }}>
                             <th style={{ textAlign: "left", padding: "9px 10px", borderBottom: "1px solid var(--border)", minWidth: 230 }}>Task</th>
-                            <th style={{ textAlign: "left", padding: "9px 8px", borderBottom: "1px solid var(--border)", width: 115 }}>Status</th>
-                            <th style={{ textAlign: "left", padding: "9px 8px", borderBottom: "1px solid var(--border)", width: 125 }}>Date Assigned</th>
-                            {detailDayStats.map((ds) => (
-                              <th key={ds.dateStr} style={{ textAlign: "center", padding: "8px 5px", borderBottom: "1px solid var(--border)", minWidth: 76, background: ds.tier.bg }}>
-                                <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>{WEEKDAY_LABEL[parseLocalDate(ds.dateStr).getDay()]} {parseLocalDate(ds.dateStr).getDate()}</div>
-                                <div style={{ marginTop: 3, fontSize: 13.5, fontWeight: 600, color: ds.tier.fg }}>{ds.capacity > 0 ? `${displayPct(ds.pct)}%` : "—"}</div>
-                                <div style={{ fontSize: 10.5, fontWeight: 600, color: ds.tier.fg, opacity: .8 }}>{ds.allocated.toFixed(1)}h / {ds.capacity.toFixed(1)}h</div>
-                              </th>
-                            ))}
+                            <th style={{ textAlign: "center", padding: "9px 8px", borderBottom: "1px solid var(--border)", width: 115 }}>Status</th>
+                            <th style={{ textAlign: "center", padding: "9px 8px", borderBottom: "1px solid var(--border)", width: 125 }}>Date Assigned</th>
+                            {detailDayStats.map((ds) => {
+                              const blockedLabel = ds.blocked === "holiday" ? "Holiday" : ds.blocked === "weekend" || ds.blocked === "off" ? "Off" : null;
+                              return (
+                                <th key={ds.dateStr} style={{ textAlign: "center", padding: "8px 5px", borderBottom: "1px solid var(--border)", minWidth: 76, background: blockedLabel ? "var(--hover-bg)" : ds.tier.bg }}>
+                                  <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>{WEEKDAY_LABEL[parseLocalDate(ds.dateStr).getDay()]} {parseLocalDate(ds.dateStr).getDate()}</div>
+                                  {blockedLabel ? (
+                                    <>
+                                      <div style={{ marginTop: 3, fontSize: 12.5, fontWeight: 600, color: "var(--muted)" }}>{blockedLabel}</div>
+                                      <div style={{ fontSize: 10.5, fontWeight: 600, color: ds.allocated > 0 ? "var(--danger)" : "var(--muted)", opacity: .85 }}>
+                                        {ds.allocated > 0 ? `${ds.allocated.toFixed(1)}h plotted` : "0.0h"}
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div style={{ marginTop: 3, fontSize: 13.5, fontWeight: 600, color: ds.tier.fg }}>{ds.capacity > 0 ? `${displayPct(ds.pct)}%` : "—"}</div>
+                                      <div style={{ fontSize: 10.5, fontWeight: 600, color: ds.tier.fg, opacity: .8 }}>{ds.allocated.toFixed(1)}h / {ds.capacity.toFixed(1)}h</div>
+                                    </>
+                                  )}
+                                </th>
+                              );
+                            })}
                           </tr>
                         </thead>
                         <tbody>
@@ -2020,8 +2037,8 @@ export default function Utilization() {
                                     return (
                                       <tr key={t.id}>
                                         <td style={{ padding: "8px 10px 8px 18px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)", fontSize: 12.5 }}>{t.name}</td>
-                                        <td style={{ padding: "8px", borderBottom: "1px solid var(--border)" }}><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span></td>
-                                        <td title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ padding: "8px", borderBottom: "1px solid var(--border)", color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 600, whiteSpace: "nowrap", fontSize: 12 }}>{formatWorkloadDate(entry)}</td>
+                                        <td style={{ padding: "8px", borderBottom: "1px solid var(--border)", textAlign: "center" }}><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span></td>
+                                        <td title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ padding: "8px", borderBottom: "1px solid var(--border)", textAlign: "center", color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 600, whiteSpace: "nowrap", fontSize: 12 }}>{formatWorkloadDate(entry)}</td>
                                         {detailDayStats.map((ds) => {
                                           const value = taskValueForDate(detailPerson, t, ds.dateStr);
                                           return (
