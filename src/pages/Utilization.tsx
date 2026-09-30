@@ -91,6 +91,20 @@ interface DeletedHourRow {
   date: string;
   hours: number;
 }
+interface SavedUtilView {
+  id: string;
+  name: string;
+  personIds: string[] | null;
+  roleFilter: string | null;
+  projectIds: string[];
+  showAllPeople: boolean;
+  planningPreset: "month" | "this_week" | "next_week" | "next_2_weeks" | "custom";
+  customStart?: string;
+  customEnd?: string;
+  viewMode: "daily" | "weekly";
+  displayMode: "both" | "utilization" | "hours";
+  isDefault?: boolean;
+}
 
 // Same local-timezone date helpers used everywhere else in the app — never
 // `new Date("YYYY-MM-DD")` directly (parses as UTC midnight, can shift a
@@ -296,6 +310,86 @@ export default function Utilization() {
   const [scenarioStart, setScenarioStart] = useState("");
   const [scenarioDue, setScenarioDue] = useState("");
   const [showAllRisks, setShowAllRisks] = useState(false);
+  const [savedViews, setSavedViews] = useState<SavedUtilView[]>([]);
+  const [activeViewId, setActiveViewId] = useState("system:all");
+  const [showSaveView, setShowSaveView] = useState(false);
+  const [saveViewName, setSaveViewName] = useState("");
+
+  function savedViewsStorageKey() {
+    return `tempo.utilization.savedViews.${me?.id ?? "anonymous"}`;
+  }
+
+  function persistSavedViews(next: SavedUtilView[]) {
+    setSavedViews(next);
+    if (me?.id) localStorage.setItem(savedViewsStorageKey(), JSON.stringify(next));
+  }
+
+  function applyViewConfig(view: SavedUtilView) {
+    setPersonFilter(view.personIds ? new Set(view.personIds) : null);
+    setRoleFilter(view.roleFilter);
+    setProjectFilter(view.projectIds);
+    setShowAllPeople(view.showAllPeople);
+    setViewMode(view.viewMode);
+    setDisplayMode(view.displayMode);
+    if (view.planningPreset === "custom" && view.customStart && view.customEnd) {
+      setRangeStart(parseLocalDate(view.customStart));
+      setRangeEnd(parseLocalDate(view.customEnd));
+      setPlanningPreset("custom");
+    } else {
+      applyPlanningPreset(view.planningPreset === "custom" ? "month" : view.planningPreset);
+    }
+  }
+
+  function applyBuiltInView(id: string) {
+    setActiveViewId(id);
+    if (id === "system:me" && me?.id) {
+      setPersonFilter(new Set([me.id]));
+      setRoleFilter(null);
+      setProjectFilter([]);
+      setShowAllPeople(false);
+      return;
+    }
+    if (id === "system:all") {
+      setPersonFilter(null);
+      setRoleFilter(null);
+      setProjectFilter([]);
+      setShowAllPeople(false);
+    }
+  }
+
+  function saveCurrentView() {
+    const name = saveViewName.trim();
+    if (!name) return;
+    const view: SavedUtilView = {
+      id: `personal:${Date.now()}`,
+      name,
+      personIds: personFilter ? Array.from(personFilter) : null,
+      roleFilter,
+      projectIds: [...projectFilter],
+      showAllPeople,
+      planningPreset,
+      customStart: planningPreset === "custom" ? toISO(rangeStart) : undefined,
+      customEnd: planningPreset === "custom" ? toISO(rangeEnd) : undefined,
+      viewMode,
+      displayMode,
+      isDefault: false,
+    };
+    persistSavedViews([...savedViews, view]);
+    setActiveViewId(view.id);
+    setSaveViewName("");
+    setShowSaveView(false);
+  }
+
+  function setActiveViewAsDefault() {
+    if (!activeViewId.startsWith("personal:")) return;
+    persistSavedViews(savedViews.map((v) => ({ ...v, isDefault: v.id === activeViewId })));
+  }
+
+  function deleteActiveView() {
+    if (!activeViewId.startsWith("personal:")) return;
+    persistSavedViews(savedViews.filter((v) => v.id !== activeViewId));
+    applyBuiltInView("system:all");
+  }
 
   async function loadAll() {
     setLoading(true);
@@ -338,6 +432,23 @@ export default function Utilization() {
   useEffect(() => {
     loadAll();
   }, []);
+
+  useEffect(() => {
+    if (!me?.id) return;
+    try {
+      const raw = localStorage.getItem(savedViewsStorageKey());
+      const parsed = raw ? JSON.parse(raw) as SavedUtilView[] : [];
+      setSavedViews(parsed);
+      const defaultView = parsed.find((v) => v.isDefault);
+      if (defaultView) {
+        setActiveViewId(defaultView.id);
+        applyViewConfig(defaultView);
+      }
+    } catch {
+      setSavedViews([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.id]);
 
   // Earliest anchor date is fixed (Sandra: "we can back-track dates as
   // far as Jan 2026 only") -- clamp any backward navigation so the
@@ -972,6 +1083,64 @@ export default function Utilization() {
         </div>
       </div>
 
+      <div className="card" style={{ padding: "8px 10px", marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", letterSpacing: ".03em" }}>VIEW</span>
+          <select
+            value={activeViewId}
+            onChange={(e) => {
+              const id = e.target.value;
+              if (id.startsWith("personal:")) {
+                const view = savedViews.find((v) => v.id === id);
+                if (view) {
+                  setActiveViewId(id);
+                  applyViewConfig(view);
+                }
+              } else {
+                applyBuiltInView(id);
+              }
+            }}
+            style={{ minWidth: 180, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 10, padding: "6px 9px", background: "var(--surface)" }}
+          >
+            <optgroup label="Built-in views">
+              <option value="system:me">My View</option>
+              <option value="system:all">All Team</option>
+            </optgroup>
+            {savedViews.length > 0 && (
+              <optgroup label="My saved views">
+                {savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}{view.isDefault ? " · Default" : ""}</option>)}
+              </optgroup>
+            )}
+          </select>
+
+          {activeViewId.startsWith("personal:") && (
+            <>
+              <button onClick={setActiveViewAsDefault} style={{ border: "1px solid var(--border)", borderRadius: 999, background: "var(--surface)", color: "var(--accent)", fontSize: 10, fontWeight: 600, padding: "6px 10px", cursor: "pointer" }}>Set as default</button>
+              <button onClick={deleteActiveView} style={{ border: "none", background: "transparent", color: "var(--danger)", fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Delete</button>
+            </>
+          )}
+
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+            {showSaveView ? (
+              <>
+                <input
+                  autoFocus
+                  value={saveViewName}
+                  onChange={(e) => setSaveViewName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveCurrentView(); if (e.key === "Escape") setShowSaveView(false); }}
+                  placeholder="View name"
+                  style={{ width: 180, fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 10, padding: "6px 9px" }}
+                />
+                <button onClick={saveCurrentView} disabled={!saveViewName.trim()} style={{ border: "none", borderRadius: 999, background: "var(--accent)", color: "#fff", fontSize: 10, fontWeight: 600, padding: "6px 11px", cursor: saveViewName.trim() ? "pointer" : "default", opacity: saveViewName.trim() ? 1 : .5 }}>Save</button>
+                <button onClick={() => { setShowSaveView(false); setSaveViewName(""); }} style={{ border: "none", background: "transparent", color: "var(--muted)", fontSize: 10, cursor: "pointer" }}>Cancel</button>
+              </>
+            ) : (
+              <button onClick={() => setShowSaveView(true)} style={{ border: "1px solid var(--border)", borderRadius: 999, background: "var(--surface)", color: "var(--accent)", fontSize: 10.5, fontWeight: 600, padding: "6px 11px", cursor: "pointer" }}>Save current view</button>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="card" style={{ padding: 10, marginBottom: 8 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -1049,12 +1218,12 @@ export default function Utilization() {
         <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
           <UtilPersonFilterButton people={scopedPeople} selected={personFilter} open={personFilterOpen} setOpen={setPersonFilterOpen} search={personFilterSearch} setSearch={setPersonFilterSearch} onChange={setPersonFilter} />
           <MultiSelectFilter options={projects.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name))} selected={projectFilter} onChange={setProjectFilter} noun="projects" singular="Project" />
-          <select value={showAllPeople ? "all" : "active"} onChange={(e) => setShowAllPeople(e.target.value === "all")} title="Deactivated team members' past hours are retained" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
+          <select value={showAllPeople ? "all" : "active"} onChange={(e) => { setShowAllPeople(e.target.value === "all"); if (activeViewId.startsWith("personal:")) setActiveViewId("system:all"); }} title="Deactivated team members' past hours are retained" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
             <option value="active">Active team members only</option>
             <option value="all">Show all (incl. deactivated)</option>
           </select>
           {roleOptions.length > 0 && (
-            <select value={roleFilter ?? "__all__"} onChange={(e) => setRoleFilter(e.target.value === "__all__" ? null : e.target.value)} title="Filter by role" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
+            <select value={roleFilter ?? "__all__"} onChange={(e) => { setRoleFilter(e.target.value === "__all__" ? null : e.target.value); if (activeViewId.startsWith("personal:")) setActiveViewId("system:all"); }} title="Filter by role" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
               <option value="__all__">All roles</option>
               {roleOptions.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
