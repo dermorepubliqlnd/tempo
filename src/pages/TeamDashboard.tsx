@@ -32,6 +32,7 @@ import {
   RefreshCw,
   TrendingUp,
   TrendingDown,
+  CalendarClock,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from "../lib/workingDays";
@@ -73,9 +74,8 @@ interface MoreFilters {
   projectType: string[];
   category: string[];
   status: string[];
-  role: string[]; // person-level (narrows Population), not a project filter
 }
-const EMPTY_MORE: MoreFilters = { owner: [], source: [], planningType: [], projectType: [], category: [], status: [], role: [] };
+const EMPTY_MORE: MoreFilters = { owner: [], source: [], planningType: [], projectType: [], category: [], status: [] };
 const HORIZON_DAYS = 14; // "Next 2 weeks"
 const PROJECT_STATUSES = ["Not Started", "In Progress", "Paused", "Completed", "Cancelled"];
 
@@ -281,10 +281,8 @@ export default function TeamDashboard() {
     let base = people;
     if (popMode === "role" && popRoles.length) base = people.filter((p) => p.job_title && popRoles.includes(p.job_title));
     else if (popMode === "members" && popMembers.length) base = people.filter((p) => popMembers.includes(p.id));
-    // More Filters > Role narrows whatever Population is selected.
-    if (more.role.length) base = base.filter((p) => p.job_title && more.role.includes(p.job_title));
     return base;
-  }, [people, popMode, popRoles, popMembers, more.role]);
+  }, [people, popMode, popRoles, popMembers]);
   const popIds = useMemo(() => new Set(popPeople.map((p) => p.id)), [popPeople]);
   // phase126d: people tagged "not expected to log time" (User management)
   // are left out of expected hours and Missing Hours only.
@@ -300,7 +298,7 @@ export default function TeamDashboard() {
   const statusOf = (p: ProjectRow) => (p.wbs_status === "draft" ? "Not Started" : p.status ?? "Not Started");
 
   // Project-level More Filters only (Role is person-level -> handled by popPeople).
-  const moreActive = (Object.keys(more) as (keyof MoreFilters)[]).some((k) => k !== "role" && more[k].length > 0);
+  const moreActive = (Object.keys(more) as (keyof MoreFilters)[]).some((k) => more[k].length > 0);
   // Projects passing More Filters + Population (a project belongs to the
   // population if its owner OR any leaf-task assignee is in it).
   const scopedProjects = useMemo(() => {
@@ -589,7 +587,7 @@ export default function TeamDashboard() {
       ) : (
         <>
           <section className="exec-section">
-            <SectionTitle n={1} title={`Portfolio Overview (${periodTag})`} caption={`Projects relevant to the selected period (${fmtShort(range.start)} – ${fmtLong(range.end)})`} />
+            <SectionTitle title={`Portfolio Overview (${periodTag})`} caption={`Projects relevant to the selected period (${fmtShort(range.start)} – ${fmtLong(range.end)})`} />
             <div className="exec-grid">
               <Kpi to="/projects" tone="blue" icon={<Folder size={18} />} label="Total Projects" value={t} sub="Completed + open in period" title="Completed in period + open projects (In Progress, Not Started, Paused) that started by period end. Cancelled excluded." />
               <Kpi to="/projects" tone="green" icon={<CheckCircle2 size={18} />} label="Completed" value={portfolio.completed.length} sub={`${pctOf(portfolio.completed.length, t)}% of total`} trend={trend(completedIn)} title="Projects whose Actual Close Date (or completion stamp) falls in the period." />
@@ -601,12 +599,12 @@ export default function TeamDashboard() {
           </section>
 
           <section className="exec-section">
-            <SectionTitle n={2} title="Executive Operating Summary" caption="Key capacity, effort and execution metrics" />
+            <SectionTitle title="Executive Operating Summary" caption="Key capacity, effort and execution metrics" />
             <div className="exec-grid exec-grid-7">
+              <Kpi to="/time-tracking?scope=all" tone="slate" icon={<CalendarClock size={18} />} label="Expected Hours" context={periodTag} value={fmtH(expectedInPeriod)} sub={`${loggers.length} ${loggers.length === 1 ? "person" : "people"} · from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)}`} title={`Each person's daily shift (usually 7.5h), adjusted for half-days, approved time off, holidays and weekends, from the Time tracking start date (${fmtShort(trackingStart)}) or period start, whichever is later, to today. People tagged "not expected to log time" are excluded.`} />
+              <Kpi to="/hours-overview" tone="teal" icon={<Timer size={18} />} label="Logged Hours" context={periodTag} value={fmtH(logged)} sub={expectedInPeriod > 0 ? `${pctOf(loggedIn(range.start, range.end, new Set(loggers.map((p) => p.id))), expectedInPeriod)}% of expected` : undefined} trend={trend((a, b) => loggedIn(a, b))} title={`Finalized (Confirmed/Approved) time only${moreActive ? ", project time within filtered projects" : ", incl. non-project time"}. Expected = ${fmtH(expectedInPeriod)}: each person's daily capacity (adjusted for half-days, time off, holidays, weekends) across working days from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)} (time tracking start) to today.`} />
               <Kpi to="/utilization" tone="purple" icon={<Users size={18} />} label="Planned Utilization" context="Next 2 weeks" value={`${Math.round(horizon.util)}%`} sub={`${fmtH(horizon.planned)} of ${fmtH(horizon.cap)} capacity`} valueTone={horizon.util > 100 ? "red" : undefined} title={`Planned workload vs available capacity, ${fmtShort(todayIso)} – ${fmtShort(horizon.end)}. Same engine as the Utilization page.`} />
               <Kpi to="/utilization" tone="green" icon={<BatteryCharging size={18} />} label="Available Capacity" context="Next 2 weeks" value={fmtH(horizon.available)} sub={`${pctOf(horizon.available, horizon.cap)}% of capacity open`} title="Sum of unallocated hours per person per working day (an overloaded day doesn't cancel out someone else's free time)." />
-              <Kpi to="/hours-overview" tone="blue" icon={<ClipboardList size={18} />} label="Scoped Hours" context={periodTag} value={fmtH(scoped)} trend={trend(scopedHoursIn)} title="Leaf-task Scoped Hours spread across each task's working days, counting only days inside the period. Parent tasks excluded (no double count)." />
-              <Kpi to="/hours-overview" tone="teal" icon={<Timer size={18} />} label="Logged Hours" context={periodTag} value={fmtH(logged)} sub={expectedInPeriod > 0 ? `${pctOf(loggedIn(range.start, range.end, new Set(loggers.map((p) => p.id))), expectedInPeriod)}% of expected` : undefined} trend={trend((a, b) => loggedIn(a, b))} title={`Finalized (Confirmed/Approved) time only${moreActive ? ", project time within filtered projects" : ", incl. non-project time"}. Expected = ${fmtH(expectedInPeriod)}: each person's daily capacity (adjusted for half-days, time off, holidays, weekends) across working days from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)} (time tracking start) to today.`} />
               <Kpi to="/utilization" tone="orange" icon={<UserX size={18} />} label="Overallocated Members" context="Next 2 weeks" value={horizon.over.length} sub="> 100% on at least 1 day" valueTone={horizon.over.length ? "orange" : undefined} title={horizon.over.length ? horizon.over.map((o) => `${o.person.name}: ${o.days} day(s), peak ${Math.round(o.peak)}%`).join("\n") : "Nobody above 100% in the next 2 weeks."} />
               <Kpi to="/projects" tone="red" icon={<AlertTriangle size={18} />} label="Overdue Tasks" context={`As of ${fmtShort(todayIso)}`} value={overdueTasks.length} sub={`Across ${overdueProjectCount} project${overdueProjectCount === 1 ? "" : "s"}`} valueTone={overdueTasks.length ? "red" : undefined} title="Open leaf tasks with Target Due Date before today. Paused-project tasks excluded." />
               <Kpi to="/time-tracking?scope=all" tone="orange" icon={<Hourglass size={18} />} label="Missing Hours" context={missing.rangeLabel ? `${missing.label} · ${missing.rangeLabel}` : missing.label} value={fmtH(missing.total)} sub={`${missing.members.length} member${missing.members.length === 1 ? "" : "s"} · completed days only`} valueTone={missing.total > 0.1 ? "orange" : undefined} title={missing.members.length ? missing.members.sort((a, b) => b.hours - a.hours).map((m) => `${m.person.name}: ${m.hours.toFixed(1)}h`).join("\n") : "No missing hours this week."} />
@@ -619,10 +617,9 @@ export default function TeamDashboard() {
 }
 
 // ================================================================= pieces
-function SectionTitle({ n, title, caption }: { n: number; title: string; caption: string }) {
+function SectionTitle({ title, caption }: { title: string; caption: string }) {
   return (
     <div className="exec-section-title">
-      <span className="exec-num">{n}</span>
       <span className="exec-title">{title}</span>
       <span className="exec-caption">{caption}</span>
     </div>
@@ -735,9 +732,11 @@ function PeriodPicker({ period, setPeriod, custom, setCustom, range }: { period:
           </label>
         ))}
         {period === "custom" && (
-          <div style={{ display: "flex", gap: 6, padding: "6px 4px 2px" }}>
-            <input type="date" value={custom.start} max={custom.end} onChange={(e) => e.target.value && setCustom({ ...custom, start: e.target.value })} className="exec-date" />
-            <input type="date" value={custom.end} min={custom.start} onChange={(e) => e.target.value && setCustom({ ...custom, end: e.target.value })} className="exec-date" />
+          <div className="exec-pop-sub" style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: "6px 8px", padding: "8px 4px 2px" }}>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>From</span>
+            <input type="date" value={custom.start} max={custom.end} onChange={(e) => e.target.value && setCustom({ ...custom, start: e.target.value })} className="exec-date" style={{ marginBottom: 0 }} />
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>To</span>
+            <input type="date" value={custom.end} min={custom.start} onChange={(e) => e.target.value && setCustom({ ...custom, end: e.target.value })} className="exec-date" style={{ marginBottom: 0 }} />
           </div>
         )}
       </Popover>
@@ -795,7 +794,6 @@ function PopulationPicker(props: { mode: PopMode; setMode: (m: PopMode) => void;
 
 type LookupBag = { sources: Lookup[]; planningTypes: Lookup[]; projectTypes: Lookup[]; categories: Lookup[] };
 function moreGroups(people: Person[], l: LookupBag): { key: keyof MoreFilters; label: string; options: Lookup[] }[] {
-  const roles = Array.from(new Set(people.map((p) => p.job_title).filter((r): r is string => !!r))).sort();
   return [
     { key: "owner", label: "Project Owner", options: people.map((p) => ({ id: p.id, name: p.name })) },
     { key: "source", label: "Source", options: l.sources },
@@ -804,7 +802,6 @@ function moreGroups(people: Person[], l: LookupBag): { key: keyof MoreFilters; l
     // category is stored by NAME on projects
     { key: "category", label: "Category", options: l.categories.map((c) => ({ id: c.name, name: c.name })) },
     { key: "status", label: "Project Status", options: PROJECT_STATUSES.map((s) => ({ id: s, name: s })) },
-    { key: "role", label: "Role", options: roles.map((r) => ({ id: r, name: r })) },
   ];
 }
 
@@ -817,7 +814,7 @@ function MoreFiltersPicker({ more, setMore, people, lookups }: { more: MoreFilte
   const g = groups.find((x) => x.key === section)!;
   return (
     <>
-      <FilterButton btnRef={ref} icon={<SlidersHorizontal size={15} color="var(--accent)" />} top="More Filters" bottom={activeCount ? `${activeCount} applied` : "Owner · Source · Type · +4"} active={activeCount > 0} onClick={() => setOpen((v) => !v)} />
+      <FilterButton btnRef={ref} icon={<SlidersHorizontal size={15} color="var(--accent)" />} top="More Filters" bottom={activeCount ? `${activeCount} applied` : "Owner · Source · Type · +3"} active={activeCount > 0} onClick={() => setOpen((v) => !v)} />
       <Popover anchor={ref} open={open} onClose={() => setOpen(false)} width={420}>
         <div style={{ display: "flex", gap: 10 }}>
           <div style={{ width: 140, borderRight: "1px solid var(--border)", paddingRight: 8 }}>
@@ -896,7 +893,6 @@ const EXEC_CSS = `
 .exec-chip button:hover{background:rgba(46,117,182,.15)}
 .exec-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-card);padding:14px 16px 16px;margin-bottom:16px}
 .exec-section-title{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
-.exec-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700}
 .exec-title{font-size:14.5px;font-weight:700;color:var(--navy)}
 .exec-caption{font-size:11px;color:var(--muted)}
 .exec-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
