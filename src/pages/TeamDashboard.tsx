@@ -215,7 +215,7 @@ export default function TeamDashboard() {
   // Site Settings > Time tracking start date (phase126c): expected hours are
   // only counted from this date, so pre-go-live months don't read as missing.
   const [trackingStart, setTrackingStart] = useState<string>("2026-08-03");
-  const [lookups, setLookups] = useState<{ sources: Lookup[]; planningTypes: Lookup[]; projectTypes: Lookup[]; categories: Lookup[] }>({ sources: [], planningTypes: [], projectTypes: [], categories: [] });
+  const [lookups, setLookups] = useState<{ sources: Lookup[]; planningTypes: Lookup[]; projectTypes: Lookup[]; categories: Lookup[]; phases: Lookup[] }>({ sources: [], planningTypes: [], projectTypes: [], categories: [], phases: [] });
 
   // filters
   const today = useMemo(() => {
@@ -248,7 +248,7 @@ export default function TeamDashboard() {
     setPendingExt((peRes.data as typeof pendingExt) ?? []);
     setPendingBaseline((pbRes.data as typeof pendingBaseline) ?? []);
     setPendingClosure((pcRes.data as typeof pendingClosure) ?? []);
-    const [pe, pr, tk, hol, av, oh, ah, del, settings, src, pt, prt, cat, te] = await Promise.all([
+    const [pe, pr, tk, hol, av, oh, ah, del, settings, src, pt, prt, cat, phs, te] = await Promise.all([
       supabase.from("people").select("id,name,daily_capacity_hours,job_title,tracks_time").eq("is_active", true).order("name"),
       supabase.from("projects").select("*").eq("is_archived", false),
       fetchAll<TaskRow>((f, t) => supabase.from("tasks").select("*").eq("is_archived", false).range(f, t)),
@@ -262,6 +262,7 @@ export default function TeamDashboard() {
       supabase.from("project_planning_types").select("id,name,color").order("sort_order"),
       supabase.from("project_types").select("id,name,color").order("sort_order"),
       supabase.from("project_categories").select("id,name").order("sort_order"),
+      supabase.from("project_phases").select("id,name,color").order("sort_order"),
       fetchAll<Entry>((f, t) =>
         supabase
           .from("time_entries")
@@ -289,6 +290,7 @@ export default function TeamDashboard() {
       planningTypes: (pt.data as Lookup[]) ?? [],
       projectTypes: (prt.data as Lookup[]) ?? [],
       categories: (cat.data as Lookup[]) ?? [],
+      phases: (phs.data as Lookup[]) ?? [],
     });
     setEntries(te);
     setUpdatedAt(new Date());
@@ -677,6 +679,42 @@ export default function TeamDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leafTasks, popIds, scopedProjectIds, projectById, engine, range, mixActiveOnly, lookups]);
 
+  // ======================================================== ACTIVE HEALTH
+  // Current state: Status = In Progress today. Ignores the Reporting Period
+  // (Population + More Filters still apply).
+  const activeHealth = useMemo(() => {
+    const act = scopedProjects.filter((p) => statusOf(p) === "In Progress");
+    const count = (keyOf: (p: ProjectRow) => string) => {
+      const m = new Map<string, number>();
+      for (const p of act) m.set(keyOf(p), (m.get(keyOf(p)) ?? 0) + 1);
+      return m;
+    };
+    const fromLookup = (m: Map<string, number>, list: Lookup[], byName = false) => {
+      const used = new Set<string>();
+      return Array.from(m.entries())
+        .map(([k, v]) => {
+          const idx = list.findIndex((l) => (byName ? l.name : l.id) === k);
+          const l = list[idx];
+          let c = l?.color && l.color !== "neutral" ? CATEGORY_TONE_ICON_COLOR[l.color] ?? "" : "";
+          if (!c || used.has(c)) c = k === "__none" ? "#c7cdd6" : MIX_PALETTE[(idx < 0 ? list.length : idx) % MIX_PALETTE.length];
+          used.add(c);
+          return { label: k === "__none" ? "Not set" : l?.name ?? k, value: v, color: c, order: idx < 0 ? 999 : idx };
+        })
+        .sort((a, b) => a.order - b.order);
+    };
+    const health = Array.from(count((p) => healthOf(p, tasks, holidayDates).label).entries())
+      .map(([k, v]) => ({ label: k, value: v, color: HEALTH_COLORS[k] ?? "#8a94a6", order: HEALTH_ORDER.indexOf(k) < 0 ? 99 : HEALTH_ORDER.indexOf(k) }))
+      .sort((a, b) => a.order - b.order);
+    return {
+      total: act.length,
+      health,
+      phase: fromLookup(count((p) => p.phase ?? "__none"), lookups.phases, true),
+      planning: fromLookup(count((p) => p.planning_type_id ?? "__none"), lookups.planningTypes),
+      ptype: fromLookup(count((p) => p.project_type_id ?? "__none"), lookups.projectTypes),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedProjects, tasks, holidayDates, lookups]);
+
   // ======================================================== SECTION 3
   // Needs Attention -- current state. Working-day age uses the same
   // holiday calendar as everything else.
@@ -979,6 +1017,20 @@ export default function TeamDashboard() {
               </div>
             </div>
           </section>
+
+          <section className="exec-section">
+            <SectionTitle title="Active Projects Health" caption={`Current state · ${activeHealth.total} active (In Progress) project${activeHealth.total === 1 ? "" : "s"} · not affected by the Reporting Period`} />
+            <div className="exec-grid-4">
+              {([
+                ["Health", activeHealth.health],
+                ["Phase", activeHealth.phase],
+                ["Planning Type", activeHealth.planning],
+                ["Project Type", activeHealth.ptype],
+              ] as const).map(([t, segs]) => (
+                <MixDonut key={t} title={t} segments={[...segs]} total={activeHealth.total} fmt={(n) => String(Math.round(n))} centerSub="active" />
+              ))}
+            </div>
+          </section>
         </>
       )}
     </div>
@@ -1032,16 +1084,28 @@ function AttnCard({ c, onOpen }: { c: AttnSpec; onOpen: () => void }) {
 
 
 // ---------------------------------------------------------------- Work Mix
+const HEALTH_ORDER = ["On track", "At risk", "Off track", "Overdue", "Schedule review", "Not started", "Health unavailable", "Paused"];
+const HEALTH_COLORS: Record<string, string> = {
+  "On track": "#16a34a",
+  "At risk": "#f59e0b",
+  "Off track": "#ea7a16",
+  Overdue: "#dc2626",
+  "Schedule review": "#d4a72c",
+  "Not started": "#94a3b8",
+  "Health unavailable": "#cbd5e1",
+  Paused: "#8b5cf6",
+};
 const MIX_PALETTE = ["#2f6fed", "#16a34a", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#ef4444", "#64748b"];
 type MixSeg = { id?: string; label: string; value: number; color: string };
-function MixDonut({ title, segments, total }: { title: string; segments: MixSeg[]; total: number }) {
+function MixDonut({ title, segments, total, fmt = fmtH, centerSub = "scoped", subtitle }: { title: string; segments: MixSeg[]; total: number; fmt?: (n: number) => string; centerSub?: string; subtitle?: string }) {
   const r = 52;
   const sw = 18;
   const C = 2 * Math.PI * r;
   let off = 0;
   return (
     <div className="exec-chart-card">
-      <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)", marginBottom: 8 }}>{title}</div>
+      <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)", marginBottom: subtitle ? 0 : 8 }}>{title}</div>
+      {subtitle && <div className="exec-kpi-context" style={{ marginBottom: 8 }}>{subtitle}</div>}
       <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
         <svg viewBox="0 0 140 140" width={130} height={130} style={{ flexShrink: 0 }}>
           <g transform="translate(70,70) rotate(-90)">
@@ -1050,25 +1114,25 @@ function MixDonut({ title, segments, total }: { title: string; segments: MixSeg[
             ) : (
               segments.map((s, i) => {
                 const dash = (s.value / total) * C;
-                const el = <circle key={i} r={r} fill="none" stroke={s.color} strokeWidth={sw} strokeDasharray={`${dash} ${C - dash}`} strokeDashoffset={-off}><title>{`${s.label}: ${fmtH(s.value)}`}</title></circle>;
+                const el = <circle key={i} r={r} fill="none" stroke={s.color} strokeWidth={sw} strokeDasharray={`${dash} ${C - dash}`} strokeDashoffset={-off}><title>{`${s.label}: ${fmt(s.value)}`}</title></circle>;
                 off += dash;
                 return el;
               })
             )}
           </g>
-          <text x={70} y={68} textAnchor="middle" fontSize={17} fontWeight={700} fill="var(--navy)">{fmtH(total)}</text>
-          <text x={70} y={84} textAnchor="middle" fontSize={9.5} fill="var(--muted)">scoped</text>
+          <text x={70} y={68} textAnchor="middle" fontSize={17} fontWeight={700} fill="var(--navy)">{fmt(total)}</text>
+          <text x={70} y={84} textAnchor="middle" fontSize={9.5} fill="var(--muted)">{centerSub}</text>
         </svg>
         <div style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 0, flex: 1 }}>
           {segments.map((s) => (
             <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5 }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
               <span style={{ color: "var(--text-secondary)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
-              <span style={{ fontWeight: 600, color: "var(--navy)" }}>{fmtH(s.value)}</span>
+              <span style={{ fontWeight: 600, color: "var(--navy)" }}>{fmt(s.value)}</span>
               <span style={{ color: "var(--muted)", width: 32, textAlign: "right" }}>{pctOf(s.value, total)}%</span>
             </div>
           ))}
-          {total <= 0 && <div style={{ fontSize: 11, color: "var(--muted)" }}>No scoped hours in this period.</div>}
+          {total <= 0 && <div style={{ fontSize: 11, color: "var(--muted)" }}>No data.</div>}
         </div>
       </div>
     </div>
@@ -1412,6 +1476,9 @@ const EXEC_CSS = `
 .exec-toggle input:checked + .exec-toggle-track{background:#34c759}
 .exec-toggle input:checked + .exec-toggle-track::after{transform:translateX(14px)}
 .exec-toggle input:focus-visible + .exec-toggle-track{outline:2px solid var(--accent);outline-offset:2px}
+.exec-grid-4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:1400px){.exec-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:700px){.exec-grid-4{grid-template-columns:minmax(0,1fr)}}
 .exec-grid-7{grid-template-columns:repeat(7,minmax(0,1fr))}
 @media (max-width:1180px){.exec-grid:not(.exec-grid-3),.exec-grid-7{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:820px){.exec-grid,.exec-grid-7{grid-template-columns:repeat(2,minmax(0,1fr))}}
