@@ -69,6 +69,7 @@ interface PersonRow {
   daily_capacity_hours: number;
   is_active: boolean;
   job_title?: string | null;
+  tracks_time?: boolean | null;
 }
 interface ProjectRow {
   id: string;
@@ -252,8 +253,8 @@ export default function HoursOverview() {
     setLoading(true);
     const [{ data: p }, { data: ap }, { data: pr }, { data: tk }, { data: te }, { data: hol }, { data: av }, { data: ownHist }, { data: assHist }, { data: delHrs }, { data: settings }] =
       await Promise.all([
-        supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").eq("is_active", true).order("name"),
-        supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title").order("name"),
+        supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title,tracks_time").eq("is_active", true).order("name"),
+        supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title,tracks_time").order("name"),
         supabase.from("projects").select("id,name,is_archived,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at,schedule_review_required").eq("is_archived", false),
         supabase
           .from("tasks")
@@ -1096,7 +1097,7 @@ export default function HoursOverview() {
                               // (2026-09-23 dynamic-expected-hours fix;
                               // see loggedHoursTier/expectedHoursForDay).
                               const avStatus = availabilityStatusFor(person.id, dateStr);
-                              const expectedHours = isHoliday ? 0 : expectedHoursForDay(person, avStatus);
+                              const expectedHours = isHoliday || person.tracks_time === false ? 0 : expectedHoursForDay(person, avStatus);
                               const colors = loggedHoursTier(logged, expectedHours);
                               const hasValue = logged > 0;
                               const bg = !hasValue ? (weekend || isHoliday ? "var(--hover-bg)" : undefined) : colors.bg;

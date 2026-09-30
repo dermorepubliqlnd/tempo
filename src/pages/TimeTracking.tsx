@@ -1433,6 +1433,7 @@ export default function TimeTracking() {
   }
   function myExpectedHoursFor(dateKey: string): number {
     if (!me) return 0;
+    if (me.tracks_time === false) return 0; // phase126d: not expected to log time
     if (holidayDates.has(dateKey)) return 0;
     return expectedHoursForDay({ id: me.id, daily_capacity_hours: me.daily_capacity_hours }, myAvStatusFor(dateKey));
   }
@@ -2331,7 +2332,7 @@ export default function TimeTracking() {
                         cardFg: effectiveRangeTargetMinutes > 0 ? rangeTier.fg : "var(--muted)",
                         label: "Logged Hours",
                         value: `${(Math.round((rangeLoggedMinutes / 60) * 100) / 100).toFixed(2)}h`,
-                        caption: effectiveRangeTargetMinutes > 0 ? `of ${(effectiveRangeTargetMinutes / 60).toFixed(2)}h expected` : "No hours expected",
+                        caption: effectiveRangeTargetMinutes > 0 ? `of ${(effectiveRangeTargetMinutes / 60).toFixed(2)}h expected` : scope === "mine" && me?.tracks_time === false ? "Not expected to log time" : "No hours expected",
                       },
                     ]),
                 // 2026-09-23 (Sandra's "Working Now" spec, Active Timers

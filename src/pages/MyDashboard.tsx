@@ -511,7 +511,10 @@ export default function MyDashboard() {
       const logged = monthEntries
         .filter((e) => toISO(new Date(e.started_at)) === dateStr)
         .reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);
-      return { date: d, dateStr, capacity, scoped, pct, logged, off, halfDay: !!halfDayRow };
+      // phase126d: people tagged "not expected to log time" have 0 expected
+      // hours (capacity/utilization unchanged).
+      const expected = me.tracks_time === false ? 0 : capacity;
+      return { date: d, dateStr, capacity, expected, scoped, pct, logged, off, halfDay: !!halfDayRow };
     });
   }, [me, weekDays, availability, holidayDateStrings, engine, monthEntries]);
 
@@ -519,10 +522,12 @@ export default function MyDashboard() {
   const weekCapacityTotal = dailyStats.reduce((sum, d) => sum + d.capacity, 0);
   const weekUtilPct = weekCapacityTotal > 0 ? (weekScopedTotal / weekCapacityTotal) * 100 : 0;
   const weekLoggedTotal = dailyStats.reduce((sum, d) => sum + d.logged, 0);
+  const weekExpectedTotal = dailyStats.reduce((sum, d) => sum + d.expected, 0);
+  const notTrackingTime = me?.tracks_time === false;
   const daysOverCapacity = dailyStats.filter((d) => d.capacity > 0 && d.pct > 100).length;
   const missingLogHours = dailyStats
     .filter((d) => d.dateStr <= todayIso && !d.off)
-    .reduce((sum, d) => sum + Math.max(0, d.capacity - d.logged), 0);
+    .reduce((sum, d) => sum + Math.max(0, d.expected - d.logged), 0);
 
   // ---- Scoped vs Logged (This Month), by project, for my tasks -----
   const scopedVsLoggedByProject = useMemo(() => {
@@ -733,7 +738,7 @@ export default function MyDashboard() {
         <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Tasks Due This Week" value={tasksThisWeek.length} sub={`${tasksDueToday.length} due today`} />
         <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="Pending Approvals" value={myPendingApprovalsCount} sub="Sent by you, awaiting decision" />
         <MetricCard icon={<BarChart3 size={16} />} colors={METRIC_COLORS.teal} label="Utilization This Week" value={`${Math.round(weekUtilPct)}%`} sub={`of ${weekCapacityTotal.toFixed(1)}h capacity`} />
-        <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={`of ${weekCapacityTotal.toFixed(1)}h expected`} />
+        <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={notTrackingTime ? "Not expected to log time" : `of ${weekExpectedTotal.toFixed(1)}h expected`} />
         <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Items" value={overdueTasks.length} sub="Needs attention" />
       </div>
 
@@ -1220,7 +1225,7 @@ export default function MyDashboard() {
                 // straight through instead of assuming a flat 7.5h shift,
                 // so a half-day person logging near their reduced target
                 // reads "Within expected" instead of "Very low".
-                const colors = loggedHoursTier(d.logged, d.capacity);
+                const colors = loggedHoursTier(d.logged, d.expected);
                 const isFullTimeOff = d.off && d.logged <= 0;
                 return (
                   <div key={d.dateStr} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
@@ -1245,16 +1250,15 @@ export default function MyDashboard() {
             </div>
             <div style={{ display: "flex", gap: 18, fontSize: 11, color: "var(--text-secondary)", marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
               <span>
-                Expected Hours <strong style={{ color: "var(--navy)" }}>{weekCapacityTotal.toFixed(1)}h</strong>
+                Expected Hours <strong style={{ color: "var(--navy)" }}>{notTrackingTime ? "Not expected" : `${weekExpectedTotal.toFixed(1)}h`}</strong>
               </span>
               <span>
                 Logged Hours <strong style={{ color: "var(--navy)" }}>{weekLoggedTotal.toFixed(1)}h</strong>
               </span>
               <span>
                 Variance{" "}
-                <strong style={{ color: weekLoggedTotal - weekCapacityTotal >= 0 ? "var(--success-text)" : "var(--danger-text)" }}>
-                  {weekLoggedTotal - weekCapacityTotal >= 0 ? "+" : ""}
-                  {(weekLoggedTotal - weekCapacityTotal).toFixed(1)}h
+                <strong style={{ color: notTrackingTime ? "var(--muted)" : weekLoggedTotal - weekExpectedTotal >= 0 ? "var(--success-text)" : "var(--danger-text)" }}>
+                  {notTrackingTime ? "—" : `${weekLoggedTotal - weekExpectedTotal >= 0 ? "+" : ""}${(weekLoggedTotal - weekExpectedTotal).toFixed(1)}h`}
                 </strong>
               </span>
             </div>
