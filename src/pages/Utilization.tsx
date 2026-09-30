@@ -959,7 +959,7 @@ export default function Utilization() {
       <div className="card" style={{ padding: 10, marginBottom: 8 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 10, fontWeight: 800, color: "var(--muted)", letterSpacing: ".03em" }}>PLANNING PERIOD</span>
+            <span style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", letterSpacing: ".03em" }}>PLANNING PERIOD</span>
             <div style={{ display: "inline-flex", gap: 3, padding: 3, background: "var(--hover-bg)", borderRadius: 999 }}>
               {([
                 ["this_week", "This week"],
@@ -978,7 +978,7 @@ export default function Utilization() {
                     boxShadow: planningPreset === preset ? "0 2px 7px rgba(15,35,65,.09)" : "none",
                     color: planningPreset === preset ? "var(--accent)" : "var(--muted)",
                     fontSize: 10,
-                    fontWeight: 750,
+                    fontWeight: 600,
                     cursor: "pointer",
                   }}
                 >
@@ -987,13 +987,13 @@ export default function Utilization() {
               ))}
             </div>
             {planningPreset === "custom" && (
-              <span style={{ fontSize: 9.5, fontWeight: 800, color: "var(--accent)", padding: "4px 7px", borderRadius: 999, background: "rgba(59,130,246,.08)" }}>Custom</span>
+              <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--accent)", padding: "4px 7px", borderRadius: 999, background: "rgba(59,130,246,.08)" }}>Custom</span>
             )}
             <div style={{ width: 1, height: 20, background: "var(--border)" }} />
             <button onClick={() => shiftRange(-1)} className="planner-nav-btn" disabled={isAtEarliestAnchor} title={isAtEarliestAnchor ? "Can't go earlier than Jan 2026" : "Previous"} style={isAtEarliestAnchor ? { opacity: 0.4, cursor: "default" } : undefined}>
               <ChevronLeft size={14} />
             </button>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)", minWidth: 165 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--navy)", minWidth: 165 }}>
               {days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} –{" "}
               {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
             </span>
@@ -1012,7 +1012,7 @@ export default function Utilization() {
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
               {(["daily", "weekly"] as const).map((mode) => (
-                <button key={mode} onClick={() => setViewMode(mode)} style={{ fontSize: 11, fontWeight: 700, textTransform: "capitalize", padding: "5px 12px", border: "none", cursor: "pointer", background: viewMode === mode ? "var(--accent)" : "transparent", color: viewMode === mode ? "#fff" : "var(--muted)" }}>{mode}</button>
+                <button key={mode} onClick={() => setViewMode(mode)} style={{ fontSize: 11, fontWeight: 600, textTransform: "capitalize", padding: "5px 12px", border: "none", cursor: "pointer", background: viewMode === mode ? "var(--accent)" : "transparent", color: viewMode === mode ? "#fff" : "var(--muted)" }}>{mode}</button>
               ))}
             </div>
             <span style={{ fontSize: 11, color: "var(--muted)" }}>Display:</span>
@@ -1022,7 +1022,7 @@ export default function Utilization() {
                 ["utilization", "Utilization"],
                 ["hours", "Hours"],
               ] as const).map(([mode, label]) => (
-                <button key={mode} onClick={() => setDisplayMode(mode)} style={{ fontSize: 11, fontWeight: 700, padding: "5px 10px", border: "none", cursor: "pointer", background: displayMode === mode ? "var(--accent)" : "transparent", color: displayMode === mode ? "#fff" : "var(--muted)" }}>{label}</button>
+                <button key={mode} onClick={() => setDisplayMode(mode)} style={{ fontSize: 11, fontWeight: 600, padding: "5px 10px", border: "none", cursor: "pointer", background: displayMode === mode ? "var(--accent)" : "transparent", color: displayMode === mode ? "#fff" : "var(--muted)" }}>{label}</button>
               ))}
             </div>
           </div>
@@ -1045,7 +1045,7 @@ export default function Utilization() {
           )}
           <button
             onClick={() => { setPersonFilter(null); setProjectFilter([]); setRoleFilter(null); setShowAllPeople(false); }}
-            style={{ marginLeft: "auto", border: "1px solid var(--border)", borderRadius: 999, background: "var(--surface)", color: "var(--accent)", fontSize: 10.5, fontWeight: 750, cursor: "pointer", padding: "6px 11px" }}
+            style={{ marginLeft: "auto", border: "1px solid var(--border)", borderRadius: 999, background: "var(--surface)", color: "var(--accent)", fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: "6px 11px" }}
           >
             Clear filters
           </button>
@@ -1054,28 +1054,28 @@ export default function Utilization() {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginBottom: 10 }}>
         <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "var(--surface)" }}>
-          <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>TEAM UTILIZATION</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>TEAM UTILIZATION</div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
-            <span style={{ fontSize: 23, fontWeight: 850, color: tierOf(teamPlanningSummary.utilizationPct).fg }}>{displayPct(teamPlanningSummary.utilizationPct)}%</span>
+            <span style={{ fontSize: 23, fontWeight: 600, color: tierOf(teamPlanningSummary.utilizationPct).fg }}>{displayPct(teamPlanningSummary.utilizationPct)}%</span>
             <span style={{ fontSize: 9.5, color: "var(--muted)" }}>{teamPlanningSummary.plannedHours.toFixed(1)}h / {teamPlanningSummary.capacityHours.toFixed(1)}h</span>
           </div>
           <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>{summaryDays.length ? `${summaryDays[0].toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${summaryDays[summaryDays.length-1].toLocaleDateString("en-US",{month:"short",day:"numeric"})}` : "Selected period"}</div>
         </div>
 
         <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "var(--surface)" }}>
-          <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>AVAILABLE CAPACITY</div>
-          <div style={{ fontSize: 23, fontWeight: 850, color: "#059669" }}>{teamPlanningSummary.availableCapacityHours.toFixed(1)}h</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>AVAILABLE CAPACITY</div>
+          <div style={{ fontSize: 23, fontWeight: 600, color: "#059669" }}>{teamPlanningSummary.availableCapacityHours.toFixed(1)}h</div>
           <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>Remaining positive capacity in the planning period</div>
         </div>
 
         <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "var(--surface)" }}>
-          <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>OVERALLOCATED MEMBERS</div>
-          <div style={{ fontSize: 23, fontWeight: 850, color: teamPlanningSummary.overloadedMembers > 0 ? "var(--danger)" : "#059669" }}>{teamPlanningSummary.overloadedMembers}</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>OVERALLOCATED MEMBERS</div>
+          <div style={{ fontSize: 23, fontWeight: 600, color: teamPlanningSummary.overloadedMembers > 0 ? "var(--danger)" : "#059669" }}>{teamPlanningSummary.overloadedMembers}</div>
           <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>Members with at least one day above 100%</div>
         </div>
 
         <div className="card" style={{ padding: "12px 14px", borderRadius: 16 }}>
-          <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 7 }}>PROJECT TYPE MIX</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 7 }}>PROJECT TYPE MIX</div>
           {teamProjectTypeMix.length === 0 ? (
             <div style={{ fontSize: 10, color: "var(--muted)" }}>No typed project effort in this period.</div>
           ) : (
@@ -1084,7 +1084,7 @@ export default function Utilization() {
                 const tone = PROJECT_TYPE_TONES[mi % PROJECT_TYPE_TONES.length];
                 const share = teamProjectTypeTotal > 0 ? Math.round((mix.hours / teamProjectTypeTotal) * 100) : 0;
                 return (
-                  <span key={mix.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 9.5, fontWeight: 800 }}>
+                  <span key={mix.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 9.5, fontWeight: 600 }}>
                     <span style={{ width: 6, height: 6, borderRadius: "50%", background: tone.dot }} />
                     {mix.name} {share}%
                   </span>
@@ -1100,17 +1100,17 @@ export default function Utilization() {
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
               <AlertTriangle size={14} style={{ color: topCapacityRisks.length ? "var(--danger)" : "#059669" }} />
-              <span style={{ fontSize: 11, fontWeight: 850, color: "var(--navy)" }}>Needs Attention</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)" }}>Needs Attention</span>
             </div>
             <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>Highest daily capacity risks in the selected planning period. Click one for the daily allocation.</div>
           </div>
-          <span style={{ fontSize: 9.5, fontWeight: 800, color: topCapacityRisks.length ? "var(--danger)" : "#059669", padding: "5px 9px", borderRadius: 999, background: topCapacityRisks.length ? "rgba(239,68,68,.07)" : "rgba(16,185,129,.08)" }}>
+          <span style={{ fontSize: 9.5, fontWeight: 600, color: topCapacityRisks.length ? "var(--danger)" : "#059669", padding: "5px 9px", borderRadius: 999, background: topCapacityRisks.length ? "rgba(239,68,68,.07)" : "rgba(16,185,129,.08)" }}>
             {capacityRisks.length} risk{capacityRisks.length === 1 ? "" : "s"}
           </span>
         </div>
 
         {topCapacityRisks.length === 0 ? (
-          <div style={{ fontSize: 10.5, color: "#059669", fontWeight: 700 }}>No team member exceeds daily capacity in this planning period.</div>
+          <div style={{ fontSize: 10.5, color: "#059669", fontWeight: 600 }}>No team member exceeds daily capacity in this planning period.</div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(150px, 1fr))", gap: 8, overflowX: "auto" }}>
             {topCapacityRisks.map((risk) => (
@@ -1129,11 +1129,11 @@ export default function Utilization() {
                   cursor: "pointer",
                 }}
               >
-                <div style={{ fontSize: 10.5, fontWeight: 850, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{risk.person.name}</div>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{risk.person.name}</div>
                 <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 1 }}>{parseLocalDate(risk.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginTop: 6 }}>
-                  <span style={{ fontSize: 18, fontWeight: 850, color: "var(--danger)" }}>{displayPct(risk.pct)}%</span>
-                  <span style={{ fontSize: 9, fontWeight: 750, color: "var(--danger)" }}>+{risk.overHours.toFixed(1)}h</span>
+                  <span style={{ fontSize: 18, fontWeight: 600, color: "var(--danger)" }}>{displayPct(risk.pct)}%</span>
+                  <span style={{ fontSize: 9, fontWeight: 600, color: "var(--danger)" }}>+{risk.overHours.toFixed(1)}h</span>
                 </div>
                 <div style={{ fontSize: 8.8, color: "var(--muted)", marginTop: 4 }}>Task {risk.taskHours.toFixed(1)}h · PM {risk.pmHours.toFixed(1)}h</div>
               </button>
@@ -1206,7 +1206,7 @@ export default function Utilization() {
                           borderLeft: wi === 0 ? undefined : "1px solid var(--border)",
                         }}
                       >
-                        <div style={{ fontWeight: 800 }}>Week {isoWeekNumber(week[0])}</div>
+                        <div style={{ fontWeight: 600 }}>Week {isoWeekNumber(week[0])}</div>
                         <div style={{ marginTop: 2, fontSize: 9.5, color: "var(--muted)", fontWeight: 600 }}>
                           {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {week[6].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                         </div>
@@ -1483,7 +1483,7 @@ export default function Utilization() {
           <div style={{ padding: "14px 15px 12px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
             <div>
               <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 2 }}>{selectedPerson.name}</div>
-              <div style={{ fontSize: 14, fontWeight: 850, color: "var(--navy)" }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--navy)" }}>
                 {parseLocalDate(selectedCell.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
               </div>
               <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3 }}>Daily allocation</div>
@@ -1496,7 +1496,7 @@ export default function Utilization() {
           <div style={{ padding: 15 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
               {selectedPct > 100 ? <AlertTriangle size={16} style={{ color: "var(--danger)" }} /> : <Gauge size={16} style={{ color: "var(--accent)" }} />}
-              <span style={{ fontSize: 25, lineHeight: 1, fontWeight: 850, color: selectedPct > 100 ? "var(--danger)" : tierOf(selectedPct).fg }}>
+              <span style={{ fontSize: 25, lineHeight: 1, fontWeight: 600, color: selectedPct > 100 ? "var(--danger)" : tierOf(selectedPct).fg }}>
                 {displayPct(selectedPct)}%
               </span>
               <span style={{ fontSize: 10, color: "var(--muted)" }}>{selectedAllocated.toFixed(1)}h allocated / {selectedCapacity.toFixed(1)}h capacity</span>
@@ -1504,15 +1504,15 @@ export default function Utilization() {
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 7, marginBottom: 15 }}>
               <div style={{ padding: 9, border: "1px solid var(--border)", borderRadius: 12, textAlign: "center", background: "var(--hover-bg)" }}>
-                <div style={{ fontSize: 13, fontWeight: 850, color: "var(--navy)" }}>{selectedCapacity.toFixed(1)}h</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>{selectedCapacity.toFixed(1)}h</div>
                 <div style={{ fontSize: 9, color: "var(--muted)" }}>Capacity</div>
               </div>
               <div style={{ padding: 9, border: "1px solid var(--border)", borderRadius: 12, textAlign: "center", background: "var(--hover-bg)" }}>
-                <div style={{ fontSize: 13, fontWeight: 850, color: "var(--navy)" }}>{selectedAllocated.toFixed(1)}h</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>{selectedAllocated.toFixed(1)}h</div>
                 <div style={{ fontSize: 9, color: "var(--muted)" }}>Allocated</div>
               </div>
               <div style={{ padding: 9, border: "1px solid var(--border)", borderRadius: 12, textAlign: "center", background: selectedAllocated > selectedCapacity ? "rgba(239,68,68,.06)" : "rgba(16,185,129,.06)" }}>
-                <div style={{ fontSize: 13, fontWeight: 850, color: selectedAllocated > selectedCapacity ? "var(--danger)" : "#059669" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: selectedAllocated > selectedCapacity ? "var(--danger)" : "#059669" }}>
                   {selectedAllocated > selectedCapacity ? "+" : ""}{(selectedAllocated - selectedCapacity).toFixed(1)}h
                 </div>
                 <div style={{ fontSize: 9, color: "var(--muted)" }}>{selectedAllocated > selectedCapacity ? "Over" : "Remaining"}</div>
@@ -1520,7 +1520,7 @@ export default function Utilization() {
             </div>
 
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 7 }}>
-              <div style={{ fontSize: 10.5, fontWeight: 850, color: "var(--navy)" }}>Work assigned this day</div>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>Work assigned this day</div>
               <button
                 onClick={() => {
                   setDetailPersonId(selectedPerson.id);
@@ -1528,7 +1528,7 @@ export default function Utilization() {
                   const clickedWeek = weeks.findIndex((week) => week.some((wd) => toISO(wd) === selectedCell.dateStr));
                   if (clickedWeek >= 0) setDetailWeekIndex(clickedWeek);
                 }}
-                style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 9.5, fontWeight: 800, cursor: "pointer" }}
+                style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 9.5, fontWeight: 600, cursor: "pointer" }}
               >
                 Open full view
               </button>
@@ -1542,7 +1542,7 @@ export default function Utilization() {
                   <div key={r.id} style={{ display: "grid", gridTemplateColumns: "22px 1fr 70px", gap: 8, alignItems: "start", padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
                     <div style={{ fontSize: 9.5, color: "var(--muted)", paddingTop: 1 }}>{i + 1}</div>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 10.5, fontWeight: 750, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.label}</div>
+                      <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.label}</div>
                       <div style={{ fontSize: 9.5, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.projectName}</div>
                       <div style={{ fontSize: 9.2, color: "var(--accent)", marginTop: 2 }}>Added {formatWorkloadDate(r.entry)}</div>
                       {r.kind === "task" && (
@@ -1554,13 +1554,13 @@ export default function Utilization() {
                             setScenarioStart(task.start_date ?? task.current_due_date);
                             setScenarioDue(task.current_due_date);
                           }}
-                          style={{ marginTop: 5, border: "none", background: "rgba(59,130,246,.08)", color: "var(--accent)", borderRadius: 999, padding: "4px 8px", fontSize: 8.8, fontWeight: 800, cursor: "pointer" }}
+                          style={{ marginTop: 5, border: "none", background: "rgba(59,130,246,.08)", color: "var(--accent)", borderRadius: 999, padding: "4px 8px", fontSize: 8.8, fontWeight: 600, cursor: "pointer" }}
                         >
                           Preview rebalance
                         </button>
                       )}
                     </div>
-                    <div style={{ textAlign: "right", fontSize: 10.5, fontWeight: 850, color: "var(--navy)" }}>{r.hours.toFixed(1)}h</div>
+                    <div style={{ textAlign: "right", fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>{r.hours.toFixed(1)}h</div>
                   </div>
                 ))}
               </div>
@@ -1595,9 +1595,9 @@ export default function Utilization() {
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
                   <Sparkles size={15} style={{ color: "var(--accent)" }} />
-                  <span style={{ fontSize: 10, fontWeight: 850, color: "var(--accent)", letterSpacing: ".04em" }}>SCENARIO PREVIEW</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: "var(--accent)", letterSpacing: ".04em" }}>SCENARIO PREVIEW</span>
                 </div>
-                <div style={{ fontSize: 16, fontWeight: 850, color: "var(--navy)" }}>{scenarioTask.name}</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: "var(--navy)" }}>{scenarioTask.name}</div>
                 <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 2 }}>{scenarioProject.name} · {scenarioPerson.name}</div>
               </div>
               <button onClick={() => setScenarioTaskId(null)} style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer" }}><X size={17} /></button>
@@ -1608,7 +1608,7 @@ export default function Utilization() {
                 Preview only. This does not change the WBS, task list, baseline, assignee history, or audit trail.
               </div>
 
-              <div style={{ fontSize: 10, fontWeight: 850, color: "var(--navy)", marginBottom: 8 }}>Try a different schedule</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)", marginBottom: 8 }}>Try a different schedule</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 28px 1fr", gap: 8, alignItems: "end", marginBottom: 15 }}>
                 <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
                   Proposed start
@@ -1623,18 +1623,18 @@ export default function Utilization() {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 14 }}>
                 <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 14, background: "var(--hover-bg)" }}>
-                  <div style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", marginBottom: 4 }}>CURRENT PEAK</div>
-                  <div style={{ fontSize: 21, fontWeight: 850, color: tierOf(scenarioImpact?.currentPeak ?? 0).fg }}>{displayPct(scenarioImpact?.currentPeak ?? 0)}%</div>
+                  <div style={{ fontSize: 9, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>CURRENT PEAK</div>
+                  <div style={{ fontSize: 21, fontWeight: 600, color: tierOf(scenarioImpact?.currentPeak ?? 0).fg }}>{displayPct(scenarioImpact?.currentPeak ?? 0)}%</div>
                   <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>{scenarioImpact?.currentOverDays ?? 0} overloaded day{(scenarioImpact?.currentOverDays ?? 0) === 1 ? "" : "s"}</div>
                 </div>
                 <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 14, background: (scenarioImpact?.proposedPeak ?? 0) > 100 ? "rgba(239,68,68,.04)" : "rgba(16,185,129,.05)" }}>
-                  <div style={{ fontSize: 9, fontWeight: 800, color: "var(--muted)", marginBottom: 4 }}>PROPOSED PEAK</div>
-                  <div style={{ fontSize: 21, fontWeight: 850, color: tierOf(scenarioImpact?.proposedPeak ?? 0).fg }}>{displayPct(scenarioImpact?.proposedPeak ?? 0)}%</div>
+                  <div style={{ fontSize: 9, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>PROPOSED PEAK</div>
+                  <div style={{ fontSize: 21, fontWeight: 600, color: tierOf(scenarioImpact?.proposedPeak ?? 0).fg }}>{displayPct(scenarioImpact?.proposedPeak ?? 0)}%</div>
                   <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>{scenarioImpact?.proposedOverDays ?? 0} overloaded day{(scenarioImpact?.proposedOverDays ?? 0) === 1 ? "" : "s"}</div>
                 </div>
               </div>
 
-              <div style={{ fontSize: 10, fontWeight: 850, color: "var(--navy)", marginBottom: 7 }}>Affected days</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)", marginBottom: 7 }}>Affected days</div>
               {!scenarioImpact || scenarioImpact.rows.length === 0 ? (
                 <div style={{ padding: 14, border: "1px dashed var(--border)", borderRadius: 12, color: "var(--muted)", fontSize: 10 }}>Change the proposed dates to see the capacity impact.</div>
               ) : (
@@ -1642,16 +1642,16 @@ export default function Utilization() {
                   {scenarioImpact.rows.slice(0, 12).map((row) => (
                     <div key={row.dateStr} style={{ display: "grid", gridTemplateColumns: "110px 1fr 24px 1fr", gap: 8, alignItems: "center", padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
                       <div>
-                        <div style={{ fontSize: 10, fontWeight: 750, color: "var(--navy)" }}>{parseLocalDate(row.dateStr).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)" }}>{parseLocalDate(row.dateStr).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
                         <div style={{ fontSize: 8.8, color: "var(--muted)" }}>{row.capacity.toFixed(1)}h capacity</div>
                       </div>
                       <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 10.5, fontWeight: 800, color: tierOf(row.currentPct).fg }}>{displayPct(row.currentPct)}%</div>
+                        <div style={{ fontSize: 10.5, fontWeight: 600, color: tierOf(row.currentPct).fg }}>{displayPct(row.currentPct)}%</div>
                         <div style={{ fontSize: 8.8, color: "var(--muted)" }}>{row.current.toFixed(1)}h</div>
                       </div>
                       <ArrowRight size={12} style={{ color: "var(--muted)" }} />
                       <div>
-                        <div style={{ fontSize: 10.5, fontWeight: 800, color: tierOf(row.proposedPct).fg }}>{displayPct(row.proposedPct)}%</div>
+                        <div style={{ fontSize: 10.5, fontWeight: 600, color: tierOf(row.proposedPct).fg }}>{displayPct(row.proposedPct)}%</div>
                         <div style={{ fontSize: 8.8, color: row.delta > 0 ? "var(--danger)" : "#059669" }}>{row.proposed.toFixed(1)}h ({row.delta > 0 ? "+" : ""}{row.delta.toFixed(1)}h)</div>
                       </div>
                     </div>
@@ -1692,7 +1692,7 @@ export default function Utilization() {
           >
             <div style={{ padding: "16px 20px 13px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
               <div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: "var(--navy)", marginBottom: 2 }}>{detailPerson.name}</div>
+                <div style={{ fontSize: 18, fontWeight: 600, color: "var(--navy)", marginBottom: 2 }}>{detailPerson.name}</div>
                 <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{detailPerson.job_title ?? "Team member"}</div>
               </div>
               <button onClick={() => { setDetailPersonId(null); setSelectedCell(null); }} title="Close" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)", padding: 3 }}><X size={18} /></button>
@@ -1743,12 +1743,12 @@ export default function Utilization() {
             {detailTab !== "workload" && (
               <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--border)", background: "var(--hover-bg)" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
-                  <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: ".04em", color: "var(--muted)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".04em", color: "var(--muted)" }}>
                     {detailTab === "timeline" ? "SELECT WEEK TO VIEW" : "SELECT WEEK FOR PIPELINE IMPACT"}
                   </div>
                   <span style={{
                     fontSize: 9.5,
-                    fontWeight: 800,
+                    fontWeight: 600,
                     padding: "4px 9px",
                     borderRadius: 999,
                     background: detailPeriodKind === "historical" ? "rgba(100,116,139,.12)" : detailPeriodKind === "current" ? "rgba(20,184,166,.12)" : "rgba(59,130,246,.12)",
@@ -1778,13 +1778,13 @@ export default function Utilization() {
                             boxShadow: active ? "0 3px 10px rgba(15,35,65,.08)" : "none",
                           }}
                         >
-                          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--navy)", marginBottom: 2 }}>Week {isoWeekNumber(week[0])}</div>
-                          <div style={{ fontSize: 9.5, color: "var(--muted)", marginBottom: 3 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--navy)", marginBottom: 2 }}>Week {isoWeekNumber(week[0])}</div>
+                          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>
                             {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {week[6].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                           </div>
                           <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                            <span style={{ fontSize: 17, fontWeight: 800, color: tier.fg }}>{displayPct(stats.avgPct)}%</span>
-                            <span style={{ fontSize: 10, color: "var(--muted)" }}>{stats.plannedHours.toFixed(1)}h / {stats.availableHours.toFixed(1)}h</span>
+                            <span style={{ fontSize: 20, fontWeight: 600, color: tier.fg }}>{displayPct(stats.avgPct)}%</span>
+                            <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{stats.plannedHours.toFixed(1)}h / {stats.availableHours.toFixed(1)}h</span>
                           </div>
                         </button>
                       );
@@ -1793,7 +1793,7 @@ export default function Utilization() {
 
                   {detailSelectedWeekStats && (
                     <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", padding: "10px 12px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-                      <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--muted)", letterSpacing: ".03em", marginBottom: 8 }}>EFFORT MIX</div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", letterSpacing: ".03em", marginBottom: 8 }}>EFFORT MIX</div>
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         <div
                           title={`Task ${selectedWeekTaskHours.toFixed(1)}h · PM ${selectedWeekPmHours.toFixed(1)}h`}
@@ -1808,18 +1808,18 @@ export default function Utilization() {
                             position: "relative",
                           }}
                         >
-                          <div style={{ position: "absolute", inset: 9, borderRadius: "50%", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, color: "var(--navy)" }}>
+                          <div style={{ position: "absolute", inset: 9, borderRadius: "50%", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>
                             {selectedPeriodEffortTotal.toFixed(1)}h
                           </div>
                         </div>
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 6 }}>
-                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "var(--navy)", fontWeight: 700 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#2563eb" }} />Task</span>
-                            <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--navy)" }}>{selectedWeekTaskHours.toFixed(1)}h</span>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--navy)", fontWeight: 600 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#2563eb" }} />Task</span>
+                            <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>{selectedWeekTaskHours.toFixed(1)}h</span>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "var(--navy)", fontWeight: 700 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#8b5cf6" }} />PM</span>
-                            <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--navy)" }}>{selectedWeekPmHours.toFixed(1)}h</span>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--navy)", fontWeight: 600 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#8b5cf6" }} />PM</span>
+                            <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>{selectedWeekPmHours.toFixed(1)}h</span>
                           </div>
                         </div>
                       </div>
@@ -1828,7 +1828,7 @@ export default function Utilization() {
 
                   {detailSelectedWeekStats && (
                     <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", padding: "10px 12px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-                      <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--muted)", letterSpacing: ".03em", marginBottom: 8 }}>PROJECT TYPE MIX</div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", letterSpacing: ".03em", marginBottom: 8 }}>PROJECT TYPE MIX</div>
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         <div
                           title={projectTypeMix.map((mix) => `${mix.name} ${mix.totalHours.toFixed(1)}h`).join(" · ")}
@@ -1852,23 +1852,23 @@ export default function Utilization() {
                             position: "relative",
                           }}
                         >
-                          <div style={{ position: "absolute", inset: 10, borderRadius: "50%", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, color: "var(--navy)" }}>
+                          <div style={{ position: "absolute", inset: 10, borderRadius: "50%", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>
                             {projectTypeMixTotal.toFixed(1)}h
                           </div>
                         </div>
                         <div style={{ minWidth: 0, flex: 1 }}>
                           {projectTypeMix.length === 0 ? (
-                            <div style={{ fontSize: 10, color: "var(--muted)" }}>No typed effort</div>
+                            <div style={{ fontSize: 11.5, color: "var(--muted)" }}>No typed effort</div>
                           ) : projectTypeMix.map((mix, mi) => {
                             const tone = PROJECT_TYPE_TONES[mi % PROJECT_TYPE_TONES.length];
                             const share = projectTypeMixTotal > 0 ? Math.round((mix.totalHours / projectTypeMixTotal) * 100) : 0;
                             return (
                               <div key={mix.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: mi === projectTypeMix.length - 1 ? 0 : 5 }}>
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0, fontSize: 10, color: "var(--navy)", fontWeight: 700 }}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0, fontSize: 11.5, color: "var(--navy)", fontWeight: 600 }}>
                                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: tone.dot, flexShrink: 0 }} />
                                   <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{mix.name}</span>
                                 </span>
-                                <span style={{ fontSize: 10, fontWeight: 800, color: tone.fg, whiteSpace: "nowrap" }}>{share}%</span>
+                                <span style={{ fontSize: 11.5, fontWeight: 600, color: tone.fg, whiteSpace: "nowrap" }}>{share}%</span>
                               </div>
                             );
                           })}
@@ -1887,14 +1887,14 @@ export default function Utilization() {
                   <div style={{ maxWidth: "none" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 14, marginBottom: 14 }}>
                       <div>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: "var(--navy)" }}>{workloadScope === "active" ? "Active scoped workload" : "Completed / historical workload"}</div>
+                        <div style={{ fontSize: 16, fontWeight: 600, color: "var(--navy)" }}>{workloadScope === "active" ? "Active scoped workload" : "Completed / historical workload"}</div>
                         <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3 }}>
                           {workloadScope === "active" ? "Work that can still consume future capacity." : "Completed and cancelled work retained for historical reference."}
                         </div>
                       </div>
                       <div style={{ display: "inline-flex", gap: 3, padding: 3, background: "var(--hover-bg)", borderRadius: 999 }}>
-                        <button onClick={() => setWorkloadScope("active")} style={{ border: "none", borderRadius: 999, padding: "7px 12px", background: workloadScope === "active" ? "var(--surface)" : "transparent", boxShadow: workloadScope === "active" ? "0 2px 7px rgba(15,35,65,.09)" : "none", color: workloadScope === "active" ? "var(--accent)" : "var(--muted)", fontSize: 12, fontWeight: 750, cursor: "pointer" }}>Active ({detailActiveTasks.length})</button>
-                        <button onClick={() => setWorkloadScope("historical")} style={{ border: "none", borderRadius: 999, padding: "7px 12px", background: workloadScope === "historical" ? "var(--surface)" : "transparent", boxShadow: workloadScope === "historical" ? "0 2px 7px rgba(15,35,65,.09)" : "none", color: workloadScope === "historical" ? "var(--accent)" : "var(--muted)", fontSize: 12, fontWeight: 750, cursor: "pointer" }}>Historical ({detailHistoricalTasks.length})</button>
+                        <button onClick={() => setWorkloadScope("active")} style={{ border: "none", borderRadius: 999, padding: "7px 12px", background: workloadScope === "active" ? "var(--surface)" : "transparent", boxShadow: workloadScope === "active" ? "0 2px 7px rgba(15,35,65,.09)" : "none", color: workloadScope === "active" ? "var(--accent)" : "var(--muted)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Active ({detailActiveTasks.length})</button>
+                        <button onClick={() => setWorkloadScope("historical")} style={{ border: "none", borderRadius: 999, padding: "7px 12px", background: workloadScope === "historical" ? "var(--surface)" : "transparent", boxShadow: workloadScope === "historical" ? "0 2px 7px rgba(15,35,65,.09)" : "none", color: workloadScope === "historical" ? "var(--accent)" : "var(--muted)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Historical ({detailHistoricalTasks.length})</button>
                       </div>
                     </div>
 
@@ -1912,26 +1912,26 @@ export default function Utilization() {
                           <div style={{ padding: "10px 12px", background: "var(--hover-bg)", display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 130px 170px", gap: 16, alignItems: "center" }}>
                             <div>
                               <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                                <div style={{ fontSize: 14, fontWeight: 800, color: "var(--navy)" }}>{project?.name ?? "Unknown project"}</div>
-                                {projectType && <span style={{ fontSize: 10.5, fontWeight: 800, padding: "3px 7px", borderRadius: 999, background: "rgba(59,130,246,.09)", color: "var(--accent)" }}>{projectType.name}</span>}
+                                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--navy)" }}>{project?.name ?? "Unknown project"}</div>
+                                {projectType && <span style={{ fontSize: 10.5, fontWeight: 600, padding: "3px 7px", borderRadius: 999, background: "rgba(59,130,246,.09)", color: "var(--accent)" }}>{projectType.name}</span>}
                               </div>
                               <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3 }}>{pTasks.length} task{pTasks.length === 1 ? "" : "s"} · {workloadScope === "active" ? "Planning" : "Historical"}</div>
                             </div>
                             <div style={{ textAlign: "center" }}>
                               <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 2 }}>Scoped</div>
-                              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--navy)" }}>{totalHours.toFixed(1)}h</div>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--navy)" }}>{totalHours.toFixed(1)}h</div>
                             </div>
                             <div style={{ textAlign: "center" }}>
                               <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 2 }}>First Added</div>
-                              <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--accent)" }}>{earliest ? formatWorkloadDate(earliest) : "—"}</div>
+                              <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)" }}>{earliest ? formatWorkloadDate(earliest) : "—"}</div>
                             </div>
                           </div>
                           <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 130px 125px 165px 165px", columnGap: 18, alignItems: "center", padding: "8px 12px", background: "rgba(15,35,65,.025)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Task</div>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "center" }}>Status</div>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "center" }}>Scoped Hours</div>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "center" }}>Date Assigned</div>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "center" }}>Week Coverage</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Task</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>Status</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>Scoped Hours</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>Date Assigned</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>Week Coverage</div>
                           </div>
                           {pTasks.map((t) => {
                             const entry = workloadEntryFor(t, detailPerson.id);
@@ -1939,8 +1939,8 @@ export default function Utilization() {
                             return (
                               <div key={t.id} style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 130px 125px 165px 165px", columnGap: 18, alignItems: "center", padding: "8px 12px", borderBottom: "1px solid var(--border)" }}>
                                 <div style={{ fontSize: 12.5, color: "var(--text-secondary)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</div>
-                                <div style={{ textAlign: "center" }}><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span></div>
-                                <div style={{ textAlign: "center", fontSize: 12.5, fontWeight: 750, color: "var(--navy)" }}>{(t.estimated_hours ?? 0).toFixed(1)}h</div>
+                                <div style={{ textAlign: "center" }}><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span></div>
+                                <div style={{ textAlign: "center", fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>{(t.estimated_hours ?? 0).toFixed(1)}h</div>
                                 <div title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ textAlign: "center", fontSize: 12, color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 650, whiteSpace: "nowrap" }}>{formatWorkloadDate(entry)}</div>
                                 <div style={{ textAlign: "center", fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
                                   {t.start_date ? parseLocalDate(t.start_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"} – {t.current_due_date ? parseLocalDate(t.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
@@ -1965,7 +1965,7 @@ export default function Utilization() {
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
                       <div>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: "var(--navy)" }}>Weekly timeline</div>
+                        <div style={{ fontSize: 16, fontWeight: 600, color: "var(--navy)" }}>Weekly timeline</div>
                         <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
                           {detailWeek.length ? `Week ${isoWeekNumber(detailWeek[0])} · ${detailWeek[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${detailWeek[6].toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
                         </div>
@@ -1985,8 +1985,8 @@ export default function Utilization() {
                             <th style={{ textAlign: "left", padding: "9px 8px", borderBottom: "1px solid var(--border)", width: 125 }}>Date Assigned</th>
                             {detailDayStats.map((ds) => (
                               <th key={ds.dateStr} style={{ textAlign: "center", padding: "8px 5px", borderBottom: "1px solid var(--border)", minWidth: 76, background: ds.tier.bg }}>
-                                <div style={{ fontSize: 11.5, fontWeight: 800, color: "var(--navy)" }}>{WEEKDAY_LABEL[parseLocalDate(ds.dateStr).getDay()]} {parseLocalDate(ds.dateStr).getDate()}</div>
-                                <div style={{ marginTop: 3, fontSize: 13.5, fontWeight: 850, color: ds.tier.fg }}>{ds.capacity > 0 ? `${displayPct(ds.pct)}%` : "—"}</div>
+                                <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>{WEEKDAY_LABEL[parseLocalDate(ds.dateStr).getDay()]} {parseLocalDate(ds.dateStr).getDate()}</div>
+                                <div style={{ marginTop: 3, fontSize: 13.5, fontWeight: 600, color: ds.tier.fg }}>{ds.capacity > 0 ? `${displayPct(ds.pct)}%` : "—"}</div>
                                 <div style={{ fontSize: 10.5, fontWeight: 600, color: ds.tier.fg, opacity: .8 }}>{ds.allocated.toFixed(1)}h / {ds.capacity.toFixed(1)}h</div>
                               </th>
                             ))}
@@ -2005,8 +2005,8 @@ export default function Utilization() {
                                   <tr style={{ background: "rgba(15,35,65,.035)" }}>
                                     <td colSpan={3 + detailDayStats.length} style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
                                       <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                                        <span style={{ fontSize: 12.5, fontWeight: 850, color: "var(--navy)" }}>{project?.name ?? "Unknown project"}</span>
-                                        {projectType && <span style={{ fontSize: 10.5, fontWeight: 800, padding: "3px 7px", borderRadius: 999, background: "rgba(59,130,246,.09)", color: "var(--accent)" }}>{projectType.name}</span>}
+                                        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>{project?.name ?? "Unknown project"}</span>
+                                        {projectType && <span style={{ fontSize: 10.5, fontWeight: 600, padding: "3px 7px", borderRadius: 999, background: "rgba(59,130,246,.09)", color: "var(--accent)" }}>{projectType.name}</span>}
                                       </div>
                                     </td>
                                   </tr>
@@ -2016,8 +2016,8 @@ export default function Utilization() {
                                     return (
                                       <tr key={t.id}>
                                         <td style={{ padding: "8px 10px 8px 18px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)", fontSize: 12.5 }}>{t.name}</td>
-                                        <td style={{ padding: "8px", borderBottom: "1px solid var(--border)" }}><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span></td>
-                                        <td title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ padding: "8px", borderBottom: "1px solid var(--border)", color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 700, whiteSpace: "nowrap", fontSize: 12 }}>{formatWorkloadDate(entry)}</td>
+                                        <td style={{ padding: "8px", borderBottom: "1px solid var(--border)" }}><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span></td>
+                                        <td title={entry.estimated ? "Estimated from historical task order" : "Date this task entered this person's workload"} style={{ padding: "8px", borderBottom: "1px solid var(--border)", color: entry.estimated ? "var(--muted)" : "var(--accent)", fontWeight: 600, whiteSpace: "nowrap", fontSize: 12 }}>{formatWorkloadDate(entry)}</td>
                                         {detailDayStats.map((ds) => {
                                           const value = taskValueForDate(detailPerson, t, ds.dateStr);
                                           return (
@@ -2045,15 +2045,15 @@ export default function Utilization() {
                 {detailTab === "pipeline" && (
                   <div style={{ maxWidth: "none" }}>
                     <div style={{ marginBottom: 14 }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: "var(--navy)" }}>Pipeline sequence</div>
+                      <div style={{ fontSize: 16, fontWeight: 600, color: "var(--navy)" }}>Pipeline sequence</div>
                       <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3 }}>
                         Work contributing to the selected period, shown in the order it entered {detailPerson.name}'s workload. Completed work remains available in historical periods but is excluded from future planning once it no longer consumes capacity.
                       </div>
                     </div>
                     {detailSelectedWeekStats && (
                       <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-                        <div style={{ padding: "10px 13px", border: "1px solid var(--border)", borderRadius: 10 }}><div style={{ fontSize: 11, color: "var(--muted)" }}>Selected week capacity</div><div style={{ fontSize: 15, fontWeight: 800, color: "var(--navy)" }}>{detailSelectedWeekStats.availableHours.toFixed(1)}h</div></div>
-                        <div style={{ padding: "10px 13px", border: "1px solid var(--border)", borderRadius: 10 }}><div style={{ fontSize: 11, color: "var(--muted)" }}>Planned this week</div><div style={{ fontSize: 15, fontWeight: 800, color: "var(--navy)" }}>{detailSelectedWeekStats.plannedHours.toFixed(1)}h</div></div>
+                        <div style={{ padding: "10px 13px", border: "1px solid var(--border)", borderRadius: 10 }}><div style={{ fontSize: 11, color: "var(--muted)" }}>Selected week capacity</div><div style={{ fontSize: 15, fontWeight: 600, color: "var(--navy)" }}>{detailSelectedWeekStats.availableHours.toFixed(1)}h</div></div>
+                        <div style={{ padding: "10px 13px", border: "1px solid var(--border)", borderRadius: 10 }}><div style={{ fontSize: 11, color: "var(--muted)" }}>Planned this week</div><div style={{ fontSize: 15, fontWeight: 600, color: "var(--navy)" }}>{detailSelectedWeekStats.plannedHours.toFixed(1)}h</div></div>
                       </div>
                     )}
                     {pipelineRows.length === 0 ? (
@@ -2061,7 +2061,7 @@ export default function Utilization() {
                     ) : (
                       <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--surface)" }}>
                         <div style={{ display: "grid", gridTemplateColumns: "56px minmax(240px,1fr) 120px 105px 130px 150px 125px", gap: 10, padding: "8px 12px", background: "var(--hover-bg)", borderBottom: "1px solid var(--border)", alignItems: "center" }}>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Seq.</div><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Task</div><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Status</div><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "right" }}>Scoped Hours</div><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Date Assigned</div><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)" }}>Week Coverage</div><div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted)", textAlign: "right" }}>Selected Impact</div>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Seq.</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Task</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Status</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "right" }}>Scoped Hours</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Date Assigned</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Week Coverage</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "right" }}>Selected Impact</div>
                         </div>
                         {pipelineRows.map((row, idx) => {
                           const project = projects.find((p) => p.id === row.task.project_id);
@@ -2069,13 +2069,13 @@ export default function Utilization() {
                           const tone = taskStatusTone(row.task.status);
                           return (
                             <div key={row.task.id} style={{ display: "grid", gridTemplateColumns: "56px minmax(240px,1fr) 120px 105px 130px 150px 125px", gap: 10, padding: "10px 12px", alignItems: "center", borderBottom: "1px solid var(--border)", background: crossed ? "rgba(210,55,55,.045)" : "var(--surface)" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: crossed ? "var(--danger)" : "var(--accent)" }} /><span style={{ fontSize: 12, fontWeight: 800, color: "var(--navy)" }}>{idx + 1}</span></div>
-                              <div style={{ minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 800, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.task.name}</div><div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>{project?.name ?? "No project"}</div>{crossed && <div style={{ marginTop: 4, fontSize: 11, fontWeight: 700, color: "var(--danger)" }}>First task taking selected-week task allocation above capacity.</div>}</div>
-                              <div><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>{row.task.status ?? "—"}</span></div>
-                              <div style={{ textAlign: "right", fontSize: 12.5, fontWeight: 750, color: "var(--navy)" }}>{(row.task.estimated_hours ?? 0).toFixed(1)}h</div>
-                              <div title={row.entry.estimated ? "Estimated from historical task order" : undefined} style={{ fontSize: 12, fontWeight: 700, color: row.entry.estimated ? "var(--muted)" : "var(--accent)", whiteSpace: "nowrap" }}>{formatWorkloadDate(row.entry)}</div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: crossed ? "var(--danger)" : "var(--accent)" }} /><span style={{ fontSize: 12, fontWeight: 600, color: "var(--navy)" }}>{idx + 1}</span></div>
+                              <div style={{ minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.task.name}</div><div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>{project?.name ?? "No project"}</div>{crossed && <div style={{ marginTop: 4, fontSize: 11, fontWeight: 600, color: "var(--danger)" }}>First task taking selected-week task allocation above capacity.</div>}</div>
+                              <div><span style={{ display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}>{row.task.status ?? "—"}</span></div>
+                              <div style={{ textAlign: "right", fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>{(row.task.estimated_hours ?? 0).toFixed(1)}h</div>
+                              <div title={row.entry.estimated ? "Estimated from historical task order" : undefined} style={{ fontSize: 12, fontWeight: 600, color: row.entry.estimated ? "var(--muted)" : "var(--accent)", whiteSpace: "nowrap" }}>{formatWorkloadDate(row.entry)}</div>
                               <div style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>{row.task.start_date ? parseLocalDate(row.task.start_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"} – {row.task.current_due_date ? parseLocalDate(row.task.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}</div>
-                              <div style={{ textAlign: "right" }}><div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--navy)" }}>+{row.weekHours.toFixed(1)}h</div><div style={{ fontSize: 11, color: row.cumulativePct > 100 ? "var(--danger)" : "var(--muted)", marginTop: 2 }}>{displayPct(row.cumulativePct)}% cumulative</div></div>
+                              <div style={{ textAlign: "right" }}><div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>+{row.weekHours.toFixed(1)}h</div><div style={{ fontSize: 11, color: row.cumulativePct > 100 ? "var(--danger)" : "var(--muted)", marginTop: 2 }}>{displayPct(row.cumulativePct)}% cumulative</div></div>
                             </div>
                           );
                         })}
@@ -2090,31 +2090,31 @@ export default function Utilization() {
                 <div style={{ borderLeft: "1px solid var(--border)", overflowY: "auto", padding: 16 }}>
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 12 }}>
                     <div>
-                      <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--navy)" }}>{parseLocalDate(selectedCell.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>{parseLocalDate(selectedCell.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</div>
                       <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>Selected utilization day</div>
                     </div>
                     <button onClick={() => setSelectedCell(null)} title="Close day details" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--muted)" }}><X size={14} /></button>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
                     {selectedPct > 100 ? <AlertTriangle size={15} style={{ color: "var(--danger)" }} /> : <Gauge size={15} style={{ color: "var(--accent)" }} />}
-                    <span style={{ fontSize: 22, fontWeight: 800, color: selectedPct > 100 ? "var(--danger)" : "var(--navy)" }}>{displayPct(selectedPct)}%</span>
+                    <span style={{ fontSize: 22, fontWeight: 600, color: selectedPct > 100 ? "var(--danger)" : "var(--navy)" }}>{displayPct(selectedPct)}%</span>
                     <span style={{ fontSize: 9.5, color: "var(--muted)" }}>{selectedAllocated.toFixed(1)}h / {selectedCapacity.toFixed(1)}h</span>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 14 }}>
-                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}><div style={{ fontSize: 12, fontWeight: 800 }}>{selectedCapacity.toFixed(1)}h</div><div style={{ fontSize: 9, color: "var(--muted)" }}>Capacity</div></div>
-                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}><div style={{ fontSize: 12, fontWeight: 800 }}>{selectedAllocated.toFixed(1)}h</div><div style={{ fontSize: 9, color: "var(--muted)" }}>Allocated</div></div>
-                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}><div style={{ fontSize: 12, fontWeight: 800, color: selectedAllocated > selectedCapacity ? "var(--danger)" : "var(--success)" }}>{selectedAllocated > selectedCapacity ? "+" : ""}{(selectedAllocated - selectedCapacity).toFixed(1)}h</div><div style={{ fontSize: 9, color: "var(--muted)" }}>{selectedAllocated > selectedCapacity ? "Over" : "Remaining"}</div></div>
+                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}><div style={{ fontSize: 12, fontWeight: 600 }}>{selectedCapacity.toFixed(1)}h</div><div style={{ fontSize: 9, color: "var(--muted)" }}>Capacity</div></div>
+                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}><div style={{ fontSize: 12, fontWeight: 600 }}>{selectedAllocated.toFixed(1)}h</div><div style={{ fontSize: 9, color: "var(--muted)" }}>Allocated</div></div>
+                    <div style={{ padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", textAlign: "center" }}><div style={{ fontSize: 12, fontWeight: 600, color: selectedAllocated > selectedCapacity ? "var(--danger)" : "var(--success)" }}>{selectedAllocated > selectedCapacity ? "+" : ""}{(selectedAllocated - selectedCapacity).toFixed(1)}h</div><div style={{ fontSize: 9, color: "var(--muted)" }}>{selectedAllocated > selectedCapacity ? "Over" : "Remaining"}</div></div>
                   </div>
-                  <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--navy)", marginBottom: 6 }}>Work contributing to this day</div>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>Work contributing to this day</div>
                   {selectedContributions.map((r, i) => (
                     <div key={r.id} style={{ padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{i + 1}. {r.label}</div>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{i + 1}. {r.label}</div>
                           <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{r.projectName}</div>
                           <div style={{ fontSize: 9.5, color: "var(--accent)", marginTop: 2 }}>Added {formatWorkloadDate(r.entry)}</div>
                         </div>
-                        <div style={{ fontSize: 10.5, fontWeight: 800 }}>{r.hours.toFixed(1)}h</div>
+                        <div style={{ fontSize: 10.5, fontWeight: 600 }}>{r.hours.toFixed(1)}h</div>
                       </div>
                     </div>
                   ))}
