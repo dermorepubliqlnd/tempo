@@ -865,6 +865,7 @@ function FilterChips({ more, setMore, people, lookups, popMode, popRoles, popMem
 }
 
 const EXEC_CSS = `
+.exec-dash{min-width:0;max-width:100%}
 .exec-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:10px}
 .exec-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
 .exec-fbtn{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);cursor:pointer;font:inherit;color:var(--navy);box-shadow:0 1px 2px rgba(15,41,66,.04)}
@@ -897,13 +898,13 @@ const EXEC_CSS = `
 .exec-caption{font-size:11px;color:var(--muted)}
 .exec-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
 .exec-grid-7{grid-template-columns:repeat(7,minmax(0,1fr))}
-@media (max-width:1280px){.exec-grid,.exec-grid-7{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media (max-width:1180px){.exec-grid,.exec-grid-7{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:820px){.exec-grid,.exec-grid-7{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.exec-kpi{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);text-decoration:none;color:inherit;transition:box-shadow .15s,border-color .15s}
+.exec-kpi{min-width:0;overflow:hidden;display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);text-decoration:none;color:inherit;transition:box-shadow .15s,border-color .15s}
 .exec-kpi:hover{border-color:#c9d3df;box-shadow:0 3px 10px rgba(15,41,66,.08)}
 .exec-kpi-icon{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;flex-shrink:0}
 .exec-kpi-label{font-size:11px;font-weight:600;color:var(--text-secondary);line-height:1.25}
 .exec-kpi-context{font-size:10px;color:var(--muted);line-height:1.2}
-.exec-kpi-value{font-size:22px;font-weight:700;line-height:1.2;margin-top:2px}
+.exec-kpi-value{font-size:clamp(17px,1.6vw,22px);white-space:nowrap;font-weight:700;line-height:1.2;margin-top:2px}
 .exec-kpi-sub{display:flex;align-items:center;gap:3px;font-size:10px;color:var(--muted);line-height:1.35}
 `;
