@@ -818,6 +818,7 @@ export default function Utilization() {
     return { ...type, taskHours, pmHours, totalHours: taskHours + pmHours };
   }).filter((x) => x.totalHours > 0);
   const projectTypeMixTotal = projectTypeMix.reduce((sum, x) => sum + x.totalHours, 0);
+  const selectedPeriodEffortTotal = selectedWeekTaskHours + selectedWeekPmHours;
 
   const detailDayStats = detailPerson
     ? detailWeek.map((d) => {
@@ -1757,59 +1758,125 @@ export default function Utilization() {
                   </span>
                 </div>
 
-                <div style={{ display: "flex", gap: 9, overflowX: "auto", paddingBottom: 8 }}>
-                  {detailWeekStats.map(({ week, stats }, wi) => {
-                    const tier = tierOf(stats.avgPct);
-                    const active = wi === safeDetailWeekIndex;
-                    return (
-                      <button
-                        key={wi}
-                        onClick={() => { setDetailWeekIndex(wi); setSelectedCell(null); }}
-                        style={{
-                          minWidth: 158,
-                          textAlign: "left",
-                          padding: "9px 11px",
-                          border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
-                          borderRadius: 14,
-                          background: tier.bg,
-                          cursor: "pointer",
-                          boxShadow: active ? "0 4px 12px rgba(15,35,65,.08)" : "none",
-                        }}
-                      >
-                        <div style={{ fontSize: 10, fontWeight: 800, color: "var(--navy)", marginBottom: 2 }}>Week {isoWeekNumber(week[0])}</div>
-                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginBottom: 3 }}>
-                          {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {week[6].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                        </div>
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                          <span style={{ fontSize: 17, fontWeight: 800, color: tier.fg }}>{displayPct(stats.avgPct)}%</span>
-                          <span style={{ fontSize: 10, color: "var(--muted)" }}>{stats.plannedHours.toFixed(1)}h / {stats.availableHours.toFixed(1)}h</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {detailSelectedWeekStats && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 9.5, fontWeight: 800, color: "var(--muted)", marginRight: 2 }}>MIX</span>
-                    <span style={{ fontSize: 9.5, fontWeight: 750, padding: "5px 9px", borderRadius: 999, background: "rgba(15,35,65,.06)", color: "var(--navy)" }}>
-                      Task {selectedWeekTaskHours.toFixed(1)}h
-                    </span>
-                    <span style={{ fontSize: 9.5, fontWeight: 750, padding: "5px 9px", borderRadius: 999, background: "rgba(99,102,241,.10)", color: "#4f46e5" }}>
-                      PM {selectedWeekPmHours.toFixed(1)}h
-                    </span>
-                    {projectTypeMix.map((mix, mi) => {
-                      const tone = PROJECT_TYPE_TONES[mi % PROJECT_TYPE_TONES.length];
-                      const share = projectTypeMixTotal > 0 ? Math.round((mix.totalHours / projectTypeMixTotal) * 100) : 0;
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 205px 245px", gap: 12, alignItems: "stretch" }}>
+                  <div style={{ display: "flex", gap: 9, overflowX: "auto", paddingBottom: 2 }}>
+                    {detailWeekStats.map(({ week, stats }, wi) => {
+                      const tier = tierOf(stats.avgPct);
+                      const active = wi === safeDetailWeekIndex;
                       return (
-                        <span key={mix.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 9.5, fontWeight: 800, padding: "5px 9px", borderRadius: 999, background: tone.bg, color: tone.fg }}>
-                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: tone.dot }} />
-                          {mix.name} {mix.totalHours.toFixed(1)}h · {share}%
-                        </span>
+                        <button
+                          key={wi}
+                          onClick={() => { setDetailWeekIndex(wi); setSelectedCell(null); }}
+                          style={{
+                            minWidth: 158,
+                            textAlign: "left",
+                            padding: "9px 11px",
+                            border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
+                            borderRadius: 10,
+                            background: tier.bg,
+                            cursor: "pointer",
+                            boxShadow: active ? "0 3px 10px rgba(15,35,65,.08)" : "none",
+                          }}
+                        >
+                          <div style={{ fontSize: 10, fontWeight: 800, color: "var(--navy)", marginBottom: 2 }}>Week {isoWeekNumber(week[0])}</div>
+                          <div style={{ fontSize: 9.5, color: "var(--muted)", marginBottom: 3 }}>
+                            {week[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {week[6].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                            <span style={{ fontSize: 17, fontWeight: 800, color: tier.fg }}>{displayPct(stats.avgPct)}%</span>
+                            <span style={{ fontSize: 10, color: "var(--muted)" }}>{stats.plannedHours.toFixed(1)}h / {stats.availableHours.toFixed(1)}h</span>
+                          </div>
+                        </button>
                       );
                     })}
                   </div>
-                )}
+
+                  {detailSelectedWeekStats && (
+                    <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", padding: "10px 12px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                      <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--muted)", letterSpacing: ".03em", marginBottom: 8 }}>EFFORT MIX</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div
+                          title={`Task ${selectedWeekTaskHours.toFixed(1)}h · PM ${selectedWeekPmHours.toFixed(1)}h`}
+                          style={{
+                            width: 58,
+                            height: 58,
+                            borderRadius: "50%",
+                            flexShrink: 0,
+                            background: selectedPeriodEffortTotal > 0
+                              ? `conic-gradient(#2563eb 0 ${(selectedWeekTaskHours / selectedPeriodEffortTotal) * 100}%, #8b5cf6 ${(selectedWeekTaskHours / selectedPeriodEffortTotal) * 100}% 100%)`
+                              : "var(--hover-bg)",
+                            position: "relative",
+                          }}
+                        >
+                          <div style={{ position: "absolute", inset: 9, borderRadius: "50%", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, color: "var(--navy)" }}>
+                            {selectedPeriodEffortTotal.toFixed(1)}h
+                          </div>
+                        </div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 6 }}>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "var(--navy)", fontWeight: 700 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#2563eb" }} />Task</span>
+                            <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--navy)" }}>{selectedWeekTaskHours.toFixed(1)}h</span>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "var(--navy)", fontWeight: 700 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#8b5cf6" }} />PM</span>
+                            <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--navy)" }}>{selectedWeekPmHours.toFixed(1)}h</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {detailSelectedWeekStats && (
+                    <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", padding: "10px 12px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                      <div style={{ fontSize: 9.5, fontWeight: 800, color: "var(--muted)", letterSpacing: ".03em", marginBottom: 8 }}>PROJECT TYPE MIX</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div
+                          title={projectTypeMix.map((mix) => `${mix.name} ${mix.totalHours.toFixed(1)}h`).join(" · ")}
+                          style={{
+                            width: 66,
+                            height: 66,
+                            borderRadius: "50%",
+                            flexShrink: 0,
+                            background: projectTypeMixTotal > 0
+                              ? (() => {
+                                  let acc = 0;
+                                  const parts = projectTypeMix.map((mix, mi) => {
+                                    const tone = PROJECT_TYPE_TONES[mi % PROJECT_TYPE_TONES.length];
+                                    const start = acc;
+                                    acc += (mix.totalHours / projectTypeMixTotal) * 100;
+                                    return `${tone.dot} ${start}% ${acc}%`;
+                                  });
+                                  return `conic-gradient(${parts.join(", ")})`;
+                                })()
+                              : "var(--hover-bg)",
+                            position: "relative",
+                          }}
+                        >
+                          <div style={{ position: "absolute", inset: 10, borderRadius: "50%", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 800, color: "var(--navy)" }}>
+                            {projectTypeMixTotal.toFixed(1)}h
+                          </div>
+                        </div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          {projectTypeMix.length === 0 ? (
+                            <div style={{ fontSize: 10, color: "var(--muted)" }}>No typed effort</div>
+                          ) : projectTypeMix.map((mix, mi) => {
+                            const tone = PROJECT_TYPE_TONES[mi % PROJECT_TYPE_TONES.length];
+                            const share = projectTypeMixTotal > 0 ? Math.round((mix.totalHours / projectTypeMixTotal) * 100) : 0;
+                            return (
+                              <div key={mix.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: mi === projectTypeMix.length - 1 ? 0 : 5 }}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0, fontSize: 10, color: "var(--navy)", fontWeight: 700 }}>
+                                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: tone.dot, flexShrink: 0 }} />
+                                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{mix.name}</span>
+                                </span>
+                                <span style={{ fontSize: 10, fontWeight: 800, color: tone.fg, whiteSpace: "nowrap" }}>{share}%</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
