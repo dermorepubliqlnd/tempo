@@ -197,6 +197,9 @@ export default function TeamDashboard() {
   const [assigneeHistory, setAssigneeHistory] = useState<{ task_id: string; person_id: string; effective_from: string; effective_to: string | null }[]>([]);
   const [deletedHours, setDeletedHours] = useState<{ person_id: string; date: string; hours: number }[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
+  // Site Settings > Time tracking start date (phase126c): expected hours are
+  // only counted from this date, so pre-go-live months don't read as missing.
+  const [trackingStart, setTrackingStart] = useState<string>("2026-08-03");
   const [lookups, setLookups] = useState<{ sources: Lookup[]; planningTypes: Lookup[]; projectTypes: Lookup[]; categories: Lookup[] }>({ sources: [], planningTypes: [], projectTypes: [], categories: [] });
 
   // filters
@@ -218,8 +221,8 @@ export default function TeamDashboard() {
   async function load() {
     setLoading(true);
     // Time entries: finalized only, from the earliest date any KPI needs.
-    const weekStart = toISO(addDays(today, -((today.getDay() + 6) % 7)));
-    const earliest = [range.prevStart, range.start, range.qtd.prevStart, weekStart].sort()[0];
+    const lastWeekStart = toISO(addDays(today, -((today.getDay() + 6) % 7) - 7));
+    const earliest = [range.prevStart, range.start, range.qtd.prevStart, lastWeekStart].sort()[0];
     const [pe, pr, tk, hol, av, oh, ah, del, settings, src, pt, prt, cat, te] = await Promise.all([
       supabase.from("people").select("id,name,daily_capacity_hours,job_title").eq("is_active", true).order("name"),
       supabase.from("projects").select("*").eq("is_archived", false),
@@ -229,7 +232,7 @@ export default function TeamDashboard() {
       supabase.from("project_owner_history").select("project_id,person_id,effective_from,effective_to"),
       supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to"),
       supabase.from("deleted_person_day_hours").select("person_id,date,hours"),
-      supabase.from("app_settings").select("historical_locking_enabled").eq("id", true).single(),
+      supabase.from("app_settings").select("historical_locking_enabled,time_tracking_start_date").eq("id", true).single(),
       supabase.from("project_sources").select("id,name").order("sort_order"),
       supabase.from("project_planning_types").select("id,name").order("sort_order"),
       supabase.from("project_types").select("id,name").order("sort_order"),
@@ -245,7 +248,9 @@ export default function TeamDashboard() {
           .range(f, t)
       ),
     ]);
-    const hist = (settings.data as { historical_locking_enabled?: boolean } | null)?.historical_locking_enabled ?? false;
+    const sd = settings.data as { historical_locking_enabled?: boolean; time_tracking_start_date?: string | null } | null;
+    const hist = sd?.historical_locking_enabled ?? false;
+    if (sd?.time_tracking_start_date) setTrackingStart(sd.time_tracking_start_date.slice(0, 10));
     setPeople((pe.data as Person[]) ?? []);
     setProjects((pr.data as ProjectRow[]) ?? []);
     setTasks(tk);
@@ -453,14 +458,15 @@ export default function TeamDashboard() {
   // Expected hours across the elapsed part of the period (through today).
   const expectedInPeriod = useMemo(() => {
     const end = range.end < todayIso ? range.end : todayIso;
-    if (range.start > end) return 0;
+    const start = range.start > trackingStart ? range.start : trackingStart;
+    if (start > end) return 0;
     let sum = 0;
-    for (const d of eachDay(range.start, end)) {
+    for (const d of eachDay(start, end)) {
       if (!isWorkingDay(parseLocalDate(d), holidaySet)) continue;
       for (const p of popPeople) sum += expectedHoursForDay(p, availStatus.get(`${p.id}|${d}`));
     }
     return sum;
-  }, [range, todayIso, holidaySet, popPeople, availStatus]);
+  }, [range, todayIso, holidaySet, popPeople, availStatus, trackingStart]);
 
   // Overdue Tasks (current state): open leaf tasks past Target Due Date.
   const overdueTasks = useMemo(
@@ -478,11 +484,24 @@ export default function TeamDashboard() {
   );
   const overdueProjectCount = new Set(overdueTasks.map((t) => t.project_id)).size;
 
-  // Missing Hours (this week, Mon -> today): expected minus finalized logged,
-  // per person per elapsed working day -- same rule as My Dashboard.
+  // Missing Hours: expected minus finalized logged, per person per COMPLETED
+  // working day this week (Mon -> yesterday; today is excluded so a mid-day
+  // view doesn't count hours people simply haven't logged yet). When no
+  // working day has finished yet this week (e.g. Monday), shows last week.
+  // Sandra 2026-09-30. My Dashboard keeps its own include-today nudge.
   const missing = useMemo(() => {
-    const weekStart = toISO(addDays(today, -((today.getDay() + 6) % 7)));
-    const days = eachDay(weekStart, todayIso).filter((d) => isWorkingDay(parseLocalDate(d), holidaySet));
+    const thisMon = addDays(today, -((today.getDay() + 6) % 7));
+    const isWd = (d: string) => isWorkingDay(parseLocalDate(d), holidaySet) && d >= trackingStart;
+    const yesterday = toISO(addDays(today, -1));
+    let weekStart = toISO(thisMon);
+    let days = weekStart <= yesterday ? eachDay(weekStart, yesterday).filter(isWd) : [];
+    let label = "This week";
+    if (days.length === 0) {
+      weekStart = toISO(addDays(thisMon, -7));
+      days = eachDay(weekStart, toISO(addDays(thisMon, -1))).filter(isWd);
+      label = "Last week";
+    }
+    const rangeLabel = days.length ? `${fmtShort(days[0])}${days.length > 1 ? ` – ${fmtShort(days[days.length - 1])}` : ""}` : "";
     const loggedByPD = new Map<string, number>();
     for (const e of entries) {
       const d = entryDay(e);
@@ -503,9 +522,9 @@ export default function TeamDashboard() {
         members.push({ person: p, hours: m });
       }
     }
-    return { total, members, weekStart };
+    return { total, members, weekStart, label, rangeLabel };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, popPeople, availStatus, holidaySet, todayIso]);
+  }, [entries, popPeople, availStatus, holidaySet, todayIso, trackingStart]);
 
   // ---------------------------------------------------------- render
   // measure(start,end) -> value. Uses the period's own comparison; for YTD
@@ -583,10 +602,10 @@ export default function TeamDashboard() {
               <Kpi to="/utilization" tone="purple" icon={<Users size={18} />} label="Planned Utilization" context="Next 2 weeks" value={`${Math.round(horizon.util)}%`} sub={`${fmtH(horizon.planned)} of ${fmtH(horizon.cap)} capacity`} valueTone={horizon.util > 100 ? "red" : undefined} title={`Planned workload vs available capacity, ${fmtShort(todayIso)} – ${fmtShort(horizon.end)}. Same engine as the Utilization page.`} />
               <Kpi to="/utilization" tone="green" icon={<BatteryCharging size={18} />} label="Available Capacity" context="Next 2 weeks" value={fmtH(horizon.available)} sub={`${pctOf(horizon.available, horizon.cap)}% of capacity open`} title="Sum of unallocated hours per person per working day (an overloaded day doesn't cancel out someone else's free time)." />
               <Kpi to="/hours-overview" tone="blue" icon={<ClipboardList size={18} />} label="Scoped Hours" context={periodTag} value={fmtH(scoped)} trend={trend(scopedHoursIn)} title="Leaf-task Scoped Hours spread across each task's working days, counting only days inside the period. Parent tasks excluded (no double count)." />
-              <Kpi to="/hours-overview" tone="teal" icon={<Timer size={18} />} label="Logged Hours" context={periodTag} value={fmtH(logged)} sub={expectedInPeriod > 0 ? `${pctOf(logged, expectedInPeriod)}% of expected` : undefined} trend={trend((a, b) => loggedIn(a, b))} title={`Finalized (Confirmed/Approved) time only${moreActive ? ", project time within filtered projects" : ", incl. non-project time"}. Expected = ${fmtH(expectedInPeriod)} across elapsed working days.`} />
+              <Kpi to="/hours-overview" tone="teal" icon={<Timer size={18} />} label="Logged Hours" context={periodTag} value={fmtH(logged)} sub={expectedInPeriod > 0 ? `${pctOf(logged, expectedInPeriod)}% of expected` : undefined} trend={trend((a, b) => loggedIn(a, b))} title={`Finalized (Confirmed/Approved) time only${moreActive ? ", project time within filtered projects" : ", incl. non-project time"}. Expected = ${fmtH(expectedInPeriod)}: each person's daily capacity (adjusted for half-days, time off, holidays, weekends) across working days from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)} (time tracking start) to today.`} />
               <Kpi to="/utilization" tone="orange" icon={<UserX size={18} />} label="Overallocated Members" context="Next 2 weeks" value={horizon.over.length} sub="> 100% on at least 1 day" valueTone={horizon.over.length ? "orange" : undefined} title={horizon.over.length ? horizon.over.map((o) => `${o.person.name}: ${o.days} day(s), peak ${Math.round(o.peak)}%`).join("\n") : "Nobody above 100% in the next 2 weeks."} />
               <Kpi to="/projects" tone="red" icon={<AlertTriangle size={18} />} label="Overdue Tasks" context={`As of ${fmtShort(todayIso)}`} value={overdueTasks.length} sub={`Across ${overdueProjectCount} project${overdueProjectCount === 1 ? "" : "s"}`} valueTone={overdueTasks.length ? "red" : undefined} title="Open leaf tasks with Target Due Date before today. Paused-project tasks excluded." />
-              <Kpi to="/time-tracking?scope=all" tone="orange" icon={<Hourglass size={18} />} label="Missing Hours" context="This week" value={fmtH(missing.total)} sub={`${missing.members.length} member${missing.members.length === 1 ? "" : "s"}`} valueTone={missing.total > 0.1 ? "orange" : undefined} title={missing.members.length ? missing.members.sort((a, b) => b.hours - a.hours).map((m) => `${m.person.name}: ${m.hours.toFixed(1)}h`).join("\n") : "No missing hours this week."} />
+              <Kpi to="/time-tracking?scope=all" tone="orange" icon={<Hourglass size={18} />} label="Missing Hours" context={missing.rangeLabel ? `${missing.label} · ${missing.rangeLabel}` : missing.label} value={fmtH(missing.total)} sub={`${missing.members.length} member${missing.members.length === 1 ? "" : "s"} · completed days only`} valueTone={missing.total > 0.1 ? "orange" : undefined} title={missing.members.length ? missing.members.sort((a, b) => b.hours - a.hours).map((m) => `${m.person.name}: ${m.hours.toFixed(1)}h`).join("\n") : "No missing hours this week."} />
             </div>
           </section>
         </>

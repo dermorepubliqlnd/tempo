@@ -401,6 +401,26 @@ export default function SiteSettings() {
     setHistoricalLockingEnabled(next);
   }
 
+  // phase126c: Time tracking start date -- expected hours (Team Dashboard
+  // Logged Hours "% of expected", Missing Hours) only count from this date.
+  const [trackingStartDate, setTrackingStartDate] = useState<string>("");
+  const [trackingStartSaving, setTrackingStartSaving] = useState(false);
+  async function loadTrackingStart() {
+    const { data } = await supabase.from("app_settings").select("time_tracking_start_date").eq("id", true).single();
+    setTrackingStartDate(((data as { time_tracking_start_date?: string | null } | null)?.time_tracking_start_date ?? "").slice(0, 10));
+  }
+  async function saveTrackingStart(v: string) {
+    if (!v) return;
+    setTrackingStartSaving(true);
+    const { error } = await supabase.from("app_settings").update({ time_tracking_start_date: v }).eq("id", true);
+    setTrackingStartSaving(false);
+    if (error) {
+      window.alert(`Couldn't save: ${error.message}`);
+      return;
+    }
+    setTrackingStartDate(v);
+  }
+
   async function loadWorkTypes() {
     setWorkTypesLoading(true);
     const { data } = await supabase.from("work_types").select("id,name,sort_order,is_active,is_fixed_schedule,color").eq("is_archived", false).order("sort_order");
@@ -1807,6 +1827,7 @@ export default function SiteSettings() {
       loadOutputTypes();
       loadMappings();
       loadHistoricalLocking();
+      loadTrackingStart();
       loadTimeEntryReasons();
       loadProjectPlanningTypes();
       loadProjectTypes();
@@ -3506,6 +3527,22 @@ export default function SiteSettings() {
         >
           {historicalLockingSaving ? "Saving…" : historicalLockingEnabled ? "On" : "Off"}
         </button>
+      </div>
+
+      <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 600 }}>Time tracking start date</div>
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+            Expected hours are only counted from this date (Team Dashboard: Logged Hours "% of expected" and Missing Hours), so months before the team started logging don't read as missing time.
+          </div>
+        </div>
+        <input
+          type="date"
+          value={trackingStartDate}
+          disabled={trackingStartSaving}
+          onChange={(e) => saveTrackingStart(e.target.value)}
+          style={{ fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", flexShrink: 0 }}
+        />
       </div>
     </div>
   );
