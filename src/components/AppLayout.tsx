@@ -4,7 +4,6 @@ import {
   LogOut,
   LayoutDashboard,
   PieChart,
-  BarChart3,
   FolderKanban,
   Timer,
   Gauge,
@@ -33,7 +32,6 @@ type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 // combined into one "Time Off & Holidays" item.
 const mainItems: NavItem[] = [
   { to: "/", label: "My Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/projects-portfolio", label: "Projects Portfolio", icon: BarChart3 },
   { to: "/team-dashboard", label: "Team Dashboard", icon: PieChart },
   { to: "/projects", label: "Projects & Tasks", icon: FolderKanban },
   { to: "/time-tracking", label: "Time Tracking", icon: Timer },

@@ -197,7 +197,7 @@ export default function MaterialsOutput() {
 
   return (
     <div>
-      <Link to="/projects-portfolio" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "var(--muted)", textDecoration: "none", marginBottom: 8 }}>
+      <Link to="/team-dashboard?view=portfolio" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "var(--muted)", textDecoration: "none", marginBottom: 8 }}>
         <ChevronLeft size={14} /> Back to Projects Portfolio
       </Link>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>

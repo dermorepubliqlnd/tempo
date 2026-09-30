@@ -45,7 +45,7 @@ import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from ".
 import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, isOpenTask, type UtilTaskRow, type UtilProjectRow } from "../lib/dailyAllocation";
 import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { healthOf, actualProgress, projectCompletionDate, type ProjectRow, type TaskRow } from "./Projects";
-import Dashboard, { MonthlyBarChart } from "./Dashboard";
+import Dashboard from "./Dashboard";
 import Modal from "../components/Modal";
 import { CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 
@@ -360,7 +360,10 @@ function ExecutiveDashboard() {
   const parentIds = useMemo(() => new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string)), [tasks]);
   const leafTasks = useMemo(() => tasks.filter((t) => !parentIds.has(t.id)), [tasks, parentIds]);
   const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
-  const statusOf = (p: ProjectRow) => (p.wbs_status === "draft" ? "Not Started" : p.status ?? "Not Started");
+  // phase126r guard: a CLOSED project is final -- never Active/open, even if
+  // legacy data left its Status as In Progress (closed before phase114).
+  const statusOf = (p: ProjectRow) =>
+    p.wbs_status === "draft" ? "Not Started" : p.wbs_status === "closed" && p.status !== "Cancelled" ? "Completed" : p.status ?? "Not Started";
 
   // Project-level More Filters only (Role is person-level -> handled by popPeople).
   const moreActive = (Object.keys(more) as (keyof MoreFilters)[]).some((k) => more[k].length > 0);
@@ -962,7 +965,7 @@ function ExecutiveDashboard() {
             <div className="exec-chart-card">
               <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)" }}>Portfolio Movement ({periodTag})</div>
               <div className="exec-kpi-context" style={{ marginBottom: 6 }}>Projects started vs. completed, by {movement.unit}</div>
-              <MonthlyBarChart months={movement.buckets} series={movement.series} />
+              <TrendLineChart buckets={movement.buckets} series={movement.series} />
             </div>
             </div>
           </section>
@@ -1136,6 +1139,57 @@ function AttnCard({ c, onOpen }: { c: AttnSpec; onOpen: () => void }) {
   );
 }
 
+
+// ---------------------------------------------------------------- Portfolio Movement (line)
+function TrendLineChart({ buckets, series }: { buckets: { key: string; label: string }[]; series: { name: string; color: string; values: number[] }[] }) {
+  const W = 640, H = 200, padL = 30, padR = 14, padT = 22, padB = 26;
+  const rawMax = Math.max(1, ...series.flatMap((s) => s.values));
+  const step = rawMax <= 5 ? 1 : rawMax <= 10 ? 2 : rawMax <= 25 ? 5 : 10;
+  const max = Math.ceil(rawMax / step) * step;
+  const ticks: number[] = [];
+  for (let v = 0; v <= max; v += step) ticks.push(v);
+  const n = Math.max(1, buckets.length - 1);
+  const x = (i: number) => padL + (buckets.length === 1 ? (W - padL - padR) / 2 : (i / n) * (W - padL - padR));
+  const y = (v: number) => padT + (1 - v / max) * (H - padT - padB);
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block", maxHeight: 230 }}>
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--border)" strokeWidth={1} />
+            <text x={padL - 6} y={y(t) + 3.5} textAnchor="end" fontSize={10} fill="var(--muted)">{t}</text>
+          </g>
+        ))}
+        {buckets.map((b, i) => (
+          <text key={b.key} x={x(i)} y={H - 8} textAnchor="middle" fontSize={10.5} fill="var(--muted)">{b.label}</text>
+        ))}
+        {series.map((s) => (
+          <g key={s.name}>
+            <polyline fill="none" stroke={s.color} strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" points={s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ")} />
+            {s.values.map((v, i) => (
+              <g key={i}>
+                <circle cx={x(i)} cy={y(v)} r={3.6} fill={s.color} stroke="var(--surface)" strokeWidth={1.5}>
+                  <title>{`${buckets[i]?.label}: ${v} ${s.name.toLowerCase()}`}</title>
+                </circle>
+                {v > 0 && (
+                  <text x={x(i)} y={y(v) - 8} textAnchor="middle" fontSize={11} fontWeight={700} fill="var(--navy)">{v}</text>
+                )}
+              </g>
+            ))}
+          </g>
+        ))}
+      </svg>
+      <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
+        {series.map((s) => (
+          <span key={s.name} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text-secondary)" }}>
+            <svg width="22" height="10"><line x1="1" x2="21" y1="5" y2="5" stroke={s.color} strokeWidth="2.2" /><circle cx="11" cy="5" r="3.4" fill={s.color} /></svg>
+            {s.name}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------- Work Mix
 const HEALTH_ORDER = ["On track", "Done on time · close pending", "Done late · close pending", "At risk", "Off track", "Overdue", "Schedule review", "Not started", "Health unavailable", "Paused"];

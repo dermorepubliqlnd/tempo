@@ -2,7 +2,6 @@ import { HashRouter, Routes, Route, Navigate, useParams } from "react-router-dom
 import AppLayout from "./components/AppLayout";
 import { TimeTrackingProvider } from "./lib/TimeTrackingContext";
 import RequireAuth from "./components/RequireAuth";
-import Dashboard from "./pages/Dashboard";
 import MaterialsOutput from "./pages/MaterialsOutput";
 import MyDashboard from "./pages/MyDashboard";
 import TeamDashboard from "./pages/TeamDashboard";
@@ -76,7 +75,7 @@ export default function App() {
           }
         >
           <Route path="/" element={<MyDashboard />} />
-          <Route path="/projects-portfolio" element={<Dashboard />} />
+          <Route path="/projects-portfolio" element={<Navigate to="/team-dashboard?view=portfolio" replace />} />
           <Route path="/team-dashboard" element={<TeamDashboard />} />
           <Route path="/materials-output" element={<MaterialsOutput />} />
           <Route path="/projects" element={<Projects />} />
