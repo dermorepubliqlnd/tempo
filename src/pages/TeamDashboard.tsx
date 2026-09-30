@@ -1084,9 +1084,10 @@ function AttnCard({ c, onOpen }: { c: AttnSpec; onOpen: () => void }) {
 
 
 // ---------------------------------------------------------------- Work Mix
-const HEALTH_ORDER = ["On track", "At risk", "Off track", "Overdue", "Schedule review", "Not started", "Health unavailable", "Paused"];
+const HEALTH_ORDER = ["On track", "Work complete", "At risk", "Off track", "Overdue", "Schedule review", "Not started", "Health unavailable", "Paused"];
 const HEALTH_COLORS: Record<string, string> = {
   "On track": "#16a34a",
+  "Work complete": "#0d9488",
   "At risk": "#f59e0b",
   "Off track": "#ea7a16",
   Overdue: "#dc2626",
