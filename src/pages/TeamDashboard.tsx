@@ -568,7 +568,7 @@ export default function TeamDashboard() {
           <section className="exec-section">
             <SectionTitle n={1} title={`Portfolio Overview (${periodTag})`} caption={`Projects relevant to the selected period (${fmtShort(range.start)} – ${fmtLong(range.end)})`} />
             <div className="exec-grid">
-              <Kpi to="/projects" tone="blue" icon={<Folder size={18} />} label="Total Projects" value={t} trend={trend((a, b) => portfolioFor(a, b).total)} title="Completed in period + open projects (In Progress, Not Started, Paused) that started by period end. Cancelled excluded." />
+              <Kpi to="/projects" tone="blue" icon={<Folder size={18} />} label="Total Projects" value={t} sub="Completed + open in period" title="Completed in period + open projects (In Progress, Not Started, Paused) that started by period end. Cancelled excluded." />
               <Kpi to="/projects" tone="green" icon={<CheckCircle2 size={18} />} label="Completed" value={portfolio.completed.length} sub={`${pctOf(portfolio.completed.length, t)}% of total`} trend={trend(completedIn)} title="Projects whose Actual Close Date (or completion stamp) falls in the period." />
               <Kpi to="/projects" tone="indigo" icon={<Activity size={18} />} label="Active" value={portfolio.active.length} sub={`${pctOf(portfolio.active.length, t)}% of total`} title="Status = In Progress (current state)." />
               <Kpi to="/projects" tone="slate" icon={<CircleDashed size={18} />} label="Not Started" value={portfolio.notStarted.length} sub={`${pctOf(portfolio.notStarted.length, t)}% of total`} title="Status = Not Started, or WBS still in Draft." />
