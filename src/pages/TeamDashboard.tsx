@@ -33,6 +33,11 @@ import {
   TrendingUp,
   TrendingDown,
   CalendarClock,
+  ListChecks,
+  ClipboardCheck,
+  BadgeCheck,
+  Flag,
+  FileWarning,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from "../lib/workingDays";
@@ -40,6 +45,7 @@ import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, isOpen
 import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { healthOf, type ProjectRow, type TaskRow } from "./Projects";
 import { MonthlyBarChart } from "./Dashboard";
+import Modal from "../components/Modal";
 
 // ---------------------------------------------------------------- types
 interface Person {
@@ -199,6 +205,11 @@ export default function TeamDashboard() {
   const [assigneeHistory, setAssigneeHistory] = useState<{ task_id: string; person_id: string; effective_from: string; effective_to: string | null }[]>([]);
   const [deletedHours, setDeletedHours] = useState<{ person_id: string; date: string; hours: number }[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
+  // Needs Attention: pending approvals (current state)
+  const [pendingTime, setPendingTime] = useState<{ id: string; person_id: string; task_id: string | null; created_at: string; entry_number?: number | null }[]>([]);
+  const [pendingExt, setPendingExt] = useState<{ id: string; task_id: string; requested_by: string; created_at: string }[]>([]);
+  const [pendingBaseline, setPendingBaseline] = useState<{ id: string; project_id: string; requested_at: string }[]>([]);
+  const [pendingClosure, setPendingClosure] = useState<{ id: string; project_id: string; requested_at: string }[]>([]);
   // Site Settings > Time tracking start date (phase126c): expected hours are
   // only counted from this date, so pre-go-live months don't read as missing.
   const [trackingStart, setTrackingStart] = useState<string>("2026-08-03");
@@ -225,6 +236,16 @@ export default function TeamDashboard() {
     // Time entries: finalized only, from the earliest date any KPI needs.
     const lastWeekStart = toISO(addDays(today, -((today.getDay() + 6) % 7) - 7));
     const earliest = [range.prevStart, range.start, range.qtd.prevStart, lastWeekStart].sort()[0];
+    const [ptRes, peRes, pbRes, pcRes] = await Promise.all([
+      supabase.from("time_entries").select("id,person_id,task_id,created_at,entry_number").eq("status", "pending_approval").eq("is_archived", false),
+      supabase.from("extension_requests").select("id,task_id,requested_by,created_at").eq("status", "Pending"),
+      supabase.from("project_baseline_requests").select("id,project_id,requested_at").eq("status", "pending"),
+      supabase.from("project_closure_requests").select("id,project_id,requested_at").eq("status", "pending"),
+    ]);
+    setPendingTime((ptRes.data as typeof pendingTime) ?? []);
+    setPendingExt((peRes.data as typeof pendingExt) ?? []);
+    setPendingBaseline((pbRes.data as typeof pendingBaseline) ?? []);
+    setPendingClosure((pcRes.data as typeof pendingClosure) ?? []);
     const [pe, pr, tk, hol, av, oh, ah, del, settings, src, pt, prt, cat, te] = await Promise.all([
       supabase.from("people").select("id,name,daily_capacity_hours,job_title,tracks_time").eq("is_active", true).order("name"),
       supabase.from("projects").select("*").eq("is_archived", false),
@@ -387,23 +408,29 @@ export default function TeamDashboard() {
     let cap = 0;
     let available = 0;
     const over: { person: Person; days: number; peak: number }[] = [];
+    const under: { person: Person; pct: number; planned: number; cap: number }[] = [];
     // phase126h: "not expected to log time" people are outside delivery capacity.
     for (const p of loggers) {
       let overDays = 0;
       let peak = 0;
+      let pPlanned = 0;
+      let pCap = 0;
       for (const d of days) {
         const c = capacityOn(p, d);
         const alloc = c > 0 ? (moreActive ? projectScopedAlloc(p.id, d) : engine.totalFor(p.id, d)) : 0;
         planned += alloc;
         cap += c;
+        pPlanned += alloc;
+        pCap += c;
         available += Math.max(0, c - alloc);
         const pct = c > 0 ? (alloc / c) * 100 : 0;
         if (pct > 100.5) overDays++;
         if (pct > peak) peak = pct;
       }
       if (overDays > 0) over.push({ person: p, days: overDays, peak });
+      if (pCap > 0 && pPlanned / pCap < 0.5) under.push({ person: p, pct: (pPlanned / pCap) * 100, planned: pPlanned, cap: pCap });
     }
-    return { planned, cap, available, util: cap > 0 ? (planned / cap) * 100 : 0, over, end: days[days.length - 1] };
+    return { planned, cap, available, util: cap > 0 ? (planned / cap) * 100 : 0, over, under, end: days[days.length - 1] };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggers, engine, availStatus, holidaySet, todayIso, moreActive, scopedProjectIds]);
 
@@ -583,6 +610,127 @@ export default function TeamDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopedProjects, range, todayIso]);
 
+  // ======================================================== SECTION 3
+  // Needs Attention -- current state. Working-day age uses the same
+  // holiday calendar as everything else.
+  const [attnOpen, setAttnOpen] = useState<string | null>(null);
+  const personName = (id: string | null | undefined) => people.find((x) => x.id === id)?.name ?? "—";
+  const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+  const workingDaysSince = (iso: string | null | undefined): number => {
+    if (!iso) return 0;
+    const from = toISO(new Date(iso.length > 10 ? iso : iso + "T00:00:00"));
+    if (from >= todayIso) return 0;
+    let n = 0;
+    for (let d = addDays(parseLocalDate(from), 1); toISO(d) <= todayIso; d = addDays(d, 1)) if (isWorkingDay(d, holidaySet)) n++;
+    return n;
+  };
+  const AGING_DAYS = 2;
+  const attention = useMemo(() => {
+    const open = scopedProjects.filter((p) => !["Cancelled", "Completed"].includes(statusOf(p)) && p.wbs_status !== "closed");
+    const overdueProjects = open.filter((p) => statusOf(p) === "In Progress" && healthOf(p, tasks, holidayDates).label === "Overdue");
+    const atRisk = open
+      .filter((p) => statusOf(p) === "In Progress")
+      .map((p) => ({ p, h: healthOf(p, tasks, holidayDates).label }))
+      .filter((x) => x.h === "At risk" || x.h === "Off track");
+    const pausedReview = scopedProjects.filter(
+      (p) =>
+        p.wbs_status !== "closed" &&
+        ((statusOf(p) === "Paused" && !!p.pause_expected_resume && p.pause_expected_resume.slice(0, 10) < todayIso) || !!p.schedule_review_required)
+    );
+    const inScopeTask = (t: TaskRow | undefined) => !!t && scopedProjectIds.has(t.project_id);
+    const inPop = (id: string | null | undefined) => popIsAll || (!!id && popIds.has(id));
+    const approvals: { kind: string; who: string; what: string; age: number; to: string }[] = [];
+    for (const e of pendingTime) {
+      if (!inPop(e.person_id)) continue;
+      const t = e.task_id ? taskById.get(e.task_id) : undefined;
+      if (e.task_id && !inScopeTask(t)) continue;
+      approvals.push({ kind: "Time log", who: personName(e.person_id), what: t ? t.name : "Non-project time", age: workingDaysSince(e.created_at), to: "/approval-center" });
+    }
+    for (const r of pendingExt) {
+      const t = taskById.get(r.task_id);
+      if (!inScopeTask(t) || !inPop(r.requested_by)) continue;
+      approvals.push({ kind: "Extension", who: personName(r.requested_by), what: t?.name ?? "—", age: workingDaysSince(r.created_at), to: "/approval-center" });
+    }
+    for (const r of pendingBaseline) {
+      const p = projectById.get(r.project_id);
+      if (!p || !scopedProjectIds.has(p.id)) continue;
+      approvals.push({ kind: "Start Project", who: personName(p.owner_id), what: p.name, age: workingDaysSince(r.requested_at), to: "/approval-center" });
+    }
+    for (const r of pendingClosure) {
+      const p = projectById.get(r.project_id);
+      if (!p || !scopedProjectIds.has(p.id)) continue;
+      approvals.push({ kind: "Project close", who: personName(p.owner_id), what: p.name, age: workingDaysSince(r.requested_at), to: "/approval-center" });
+    }
+    approvals.sort((a, b) => b.age - a.age);
+    const validations = leafTasks
+      .filter((t) => t.status === "Done" && !t.validated_completion_date && scopedProjectIds.has(t.project_id) && inPop(t.assignee_id))
+      .map((t) => ({ t, reported: (t.submitted_on ?? t.actual_completion_date ?? "").slice(0, 10) }))
+      .filter((x) => x.reported && workingDaysSince(x.reported) >= AGING_DAYS)
+      .map((x) => ({ ...x, age: workingDaysSince(x.reported) }))
+      .sort((a, b) => b.age - a.age);
+    const readyToClose = scopedProjects
+      .filter((p) => statusOf(p) === "Completed" && p.wbs_status !== "closed")
+      .map((p) => {
+        const since = (p.completed_at ?? p.end_date ?? "").slice(0, 10);
+        const days = since ? Math.round((today.getTime() - parseLocalDate(since).getTime()) / 86400000) : 0;
+        return { p, since, days };
+      })
+      .sort((a, b) => b.days - a.days);
+    const planningGaps = leafTasks.filter((t) => {
+      const p = projectById.get(t.project_id);
+      if (!p || !scopedProjectIds.has(p.id) || p.wbs_status === "draft" || p.wbs_status === "closed") return false;
+      if (!isOpenTask(t)) return false;
+      return !t.assignee_id || !t.estimated_hours;
+    });
+    return { overdueProjects, atRisk, pausedReview, approvals, validations, readyToClose, planningGaps };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedProjects, scopedProjectIds, tasks, leafTasks, holidayDates, holidaySet, todayIso, pendingTime, pendingExt, pendingBaseline, pendingClosure, popIds, popIsAll, people]);
+
+  function attnCards(): AttnSpec[] {
+    const a = attention;
+    const projRow = (p: ProjectRow, extra: string[]) => ({ cells: [p.name, personName(p.owner_id), ...extra], to: `/projects/${p.id}/wbs` });
+    const taskRow = (t: TaskRow, extra: string[]) => ({ cells: [t.name, projectById.get(t.project_id)?.name ?? "—", personName(t.assignee_id), ...extra], to: `/projects/${t.project_id}/wbs` });
+    const aging = a.approvals.filter((x) => x.age >= AGING_DAYS).length;
+    const rtc14 = a.readyToClose.filter((x) => x.days >= 14).length;
+    const pastResume = a.pausedReview.filter((p) => statusOf(p) === "Paused" && p.pause_expected_resume && p.pause_expected_resume.slice(0, 10) < todayIso).length;
+    const reviewPending = a.pausedReview.filter((p) => p.schedule_review_required).length;
+    return [
+      { key: "over", tier: 1, tone: "red", icon: <UserX size={16} />, label: "Overallocated", context: "Next 2 weeks", value: horizon.over.length, sub: "> 100% on 1+ day",
+        definition: "People planned above 100% of their capacity on at least one working day in the next 2 weeks.", columns: ["Member", "Days over 100%", "Peak"], to: "/utilization", toLabel: "Utilization",
+        rows: [...horizon.over].sort((x, y) => y.peak - x.peak).map((o) => ({ cells: [o.person.name, String(o.days), `${Math.round(o.peak)}%`], to: "/utilization" })) },
+      { key: "under", tier: 1, tone: "blue", icon: <BatteryCharging size={16} />, label: "Underloaded", context: "Next 2 weeks", value: horizon.under.length, sub: "< 50% planned",
+        definition: "People planned below 50% of their capacity over the next 2 weeks -- open capacity that can take more work.", columns: ["Member", "Planned", "Capacity", "Utilization"], to: "/utilization", toLabel: "Utilization",
+        rows: [...horizon.under].sort((x, y) => x.pct - y.pct).map((u) => ({ cells: [u.person.name, fmtH(u.planned), fmtH(u.cap), `${Math.round(u.pct)}%`], to: "/utilization" })) },
+      { key: "odproj", tier: 2, tone: "red", icon: <Clock3 size={16} />, label: "Overdue projects", context: "Health", value: a.overdueProjects.length, sub: "Past End Date",
+        definition: "Active projects whose Health is Overdue: past their End Date and not complete.", columns: ["Project", "Owner", "End date"], to: "/projects", toLabel: "Projects & Tasks",
+        rows: a.overdueProjects.map((p) => projRow(p, [p.end_date ? fmtLong(p.end_date.slice(0, 10)) : "—"])) },
+      { key: "risk", tier: 2, tone: "amber", icon: <AlertTriangle size={16} />, label: "At-risk projects", context: "Health", value: a.atRisk.length, sub: "At risk · off track",
+        definition: "Active projects whose progress is behind schedule (Health = At risk or Off track) but not overdue yet.", columns: ["Project", "Owner", "Health", "End date"], to: "/projects", toLabel: "Projects & Tasks",
+        rows: a.atRisk.map((x) => projRow(x.p, [x.h, x.p.end_date ? fmtLong(x.p.end_date.slice(0, 10)) : "—"])) },
+      { key: "odtask", tier: 2, tone: "red", icon: <ListChecks size={16} />, label: "Overdue tasks", context: `As of ${fmtShort(todayIso)}`, value: overdueTasks.length, sub: `${overdueProjectCount} project${overdueProjectCount === 1 ? "" : "s"}`,
+        definition: "Open tasks past their Target Due Date. Tasks in paused projects are excluded.", columns: ["Task", "Project", "Assignee", "Due", "Days late"], to: "/projects", toLabel: "Projects & Tasks",
+        rows: [...overdueTasks].sort((x, y) => (x.current_due_date ?? "").localeCompare(y.current_due_date ?? "")).map((t) => taskRow(t, [fmtLong(t.current_due_date.slice(0, 10)), String(workingDaysSince(t.current_due_date))])) },
+      { key: "paused", tier: 2, tone: "amber", icon: <PauseCircle size={16} />, label: "Paused / needs review", context: "Current", value: a.pausedReview.length, sub: `${pastResume} past resume · ${reviewPending} review`,
+        definition: "Paused projects past their expected resume date, or resumed projects still waiting for their Schedule Review.", columns: ["Project", "Owner", "Reason", "Expected resume"], to: "/projects", toLabel: "Projects & Tasks",
+        rows: a.pausedReview.map((p) => projRow(p, [p.schedule_review_required ? "Schedule review pending" : "Past expected resume", p.pause_expected_resume ? fmtLong(p.pause_expected_resume.slice(0, 10)) : "—"])) },
+      { key: "appr", tier: 3, tone: "purple", icon: <ClipboardCheck size={16} />, label: "Pending approvals", context: "Time · extension · start · close", value: a.approvals.length, sub: aging ? `${aging} waiting ${AGING_DAYS}+ days` : "None aging", subTone: aging ? "red" : undefined,
+        definition: `Requests waiting for a decision. "Aging" = waiting ${AGING_DAYS}+ working days. Task validations have their own card.`, columns: ["Type", "Requested by", "Item", "Waiting (working days)"], to: "/approval-center", toLabel: "Approval Center",
+        rows: a.approvals.map((x) => ({ cells: [x.kind, x.who, x.what, String(x.age)], to: x.to })) },
+      { key: "valid", tier: 3, tone: "purple", icon: <BadgeCheck size={16} />, label: "Validations overdue", context: `Done ${AGING_DAYS}+ working days`, value: a.validations.length, sub: "Not yet validated",
+        definition: `Tasks marked Done whose Reported Completion Date is ${AGING_DAYS}+ working days ago and nobody has confirmed (validated) yet.`, columns: ["Task", "Project", "Assignee", "Reported done", "Waiting"], to: "/approval-center", toLabel: "Approval Center",
+        rows: a.validations.map((x) => taskRow(x.t, [fmtLong(x.reported), `${x.age} days`])) },
+      { key: "rtc", tier: 4, tone: "amber", icon: <Flag size={16} />, label: "Ready to close", context: "Completed, not closed", value: a.readyToClose.length, sub: rtc14 ? `${rtc14} waiting 14+ days` : "None waiting 14+ days",
+        definition: "Projects with Status Completed whose WBS hasn't been closed yet.", columns: ["Project", "Owner", "Completed", "Days waiting"], to: "/projects", toLabel: "Projects & Tasks",
+        rows: a.readyToClose.map((x) => projRow(x.p, [x.since ? fmtLong(x.since) : "—", String(x.days)])) },
+      { key: "miss", tier: 4, tone: "blue", icon: <Hourglass size={16} />, label: "Missing hours", context: missing.rangeLabel ? `${missing.label} · ${missing.rangeLabel}` : missing.label, value: missing.members.length, sub: `members · ${fmtH(missing.total)}`,
+        definition: "Members whose finalized logged hours are below expected hours on completed working days this week.", columns: ["Member", "Missing"], to: "/time-tracking?scope=all", toLabel: "Time Tracking",
+        rows: [...missing.members].sort((x, y) => y.hours - x.hours).map((m) => ({ cells: [m.person.name, `${m.hours.toFixed(1)}h`], to: "/time-tracking?scope=all" })) },
+      { key: "gaps", tier: 4, tone: "amber", icon: <FileWarning size={16} />, label: "Planning gaps", context: "Started projects", value: a.planningGaps.length, sub: "No assignee or hours",
+        definition: "Open tasks in started projects with no Assignee or no Scoped Hours -- invisible to Utilization. Draft projects are not counted.", columns: ["Task", "Project", "Assignee", "Missing"], to: "/projects", toLabel: "Projects & Tasks",
+        rows: a.planningGaps.map((t) => taskRow(t, [[!t.assignee_id && "Assignee", !t.estimated_hours && "Scoped Hours"].filter(Boolean).join(", ")])) },
+    ];
+  }
+
   // ---------------------------------------------------------- render
   // measure(start,end) -> value. Uses the period's own comparison; for YTD
   // with no prior-year data, falls back to QTD vs same point last quarter.
@@ -672,9 +820,121 @@ export default function TeamDashboard() {
               <Kpi to="/time-tracking?scope=all" tone="orange" icon={<Hourglass size={18} />} label="Missing Hours" context={missing.rangeLabel ? `${missing.label} · ${missing.rangeLabel}` : missing.label} value={fmtH(missing.total)} sub={`${missing.members.length} member${missing.members.length === 1 ? "" : "s"} · completed days only`} valueTone={missing.total > 0.1 ? "orange" : undefined} title={missing.members.length ? missing.members.sort((a, b) => b.hours - a.hours).map((m) => `${m.person.name}: ${m.hours.toFixed(1)}h`).join("\n") : "No missing hours this week."} />
             </div>
           </section>
+
+          <section className="exec-section">
+            <SectionTitle title="Needs Attention" caption="Items that may need leadership review or intervention · current state" />
+            {(() => {
+              const a = attention;
+              const cards = attnCards();
+              const byTier = (tier: number) => cards.filter((c) => c.tier === tier);
+              const row = (left: number, right: number) => (
+                <div className="exec-attn-row">
+                  {[left, right].map((tier, i) => (
+                    <div key={tier} style={{ display: "contents" }}>
+                      {i === 1 && <div className="exec-attn-sep" />}
+                      <div className="exec-attn-grp" style={{ flex: byTier(tier).length }}>
+                        <div className="exec-attn-tier">{TIER_LABELS[tier]}</div>
+                        <div className="exec-attn-cards" style={{ gridTemplateColumns: `repeat(${byTier(tier).length}, minmax(0, 1fr))` }}>
+                          {byTier(tier).map((c) => (
+                            <AttnCard key={c.key} c={c} onOpen={() => setAttnOpen(c.key)} />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+              void a;
+              const openCard = cards.find((c) => c.key === attnOpen);
+              return (
+                <>
+                  {row(1, 2)}
+                  <div className="exec-attn-hr" />
+                  {row(3, 4)}
+                  {openCard && (
+                    <Modal title={`${openCard.label} (${openCard.rows.length})`} onClose={() => setAttnOpen(null)} width={720}>
+                      <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 10 }}>{openCard.definition}</div>
+                      {openCard.rows.length === 0 ? (
+                        <div style={{ fontSize: 12, color: "var(--muted)", padding: "12px 0" }}>All clear.</div>
+                      ) : (
+                        <table className="exec-attn-table">
+                          <thead>
+                            <tr>
+                              {openCard.columns.map((h) => (
+                                <th key={h}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {openCard.rows.map((r, i) => (
+                              <tr key={i}>
+                                {r.cells.map((c, j) => (
+                                  <td key={j}>{j === 0 && r.to ? <Link to={r.to} onClick={() => setAttnOpen(null)}>{c}</Link> : c}</td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                      <div style={{ marginTop: 12, textAlign: "right" }}>
+                        <Link to={openCard.to} onClick={() => setAttnOpen(null)} style={{ fontSize: 12, color: "var(--accent)" }}>
+                          Open {openCard.toLabel} →
+                        </Link>
+                      </div>
+                    </Modal>
+                  )}
+                </>
+              );
+            })()}
+          </section>
         </>
       )}
     </div>
+  );
+}
+
+
+// ---------------------------------------------------------------- Needs Attention
+const TIER_LABELS: Record<number, string> = { 1: "Capacity risk", 2: "Delivery risk", 3: "Decisions waiting", 4: "Closure and hygiene" };
+const ATTN_TONES: Record<string, { bg: string; fg: string; ic: string }> = {
+  red: { bg: "#fdecec", fg: "#b42318", ic: "#dc2626" },
+  amber: { bg: "#fff4e0", fg: "#9a5b00", ic: "#d97706" },
+  purple: { bg: "#f1ebfd", fg: "#5b3aa8", ic: "#8b5cf6" },
+  blue: { bg: "#e8f1fd", fg: "#1e4f9c", ic: "#2f6fed" },
+  clear: { bg: "var(--hover-bg)", fg: "var(--text-secondary)", ic: "var(--muted)" },
+};
+interface AttnSpec {
+  key: string;
+  tier: number;
+  tone: string;
+  icon: JSX.Element;
+  label: string;
+  context: string;
+  value: number;
+  sub: string;
+  subTone?: string;
+  definition: string;
+  columns: string[];
+  rows: { cells: string[]; to?: string }[];
+  to: string;
+  toLabel: string;
+}
+function AttnCard({ c, onOpen }: { c: AttnSpec; onOpen: () => void }) {
+  const t = ATTN_TONES[c.value === 0 ? "clear" : c.tone];
+  return (
+    <button type="button" className="exec-attn-card" onClick={onOpen} style={{ background: t.bg, color: t.fg }} title={c.definition}>
+      <span className="exec-kpi-icon" style={{ background: "rgba(255,255,255,.75)", color: t.ic, width: 32, height: 32 }}>
+        {c.value === 0 ? <CheckCircle2 size={16} /> : c.icon}
+      </span>
+      <div style={{ minWidth: 0, textAlign: "left" }}>
+        <div className="exec-kpi-label" style={{ color: t.fg }}>{c.label}</div>
+        <div className="exec-kpi-context" style={{ color: t.fg, opacity: 0.75 }}>{c.context}</div>
+        <div className="exec-kpi-value" style={{ color: t.fg }}>{c.value}</div>
+        <div className="exec-kpi-sub" style={{ color: c.subTone === "red" && c.value ? "#b42318" : t.fg, opacity: c.subTone ? 1 : 0.8, fontWeight: c.subTone ? 600 : 400 }}>
+          {c.value === 0 ? "All clear" : c.sub}
+        </div>
+      </div>
+    </button>
   );
 }
 
@@ -963,6 +1223,19 @@ const EXEC_CSS = `
 .exec-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .exec-chart-card{border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px;min-width:0}
 @media (max-width:1100px){.exec-portfolio{grid-template-columns:minmax(0,1fr)}}
+.exec-attn-row{display:flex;align-items:stretch;min-width:0}
+.exec-attn-grp{min-width:0}
+.exec-attn-sep{width:1px;background:var(--border);margin:20px 12px 0;flex-shrink:0}
+.exec-attn-hr{height:1px;background:var(--border);margin:12px 0}
+.exec-attn-tier{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 6px 2px}
+.exec-attn-cards{display:grid;gap:8px}
+.exec-attn-card{display:flex;gap:9px;align-items:flex-start;padding:11px 10px;border:none;border-radius:var(--radius-md);cursor:pointer;font:inherit;min-width:0;overflow:hidden;transition:box-shadow .15s,transform .15s}
+.exec-attn-card:hover{box-shadow:0 3px 10px rgba(15,41,66,.10);transform:translateY(-1px)}
+.exec-attn-table{width:100%;border-collapse:collapse;font-size:12px}
+.exec-attn-table th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--border)}
+.exec-attn-table td{padding:7px 8px;border-bottom:1px solid var(--border);color:var(--text)}
+.exec-attn-table a{color:var(--accent);text-decoration:none;font-weight:600}
+@media (max-width:1100px){.exec-attn-row{flex-direction:column}.exec-attn-sep{display:none}.exec-attn-grp{margin-bottom:8px}}
 .exec-grid-7{grid-template-columns:repeat(7,minmax(0,1fr))}
 @media (max-width:1180px){.exec-grid:not(.exec-grid-3),.exec-grid-7{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:820px){.exec-grid,.exec-grid-7{grid-template-columns:repeat(2,minmax(0,1fr))}}
