@@ -1995,15 +1995,15 @@ export default function Utilization() {
           <aside
             style={{
               position: "fixed",
-              top: 14,
-              right: 14,
-              bottom: 14,
+              top: 0,
+              right: 0,
+              bottom: 0,
               zIndex: 49,
               width: "min(94vw, 1120px)",
               maxWidth: "calc(100vw - 28px)",
               background: "var(--surface)",
               border: "1px solid var(--border)",
-              borderRadius: 12,
+              borderRadius: "10px 0 0 10px",
               boxShadow: "0 24px 64px rgba(15,35,65,.24)",
               overflowY: "auto",
             }}
@@ -2167,7 +2167,7 @@ export default function Utilization() {
                         return (
                           <div key={day.dateStr} title={day.blocked ? day.blocked : `${day.allocated.toFixed(1)}h allocated · ${day.free.toFixed(1)}h free`} style={{ padding: "6px 4px", borderRadius: 8, border: "1px solid var(--border)", textAlign: "center", background: day.blocked ? "var(--hover-bg)" : tone?.bg }}>
                             <div style={{ fontSize: 8, color: "var(--muted)" }}>{parseLocalDate(day.dateStr).toLocaleDateString("en-US",{weekday:"short"})}</div>
-                            <div style={{ fontSize: 9.2, fontWeight: 600, color: "var(--navy)", marginTop: 1 }}>{parseLocalDate(day.dateStr).getDate()}</div>
+                            <div style={{ fontSize: 9.2, fontWeight: 600, color: "var(--navy)", marginTop: 1 }}>{parseLocalDate(day.dateStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
                             <div style={{ fontSize: 9.5, fontWeight: 600, color: day.blocked ? "var(--muted)" : tone?.fg, marginTop: 2 }}>{day.blocked ? "Off" : `${displayPct(day.pct)}%`}</div>
                             <div style={{ fontSize: 7.7, color: "var(--muted)", marginTop: 1 }}>{day.blocked ? "—" : `${day.free.toFixed(1)}h free`}</div>
                           </div>
@@ -2182,9 +2182,14 @@ export default function Utilization() {
                     <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--navy)", marginBottom: 7 }}>Suggested windows</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 7 }}>
                       {selectedScenarioWindows.map((window, wi) => (
-                        <div key={window.startStr} style={{ padding: 9, borderRadius: 9, border: "1px solid var(--border)", background: wi === 0 ? "rgba(16,185,129,.07)" : "rgba(255,255,255,.7)" }}>
-                          <div style={{ fontSize: 8.5, fontWeight: 600, color: wi === 0 ? "#059669" : "var(--muted)", marginBottom: 3 }}>{wi === 0 ? "BEST CAPACITY FIT" : wi === 1 ? "NEXT BEST" : "ALTERNATIVE"}</div>
-                          <div style={{ fontSize: 10.2, fontWeight: 600, color: "var(--navy)" }}>{parseLocalDate(window.startStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})} – {parseLocalDate(window.dueStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+                        <div key={window.startStr} style={{ padding: 10, borderRadius: 9, border: "1px solid var(--border)", background: wi === 0 ? "rgba(16,185,129,.07)" : wi === 1 ? "rgba(59,130,246,.04)" : "rgba(245,158,11,.05)" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                            <span style={{ width: 20, height: 20, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", background: wi === 0 ? "rgba(16,185,129,.12)" : wi === 1 ? "rgba(59,130,246,.10)" : "rgba(245,158,11,.12)", color: wi === 0 ? "#059669" : wi === 1 ? "#2563eb" : "#d97706" }}>
+                              {wi === 0 ? <CheckCircle2 size={12} /> : wi === 1 ? <TrendingUp size={12} /> : <Gauge size={12} />}
+                            </span>
+                            <div style={{ fontSize: 8.5, fontWeight: 600, color: wi === 0 ? "#059669" : wi === 1 ? "#2563eb" : "#b45309" }}>{wi === 0 ? "BEST CAPACITY FIT" : wi === 1 ? "NEXT BEST" : "ALTERNATIVE"}</div>
+                          </div>
+                          <div style={{ fontSize: 10.4, fontWeight: 600, color: "var(--navy)" }}>{parseLocalDate(window.startStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})} – {parseLocalDate(window.dueStr).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
                           <div style={{ fontSize: 8.5, color: "var(--muted)", marginTop: 3 }}>Projected peak <strong style={{ color: tierOf(window.peakPct).fg }}>{displayPct(window.peakPct)}%</strong> · {window.overloadedDays} overload day{window.overloadedDays === 1 ? "" : "s"}</div>
                           <button onClick={() => { setScenarioStart(window.startStr); setScenarioDue(window.dueStr); }} style={{ marginTop: 7, width: "100%", border: "1px solid rgba(59,130,246,.22)", borderRadius: 7, background: "var(--surface)", color: "var(--accent)", fontSize: 8.8, fontWeight: 600, padding: "5px 6px", cursor: "pointer" }}>Use dates</button>
                         </div>
@@ -2211,9 +2216,14 @@ export default function Utilization() {
                       return (
                         <div key={person.id} style={{ padding: 10, border: "1px solid var(--border)", borderRadius: 10, background: sameRole ? "rgba(236,253,245,.72)" : "rgba(255,255,255,.76)" }}>
                           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: 9.8, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{person.name}</div>
-                              <div style={{ fontSize: 8.2, color: "var(--muted)", marginTop: 1 }}>{person.job_title ?? "No role"}</div>
+                            <div style={{ minWidth: 0, display: "flex", gap: 7, alignItems: "center" }}>
+                              <span style={{ width: 24, height: 24, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", background: sameRole ? "rgba(16,185,129,.10)" : "rgba(59,130,246,.08)", color: sameRole ? "#059669" : "#2563eb", flex: "0 0 auto" }}>
+                                {sameRole ? <CheckCircle2 size={13} /> : <Sparkles size={13} />}
+                              </span>
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: 9.8, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{person.name}</div>
+                                <div style={{ fontSize: 8.2, color: "var(--muted)", marginTop: 1 }}>{person.job_title ?? "No role"}</div>
+                              </div>
                             </div>
                             <span style={{ padding: "3px 6px", borderRadius: 999, fontSize: 7.7, fontWeight: 600, background: sameRole ? "rgba(16,185,129,.10)" : "rgba(100,116,139,.10)", color: sameRole ? "#047857" : "var(--muted)", whiteSpace: "nowrap" }}>{sameRole ? "Same role" : "Other role"}</span>
                           </div>
