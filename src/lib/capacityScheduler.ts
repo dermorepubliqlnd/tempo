@@ -154,6 +154,12 @@ export interface ForwardScheduleArgs {
   // the remaining tasks are scheduled into the free capacity left over.
   // WBS passes "every task NOT in this project". Omitted = old behavior.
   reserveAsSpread?: (t: SchedTaskRow) => boolean;
+  // phase127o (Sandra 2026-10-01): a flexible task doesn't START on a day
+  // with less than this many free hours (e.g. 0.3h left) -- it waits for
+  // the next day with real room. Once started, any free hours are used.
+  // A task smaller than the threshold may still start where it fits.
+  // Omitted/0 = old behavior (WBS passes 1).
+  minStartFreeHours?: number;
 }
 
 export interface ForwardScheduleDay {
@@ -382,7 +388,8 @@ export function buildForwardSchedule(args: ForwardScheduleArgs): ForwardSchedule
           perDay.set(dateStr, day);
         }
         const free = Math.max(0, day.capacity - day.totalHours);
-        if (free > 0) {
+        const startThreshold = firstWorkedDate ? 0 : Math.min(args.minStartFreeHours ?? 0, remaining);
+        if (free > 0 && free + 1e-9 >= startThreshold) {
           const consume = Math.min(free, remaining);
           day.taskHours.set(task.id, (day.taskHours.get(task.id) ?? 0) + consume);
           day.totalHours += consume;

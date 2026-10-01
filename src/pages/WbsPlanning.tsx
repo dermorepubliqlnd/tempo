@@ -1950,6 +1950,8 @@ export default function WbsPlanning() {
         // Committed row shows it (even spread, overbooking stays put), so a
         // free day in Available bandwidth is a day this project can use.
         reserveAsSpread: (x) => x.project_id !== projectId,
+        // phase127o: don't start a task in a sliver of a day (< 1h free).
+        minStartFreeHours: 1,
       });
       ctx.forward.set(personId, sched);
     }
