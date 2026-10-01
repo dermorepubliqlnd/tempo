@@ -88,7 +88,6 @@ interface MoreFilters {
   status: string[];
 }
 const EMPTY_MORE: MoreFilters = { owner: [], source: [], planningType: [], projectType: [], category: [], status: [] };
-const HORIZON_DAYS = 14; // "Next 2 weeks"
 const PROJECT_STATUSES = ["Not Started", "In Progress", "Paused", "Completed", "Cancelled"];
 
 // ---------------------------------------------------------------- dates
@@ -449,20 +448,29 @@ function ExecutiveDashboard() {
     return dailyCapacityHours(p, st === "half_day");
   };
 
-  // Forward horizon (next 2 weeks, today inclusive)
+  // Forward horizon -- "Next 2 weeks" = today through the Friday of the week
+  // after next (Sandra 2026-10-01: one window for every capacity number --
+  // summary cards, Needs Attention cards and the Capacity section lists).
   const horizon = useMemo(() => {
-    const days = eachDay(todayIso, toISO(addDays(today, HORIZON_DAYS - 1)));
+    const mondayThis = addDays(today, -((today.getDay() + 6) % 7));
+    const days = eachDay(todayIso, toISO(addDays(mondayThis, 18)));
+    const nextWeekFrom = toISO(addDays(mondayThis, 7));
+    const nextWeekTo = toISO(addDays(mondayThis, 11));
     let planned = 0;
     let cap = 0;
     let available = 0;
     const over: { person: Person; days: number; peak: number }[] = [];
     const under: { person: Person; pct: number; planned: number; cap: number }[] = [];
+    const perPerson: { person: Person; planned: number; cap: number; free: number; nextWeekFree: number; peak: number; peakDay: string; overDays: number }[] = [];
     // phase126h: "not expected to log time" people are outside delivery capacity.
     for (const p of loggers) {
       let overDays = 0;
       let peak = 0;
       let pPlanned = 0;
       let pCap = 0;
+      let pFree = 0;
+      let nwFree = 0;
+      let peakDay = "";
       for (const d of days) {
         const c = capacityOn(p, d);
         const alloc = c > 0 ? (moreActive ? projectScopedAlloc(p.id, d) : engine.totalFor(p.id, d)) : 0;
@@ -471,14 +479,20 @@ function ExecutiveDashboard() {
         pPlanned += alloc;
         pCap += c;
         available += Math.max(0, c - alloc);
+        pFree += Math.max(0, c - alloc);
+        if (d >= nextWeekFrom && d <= nextWeekTo) nwFree += Math.max(0, c - alloc);
         const pct = c > 0 ? (alloc / c) * 100 : 0;
         if (pct > 100.5) overDays++;
-        if (pct > peak) peak = pct;
+        if (pct > peak) {
+          peak = pct;
+          peakDay = d;
+        }
       }
+      perPerson.push({ person: p, planned: pPlanned, cap: pCap, free: pFree, nextWeekFree: nwFree, peak, peakDay, overDays });
       if (overDays > 0) over.push({ person: p, days: overDays, peak });
       if (pCap > 0 && pPlanned / pCap < 0.5) under.push({ person: p, pct: (pPlanned / pCap) * 100, planned: pPlanned, cap: pCap });
     }
-    return { planned, cap, available, util: cap > 0 ? (planned / cap) * 100 : 0, over, under, end: days[days.length - 1] };
+    return { planned, cap, available, util: cap > 0 ? (planned / cap) * 100 : 0, over, under, perPerson, end: days[days.length - 1] };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggers, engine, availStatus, holidaySet, todayIso, moreActive, scopedProjectIds]);
 
@@ -698,12 +712,16 @@ function ExecutiveDashboard() {
         }
       }
     }
-    const withPct = people.filter((r) => r.cap > 0).map((r) => ({ ...r, pct: (r.planned / r.cap) * 100, free: Math.max(0, r.cap - r.planned) }));
-    const over = withPct.filter((r) => r.peak > 100.5).sort((a, b) => b.peak - a.peak);
-    const avail = withPct.filter((r) => r.pct < 100).sort((a, b) => b.free - a.free);
+    // Lists: today onward only (same window as the summary + Needs Attention
+    // cards), so they show what can still be acted on.
+    const hp = horizon.perPerson.filter((r) => r.cap > 0).map((r) => ({ ...r, pct: (r.planned / r.cap) * 100 }));
+    const over = hp.filter((r) => r.peak > 100.5).sort((a, b) => b.peak - a.peak);
+    const avail = hp.filter((r) => r.free > 0.05).sort((a, b) => b.free - a.free);
     return { from: toISO(monday), to: toISO(addDays(monday, 18)), weeks: weeks.map((w) => ({ ...w, available: w.free, util: w.cap > 0 ? (w.planned / w.cap) * 100 : 0 })), over, avail };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loggers, engine, availStatus, holidaySet, todayIso, moreActive, scopedProjectIds]);
+  }, [loggers, engine, availStatus, holidaySet, todayIso, moreActive, scopedProjectIds, horizon]);
+
+  const horizonLabel = `Next 2 weeks · to ${fmtShort(horizon.end)}`;
 
   // ======================================================== WORK MIX
   // Scoped Hours by Planning Type / Project Type, for the Reporting Period
@@ -901,11 +919,11 @@ function ExecutiveDashboard() {
     const pastResume = a.pausedReview.filter((p) => statusOf(p) === "Paused" && p.pause_expected_resume && p.pause_expected_resume.slice(0, 10) < todayIso).length;
     const reviewPending = a.pausedReview.filter((p) => p.schedule_review_required).length;
     return [
-      { key: "over", tier: 1, tone: "red", icon: <UserX size={16} />, label: "Overallocated", context: "Next 2 weeks", value: horizon.over.length, sub: "> 100% on 1+ day",
-        definition: "People planned above 100% of their capacity on at least one working day in the next 2 weeks.", columns: ["Member", "Days over 100%", "Peak"], to: "/utilization", toLabel: "Utilization",
+      { key: "over", tier: 1, tone: "red", icon: <UserX size={16} />, label: "Overallocated", context: horizonLabel, value: horizon.over.length, sub: "> 100% on 1+ day",
+        definition: "People planned above 100% of their capacity on at least one working day from today through the Friday of the week after next.", columns: ["Member", "Days over 100%", "Peak"], to: "/utilization", toLabel: "Utilization",
         rows: [...horizon.over].sort((x, y) => y.peak - x.peak).map((o) => ({ cells: [o.person.name, String(o.days), `${Math.round(o.peak)}%`], to: "/utilization" })) },
-      { key: "under", tier: 1, tone: "blue", icon: <BatteryCharging size={16} />, label: "Underloaded", context: "Next 2 weeks", value: horizon.under.length, sub: "< 50% planned",
-        definition: "People planned below 50% of their capacity over the next 2 weeks -- open capacity that can take more work.", columns: ["Member", "Planned", "Capacity", "Utilization"], to: "/utilization", toLabel: "Utilization",
+      { key: "under", tier: 1, tone: "blue", icon: <BatteryCharging size={16} />, label: "Underloaded", context: horizonLabel, value: horizon.under.length, sub: "< 50% planned",
+        definition: "People planned below 50% of their capacity from today through the Friday of the week after next -- open capacity that can take more work.", columns: ["Member", "Planned", "Capacity", "Utilization"], to: "/utilization", toLabel: "Utilization",
         rows: [...horizon.under].sort((x, y) => x.pct - y.pct).map((u) => ({ cells: [u.person.name, fmtH(u.planned), fmtH(u.cap), `${Math.round(u.pct)}%`], to: "/utilization" })) },
       { key: "odproj", tier: 2, tone: "red", icon: <Clock3 size={16} />, label: "Overdue projects", context: "Health", value: a.overdueProjects.length, sub: "Past End Date",
         definition: "Active projects whose Health is Overdue: past their End Date and not complete.", columns: ["Project", "Owner", "End date"], to: "/projects", toLabel: "Projects & Tasks",
@@ -1024,9 +1042,9 @@ function ExecutiveDashboard() {
             <div className="exec-grid exec-grid-7">
               <Kpi to="/time-tracking?scope=all" tone="slate" icon={<CalendarClock size={18} />} label="Expected Hours" context={periodTag} value={fmtH(expectedInPeriod)} sub={`${loggers.length} ${loggers.length === 1 ? "person" : "people"} · from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)}`} title={`Each person's daily shift (usually 7.5h), adjusted for half-days, approved time off, holidays and weekends, from the Time tracking start date (${fmtShort(trackingStart)}) or period start, whichever is later, to today. People tagged "not expected to log time" are excluded.`} />
               <Kpi to="/hours-overview" tone="teal" icon={<Timer size={18} />} label="Logged Hours" context={`${periodTag} · from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)}`} value={fmtH(logged)} sub={expectedInPeriod > 0 ? `${pctOf(loggedIn(range.start, range.end, new Set(loggers.map((p) => p.id))), expectedInPeriod)}% of expected` : undefined} trend={trend((a, b) => loggedIn(a, b))} title={`Finalized (Confirmed/Approved) time only${moreActive ? ", project time within filtered projects" : ", incl. non-project time"}. Expected = ${fmtH(expectedInPeriod)}: each person's daily capacity (adjusted for half-days, time off, holidays, weekends) across working days from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)} (time tracking start) to today.`} />
-              <Kpi to="/utilization" tone="purple" icon={<Users size={18} />} label="Planned Utilization" context="Next 2 weeks" value={`${Math.round(horizon.util)}%`} sub={`${fmtH(horizon.planned)} of ${fmtH(horizon.cap)} capacity`} valueTone={horizon.util > 100 ? "red" : undefined} title={`Planned workload vs available capacity, ${fmtShort(todayIso)} – ${fmtShort(horizon.end)}. Same engine as the Utilization page.`} />
-              <Kpi to="/utilization" tone="green" icon={<BatteryCharging size={18} />} label="Available Capacity" context="Next 2 weeks" value={fmtH(horizon.available)} sub={`${pctOf(horizon.available, horizon.cap)}% of capacity open`} title="Sum of unallocated hours per person per working day (an overloaded day doesn't cancel out someone else's free time)." />
-              <Kpi to="/utilization" tone="orange" icon={<UserX size={18} />} label="Overallocated Members" context="Next 2 weeks" value={horizon.over.length} sub="> 100% on at least 1 day" valueTone={horizon.over.length ? "orange" : undefined} title={horizon.over.length ? horizon.over.map((o) => `${o.person.name}: ${o.days} day(s), peak ${Math.round(o.peak)}%`).join("\n") : "Nobody above 100% in the next 2 weeks."} />
+              <Kpi to="/utilization" tone="purple" icon={<Users size={18} />} label="Planned Utilization" context={horizonLabel} value={`${Math.round(horizon.util)}%`} sub={`${fmtH(horizon.planned)} of ${fmtH(horizon.cap)} capacity`} valueTone={horizon.util > 100 ? "red" : undefined} title={`Planned workload vs available capacity, ${fmtShort(todayIso)} – ${fmtShort(horizon.end)}. Same engine as the Utilization page.`} />
+              <Kpi to="/utilization" tone="green" icon={<BatteryCharging size={18} />} label="Available Capacity" context={horizonLabel} value={fmtH(horizon.available)} sub={`${pctOf(horizon.available, horizon.cap)}% of capacity open`} title="Sum of unallocated hours per person per working day (an overloaded day doesn't cancel out someone else's free time)." />
+              <Kpi to="/utilization" tone="orange" icon={<UserX size={18} />} label="Overallocated Members" context={horizonLabel} value={horizon.over.length} sub="> 100% on at least 1 day" valueTone={horizon.over.length ? "orange" : undefined} title={horizon.over.length ? horizon.over.map((o) => `${o.person.name}: ${o.days} day(s), peak ${Math.round(o.peak)}%`).join("\n") : "Nobody above 100% in the next 2 weeks."} />
               <Kpi to="/projects" tone="red" icon={<AlertTriangle size={18} />} label="Overdue Tasks" context={`As of ${fmtShort(todayIso)}`} value={overdueTasks.length} sub={`Across ${overdueProjectCount} project${overdueProjectCount === 1 ? "" : "s"}`} valueTone={overdueTasks.length ? "red" : undefined} title="Open leaf tasks with Target Due Date before today. Paused-project tasks excluded." />
               <Kpi to="/time-tracking?scope=all" tone="orange" icon={<Hourglass size={18} />} label="Missing Hours" context={missing.rangeLabel ? `${missing.label} · ${missing.rangeLabel}` : missing.label} value={fmtH(missing.total)} sub={`${missing.members.length} member${missing.members.length === 1 ? "" : "s"} · completed days only`} valueTone={missing.total > 0.1 ? "orange" : undefined} title={missing.members.length ? missing.members.sort((a, b) => b.hours - a.hours).map((m) => `${m.person.name}: ${m.hours.toFixed(1)}h`).join("\n") : "No missing hours this week."} />
             </div>
@@ -1146,8 +1164,8 @@ function ExecutiveDashboard() {
                 <div className="exec-kpi-context" style={{ marginBottom: 6 }}>Planned load vs available capacity by week · line = utilization %</div>
                 <OutlookChart weeks={capacity.weeks} />
               </div>
-              <PeopleBarList title="Most Overallocated Members" subtitle="Peak day utilization · members over 100% on at least one day" rows={capacity.over.map((r) => ({ person: r.person, pct: r.peak, note: `3-week average ${Math.round(r.pct)}% · ${fmtH(r.planned)} planned of ${fmtH(r.cap)}`, right: `${Math.round(r.peak)}%`, sub: r.peakDay ? `Peak ${parseLocalDate(r.peakDay).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}` : undefined }))} tone="over" empty="Nobody is over 100% on any day." />
-              <PeopleBarList title="Most Available Capacity" subtitle="Most free hours across the 3 weeks" rows={capacity.avail.map((r) => ({ person: r.person, pct: r.pct, note: `${fmtH(r.free)} free of ${fmtH(r.cap)}`, right: fmtH(r.free) }))} tone="avail" empty="Nobody has free capacity in these weeks." />
+              <PeopleBarList title="Most Overallocated Members" subtitle={`Peak day from today · ${fmtShort(todayIso)} – ${fmtShort(horizon.end)}`} rows={capacity.over.map((r) => ({ person: r.person, pct: r.peak, note: `Average ${Math.round(r.pct)}% · ${fmtH(r.planned)} planned of ${fmtH(r.cap)} (${fmtShort(todayIso)} – ${fmtShort(horizon.end)})`, right: `${Math.round(r.peak)}%`, sub: r.peakDay ? `Peak ${parseLocalDate(r.peakDay).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} · ${r.overDays} day${r.overDays === 1 ? "" : "s"} over` : undefined }))} tone="over" empty="Nobody is over 100% on any day." />
+              <PeopleBarList title="Most Available Capacity" subtitle={`Free hours from today · ${fmtShort(todayIso)} – ${fmtShort(horizon.end)}`} rows={capacity.avail.map((r) => ({ person: r.person, pct: r.pct, note: `${fmtH(r.free)} free of ${fmtH(r.cap)} · ${Math.round(r.pct)}% planned (${fmtShort(todayIso)} – ${fmtShort(horizon.end)})`, right: fmtH(r.free), sub: `${fmtH(r.nextWeekFree)} free next week` }))} tone="avail" empty="Nobody has free capacity in these weeks." />
             </div>
           </section>
         </>
