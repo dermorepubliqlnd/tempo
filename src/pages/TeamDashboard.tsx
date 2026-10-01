@@ -1319,7 +1319,18 @@ function PeopleBarList({ title, subtitle, rows, tone, empty }: { title: string; 
 
 // ---------------------------------------------------------------- Portfolio Movement (line)
 function TrendLineChart({ buckets, series }: { buckets: { key: string; label: string }[]; series: { name: string; color: string; values: number[] }[] }) {
-  const W = 640, H = 200, padL = 30, padR = 14, padT = 22, padB = 26;
+  // Fixed 150px plot height; width follows the card (measured) so text never
+  // stretches and the chart no longer grows taller as the card gets wider.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [W, setW] = useState(640);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setW(Math.max(280, Math.round(el.clientWidth))));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const H = 150, padL = 30, padR = 14, padT = 20, padB = 22;
   const rawMax = Math.max(1, ...series.flatMap((s) => s.values));
   const step = rawMax <= 5 ? 1 : rawMax <= 10 ? 2 : rawMax <= 25 ? 5 : 10;
   const max = Math.ceil(rawMax / step) * step;
@@ -1329,8 +1340,8 @@ function TrendLineChart({ buckets, series }: { buckets: { key: string; label: st
   const x = (i: number) => padL + (buckets.length === 1 ? (W - padL - padR) / 2 : (i / n) * (W - padL - padR));
   const y = (v: number) => padT + (1 - v / max) * (H - padT - padB);
   return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block", maxHeight: 230 }}>
+    <div ref={wrapRef}>
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ display: "block", maxWidth: "100%" }}>
         {ticks.map((t) => (
           <g key={t}>
             <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--border)" strokeWidth={1} />
@@ -1738,6 +1749,7 @@ const EXEC_CSS = `
 .exec-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
 .exec-portfolio{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
 .exec-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.exec-grid-3 .exec-kpi{align-items:center}
 .exec-chart-card{border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px;min-width:0}
 @media (max-width:1100px){.exec-portfolio{grid-template-columns:minmax(0,1fr)}}
 .exec-attn-row{display:flex;align-items:stretch;min-width:0}
