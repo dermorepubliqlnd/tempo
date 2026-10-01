@@ -710,6 +710,17 @@ function CorrectionForm({
 }
 
 export default function TimeTracking() {
+  // 2026-10-01 phase127c: Export menu (Detailed | Daily summary).
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) setExportMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [exportMenuOpen]);
   const { person: me } = useSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const filterProjectId = searchParams.get("project") || "";
@@ -1585,14 +1596,56 @@ export default function TimeTracking() {
           row.reason_notes?.trim() || row.reason_category || "",
         ];
       });
-    const csv = "\uFEFF" + toCsv(["Log ID", "Task ID", "Project", "Task", "Date", "Duration (min)", "Details"], rows);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    downloadMyTimeCsv(toCsv(["Log ID", "Task ID", "Project", "Task", "Date", "Duration (min)", "Details"], rows), `my_time_detailed_${kpiRangeStart}_to_${kpiRangeEnd}.csv`);
+  }
+
+  function downloadMyTimeCsv(csvBody: string, filename: string) {
+    const blob = new Blob(["\uFEFF" + csvBody], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `my_time_${kpiRangeStart}_to_${kpiRangeEnd}.csv`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // 2026-10-01 phase127c (Sandra: "daily summaries view... same task ID
+  // summarize and combine details; non-projects combine all of the same
+  // category... no need for log id and task ID... only approved logs and
+  // confirmed ones"). One row per Date + Task (project logs, keyed by
+  // task_id) or Date + Activity Type (non-project). Minutes summed,
+  // distinct details joined with "; " in chronological order. Rows
+  // ordered by date, then by each group's first start time.
+  function exportMyTimeDailySummaryCsv() {
+    const finalized = filteredEntries
+      .filter((e) => e.status === "approved" || e.status === "confirmed")
+      .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
+    type Group = { date: string; project: string; task: string; minutes: number; details: string[]; firstStart: number };
+    const groups = new Map<string, Group>();
+    for (const row of finalized) {
+      const date = toDateInputValue(new Date(row.started_at));
+      const isNonProject = Boolean(row.activity_type_id);
+      const key = `${date}|${isNonProject ? `np:${row.activity_type_id}` : `t:${row.task_id}`}`;
+      let g = groups.get(key);
+      if (!g) {
+        g = {
+          date,
+          project: isNonProject ? "Non-project" : row.task?.project?.name ?? "",
+          task: isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "",
+          minutes: 0,
+          details: [],
+          firstStart: new Date(row.started_at).getTime(),
+        };
+        groups.set(key, g);
+      }
+      g.minutes += row.duration_minutes ?? 0;
+      const d = (row.reason_notes?.trim() || row.reason_category || "").trim();
+      if (d && !g.details.some((x) => x.toLowerCase() === d.toLowerCase())) g.details.push(d);
+    }
+    const rows = [...groups.values()]
+      .sort((a, b) => (a.date === b.date ? a.firstStart - b.firstStart : a.date < b.date ? -1 : 1))
+      .map((g) => [g.date, g.project, g.task, Math.round(g.minutes), g.details.join("; ")]);
+    downloadMyTimeCsv(toCsv(["Date", "Project", "Task", "Duration (min)", "Details"], rows), `my_time_daily_summary_${kpiRangeStart}_to_${kpiRangeEnd}.csv`);
   }
 
   // 2026-09-23 (Sandra: "task ID as the first column and immovable...
@@ -2763,17 +2816,44 @@ export default function TimeTracking() {
               {scope === "mine" ? "My entries" : scope === "team" ? "Team entries" : "All entries"} ({filteredEntries.length})
             </h2>
             {scope === "mine" && filteredEntries.length > 0 && (
-              <button
-                onClick={exportMyTimeCsv}
-                title="Download the entries shown below (current date range and filters)"
-                style={{
-                  marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600,
-                  color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
-                  padding: "5px 10px", background: "var(--surface)", cursor: "pointer", whiteSpace: "nowrap",
-                }}
-              >
-                <Download size={13} /> Export to Excel
-              </button>
+              <div ref={exportMenuRef} style={{ marginLeft: "auto", position: "relative" }}>
+                <button
+                  onClick={() => setExportMenuOpen((v) => !v)}
+                  title="Download the entries shown below (current date range and filters)"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600,
+                    color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
+                    padding: "5px 10px", background: "var(--surface)", cursor: "pointer", whiteSpace: "nowrap",
+                  }}
+                >
+                  <Download size={13} /> Export to Excel <ChevronDown size={13} />
+                </button>
+                {exportMenuOpen && (
+                  <div
+                    style={{
+                      position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 50, width: 270,
+                      background: "var(--surface, #fff)", border: "1px solid var(--border)", borderRadius: 10,
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: 4,
+                    }}
+                  >
+                    {[
+                      { label: "Detailed", sub: "Every log, with Log ID and Task ID", run: exportMyTimeCsv },
+                      { label: "Daily summary", sub: "Approved and confirmed logs only, combined per task or activity type per day", run: exportMyTimeDailySummaryCsv },
+                    ].map((opt) => (
+                      <button
+                        key={opt.label}
+                        onClick={() => { setExportMenuOpen(false); opt.run(); }}
+                        style={{ display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", padding: "8px 10px", borderRadius: 8, cursor: "pointer" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2, #f5f6f8)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{opt.label}</div>
+                        <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2, lineHeight: 1.35 }}>{opt.sub}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
           {filteredEntries.length === 0 ? (
