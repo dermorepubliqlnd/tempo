@@ -1677,6 +1677,7 @@ export default function Projects() {
   // authorities (editing, closing, reopening, extension decisions, etc.)
   // are untouched -- only *visibility* and *creation* are now open to all.
   const canCreateProject = true;
+  const [creatingProject, setCreatingProject] = useState(false);
   const canCreateTask = isFullAccess || projects.some((p) => p.owner_id === me?.id);
   // Scoping-phase due-date editing: a project's timelines are freely
   // editable (by owner/Full Access/assignee, same as canEditTask) until
@@ -5112,6 +5113,31 @@ export default function Projects() {
         <div>
           <h1>Projects</h1>
         </div>
+        {/* phase127g (Sandra 2026-10-01): header "Add New Project" button,
+            styled like Time Tracking's Add Time pill. Same createBlankProject
+            as the in-table "New project" rows, which stay. */}
+        {canCreateProject && (
+          <button
+            onClick={async () => {
+              if (creatingProject) return;
+              setCreatingProject(true);
+              try {
+                await createBlankProject();
+              } finally {
+                setCreatingProject(false);
+              }
+            }}
+            disabled={creatingProject}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6, marginTop: 4,
+              fontSize: 12.5, fontWeight: 600, color: "#fff", background: "var(--accent)",
+              border: "none", borderRadius: 999, padding: "9px 16px",
+              cursor: creatingProject ? "default" : "pointer", opacity: creatingProject ? 0.7 : 1, whiteSpace: "nowrap",
+            }}
+          >
+            <Plus size={14} /> {creatingProject ? "Creating…" : "Add New Project"}
+          </button>
+        )}
       </div>
 
       <div className="card" style={{ padding: 0, marginBottom: 20 }}>
