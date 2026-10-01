@@ -1,4 +1,5 @@
 import { useAssigneePicker } from "../components/AssigneePicker";
+import { useProjectStartDatePrompt } from "../components/ProjectStartDatePrompt";
 import ValidateCompletionModal from "../components/ValidateCompletionModal";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -1050,6 +1051,7 @@ export default function Projects() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [people, setPeople] = useState<PersonOption[]>([]);
   const assigneePicker = useAssigneePicker(people);
+  const startDatePrompt = useProjectStartDatePrompt();
   // Work Types (Phase 12, 2026-08-20) -- fetched unfiltered (all rows,
   // active or not) so a task referencing a since-deactivated Work Type
   // still resolves to its historical label here; only the WBS Planning
@@ -3384,6 +3386,8 @@ export default function Projects() {
       await alert("This project is closed -- its scope is final, so no more tasks can be added to it.");
       return;
     }
+    // phase127f: project needs a Start date before any task is added.
+    if (!(await startDatePrompt.ensure(projects.find((p) => p.id === parent.project_id)))) return;
     // phase126l: started project -> new task needs an Assignee up front.
     let newAssignee: string | null = null;
     if (projects.find((p) => p.id === parent.project_id)?.wbs_status !== "draft") {
@@ -4862,6 +4866,9 @@ export default function Projects() {
     const today = toISOWorkingDay(new Date());
     const project = projects.find((p) => p.id === projectId);
     const defaultDue = project?.end_date ?? today;
+    // phase127f (Sandra: "always ask for a project start date before
+    // adding new tasks").
+    if (!(await startDatePrompt.ensure(project))) return;
     let newAssignee: string | null = null;
     if (project && project.wbs_status !== "draft") {
       newAssignee = await assigneePicker.pick("Assign the new task");
@@ -5050,6 +5057,7 @@ export default function Projects() {
     <div>
       {confirmDialog}
       {assigneePicker.element}
+      {startDatePrompt.element}
       {validatingTask && (
         <ValidateCompletionModal
           taskName={validatingTask.t.name}

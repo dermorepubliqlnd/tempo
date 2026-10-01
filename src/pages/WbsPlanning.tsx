@@ -1,4 +1,5 @@
 import { useAssigneePicker } from "../components/AssigneePicker";
+import { useProjectStartDatePrompt } from "../components/ProjectStartDatePrompt";
 import { useState, useEffect, useCallback, useRef, Fragment, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, Link } from "react-router-dom";
@@ -494,6 +495,11 @@ interface ChainEntry {
   isOverridden?: boolean;
   suggestedStart?: string;
   suggestedEnd?: string;
+  // phase127f: Forecasted (untouched) only -- the stored "not before"
+  // floor the queue started from, and the per-day hours the capacity
+  // walk actually placed, for the Start/End tooltips.
+  floorStart?: string;
+  placement?: { date: string; hours: number }[];
   // Phase 19 (2026-08-24): set only when Manual mode's typed End date is
   // driving the span (rather than the flat 7.5h/day fallback) -- the
   // even-spread rate, purely for display (e.g. "5.0 h/day").
@@ -551,6 +557,7 @@ export default function WbsPlanning() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [people, setPeople] = useState<PersonRow[]>([]);
   const assigneePicker = useAssigneePicker(people.filter((p) => p.is_active));
+  const startDatePrompt = useProjectStartDatePrompt();
   // Work Types (Phase 12, 2026-08-20) -- fetched unfiltered (all rows) so
   // an already-assigned but since-deactivated Work Type still resolves to
   // its historical name here; the dropdown itself (below) filters to
@@ -1973,6 +1980,19 @@ export default function WbsPlanning() {
   // same-project siblings into each other's same-day leftover capacity
   // via theoreticalScheduleFor above, since it's meant to represent the
   // optimistic "every available hour actually gets used" reference.
+  // phase127f helpers for the Forecasted Start/End tooltips.
+  function assigneeFirstName(t: TaskRow): string {
+    const n = people.find((p) => p.id === t.assignee_id)?.name ?? "The assignee";
+    return n.split(" ")[0];
+  }
+  function placementTooltip(t: TaskRow, entry: ChainEntry): string {
+    if (!entry.placement?.length) return "Placed into the assignee's free hours after their other committed work.";
+    const who = assigneeFirstName(t);
+    const parts = entry.placement.map((p) => `${formatDate(p.date)}: ${p.hours}h`).join(", ");
+    const waited = entry.floorStart && entry.floorStart < entry.start ? ` ${who} is fully booked from ${formatDate(entry.floorStart)} until ${formatDate(entry.start)}.` : "";
+    return `Fits into ${who}'s free hours after other committed work (${parts}).${waited} Type an End date to spread hours evenly instead.`;
+  }
+
   function computeEntry(t: TaskRow, mode: Mode, ctx: SchedContext): ChainEntry | null {
     // Phase 12 (2026-08-21): Sandra -- "add a table for Manual... the
     // manual timetable would basically reflect Capacity-Based by
@@ -2049,7 +2069,14 @@ export default function WbsPlanning() {
       // exactly, so Manual always "reflects Capacity-Based by default."
       if (!schedStart || !schedEnd) return null;
       const durationDays = workingDaysBetween(parseLocalDate(schedStart), parseLocalDate(schedEnd), holidaySet).length;
-      return { start: schedStart, end: schedEnd, durationDays };
+      const placement: { date: string; hours: number }[] = [];
+      for (const [date, day] of sched.perDay) {
+        const h = day.taskHours.get(t.id);
+        if (h && h > 0) placement.push({ date, hours: Math.round(h * 100) / 100 });
+      }
+      placement.sort((a, b) => (a.date < b.date ? -1 : 1));
+      const floorRaw = t.start_date_standard ?? t.start_date;
+      return { start: schedStart, end: schedEnd, durationDays, floorStart: floorRaw ? floorRaw.slice(0, 10) : undefined, placement };
     }
 
     if (mode === "standard") {
@@ -2732,8 +2759,13 @@ export default function WbsPlanning() {
     // task can never discard in-progress work on other rows.
     const flushed = await flushPendingEdits();
     if (!flushed) return;
+    // phase127f (Sandra: "always ask for a project start date before
+    // adding new tasks") -- no Start date, no new task.
+    const ensuredStart = await startDatePrompt.ensure(project);
+    if (!ensuredStart) return;
+    if (!project.start_date) setProject((prev) => (prev ? { ...prev, start_date: ensuredStart } : prev));
     const today = toISO(new Date());
-    const anchor = project.start_date ? project.start_date.slice(0, 10) : fallbackStartDate;
+    const anchor = ensuredStart;
     let defaultStartFull = anchor;
     let defaultStartStandard = anchor;
     // Bugfix (2026-08-26, Sandra: "why is Gemma and Fritzie's task start
@@ -2814,7 +2846,11 @@ export default function WbsPlanning() {
     // this insert's own loadAll() can discard them.
     const flushed = await flushPendingEdits();
     if (!flushed) return;
-    const projectAnchor = project?.start_date ? project.start_date.slice(0, 10) : fallbackStartDate;
+    // phase127f: same Start-date gate as addTopLevelTask.
+    const ensuredStart = await startDatePrompt.ensure(project);
+    if (!ensuredStart) return;
+    if (!project?.start_date) setProject((prev) => (prev ? { ...prev, start_date: ensuredStart } : prev));
+    const projectAnchor = ensuredStart;
     let defaultStartFull = parent.start_date_full ? parent.start_date_full.slice(0, 10) : projectAnchor;
     let defaultStartStandard = parent.start_date_standard ? parent.start_date_standard.slice(0, 10) : projectAnchor;
     // 2026-08-26 bugfix -- same fix as addTopLevelTask above, scoped to
@@ -3074,8 +3110,13 @@ export default function WbsPlanning() {
             // details") -- only the very first task in schedule order has
             // nothing earlier to chain from.
             next = projectAnchor;
-          } else if (mode !== "full_capacity" && prevEntry) {
-            next = nextWorkingDayAfter(prevEntry.end, holidaySet);
+          } else if (mode !== "full_capacity") {
+            // phase127f (Sandra 2026-10-01): a task with no dependency is
+            // NOT chained behind the row above it (that pushed Gemma's
+            // task behind Fritzie's). It anchors to the project Start and
+            // the capacity walk places it into its own assignee's free
+            // hours; same-person tasks still queue behind each other there.
+            next = projectAnchor;
           }
           // Theoretical (full_capacity) deliberately writes NOTHING for an
           // unconstrained sibling (2026-08-26): the live packer treats
@@ -3917,6 +3958,8 @@ export default function WbsPlanning() {
                 ? `Computed from this task's own sub-tasks (earliest Start under ${MODE_LABEL[mode]})`
                 : conflict
                 ? `Starts on or before "${conflict.name}" finishes (${formatDate(conflict.end)}) under ${MODE_LABEL[mode]} -- double-check this Start date.`
+                : entry && !entry.isOverridden && entry.floorStart && entry.floorStart < entry.start
+                ? `Earliest start ${formatDate(entry.floorStart)}, but ${assigneeFirstName(t)} has no free hours until ${formatDate(entry.start)} (other committed work comes first). Type a date to override.`
                 : undefined
             }
             style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0 }}
@@ -3932,7 +3975,11 @@ export default function WbsPlanning() {
                 the ones that give up room. */}
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               <InlineDate
-                value={t[field]}
+                // phase127f (Sandra 2026-10-01: table said 10/09 while the
+                // Gantt bar started 10/19): show the date the hours are
+                // actually placed from, not the stored "not before" floor.
+                // A typed Start is the override and shows as-is.
+                value={entry?.start ?? t[field]}
                 // Start Date lock (2026-08-26): once the project's
                 // baseline is locked, direct edits are blocked at the DB
                 // level (enforce_start_date_lock trigger) -- turn the
@@ -4010,7 +4057,7 @@ export default function WbsPlanning() {
               spread needs, computed symmetrically to the existing,
               working Start-edit path rather than inventing a new rule. */}
           {entry ? (
-            <span title={entry.avgHoursPerDay != null ? `${entry.avgHoursPerDay}h/day, spread evenly across this window` : "Flat 7.5h/day from Start -- type an End date to spread hours evenly instead"} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span title={entry.avgHoursPerDay != null ? `${entry.avgHoursPerDay}h/day, spread evenly across this window` : entry.isOverridden ? "Flat 7.5h/day from Start -- type an End date to spread hours evenly instead" : placementTooltip(t, entry)} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
               <InlineDate
                 // Bugfix (2026-08-24, found in post-ship audit): when no
                 // End has been typed yet, this must still show the
@@ -4425,6 +4472,7 @@ export default function WbsPlanning() {
     <div>
       {dialog}
       {assigneePicker.element}
+      {startDatePrompt.element}
       <CancelTaskDialog
         open={Boolean(cancelTaskDialogOpen)}
         taskLabel={cancelTaskDialogOpen?.label ?? ""}
