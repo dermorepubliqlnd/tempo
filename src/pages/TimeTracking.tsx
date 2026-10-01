@@ -1592,6 +1592,7 @@ export default function TimeTracking() {
         return [
           timeLogId(row.entry_number),
           taskIdLabel,
+          isNonProject ? "Non-project" : "Project",
           isNonProject ? "Non-project" : row.task?.project?.name ?? "",
           isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "",
           toDateInputValue(new Date(row.started_at)),
@@ -1599,7 +1600,7 @@ export default function TimeTracking() {
           row.reason_notes?.trim() || row.reason_category || "",
         ];
       });
-    downloadMyTimeCsv(toCsv(["Log ID", "Task ID", "Project", "Task", "Date", "Duration (min)", "Details"], rows), `my_time_detailed_${kpiRangeStart}_to_${kpiRangeEnd}.csv`);
+    downloadMyTimeCsv(toCsv(["Log ID", "Task ID", "Type", "Project", "Task", "Date", "Duration (min)", "Details"], rows), `my_time_detailed_${kpiRangeStart}_to_${kpiRangeEnd}.csv`);
   }
 
   function downloadMyTimeCsv(csvBody: string, filename: string) {
@@ -1623,7 +1624,7 @@ export default function TimeTracking() {
     const finalized = filteredEntries
       .filter((e) => e.status === "approved" || e.status === "confirmed")
       .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
-    type Group = { date: string; project: string; task: string; minutes: number; details: string[]; firstStart: number };
+    type Group = { date: string; type: string; project: string; task: string; minutes: number; details: string[]; firstStart: number };
     const groups = new Map<string, Group>();
     for (const row of finalized) {
       const date = toDateInputValue(new Date(row.started_at));
@@ -1633,6 +1634,7 @@ export default function TimeTracking() {
       if (!g) {
         g = {
           date,
+          type: isNonProject ? "Non-project" : "Project",
           project: isNonProject ? "Non-project" : row.task?.project?.name ?? "",
           task: isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "",
           minutes: 0,
@@ -1647,8 +1649,8 @@ export default function TimeTracking() {
     }
     const rows = [...groups.values()]
       .sort((a, b) => (a.date === b.date ? a.firstStart - b.firstStart : a.date < b.date ? -1 : 1))
-      .map((g) => [g.date, g.project, g.task, Math.round(g.minutes), g.details.join("; ")]);
-    downloadMyTimeCsv(toCsv(["Date", "Project", "Task", "Duration (min)", "Details"], rows), `my_time_daily_summary_${kpiRangeStart}_to_${kpiRangeEnd}.csv`);
+      .map((g) => [g.date, g.type, g.project, g.task, Math.round(g.minutes), g.details.join("; ")]);
+    downloadMyTimeCsv(toCsv(["Date", "Type", "Project", "Task", "Duration (min)", "Details"], rows), `my_time_daily_summary_${kpiRangeStart}_to_${kpiRangeEnd}.csv`);
   }
 
   // 2026-09-23 (Sandra: "task ID as the first column and immovable...
