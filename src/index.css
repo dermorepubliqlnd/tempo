@@ -1899,3 +1899,7 @@ mark.kb-mark { background: #fff3c4; color: inherit; padding: 0 1px; border-radiu
 .kb-content details.kb-detail[open] summary { background: var(--accent-bg, #eaf2fb); color: var(--accent); border-bottom: 1px solid var(--border); }
 .kb-content details.kb-detail[open] summary::before { border-left-color: var(--accent); }
 .kb-content details.kb-detail[open] .kb-detail-body { padding: 12px 16px 14px 29px; font-size: 12.5px; }
+
+/* phase127i: gentle pulse on the sidebar timer's clock icon */
+@keyframes timerPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.timer-pulse { animation: timerPulse 2s ease-in-out infinite; flex-shrink: 0; }

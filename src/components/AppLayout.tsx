@@ -156,7 +156,15 @@ export default function AppLayout() {
           padding: collapsed ? "16px 4px" : "16px 10px",
           display: "flex",
           flexDirection: "column",
-          position: "relative",
+          // phase127i: sticky full-height sidebar so the timer card under
+          // the logo (and Sign out) stays visible while the page scrolls.
+          // No overflow on <nav> itself -- it would clip the collapse
+          // toggle that sits at right:-12 (overflow-axis coupling); the
+          // nav groups scroll in their own inner wrapper instead.
+          position: "sticky",
+          top: 0,
+          height: "100vh",
+          alignSelf: "flex-start",
           transition: "width 0.15s ease, padding 0.15s ease",
         }}
       >
@@ -212,11 +220,14 @@ export default function AppLayout() {
           </div>
         </div>
 
-        <NavGroup title="Main" items={visibleMainItems} collapsed={collapsed} />
-        <NavGroup title="Resource Planning" items={resourcePlanningItems} collapsed={collapsed} />
-        {groups.length > 1 && <NavGroup title="Admin" items={adminItems} collapsed={collapsed} />}
+        <TimeTrackerBar collapsed={collapsed} />
 
-        <div className="nav-spacer" style={{ flex: 1 }} />
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", display: "flex", flexDirection: "column" }}>
+          <NavGroup title="Main" items={visibleMainItems} collapsed={collapsed} />
+          <NavGroup title="Resource Planning" items={resourcePlanningItems} collapsed={collapsed} />
+          {groups.length > 1 && <NavGroup title="Admin" items={adminItems} collapsed={collapsed} />}
+          <div className="nav-spacer" style={{ flex: 1 }} />
+        </div>
 
         {person && (
           <div style={{ padding: collapsed ? "10px 0 0" : "10px 10px 0", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
@@ -246,7 +257,6 @@ export default function AppLayout() {
       <main style={{ flex: 1, minWidth: 0, padding: 20 }}>
         <Outlet />
       </main>
-      <TimeTrackerBar />
     </div>
   );
 }

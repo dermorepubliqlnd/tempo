@@ -18,7 +18,13 @@ function elapsedLabel(startedAt: string, now: number): string {
 // away from the Tasks table. Also surfaces a quiet reminder if there are
 // unconfirmed entries waiting (stopped or auto-stopped, not yet locked
 // in), since those don't block anything and could otherwise sit forgotten.
-export default function TimeTrackerBar() {
+// phase127i (Sandra 2026-10-01: "the timer kinda overlaps with the bottom
+// part and it's hard to see... move the timer into the navigation panel,
+// just under the logo"). Was a fixed bottom bar (left: 208 hard-coded, so it
+// also mis-aligned when the sidebar was collapsed, and it covered the last
+// rows of every page). Now a card rendered INSIDE the sticky sidebar, right
+// under the Tempo logo. `collapsed` mirrors the sidebar's own state.
+export default function TimeTrackerBar({ collapsed = false }: { collapsed?: boolean }) {
   const { running, pendingConfirm, busy, requestStop, refresh, openConfirmModalFor, setOpenConfirmModalFor, bumpVersion } = useTimeTracking();
   const [now, setNow] = useState(Date.now());
 
@@ -32,59 +38,79 @@ export default function TimeTrackerBar() {
 
   if (!running && pendingConfirm.length === 0) return null;
 
+  const elapsed = running ? elapsedLabel(running.started_at, now) : "";
+  const unconfirmedLabel = `${pendingConfirm.length} unconfirmed ${pendingConfirm.length === 1 ? "entry" : "entries"}`;
+
+  const card = collapsed ? (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, margin: "0 0 14px", padding: "8px 0", borderRadius: 10, background: "rgba(255,255,255,0.08)" }}>
+      {running && (
+        <>
+          <span title={`Timing ${running.task_name}${running.is_non_project ? " · Non-project" : ""}`} style={{ display: "inline-flex" }}>
+            <Clock size={15} color="var(--teal, #4fd1c5)" className="timer-pulse" />
+          </span>
+          <span style={{ fontSize: 9.5, fontWeight: 700, color: "#fff", fontVariantNumeric: "tabular-nums" }}>{elapsed}</span>
+          <button
+            onClick={() => requestStop()}
+            disabled={busy}
+            title="Stop timer"
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, background: "#fff", border: "none", borderRadius: 6, cursor: "pointer", padding: 0 }}
+          >
+            <Square size={10} fill="var(--navy)" color="var(--navy)" />
+          </button>
+        </>
+      )}
+      {pendingConfirm.length > 0 && (
+        <button
+          onClick={() => setOpenConfirmModalFor(pendingConfirm[0].id)}
+          title={unconfirmedLabel}
+          style={{ display: "flex", alignItems: "center", gap: 2, background: "none", border: "none", color: "#ffd479", fontSize: 10, fontWeight: 700, cursor: "pointer", padding: 0 }}
+        >
+          <AlertCircle size={13} />
+          {pendingConfirm.length}
+        </button>
+      )}
+    </div>
+  ) : (
+    <div style={{ margin: "0 0 16px", padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.10)", color: "#fff" }}>
+      {running && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+            <Clock size={13} color="var(--teal, #4fd1c5)" className="timer-pulse" />
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#9BA8BB" }}>Timing</span>
+            <span style={{ marginLeft: "auto", fontSize: 15, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{elapsed}</span>
+          </div>
+          <div
+            title={running.task_name}
+            style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word" }}
+          >
+            {running.task_name}
+          </div>
+          {running.is_non_project && <div style={{ fontSize: 10.5, color: "#9BA8BB", marginTop: 1 }}>Non-project</div>}
+          <button
+            onClick={() => requestStop()}
+            disabled={busy}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, width: "100%", marginTop: 8, background: "#fff", color: "var(--navy)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 0", fontWeight: 700, fontSize: 12, cursor: busy ? "default" : "pointer" }}
+          >
+            <Square size={10} fill="var(--navy)" color="var(--navy)" />
+            Stop
+          </button>
+        </>
+      )}
+      {pendingConfirm.length > 0 && (
+        <button
+          onClick={() => setOpenConfirmModalFor(pendingConfirm[0].id)}
+          style={{ display: "flex", alignItems: "center", gap: 5, marginTop: running ? 8 : 0, background: "none", border: "none", color: "#ffd479", fontSize: 11.5, fontWeight: 600, cursor: "pointer", padding: 0, textAlign: "left" }}
+        >
+          <AlertCircle size={13} style={{ flexShrink: 0 }} />
+          {unconfirmedLabel}
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <>
-      <div
-        style={{
-          position: "fixed",
-          left: 208,
-          right: 0,
-          bottom: 0,
-          zIndex: 40,
-          background: "var(--navy-deep, var(--navy))",
-          color: "#fff",
-          padding: "8px 18px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          fontSize: 12.5,
-          boxShadow: "0 -2px 8px rgba(0,0,0,0.12)",
-        }}
-      >
-        {running ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Clock size={14} color="var(--teal, #4fd1c5)" />
-            <span>
-              Timing <strong>{running.task_name}</strong>
-              {running.is_non_project && <span style={{ opacity: 0.75 }}> · Non-project</span>}
-            </span>
-            <span style={{ fontVariantNumeric: "tabular-nums", opacity: 0.85 }}>{elapsedLabel(running.started_at, now)}</span>
-          </div>
-        ) : (
-          <div />
-        )}
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          {pendingConfirm.length > 0 && (
-            <button
-              onClick={() => setOpenConfirmModalFor(pendingConfirm[0].id)}
-              style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", color: "#ffd479", fontSize: 12, cursor: "pointer" }}
-            >
-              <AlertCircle size={13} />
-              {pendingConfirm.length} unconfirmed {pendingConfirm.length === 1 ? "entry" : "entries"}
-            </button>
-          )}
-          {running && (
-            <button
-              onClick={() => requestStop()}
-              disabled={busy}
-              style={{ display: "flex", alignItems: "center", gap: 5, background: "#fff", color: "var(--navy)", border: "none", borderRadius: "var(--radius-sm)", padding: "5px 12px", fontWeight: 600, fontSize: 12, cursor: "pointer" }}
-            >
-              <Square size={11} fill="var(--navy)" />
-              Stop
-            </button>
-          )}
-        </div>
-      </div>
+      {card}
       {modalEntry && (
         <ConfirmTimeEntryModal
           entry={modalEntry}
