@@ -1577,7 +1577,10 @@ export default function TimeTracking() {
   // Productivity/Materials Output; BOM so names like "Velena" with an
   // enye render correctly in Excel. Duration is whole minutes (Sandra 2026-10-01) so it sums.
   function exportMyTimeCsv() {
-    const rows = [...filteredEntries]
+    // 2026-10-01 (Sandra: "only approved and confirmed logs") -- both
+    // exports now carry finalized logs only; pending/rejected never export.
+    const rows = filteredEntries
+      .filter((e) => e.status === "approved" || e.status === "confirmed")
       .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime())
       .map((row) => {
         const isNonProject = Boolean(row.activity_type_id);
@@ -2819,7 +2822,7 @@ export default function TimeTracking() {
               <div ref={exportMenuRef} style={{ marginLeft: "auto", position: "relative" }}>
                 <button
                   onClick={() => setExportMenuOpen((v) => !v)}
-                  title="Download the entries shown below (current date range and filters)"
+                  title="Downloads approved and confirmed logs only, for the current date range and filters"
                   style={{
                     display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600,
                     color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
@@ -2837,8 +2840,8 @@ export default function TimeTracking() {
                     }}
                   >
                     {[
-                      { label: "Detailed", sub: "Every log, with Log ID and Task ID", run: exportMyTimeCsv },
-                      { label: "Daily summary", sub: "Approved and confirmed logs only, combined per task or activity type per day", run: exportMyTimeDailySummaryCsv },
+                      { label: "Detailed", sub: "Each approved and confirmed log, with Log ID and Task ID", run: exportMyTimeCsv },
+                      { label: "Daily summary", sub: "Approved and confirmed logs combined per task or activity type per day", run: exportMyTimeDailySummaryCsv },
                     ].map((opt) => (
                       <button
                         key={opt.label}
