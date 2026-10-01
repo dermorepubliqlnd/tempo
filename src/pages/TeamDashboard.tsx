@@ -1023,11 +1023,11 @@ function ExecutiveDashboard() {
             <div className="exec-portfolio">
             <div className="exec-grid exec-grid-3">
               <Kpi to="/projects" tone="blue" icon={<Folder size={18} />} label="Total Projects" value={t} sub="Completed + open in period" title="Completed in period + open projects (In Progress, Not Started, Paused) that started by period end. Cancelled excluded." />
-              <Kpi to="/projects" tone="green" icon={<CheckCircle2 size={18} />} label="Completed" value={portfolio.completed.length} sub={`${pctOf(portfolio.completed.length, t)}% of total`} trend={trend(completedIn)} title="Projects whose Actual Close Date (or completion stamp) falls in the period." />
-              <Kpi to="/projects" tone="indigo" icon={<Activity size={18} />} label="Active" value={portfolio.active.length} sub={`${pctOf(portfolio.active.length, t)}% of total`} title="Status = In Progress (current state)." />
-              <Kpi to="/projects" tone="slate" icon={<CircleDashed size={18} />} label="Not Started" value={portfolio.notStarted.length} sub={`${pctOf(portfolio.notStarted.length, t)}% of total`} title="Status = Not Started, or WBS still in Draft." />
-              <Kpi to="/projects" tone="orange" icon={<PauseCircle size={18} />} label="Paused" value={portfolio.paused.length} sub={`${pctOf(portfolio.paused.length, t)}% of total`} />
-              <Kpi to="/projects" tone="red" icon={<Clock3 size={18} />} label="Overdue" value={portfolio.overdue.length} sub={`${pctOf(portfolio.overdue.length, portfolio.active.length)}% of active`} title="Active projects whose Health is Overdue (past End Date, not complete). Health is separate from Status." />
+              <Kpi to="/projects" tone="green" icon={<CheckCircle2 size={18} />} label="Completed" share={pctOf(portfolio.completed.length, t)} value={portfolio.completed.length} sub={`${pctOf(portfolio.completed.length, t)}% of total`} trend={trend(completedIn)} title="Projects whose Actual Close Date (or completion stamp) falls in the period." />
+              <Kpi to="/projects" tone="indigo" icon={<Activity size={18} />} label="Active" share={pctOf(portfolio.active.length, t)} value={portfolio.active.length} sub={`${pctOf(portfolio.active.length, t)}% of total`} title="Status = In Progress (current state)." />
+              <Kpi to="/projects" tone="slate" icon={<CircleDashed size={18} />} label="Not Started" share={pctOf(portfolio.notStarted.length, t)} value={portfolio.notStarted.length} sub={`${pctOf(portfolio.notStarted.length, t)}% of total`} title="Status = Not Started, or WBS still in Draft." />
+              <Kpi to="/projects" tone="orange" icon={<PauseCircle size={18} />} label="Paused" share={pctOf(portfolio.paused.length, t)} value={portfolio.paused.length} sub={`${pctOf(portfolio.paused.length, t)}% of total`} />
+              <Kpi to="/projects" tone="red" icon={<Clock3 size={18} />} label="Overdue" value={portfolio.overdue.length} share={pctOf(portfolio.overdue.length, portfolio.active.length)} sub={`${pctOf(portfolio.overdue.length, portfolio.active.length)}% of active`} title="Active projects whose Health is Overdue (past End Date, not complete). Health is separate from Status." />
             </div>
             <div className="exec-chart-card">
               <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)" }}>Portfolio Movement ({periodTag})</div>
@@ -1487,6 +1487,7 @@ function Kpi({
   trend,
   valueTone,
   title,
+  share,
 }: {
   to: string;
   tone: Tone;
@@ -1498,6 +1499,8 @@ function Kpi({
   trend?: { text: string; dir: 1 | -1 | 0 };
   valueTone?: Tone;
   title?: string;
+  /** 0-100: thin share bar under the card text (Portfolio Overview). */
+  share?: number;
 }) {
   const c = TONES[tone];
   const vc = TONES[valueTone ?? tone].fg;
@@ -1518,6 +1521,11 @@ function Kpi({
           </div>
         )}
         {sub && <div className="exec-kpi-sub">{sub}</div>}
+        {share !== undefined && (
+          <div className="exec-share" title={`${Math.round(share)}%`}>
+            <span style={{ width: `${Math.max(0, Math.min(100, share))}%`, background: c.fg }} />
+          </div>
+        )}
       </div>
     </Link>
   );
@@ -1750,6 +1758,9 @@ const EXEC_CSS = `
 .exec-portfolio{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
 .exec-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .exec-grid-3 .exec-kpi{align-items:center}
+.exec-grid-3 .exec-kpi>div{flex:1}
+.exec-share{height:5px;border-radius:3px;background:var(--hover-bg);overflow:hidden;margin-top:7px;width:100%}
+.exec-share>span{display:block;height:100%;border-radius:3px}
 .exec-chart-card{border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px;min-width:0}
 @media (max-width:1100px){.exec-portfolio{grid-template-columns:minmax(0,1fr)}}
 .exec-attn-row{display:flex;align-items:stretch;min-width:0}
