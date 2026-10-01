@@ -3992,11 +3992,13 @@ export default function WbsPlanning() {
               looked like "icon overlapping the End date". `overflow:
               hidden` on the `<td>` itself (not just an inner span) is
               what actually stops that bleed. */}
-          <td style={{ ...style, overflow: "hidden" }}>
+          <td style={{ ...style, overflow: "hidden", ...(conflict ? { background: "var(--danger-bg)", boxShadow: "inset 3px 0 0 var(--danger-text)" } : {}) }} title={conflict ? `Starts on or before "${conflict.name}" finishes (${formatDate(conflict.end)}) -- move this Start after that date, or click Refresh dates.` : undefined}>
             <span
               title={
                 isParent
                   ? `Computed from this task's own sub-tasks (earliest Start under ${MODE_LABEL[mode]})`
+                  : conflict
+                  ? `Starts on or before "${conflict.name}" finishes (${formatDate(conflict.end)}) -- move this Start after that date, or click Refresh dates.`
                   : `${MODE_LABEL[mode]} is read-only -- edit dates under Forecasted instead.`
               }
               style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, maxWidth: "100%" /* phase127l: cap at the cell width so the warning/pin icons are never clipped off the right edge */ }}
@@ -4011,7 +4013,7 @@ export default function WbsPlanning() {
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
                 {entry ? formatDate(entry.start) : "—"}
               </span>
-              {conflict && <AlertTriangle size={12} style={{ color: "var(--warning-text, #b45309)", flexShrink: 0 }} />}
+              {/* phase127m: conflict shown as a red cell fill + hover note, no icon */}
             </span>
           </td>
           <td style={entry ? style : { ...style, color: "var(--muted)" }}>{entry ? formatDate(entry.end) : "—"}</td>
@@ -4024,7 +4026,7 @@ export default function WbsPlanning() {
     const autoField = "start_standard_auto";
     return (
       <>
-        <td style={{ ...style, overflow: "hidden", ...(conflict ? { background: "var(--warning-bg)", boxShadow: "inset 3px 0 0 var(--warning-text, #b45309)" } : {}) /* phase127l: conflict tint, visible even when the column is narrow */ }}>
+        <td style={{ ...style, overflow: "hidden", ...(conflict ? { background: "var(--danger-bg)", boxShadow: "inset 3px 0 0 var(--danger-text)" } : {}) /* phase127m: red fill on dependency conflict */ }} title={conflict ? `Starts on or before "${conflict.name}" finishes (${formatDate(conflict.end)}) -- move this Start after that date, or click Refresh dates.` : undefined}>
           <span
             title={
               isParent
@@ -4085,7 +4087,7 @@ export default function WbsPlanning() {
                 }}
               />
             </span>
-            {conflict && <AlertTriangle size={12} style={{ color: "var(--warning-text, #b45309)", flexShrink: 0 }} />}
+            {/* phase127m: conflict shown as a red cell fill + hover note, no icon */}
             {entry?.isOverridden && (
               <span
                 title={
