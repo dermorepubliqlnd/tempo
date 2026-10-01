@@ -328,6 +328,14 @@ export default function UserDrawer({
           <Section title="Approval rights">
             {isEdit ? (
               <>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }} title="Approve or decline Start Project requests (locks the project baseline)">
+                  <input
+                    type="checkbox"
+                    checked={person.can_approve_rebaseline}
+                    onChange={(e) => onToggleApprovalFlag("can_approve_rebaseline", e.target.checked)}
+                  />
+                  Project Start
+                </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }} title="Decide Project Close decisions (in addition to Full Access and the project owner)">
                   <input
                     type="checkbox"
@@ -336,19 +344,11 @@ export default function UserDrawer({
                   />
                   Project Close
                 </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
-                  <input
-                    type="checkbox"
-                    checked={person.can_approve_rebaseline}
-                    onChange={(e) => onToggleApprovalFlag("can_approve_rebaseline", e.target.checked)}
-                  />
-                  Re-baseline
-                </label>
               </>
             ) : (
               <>
+                <Field label="Project Start">{person.can_approve_rebaseline ? "Yes" : "No"}</Field>
                 <Field label="Project Close">{person.can_approve_closures ? "Yes" : "No"}</Field>
-                <Field label="Re-baseline">{person.can_approve_rebaseline ? "Yes" : "No"}</Field>
                 {approvalCount === 0 && <div style={{ fontSize: 11, color: "var(--muted)" }}>No approval permissions granted.</div>}
               </>
             )}

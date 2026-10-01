@@ -40,8 +40,8 @@ const CSV_TEMPLATE_HEADERS = [
   "Reports To",
   "Capacity/Day",
   "Admin",
-  "Approve Closures",
-  "Approve Rebaseline",
+  "Approve Project Start",
+  "Approve Project Close",
   "Status",
 ];
 
@@ -566,8 +566,8 @@ export default function Admin() {
         const capacityRaw = getField(row, "Capacity/Day", "Capacity per Day", "Daily Capacity", "Capacity");
         const daily_capacity_hours = Number(capacityRaw) > 0 ? Number(capacityRaw) : 7.5;
         const access_level: "full" | "limited" = parseYesNo(getField(row, "Admin", "Access Rights", "Access Level")) ? "full" : "limited";
-        const can_approve_closures = parseYesNo(getField(row, "Approve Closures", "Approval Closures"));
-        const can_approve_rebaseline = parseYesNo(getField(row, "Approve Rebaseline"));
+        const can_approve_closures = parseYesNo(getField(row, "Approve Project Close", "Approve Closures", "Approval Closures"));
+        const can_approve_rebaseline = parseYesNo(getField(row, "Approve Project Start", "Approve Rebaseline"));
         const is_active = parseStatus(getField(row, "Status"));
 
         const existing = people.find((p) => p.email.toLowerCase() === email);
