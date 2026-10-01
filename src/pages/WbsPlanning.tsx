@@ -3999,7 +3999,7 @@ export default function WbsPlanning() {
                   ? `Computed from this task's own sub-tasks (earliest Start under ${MODE_LABEL[mode]})`
                   : `${MODE_LABEL[mode]} is read-only -- edit dates under Forecasted instead.`
               }
-              style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0 }}
+              style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, maxWidth: "100%" /* phase127l: cap at the cell width so the warning/pin icons are never clipped off the right edge */ }}
             >
               {/* Bugfix (2026-08-26, Sandra: warning/pin icons overlapping
                   the date text in a narrow column): the date text had no
@@ -4024,7 +4024,7 @@ export default function WbsPlanning() {
     const autoField = "start_standard_auto";
     return (
       <>
-        <td style={{ ...style, overflow: "hidden" }}>
+        <td style={{ ...style, overflow: "hidden", ...(conflict ? { background: "var(--warning-bg)", boxShadow: "inset 3px 0 0 var(--warning-text, #b45309)" } : {}) /* phase127l: conflict tint, visible even when the column is narrow */ }}>
           <span
             title={
               isParent
@@ -4035,7 +4035,7 @@ export default function WbsPlanning() {
                 ? `Earliest start ${formatDate(entry.floorStart)}, but ${assigneeFirstName(t)} has no free hours until ${formatDate(entry.start)} (other committed work comes first). Type a date to override.`
                 : undefined
             }
-            style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0 }}
+            style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, maxWidth: "100%" /* phase127l: cap at the cell width so the warning/pin icons are never clipped off the right edge */ }}
           >
             {/* Bugfix (2026-08-26, Sandra: warning/pin icons overlapping
                 the date text in a narrow column): wrap InlineDate in a
