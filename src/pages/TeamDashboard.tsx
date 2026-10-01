@@ -667,7 +667,7 @@ function ExecutiveDashboard() {
     const monday = addDays(today, -((today.getDay() + 6) % 7));
     const days = eachDay(toISO(monday), toISO(addDays(monday, 18)));
     const weekKey = (d: string) => toISO(addDays(parseLocalDate(d), -((parseLocalDate(d).getDay() + 6) % 7)));
-    const weeks: { key: string; label: string; range: string; planned: number; cap: number }[] = [];
+    const weeks: { key: string; label: string; range: string; planned: number; cap: number; free: number }[] = [];
     const people: { person: Person; planned: number; cap: number; peak: number; peakDay: string }[] = [];
     for (const p of loggers) people.push({ person: p, planned: 0, cap: 0, peak: 0, peakDay: "" });
     for (const d of days) {
@@ -675,7 +675,7 @@ function ExecutiveDashboard() {
       const k = weekKey(d);
       let w = weeks.find((x) => x.key === k);
       if (!w) {
-        w = { key: k, label: weeks.length === 0 ? "This week" : weeks.length === 1 ? "Next week" : `Week +${weeks.length}`, range: "", planned: 0, cap: 0 };
+        w = { key: k, label: weeks.length === 0 ? "This week" : weeks.length === 1 ? "Next week" : `Week +${weeks.length}`, range: "", planned: 0, cap: 0, free: 0 };
         weeks.push(w);
       }
       w.range = w.range ? `${w.range.split(" – ")[0]} – ${fmtShort(d)}` : fmtShort(d);
@@ -688,6 +688,9 @@ function ExecutiveDashboard() {
         row.cap += c;
         w.planned += a;
         w.cap += c;
+        // Available = per person per day (one person's overload never
+        // cancels out someone else's free time) -- same rule as the KPI card.
+        w.free += Math.max(0, c - a);
         const pct = c > 0 ? (a / c) * 100 : 0;
         if (pct > row.peak) {
           row.peak = pct;
@@ -698,7 +701,7 @@ function ExecutiveDashboard() {
     const withPct = people.filter((r) => r.cap > 0).map((r) => ({ ...r, pct: (r.planned / r.cap) * 100, free: Math.max(0, r.cap - r.planned) }));
     const over = withPct.filter((r) => r.peak > 100.5).sort((a, b) => b.peak - a.peak);
     const avail = withPct.filter((r) => r.pct < 100).sort((a, b) => b.free - a.free);
-    return { from: toISO(monday), to: toISO(addDays(monday, 18)), weeks: weeks.map((w) => ({ ...w, available: Math.max(0, w.cap - w.planned), util: w.cap > 0 ? (w.planned / w.cap) * 100 : 0 })), over, avail };
+    return { from: toISO(monday), to: toISO(addDays(monday, 18)), weeks: weeks.map((w) => ({ ...w, available: w.free, util: w.cap > 0 ? (w.planned / w.cap) * 100 : 0 })), over, avail };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggers, engine, availStatus, holidaySet, todayIso, moreActive, scopedProjectIds]);
 
