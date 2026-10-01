@@ -1946,6 +1946,10 @@ export default function WbsPlanning() {
         // future" grid (this scheduler's other caller, which keeps the old
         // floor-at-today behavior on purpose).
         floorEffectiveStartAtFromDate: false,
+        // phase127n: other projects' work is reserved exactly as the
+        // Committed row shows it (even spread, overbooking stays put), so a
+        // free day in Available bandwidth is a day this project can use.
+        reserveAsSpread: (x) => x.project_id !== projectId,
       });
       ctx.forward.set(personId, sched);
     }

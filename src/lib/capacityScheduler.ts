@@ -11,7 +11,7 @@
 import { addDays, isWorkingDay, parseLocalDate, toISO, type HolidaySet } from "./workingDays";
 // Single source of truth for the PM-overhead rate and for a project's REAL
 // current end date (consolidated 2026-08-31 -- see dailyAllocation.ts).
-import { PROJECT_PM_DAILY_HOURS, pmWindowEnd } from "./dailyAllocation";
+import { PROJECT_PM_DAILY_HOURS, pmWindowEnd, taskAllocationDays, buildOffDaySet, type UtilTaskRow } from "./dailyAllocation";
 
 // Unifies what used to be two separate PM-overhead mechanisms (Day
 // Planner's manual-entry default of 0.5h/day, and Utilization's old
@@ -144,6 +144,16 @@ export interface ForwardScheduleArgs {
   // (old behavior, unchanged) so Utilization.tsx's own call is
   // unaffected; WbsPlanning.tsx's call opts out.
   floorEffectiveStartAtFromDate?: boolean;
+  // phase127n (Sandra 2026-10-01: "commitment shows she is free on the 19,
+  // why are we pushing it further?"): tasks matching this predicate are NOT
+  // re-packed by the forward walk. They are reserved exactly where the
+  // Committed view shows them -- their hours spread evenly across their own
+  // start->due window (same rule as Utilization / Available bandwidth) --
+  // and any overbooking simply stays on those days (free = 0) instead of
+  // spilling forward as "catch-up" that delays everything after it. Only
+  // the remaining tasks are scheduled into the free capacity left over.
+  // WBS passes "every task NOT in this project". Omitted = old behavior.
+  reserveAsSpread?: (t: SchedTaskRow) => boolean;
 }
 
 export interface ForwardScheduleDay {
@@ -280,11 +290,33 @@ export function buildForwardSchedule(args: ForwardScheduleArgs): ForwardSchedule
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   };
 
-  const fixedQueue = eligible.filter((t) => t.is_fixed_schedule).sort(sortByEffectiveDate);
-  const flexQueue = eligible.filter((t) => !t.is_fixed_schedule).sort(sortByEffectiveDate);
+  const reserved = args.reserveAsSpread ? eligible.filter((t) => args.reserveAsSpread!(t)) : [];
+  const reservedIds = new Set(reserved.map((t) => t.id));
+  const fixedQueue = eligible.filter((t) => !reservedIds.has(t.id) && t.is_fixed_schedule).sort(sortByEffectiveDate);
+  const flexQueue = eligible.filter((t) => !reservedIds.has(t.id) && !t.is_fixed_schedule).sort(sortByEffectiveDate);
 
   const taskDueDates = new Map<string, string>();
   const taskStartDates = new Map<string, string>();
+
+  if (reserved.length) {
+    const offDays = buildOffDaySet(availability, personId);
+    for (const task of reserved) {
+      const days = taskAllocationDays(task as unknown as UtilTaskRow, holidaySet, offDays);
+      if (!days.length) continue;
+      const per = (task.estimated_hours ?? 0) / days.length;
+      for (const dateStr of days) {
+        let day = perDay.get(dateStr);
+        if (!day) {
+          day = { capacity: capacityOnDate(person, dateStr, holidaySet, availability), pmHours: new Map(), taskHours: new Map(), totalHours: 0 };
+          perDay.set(dateStr, day);
+        }
+        day.taskHours.set(task.id, (day.taskHours.get(task.id) ?? 0) + per);
+        day.totalHours += per;
+      }
+      taskStartDates.set(task.id, days[0]);
+      taskDueDates.set(task.id, days[days.length - 1]);
+    }
+  }
   const lastGuardDate = toISO(addDays(fromDate, Math.max(0, maxDaysGuard - 1)));
 
   // Fixed-Schedule tasks placed FIRST, independently of each other and of
