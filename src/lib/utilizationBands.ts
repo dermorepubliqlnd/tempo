@@ -52,3 +52,33 @@ export const UTIL_LEGEND = [
   { pct: "96–100%", label: "Full", tone: "accent" },
   { pct: "101%+", label: "Overloaded", tone: "danger" },
 ];
+
+// phase127h (Sandra 2026-10-01): WBS "Available bandwidth" snapshot -- the
+// reverse of utilization, in FREE HOURS (capacity minus planned, PM time
+// counted as booked). Bands are free hours as a share of that day's
+// capacity; the band always derives from the same 0.1h-rounded value the
+// cell prints, so number and colour can't disagree (same lesson as
+// displayPct above). Used only by WbsPlanning.tsx.
+export function roundFreeHours(h: number): number {
+  return Math.round(h * 10) / 10;
+}
+export function bandwidthTier(freeHours: number, capacityHours: number): UtilTier {
+  const free = roundFreeHours(freeHours);
+  if (free < 0) return { key: "overbooked", label: "Overbooked", bg: "var(--danger-bg)", fg: "var(--danger-text)" };
+  const pct = capacityHours > 0 ? (free / capacityHours) * 100 : 0;
+  if (pct >= 41) return { key: "plenty", label: "Plenty", bg: "var(--success-bg)", fg: "var(--success-text)" };
+  if (pct >= 20) return { key: "some", label: "Some", bg: "var(--available-bg)", fg: "var(--available-text)" };
+  if (pct >= 5) return { key: "tight", label: "Tight", bg: "var(--warning-bg)", fg: "var(--warning-text)" };
+  return { key: "full", label: "Full", bg: "#f1f2f4", fg: "var(--muted)" };
+}
+export const BANDWIDTH_LEGEND = [
+  { pct: "41%+ free", label: "Plenty", tone: "success" },
+  { pct: "20–40% free", label: "Some", tone: "available" },
+  { pct: "5–19% free", label: "Tight", tone: "warning" },
+  { pct: "0–4% free", label: "Full", tone: "neutral" },
+  { pct: "Below 0h", label: "Overbooked", tone: "danger" },
+];
+export function formatFreeHours(h: number): string {
+  const r = roundFreeHours(h);
+  return r < 0 ? `−${Math.abs(r).toFixed(1)}h` : `${r.toFixed(1)}h`;
+}

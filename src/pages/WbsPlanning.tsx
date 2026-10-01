@@ -31,7 +31,7 @@ import {
   type UtilProjectRow,
   type UtilPersonRow,
 } from "../lib/dailyAllocation";
-import { displayPct, tierOf, UTIL_LEGEND } from "../lib/utilizationBands";
+import { bandwidthTier, BANDWIDTH_LEGEND, formatFreeHours, roundFreeHours } from "../lib/utilizationBands";
 import { colorForPerson, UNASSIGNED_BAR_COLOR } from "../lib/personColors";
 import { WBS_STATUS_META, wbsStatusMetaFor, type WbsStatus } from "../lib/wbsStatus";
 import { useUnsavedChangesGuard } from "../lib/useUnsavedChangesGuard";
@@ -870,7 +870,8 @@ export default function WbsPlanning() {
   // Phase 11 (2026-08-21): Sandra's snapshot display controls -- reuse
   // the exact same computed points/capacity/tier everywhere below, these
   // three only decide what's shown and to whom, never how it's computed.
-  const [utilShowHours, setUtilShowHours] = useState(true);
+  // phase127h: scratch holder for the current Available-bandwidth row's totals (render-time only).
+  const rowTotals = useRef<{ free: number; over: number }>({ free: 0, over: 0 });
   // 2026-09-03 (Sandra: hour text like "10.3h/7.5h" was being truncated
   // unreadably in the snapshot's day columns): widen the day columns
   // only while Hours is actually shown -- 40px comfortably fits the
@@ -885,7 +886,8 @@ export default function WbsPlanning() {
   // explicit tight padding override on these specific cells (see below)
   // instead of inheriting the table's normal padding, which is sized for
   // much wider columns elsewhere in the app.
-  const utilDayColW = utilShowHours ? 50 : 40;
+  // phase127h: free-hours cells ("−10.5h" worst case) need a fixed width.
+  const utilDayColW = 48;
   const utilDayColPadding = "1px 2px";
   // Phase 21 (2026-08-24): replaces the single Full-Effort-only toggle
   // with the centralized 3-scenario checkbox set -- same state now
@@ -5162,9 +5164,9 @@ export default function WbsPlanning() {
               way for a closed project. */}
           <div className="card" style={{ padding: 14, marginBottom: 12, display: project.wbs_status === "closed" ? "none" : undefined }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
-              <strong style={{ fontSize: 12.5, color: "var(--navy)" }}>Utilization snapshot</strong>
+              <strong style={{ fontSize: 12.5, color: "var(--navy)" }}>Available bandwidth</strong>
               <span
-                title="Preview how this project's draft plan would land on top of everyone's real committed workload, under each scheduling method."
+                title="Free hours per person per day: daily capacity minus planned work (PM time counted as booked). Committed = free time before this project; the scenario rows = free time left after this project's plan is added."
                 style={{ display: "inline-flex", cursor: "help", color: "var(--muted)" }}
               >
                 <Info size={13} />
@@ -5198,16 +5200,7 @@ export default function WbsPlanning() {
                 intentionally NOT one of these checkboxes -- it always
                 stays visible as the ground-truth reference row. */}
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-              <button
-                onClick={() => setUtilShowHours((v) => !v)}
-                className={`timeline-segmented-btn${utilShowHours ? " active" : ""}`}
-                style={{ borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}
-                title="Show/hide planned and capacity hours under each percentage"
-              >
-                <Clock size={12} style={{ marginRight: 4, verticalAlign: -2 }} />
-                Hours
-              </button>
-              <span style={{ width: 1, height: 20, background: "var(--border)", margin: "0 2px" }} />
+              {/* phase127h: Hours toggle removed -- cells are free hours now. */}
               <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Scenarios shown:</span>
               {SCENARIO_ORDER.map((key) => {
                 const checked = visibleScenarios.has(key);
@@ -5362,6 +5355,9 @@ export default function WbsPlanning() {
                         </th>
                       );
                     })}
+                    <th style={{ minWidth: 64, padding: utilDayColPadding, fontSize: 10, textAlign: "center", borderLeft: "2px solid var(--border)" }} title="Total free hours across the working days shown">
+                      Total free
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -5475,7 +5471,7 @@ export default function WbsPlanning() {
                               </span>
                             </span>
                           </td>
-                          <td colSpan={utilDays.length + 1} style={{ fontSize: 11, color: "var(--muted)" }}>
+                          <td colSpan={utilDays.length + 2} style={{ fontSize: 11, color: "var(--muted)" }}>
                             View scenarios
                           </td>
                         </tr>
@@ -5575,6 +5571,23 @@ export default function WbsPlanning() {
                                   </span>
                                 </span>
                               </td>
+                              {(() => {
+                                // phase127h: per-row window totals for the Total free column.
+                                let rowFree = 0;
+                                let rowOver = 0;
+                                for (const d of utilDays) {
+                                  if (!isWorkingDay(d, holidaySet)) continue;
+                                  const iso = toISO(d);
+                                  const av = utilAvailability(p.id, iso);
+                                  if (av?.status === "off") continue;
+                                  const cap = dailyCapacityHours(p as UtilPersonRow, av?.status === "half_day");
+                                  const f = roundFreeHours(cap - modeEngine.totalFor(p.id, iso));
+                                  if (f > 0) rowFree += f;
+                                  else if (f < 0) rowOver += -f;
+                                }
+                                rowTotals.current = { free: roundFreeHours(rowFree), over: roundFreeHours(rowOver) };
+                                return null;
+                              })()}
                               {utilDays.map((d) => {
                                 const iso = toISO(d);
                                 if (!isWorkingDay(d, holidaySet)) {
@@ -5615,8 +5628,9 @@ export default function WbsPlanning() {
                                 // exactly how they drifted apart.
                                 const plannedHours = modeEngine.totalFor(p.id, iso);
                                 const capacityHours = dailyCapacityHours(p as UtilPersonRow, av?.status === "half_day");
-                                const pct = capacityHours > 0 ? (plannedHours / capacityHours) * 100 : plannedHours > 0 ? 999 : 0;
-                                const tier = tierOf(pct);
+                                // phase127h: Available bandwidth = free hours (reverse of utilization).
+                                const freeHours = capacityHours - plannedHours;
+                                const tier = bandwidthTier(freeHours, capacityHours);
                                 return (
                                   <td
                                     key={iso}
@@ -5648,35 +5662,21 @@ export default function WbsPlanning() {
                                       fontWeight: 600,
                                       lineHeight: 1.35,
                                     }}
-                                    title={`${p.name} · ${UTIL_PREVIEW_LABEL[mode]} · ${iso} · ${tier.label}${av?.status === "half_day" ? " (half day)" : ""}`}
+                                    title={`${p.name} · ${UTIL_PREVIEW_LABEL[mode]} · ${iso} · ${tier.label}: ${formatFreeHours(freeHours)} free (booked ${plannedHours.toFixed(1)}h of ${capacityHours.toFixed(1)}h)${av?.status === "half_day" ? " · half day" : ""}`}
                                   >
-                                    {tier.key === "unallocated" ? (
-                                      "–"
-                                    ) : (
-                                      <>
-                                        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                          {displayPct(pct)}%
-                                        </div>
-                                        {utilShowHours && (
-                                          <div
-                                            style={{
-                                              fontSize: 8.5,
-                                              fontWeight: 500,
-                                              opacity: 0.85,
-                                              overflow: "hidden",
-                                              textOverflow: "ellipsis",
-                                              whiteSpace: "nowrap",
-                                            }}
-                                            title={`${plannedHours.toFixed(1)}h / ${capacityHours.toFixed(1)}h`}
-                                          >
-                                            {plannedHours.toFixed(1)}h/{capacityHours.toFixed(1)}h
-                                          </div>
-                                        )}
-                                      </>
-                                    )}
+                                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{formatFreeHours(freeHours)}</div>
                                   </td>
                                 );
                               })}
+                              <td
+                                style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: "var(--navy)", borderLeft: "2px solid var(--border)", padding: utilDayColPadding, whiteSpace: "nowrap" }}
+                                title={`${p.name} · ${UTIL_PREVIEW_LABEL[mode]} · ${rowTotals.current.free.toFixed(1)}h free across the working days shown${rowTotals.current.over > 0 ? ` · ${rowTotals.current.over.toFixed(1)}h overbooked` : ""}`}
+                              >
+                                {rowTotals.current.free.toFixed(1)}h
+                                {rowTotals.current.over > 0 && (
+                                  <div style={{ fontSize: 9, fontWeight: 600, color: "var(--danger-text)" }}>−{rowTotals.current.over.toFixed(1)}h over</div>
+                                )}
+                              </td>
                             </tr>
                           );
                         })}
@@ -5685,7 +5685,7 @@ export default function WbsPlanning() {
                   })}
                   {people.length === 0 && (
                     <tr>
-                      <td colSpan={UTIL_WINDOW_DAYS + 2} style={{ padding: 10, color: "var(--muted)", fontSize: 12 }}>
+                      <td colSpan={UTIL_WINDOW_DAYS + 3} style={{ padding: 10, color: "var(--muted)", fontSize: 12 }}>
                         No active people to show.
                       </td>
                     </tr>
@@ -5699,7 +5699,7 @@ export default function WbsPlanning() {
                 from the SAME UTIL_LEGEND constant the Utilization page uses,
                 so the two can never describe different boundaries again. */}
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
-              {UTIL_LEGEND.map(({ pct, label, tone }) => (
+              {BANDWIDTH_LEGEND.map(({ pct, label, tone }) => (
                 <div key={label} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5 }}>
                   <span className={`status-pill ${tone}`}>{pct}</span>
                   <span style={{ color: "var(--muted)" }}>{label}</span>
