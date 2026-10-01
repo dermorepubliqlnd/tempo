@@ -1564,7 +1564,7 @@ export default function TimeTracking() {
   // (selected date range + status/source/log type/project filters +
   // search), oldest to newest. Same CSV-opens-in-Excel pattern as
   // Productivity/Materials Output; BOM so names like "Velena" with an
-  // enye render correctly in Excel. Duration is decimal hours so it sums.
+  // enye render correctly in Excel. Duration is whole minutes (Sandra 2026-10-01) so it sums.
   function exportMyTimeCsv() {
     const rows = [...filteredEntries]
       .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime())
@@ -1581,11 +1581,11 @@ export default function TimeTracking() {
           isNonProject ? "Non-project" : row.task?.project?.name ?? "",
           isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "",
           toDateInputValue(new Date(row.started_at)),
-          ((row.duration_minutes ?? 0) / 60).toFixed(2),
+          Math.round(row.duration_minutes ?? 0),
           row.reason_notes?.trim() || row.reason_category || "",
         ];
       });
-    const csv = "\uFEFF" + toCsv(["Log ID", "Task ID", "Project", "Task", "Date", "Duration (h)", "Details"], rows);
+    const csv = "\uFEFF" + toCsv(["Log ID", "Task ID", "Project", "Task", "Date", "Duration (min)", "Details"], rows);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
