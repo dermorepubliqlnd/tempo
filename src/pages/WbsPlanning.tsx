@@ -5375,117 +5375,19 @@ export default function WbsPlanning() {
                         return next;
                       });
                     }
-                    if (!isExpanded) {
-                      // Bugfix (2026-08-26, Sandra: "confusing to click on
-                      // View scenarios then the collapse will be in the
-                      // name"): the expand trigger (chevron + "View
-                      // scenarios") used to live in the SECOND column,
-                      // separate from the person's name -- but the
-                      // collapse trigger (chevron right before the name)
-                      // lives in the FIRST column once expanded, so the
-                      // clickable chevron visually jumped to a different
-                      // spot depending on state. Both states now put the
-                      // chevron in the exact same place, right before the
-                      // name in the Person column, so there's one
-                      // consistent click target regardless of expanded/
-                      // collapsed -- "View scenarios" stays as a plain
-                      // (still-clickable, the whole row has onClick) hint
-                      // in the second column rather than owning the icon.
-                      return (
-                        <tr key={p.id} style={{ borderTop: "2px solid var(--border)", cursor: "pointer" }} onClick={toggleExpanded}>
-                          <td
-                            style={{
-                              fontSize: 12,
-                              fontWeight: 600,
-                              position: "sticky",
-                              left: 0,
-                              width: utilPersonColW,
-                              maxWidth: utilPersonColW,
-                              background: "var(--surface)",
-                              // 2026-09-03 (Sandra: numbers still overflowing
-                              // left when scrolling, after the earlier
-                              // per-cell width fix) -- root cause was here,
-                              // not the day cells: this sticky <td> had no
-                              // z-index, unlike its own <th> above (zIndex:
-                              // 1). Sticky position alone doesn't promise a
-                              // paint order above later siblings with the
-                              // same implicit z-index:auto -- day-column
-                              // <td>s scrolled underneath this frozen column
-                              // were winning the paint order (later in DOM)
-                              // and showing through/over it instead of being
-                              // cleanly hidden behind it.
-                              zIndex: 1,
-                              overflow: "hidden",
-                            }}
-                          >
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 4,
-                                overflow: "hidden",
-                              }}
-                            >
-                              <ChevronRight size={12} style={{ flexShrink: 0 }} />
-                              {/* Bugfix (2026-08-28, Sandra: "the name column
-                                  cannot be adjusted also seems like a bug when
-                                  I am showing all scenarios... changing the
-                                  width. Especially in Rhen's name"): under
-                                  this table's auto layout, a `width`/`maxWidth`
-                                  on the <td> alone does NOT stop the browser
-                                  from sizing the PERSON column wider than that
-                                  -- auto layout still measures each cell's
-                                  unclipped, unwrapped text as its "preferred"
-                                  contribution to the column's width, and
-                                  `overflow: hidden` only clips PAINT, it
-                                  doesn't shrink that measurement. A long
-                                  un-truncated name (worst case in this
-                                  roster: "Rhenmart Neil Dela Cruz") was
-                                  therefore free to force the column wider
-                                  than utilPersonColW whenever it was the
-                                  widest thing being measured that render --
-                                  and since collapsed vs expanded rows measure
-                                  a DIFFERENT set of cells each time (the
-                                  Scenario column's "Committed (Existing)"
-                                  label only exists once expanded), the
-                                  column's real width could shift between the
-                                  two states. Giving this inner span its own
-                                  explicit pixel width (not just the outer
-                                  flex wrapper) bounds its CONTRIBUTION to
-                                  that measurement to a fixed size regardless
-                                  of the name's real length, so the column
-                                  itself can no longer be pushed wider by it
-                                  -- the name truncates with an ellipsis
-                                  instead, in both states alike. */}
-                              <span
-                                style={{
-                                  display: "inline-block",
-                                  width: Math.max(20, utilPersonColW - 34),
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                  verticalAlign: "middle",
-                                }}
-                              >
-                                {p.name}
-                              </span>
-                            </span>
-                          </td>
-                          <td colSpan={utilDays.length + 2} style={{ fontSize: 11, color: "var(--muted)" }}>
-                            View scenarios
-                          </td>
-                        </tr>
-                      );
-                    }
+                    // phase127j (Sandra 2026-10-01): collapsed people still show their
+                    // Committed (Existing) row, so existing free time is visible at a
+                    // glance; expanding adds the scenario rows underneath.
+                    const rowModes: UtilPreviewMode[] = isExpanded ? visibleModes : ["actual"];
                     return (
                       <Fragment key={p.id}>
-                        {visibleModes.map((mode, mi) => {
+                        {rowModes.map((mode, mi) => {
                           const modeEngine = engineForMode[mode];
                           return (
                             <tr key={mode} style={mi === 0 ? { borderTop: "2px solid var(--border)" } : undefined}>
                               {mi === 0 && (
                                 <td
-                                  rowSpan={visibleModes.length}
+                                  rowSpan={rowModes.length}
                                   style={{
                                     fontSize: 12,
                                     fontWeight: 600,
@@ -5511,7 +5413,7 @@ export default function WbsPlanning() {
                                       gap: 4,
                                     }}
                                   >
-                                    <ChevronDown size={12} style={{ flexShrink: 0, marginTop: 1 }} />
+                                    {isExpanded ? <ChevronDown size={12} style={{ flexShrink: 0, marginTop: 1 }} /> : <ChevronRight size={12} style={{ flexShrink: 0, marginTop: 1 }} />}
                                     {/* Same fixed-width bound as the collapsed
                                         row's name span above (see its
                                         comment) -- keeps the PERSON column's
@@ -5529,6 +5431,9 @@ export default function WbsPlanning() {
                                       {p.name}
                                     </span>
                                   </span>
+                                  <div style={{ fontSize: 10, fontWeight: 500, color: "var(--accent)", marginTop: 2, paddingLeft: 16 }}>
+                                    {isExpanded ? "Hide scenarios" : "View scenarios"}
+                                  </div>
                                 </td>
                               )}
                               <td
