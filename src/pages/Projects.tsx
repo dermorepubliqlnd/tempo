@@ -1332,7 +1332,7 @@ export default function Projects() {
   async function loadAll() {
     setLoading(true);
     const [{ data: projectData }, { data: taskData }, { data: peopleData }, { data: chainPeopleData }, { data: holidayData }, { data: extReqData }, { data: timeEntryData }, { data: noteData }, { data: delSpentData }, { data: workTypeData }, { data: outputTypeData }, { data: projectSourceData }, { data: projectCategoryData }, { data: projectPhaseData }, { data: phaseMappingData }, { data: pendingBaselineData }, { data: projectPlanningTypeData }, { data: projectTypeData }, { data: closeoutData }, { data: baselineApprovalData }, { data: declinedBaselineData }] = await Promise.all([
-      supabase.from("projects").select("*").eq("is_archived", false).order("sort_order"),
+      supabase.from("projects").select("*").eq("is_archived", false).eq("is_unsaved", false).order("sort_order"),
       supabase.from("tasks").select("*").eq("is_archived", false).order("sort_order"),
       supabase.from("people").select("id,name,color").eq("is_active", true).order("name"),
       supabase.from("people").select("id,reports_to,is_active"),
@@ -3360,7 +3360,7 @@ export default function Projects() {
     // projectStatusOf's doc comment for why this drifted before.
     const { data, error } = await supabase
       .from("projects")
-      .insert({ name: "Untitled", sort_order: Date.now(), owner_id: me?.id ?? null, status: "Not Started" })
+      .insert({ name: "Untitled", sort_order: Date.now(), owner_id: me?.id ?? null, status: "Not Started", is_unsaved: true })
       .select("id")
       .single();
     if (error || !data) {
@@ -5109,9 +5109,9 @@ export default function Projects() {
         onClose={() => setCancelTaskDialog(null)}
         onConfirm={(reason) => confirmCancelTasks(reason)}
       />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <div>
-          <h1>Projects</h1>
+          <h1 style={{ margin: 0 }}>Projects</h1>
         </div>
         {/* phase127g (Sandra 2026-10-01): header "Add New Project" button,
             styled like Time Tracking's Add Time pill. Same createBlankProject
@@ -5129,7 +5129,7 @@ export default function Projects() {
             }}
             disabled={creatingProject}
             style={{
-              display: "inline-flex", alignItems: "center", gap: 6, marginTop: 4,
+              display: "inline-flex", alignItems: "center", gap: 6,
               fontSize: 12.5, fontWeight: 600, color: "#fff", background: "var(--accent)",
               border: "none", borderRadius: 999, padding: "9px 16px",
               cursor: creatingProject ? "default" : "pointer", opacity: creatingProject ? 0.7 : 1, whiteSpace: "nowrap",

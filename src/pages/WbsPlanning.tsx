@@ -1,4 +1,5 @@
 import { useAssigneePicker } from "../components/AssigneePicker";
+import Modal from "../components/Modal";
 import { useProjectStartDatePrompt } from "../components/ProjectStartDatePrompt";
 import { useState, useEffect, useCallback, useRef, Fragment, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
@@ -41,6 +42,8 @@ interface ProjectRow {
   id: string;
   name: string;
   owner_id: string | null;
+  // phase127k: true from creation until the first Save / "Save and leave".
+  is_unsaved?: boolean | null;
   // phase118
   paused_at?: string | null;
   resumed_at?: string | null;
@@ -1031,7 +1034,7 @@ export default function WbsPlanning() {
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
     const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required").eq("id", projectId).single(),
+      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -3468,7 +3471,12 @@ export default function WbsPlanning() {
           }
         }
       }
-      const { error: scopingModeError } = await supabase.from("projects").update({ scoping_effort_mode: activeMode }).eq("id", project.id);
+      // phase127k: an explicit Save is what makes a new project "real".
+      const { error: scopingModeError } = await supabase
+        .from("projects")
+        .update(project.is_unsaved ? { scoping_effort_mode: activeMode, is_unsaved: false } : { scoping_effort_mode: activeMode })
+        .eq("id", project.id);
+      if (!scopingModeError && project.is_unsaved) setProject((prev) => (prev ? { ...prev, is_unsaved: false } : prev));
       if (scopingModeError) {
         await alert(`Timelines were saved, but the project's Scoping Effort setting couldn't be updated: ${scopingModeError.message}`);
         await loadAll();
@@ -3521,7 +3529,70 @@ export default function WbsPlanning() {
 
   // Must run unconditionally (Rules of Hooks) -- before the loading/
   // not-found early returns below.
-  useUnsavedChangesGuard(hasUnsavedChanges);
+  useUnsavedChangesGuard(hasUnsavedChanges || !!project?.is_unsaved);
+
+  // phase127k (Sandra 2026-10-01): leaving a brand-new project that was never
+  // saved asks Save / Discard / Keep editing, instead of silently leaving an
+  // "Untitled" project behind. HashRouter has no useBlocker, so in-app links
+  // are intercepted in the capture phase; the browser Back button and closed
+  // tabs fall through to the 24h server-side purge of unsaved projects.
+  const [leaveTarget, setLeaveTarget] = useState<string | null>(null);
+  const [leaveBusy, setLeaveBusy] = useState(false);
+  const isUnsavedProject = !!project?.is_unsaved;
+  useEffect(() => {
+    if (!isUnsavedProject) return;
+    function onClickCapture(e: MouseEvent) {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a || a.target === "_blank") return;
+      const href = a.getAttribute("href") ?? "";
+      if (!href.startsWith("#/")) return;
+      if (href === window.location.hash) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setLeaveTarget(href.slice(1));
+    }
+    document.addEventListener("click", onClickCapture, true);
+    return () => document.removeEventListener("click", onClickCapture, true);
+  }, [isUnsavedProject]);
+
+  async function keepAndLeave() {
+    if (!project || !leaveTarget) return;
+    setLeaveBusy(true);
+    const flushed = await flushPendingEdits();
+    if (!flushed) {
+      setLeaveBusy(false);
+      return;
+    }
+    const { error } = await supabase.from("projects").update({ is_unsaved: false }).eq("id", project.id);
+    setLeaveBusy(false);
+    if (error) {
+      await alert(`Couldn't save the project: ${error.message}`);
+      return;
+    }
+    setHasUnsavedChanges(false);
+    setProject((prev) => (prev ? { ...prev, is_unsaved: false } : prev));
+    const to = leaveTarget;
+    setLeaveTarget(null);
+    navigate(to);
+  }
+
+  async function discardAndLeave() {
+    if (!project || !leaveTarget) return;
+    setLeaveBusy(true);
+    const { error } = await supabase.rpc("discard_unsaved_project", { p_id: project.id });
+    setLeaveBusy(false);
+    if (error) {
+      await alert(`Couldn't discard the project: ${error.message}`);
+      return;
+    }
+    pendingTaskPatches.current.clear();
+    pendingProjectPatch.current = {};
+    setHasUnsavedChanges(false);
+    const to = leaveTarget;
+    setLeaveTarget(null);
+    navigate(to);
+  }
 
   if (loading) return <div style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>;
   if (!project) return <div style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>Project not found.</div>;
@@ -4475,6 +4546,30 @@ export default function WbsPlanning() {
       {dialog}
       {assigneePicker.element}
       {startDatePrompt.element}
+      {leaveTarget && (
+        <Modal title="This project hasn't been saved" onClose={() => (leaveBusy ? undefined : setLeaveTarget(null))} width={440}>
+          <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: "0 0 14px", lineHeight: 1.5 }}>
+            <strong>{project?.name || "Untitled"}</strong> is a new project that hasn't been saved yet. Save it to keep it, or discard it so it doesn't
+            stay behind as an empty project.
+          </p>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" className="btn-secondary" disabled={leaveBusy} onClick={() => setLeaveTarget(null)}>
+              Keep editing
+            </button>
+            <button
+              type="button"
+              disabled={leaveBusy}
+              onClick={discardAndLeave}
+              style={{ padding: "6px 12px", fontSize: 12, fontWeight: 600, border: "1px solid var(--danger-text)", color: "var(--danger-text)", background: "var(--surface)", borderRadius: "var(--radius-btn)", cursor: "pointer" }}
+            >
+              Discard project
+            </button>
+            <button type="button" className="btn-primary" disabled={leaveBusy} onClick={keepAndLeave}>
+              {leaveBusy ? "Working…" : "Save and leave"}
+            </button>
+          </div>
+        </Modal>
+      )}
       <CancelTaskDialog
         open={Boolean(cancelTaskDialogOpen)}
         taskLabel={cancelTaskDialogOpen?.label ?? ""}
