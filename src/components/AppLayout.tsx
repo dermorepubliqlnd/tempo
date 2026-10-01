@@ -11,6 +11,7 @@ import {
   Palmtree,
   Users,
   Settings,
+  Presentation,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
@@ -52,6 +53,7 @@ const adminItems: NavItem[] = [
   // since that path starts with /admin. Bug found 2026-09-03: Holiday
   // calendar highlighted both itself AND User management at once.
   { to: "/admin", label: "User management", icon: Users, end: true },
+  { to: "/reports", label: "Reports", icon: Presentation },
   { to: "/site-settings", label: "Site settings", icon: Settings },
 ];
 

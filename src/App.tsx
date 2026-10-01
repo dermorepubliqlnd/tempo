@@ -12,6 +12,7 @@ import TimeTracking from "./pages/TimeTracking";
 import Utilization from "./pages/Utilization";
 import Admin from "./pages/Admin";
 import SiteSettings from "./pages/SiteSettings";
+import Reports from "./pages/Reports";
 import HoursOverview from "./pages/HoursOverview";
 import TimeOff from "./pages/TimeOff";
 import WbsPlanning from "./pages/WbsPlanning";
@@ -103,6 +104,7 @@ export default function App() {
           <Route path="/time-off" element={<TimeOff />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="/site-settings" element={<SiteSettings />} />
+          <Route path="/reports" element={<Reports />} />
           <Route path="/admin/holidays" element={<Navigate to="/time-off?tab=holidays" replace />} />
         </Route>
       </Routes>
