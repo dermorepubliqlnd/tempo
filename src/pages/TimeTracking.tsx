@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ShieldCheck, ChevronRight, ChevronLeft, ChevronDown, Pencil, Timer, Trash2, Archive, RotateCcw, Plus, Search, X, CalendarDays, AlertCircle, ListChecks, Radio, FilePen } from "lucide-react";
+import { ShieldCheck, ChevronRight, ChevronLeft, ChevronDown, Pencil, Timer, Trash2, Archive, RotateCcw, Plus, Search, X, CalendarDays, AlertCircle, ListChecks, Radio, FilePen, Download } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
@@ -13,6 +13,7 @@ import { useSearchParams } from "react-router-dom";
 import NonProjectTimerQuickStart from "../components/NonProjectTimerQuickStart";
 import MultiSelectFilter from "../components/MultiSelectFilter";
 import Modal from "../components/Modal";
+import { toCsv } from "../lib/csv";
 
 interface PersonLite {
   id: string;
@@ -1556,6 +1557,44 @@ export default function TimeTracking() {
     for (const key of keys) groupedEntries.push({ dateKey: key, rows: byDate.get(key)! });
   }
 
+  // 2026-10-01 (Sandra: "export report via excel in time tracking allow
+  // everyone to download their own data in my time" -- Log ID, Task ID,
+  // Project, Task, Date, Duration, Details). My Time only, so it's always
+  // the signed-in person's own rows. Exports exactly what the table shows
+  // (selected date range + status/source/log type/project filters +
+  // search), oldest to newest. Same CSV-opens-in-Excel pattern as
+  // Productivity/Materials Output; BOM so names like "Velena" with an
+  // enye render correctly in Excel. Duration is decimal hours so it sums.
+  function exportMyTimeCsv() {
+    const rows = [...filteredEntries]
+      .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime())
+      .map((row) => {
+        const isNonProject = Boolean(row.activity_type_id);
+        const taskIdLabel = row.task?.task_number
+          ? `T-${String(row.task.task_number).padStart(4, "0")}`
+          : row.non_project_entry_number
+          ? `NP-${String(row.non_project_entry_number).padStart(4, "0")}`
+          : "";
+        return [
+          timeLogId(row.entry_number),
+          taskIdLabel,
+          isNonProject ? "Non-project" : row.task?.project?.name ?? "",
+          isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "",
+          toDateInputValue(new Date(row.started_at)),
+          ((row.duration_minutes ?? 0) / 60).toFixed(2),
+          row.reason_notes?.trim() || row.reason_category || "",
+        ];
+      });
+    const csv = "\uFEFF" + toCsv(["Log ID", "Task ID", "Project", "Task", "Date", "Duration (h)", "Details"], rows);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `my_time_${kpiRangeStart}_to_${kpiRangeEnd}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   // 2026-09-23 (Sandra: "task ID as the first column and immovable...
   // task/project, work date, time, duration, details, source, status,
   // action") -- rebuilt from the old fixed 9-column shape (which buried
@@ -2723,6 +2762,19 @@ export default function TimeTracking() {
             <h2 style={{ margin: 0, fontSize: 13 }}>
               {scope === "mine" ? "My entries" : scope === "team" ? "Team entries" : "All entries"} ({filteredEntries.length})
             </h2>
+            {scope === "mine" && filteredEntries.length > 0 && (
+              <button
+                onClick={exportMyTimeCsv}
+                title="Download the entries shown below (current date range and filters)"
+                style={{
+                  marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 600,
+                  color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
+                  padding: "5px 10px", background: "var(--surface)", cursor: "pointer", whiteSpace: "nowrap",
+                }}
+              >
+                <Download size={13} /> Export to Excel
+              </button>
+            )}
           </div>
           {filteredEntries.length === 0 ? (
             <p style={{ fontSize: 12, color: "var(--muted)" }}>No time logged for this range.</p>
