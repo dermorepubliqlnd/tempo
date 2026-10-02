@@ -685,8 +685,11 @@ export default function MyDashboard() {
   const weekExpectedTotal = dailyStats.reduce((sum, d) => sum + d.expected, 0);
   const notTrackingTime = me?.tracks_time === false;
   const daysOverCapacity = dailyStats.filter((d) => d.capacity > 0 && d.pct > 100).length;
+  // Missing-hours attention should only evaluate completed workdays.
+  // The current day is intentionally excluded because the employee still
+  // has time remaining in the workday to complete their expected hours.
   const missingLogHours = dailyStats
-    .filter((d) => d.dateStr <= todayIso && !d.off)
+    .filter((d) => d.dateStr < todayIso && !d.off)
     .reduce((sum, d) => sum + Math.max(0, d.expected - d.logged), 0);
 
   // ---- Scoped vs Logged (This Month), by project, for my tasks -----
