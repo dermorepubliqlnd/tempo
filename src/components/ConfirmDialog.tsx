@@ -1,5 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 import { Fragment } from "react";
+import { createPortal } from "react-dom";
 
 interface ConfirmDialogProps {
   title?: string;
@@ -100,7 +101,8 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  return (
+  // Portaled + above Modal (1100) so confirms opened from a modal stay on top.
+  return createPortal(
     <div
       onClick={hideCancel ? onConfirm : onCancel}
       style={{
@@ -110,7 +112,7 @@ export default function ConfirmDialog({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 200,
+        zIndex: 1200,
       }}
     >
       <div
@@ -161,5 +163,5 @@ export default function ConfirmDialog({
         </div>
       </div>
     </div>
-  );
+  , document.body);
 }

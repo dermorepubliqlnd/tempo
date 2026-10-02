@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 interface ModalProps {
@@ -8,8 +9,12 @@ interface ModalProps {
   width?: number;
 }
 
+// 2026-10-02 (Sandra: timer confirm "broken" behind the Projects table) --
+// rendered through a portal on <body>, so a modal opened from inside a
+// stacking context (e.g. the sticky sidebar's timer) can't be painted over
+// by sticky table cells/headers elsewhere on the page.
 export default function Modal({ title, onClose, children, width = 480 }: ModalProps) {
-  return (
+  return createPortal(
     <div
       onClick={onClose}
       style={{
@@ -19,7 +24,7 @@ export default function Modal({ title, onClose, children, width = 480 }: ModalPr
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 100,
+        zIndex: 1100,
       }}
     >
       <div
@@ -36,5 +41,5 @@ export default function Modal({ title, onClose, children, width = 480 }: ModalPr
         {children}
       </div>
     </div>
-  );
+  , document.body);
 }
