@@ -300,15 +300,15 @@ export default function ProjectOverview() {
         <section style={{ ...cardStyle(), gridColumn: "span 4" }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>Project Risks & Attention</div>
           {[
-            [AlertTriangle, "Overdue tasks", overdueTasks],
-            [Users, "Overallocated assignees", overloadedAssignees],
-            [Clock3, "Pending extension requests", pendingExtensions],
-            [AlertTriangle, "Unassigned open tasks", unassignedTasks],
-            [CheckCircle2, "Changed after baseline", tasksChangedAfterBaseline ? 1 : 0],
-          ].map(([Icon, label, count], i) => (
-            <div key={label as string} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: i ? "1px solid var(--border)" : "none", fontSize: 11.5 }}>
+            { Icon: AlertTriangle, label: "Overdue tasks", count: overdueTasks },
+            { Icon: Users, label: "Overallocated assignees", count: overloadedAssignees },
+            { Icon: Clock3, label: "Pending extension requests", count: pendingExtensions },
+            { Icon: AlertTriangle, label: "Unassigned open tasks", count: unassignedTasks },
+            { Icon: CheckCircle2, label: "Changed after baseline", count: tasksChangedAfterBaseline ? 1 : 0 },
+          ].map(({ Icon, label, count }, i) => (
+            <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: i ? "1px solid var(--border)" : "none", fontSize: 11.5 }}>
               <span style={{ display: "inline-flex", gap: 7, alignItems: "center", color: "var(--text-secondary)" }}><Icon size={13} /> {label}</span>
-              <strong style={{ color: Number(count) > 0 ? "var(--danger-text)" : "var(--muted)" }}>{count as number}</strong>
+              <strong style={{ color: count > 0 ? "var(--danger-text)" : "var(--muted)" }}>{count}</strong>
             </div>
           ))}
         </section>
@@ -359,7 +359,7 @@ export default function ProjectOverview() {
             ["Status", project.status ?? "Not Started"],
             ["Phase", project.phase ?? "—"],
             ["Priority", project.priority ?? "—"],
-            ["WBS Status", project.wbs_status.replaceAll("_", " ")],
+            ["WBS Status", project.wbs_status.split("_").join(" ")],
           ].map(([label, value], i) => (
             <div key={label} style={{ display: "grid", gridTemplateColumns: "105px 1fr", gap: 10, padding: "7px 0", borderTop: i ? "1px solid var(--border)" : "none", fontSize: 11.5 }}>
               <span style={{ color: "var(--muted)" }}>{label}</span>
