@@ -552,10 +552,11 @@ export default function MyDashboard() {
                         </button>
                       )
                     ) : pendingExtTaskIds.has(t.id) ? (
-                      <span className="status-pill gold" title="Extension request awaiting approval" style={{ fontSize: 9, marginLeft: 6, whiteSpace: "nowrap" }}>Ext. pending</span>
+                      <span className="status-pill gold" title="Extension request awaiting approval" style={{ fontSize: 10, marginLeft: 6, padding: "5px 10px", whiteSpace: "nowrap" }}>Extension pending</span>
                     ) : (
-                      <button onClick={() => setExtensionTask({ id: t.id, name: t.name, current_due_date: t.current_due_date ?? todayIso })} title="Request a due-date extension" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--gold-text, #9a6700)" }}>
+                      <button onClick={() => setExtensionTask({ id: t.id, name: t.name, current_due_date: t.current_due_date ?? todayIso })} title="Request a due-date extension" style={{ ...iconBtn, width: "auto", gap: 5, padding: "0 10px", marginLeft: 6, background: "var(--warning-bg, #fff6e0)", border: "1px solid #f0d58c", color: "var(--warning-text, #9a6700)", fontSize: 11, fontWeight: 600, fontFamily: "inherit", whiteSpace: "nowrap" }}>
                         <CalendarClock size={13} />
+                        Request extension
                       </button>
                     )}
                   </div>
