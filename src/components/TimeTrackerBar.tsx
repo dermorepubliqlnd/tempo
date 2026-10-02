@@ -53,9 +53,9 @@ export default function TimeTrackerBar({ collapsed = false }: { collapsed?: bool
             onClick={() => requestStop()}
             disabled={busy}
             title="Stop timer"
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, background: "#fff", border: "none", borderRadius: 6, cursor: "pointer", padding: 0 }}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, background: "var(--danger-bg)", border: "1px solid #f5c6c3", borderRadius: 6, cursor: "pointer", padding: 0 }}
           >
-            <Square size={10} fill="var(--navy)" color="var(--navy)" />
+            <Square size={10} fill="#e0352b" color="#e0352b" />
           </button>
         </>
       )}
@@ -89,9 +89,9 @@ export default function TimeTrackerBar({ collapsed = false }: { collapsed?: bool
           <button
             onClick={() => requestStop()}
             disabled={busy}
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, width: "100%", marginTop: 8, background: "#fff", color: "var(--navy)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 0", fontWeight: 700, fontSize: 12, cursor: busy ? "default" : "pointer" }}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, width: "100%", marginTop: 8, background: "var(--danger-bg)", color: "var(--danger-text)", border: "1px solid #f5c6c3", borderRadius: "var(--radius-sm)", padding: "6px 0", fontWeight: 700, fontSize: 12, cursor: busy ? "default" : "pointer" }}
           >
-            <Square size={10} fill="var(--navy)" color="var(--navy)" />
+            <Square size={10} fill="#e0352b" color="#e0352b" />
             Stop
           </button>
         </>
