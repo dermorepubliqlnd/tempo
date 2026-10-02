@@ -210,7 +210,7 @@ export default function MyDashboard() {
   // authority, so the Pending Approvals header links elsewhere for them.
   const hasApprovalAuthority = useApprovalAuthority();
   const { running, busy: timerBusy, start: startTaskTimer, requestStop, pendingConfirm, setOpenConfirmModalFor } = useTimeTracking();
-  const { confirm, dialog: confirmDialog } = useConfirm();
+  const { confirm, alert, dialog: confirmDialog } = useConfirm();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
 
@@ -610,7 +610,7 @@ export default function MyDashboard() {
       return;
     }
     setExtensionTask(null);
-    await alert("Extension request submitted -- it goes to your supervisor in Approval Center. The due date moves once it's approved.");
+    await alert({ title: "Extension request submitted", message: "It goes to your supervisor in Approval Center. The due date moves once it's approved." });
     loadAll();
   }
 
