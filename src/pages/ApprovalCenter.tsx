@@ -1,7 +1,7 @@
 import MultiSelectFilter from "../components/MultiSelectFilter";
 import ValidateCompletionModal from "../components/ValidateCompletionModal";
 import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
   XCircle,
@@ -29,6 +29,8 @@ import { workingDayDelta, formatWorkingDayDelta } from "../lib/workingDays";
 import { useHolidaySet } from "../lib/useHolidaySet";
 import { loadRoutingData, routeApproval, activeDelegationFor, type RoutingData } from "../lib/approvalRouting";
 import OverrideReasonModal from "../components/OverrideReasonModal";
+import MyRequestsPanel from "../components/MyRequestsPanel";
+import { useApprovalAuthority } from "../lib/useApprovalAuthority";
 import DelegateApprovalsModal from "../components/DelegateApprovalsModal";
 import { formatDate } from "../lib/formatDate";
 import { decideTimeEntry, decideTimeEntryCorrection, formatDuration, FOLLOW_UP_REASON_LABEL, timeLogId, type FollowUpReason } from "../lib/timeTracking";
@@ -487,7 +489,22 @@ export default function ApprovalCenter() {
   const holidaySet = useHolidaySet();
   // phase130: routing, tabs, overrides, delegation.
   const [routing, setRouting] = useState<RoutingData | null>(null);
-  const [tab, setTab] = useState<"mine" | "team">("mine");
+  // 2026-10-02 (Sandra): Approval Center is open to everyone; approval tabs
+  // only for people with approval rights, My Requests for all.
+  const hasAuthority = useApprovalAuthority();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTabState] = useState<"mine" | "team" | "requests">(searchParams.get("tab") === "requests" ? "requests" : "mine");
+  const setTab = (t: "mine" | "team" | "requests") => {
+    setTabState(t);
+    const next = new URLSearchParams(searchParams);
+    if (t === "requests") next.set("tab", "requests");
+    else next.delete("tab");
+    setSearchParams(next, { replace: true });
+  };
+  useEffect(() => {
+    if (hasAuthority === false && tab !== "requests") setTabState("requests");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasAuthority]);
   const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({});
   const [overrideTarget, setOverrideTarget] = useState<Row | null>(null);
   const [delegateOpen, setDelegateOpen] = useState(false);
@@ -1868,7 +1885,9 @@ export default function ApprovalCenter() {
     <div>
       <div style={{ marginBottom: 16 }}>
         <h1 style={{ marginBottom: 2 }}>Approval Center</h1>
-        <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: 0 }}>Review requests routed to you. Everything else stays visible in Team view.</p>
+        <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: 0 }}>
+          {hasAuthority ? "Review requests routed to you, and track the ones you've sent in My Requests." : "Track everything you've submitted for approval and its outcome."}
+        </p>
       </div>
 
       {(() => {
@@ -1896,9 +1915,10 @@ export default function ApprovalCenter() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14, borderBottom: "1px solid var(--border)" }}>
         {([
-          ["mine", `Mine to approve (${mineCount})`],
-          ...(showTeamTab ? [["team", `Team view (${teamCount})`]] : []),
-        ] as [("mine" | "team"), string][]).map(([k, label]) => (
+          ...(hasAuthority ? [["mine", `Mine to approve (${mineCount})`]] : []),
+          ...(hasAuthority && showTeamTab ? [["team", `Team view (${teamCount})`]] : []),
+          ["requests", "My Requests"],
+        ] as [("mine" | "team" | "requests"), string][]).map(([k, label]) => (
           <button
             key={k}
             onClick={() => { setTab(k); setKindFilter(null); }}
@@ -1907,12 +1927,12 @@ export default function ApprovalCenter() {
             {label}
           </button>
         ))}
-        <button
+        {hasAuthority && <button
           onClick={() => setDelegateOpen(true)}
           style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--accent)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 10px", cursor: "pointer", marginBottom: 6 }}
         >
           <UserCheck size={13} /> Delegate approvals
-        </button>
+        </button>}
       </div>
       {tab === "team" && (
         <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: -6, marginBottom: 12 }}>
@@ -1920,6 +1940,9 @@ export default function ApprovalCenter() {
         </p>
       )}
 
+      {tab === "requests" && me && <MyRequestsPanel meId={me.id} />}
+      {tab !== "requests" && (
+        <>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         {AllRequestsSummaryCard()}
         {SummaryCard({ kind: "extension" })}
@@ -1978,6 +2001,9 @@ export default function ApprovalCenter() {
             ))}
           </div>
         </div>
+      )}
+
+        </>
       )}
 
       {overrideTarget && (

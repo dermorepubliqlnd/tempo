@@ -121,7 +121,9 @@ export default function AppLayout() {
   const { person } = useSession();
   const groups = person?.access_level === "full" ? [mainItems, adminItems] : [mainItems];
   const hasApprovalAuthority = useApprovalAuthority();
-  const visibleMainItems = mainItems.filter((item) => item.to !== "/approval-center" || hasApprovalAuthority === true);
+  // 2026-10-02: Approval Center visible to all (non-approvers see My Requests only).
+  const visibleMainItems = mainItems;
+  void hasApprovalAuthority;
 
   const [collapsed, setCollapsed] = useState(() => {
     try {

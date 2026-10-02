@@ -29,15 +29,14 @@ import SetPassword from "./pages/SetPassword";
 function ExtensionRequestsRedirect() {
   const has = useApprovalAuthority();
   if (has === null) return null;
-  return <Navigate to={has ? "/approval-center" : "/projects"} replace />;
+  return <Navigate to={has ? "/approval-center" : "/approval-center?tab=requests"} replace />;
 }
 
 // Approval Center is only reachable by people with approval authority
 // (same rule that hides its menu item).
 function ApprovalCenterGate() {
-  const has = useApprovalAuthority();
-  if (has === null) return null;
-  return has ? <ApprovalCenter /> : <Navigate to="/" replace />;
+  // 2026-10-02: open to everyone -- non-approvers only get My Requests.
+  return <ApprovalCenter />;
 }
 
 function RedirectToWbs() {

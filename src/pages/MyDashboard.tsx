@@ -27,6 +27,7 @@ import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { supabase } from "../lib/supabaseClient";
 import Modal from "../components/Modal";
 import RequestExtensionModal from "../components/RequestExtensionModal";
+import { loadMyRequests, type MyRequestRow } from "../lib/myRequests";
 import NonProjectTimerQuickStart from "../components/NonProjectTimerQuickStart";
 import { useSession } from "../lib/useSession";
 import { useApprovalAuthority } from "../lib/useApprovalAuthority";
@@ -232,6 +233,7 @@ export default function MyDashboard() {
   }, [monthEntries]);
 
   const [extensions, setExtensions] = useState<ExtensionRow[]>([]);
+  const [myReqs, setMyReqs] = useState<MyRequestRow[]>([]);
   const [extensionTask, setExtensionTask] = useState<{ id: string; name: string; current_due_date: string } | null>(null);
   const [pendingTimeEntries, setPendingTimeEntries] = useState<PendingTimeEntryRow[]>([]);
   const [baselineRequests, setBaselineRequests] = useState<BaselineRow[]>([]);
@@ -381,6 +383,12 @@ export default function MyDashboard() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.id]);
+
+  useEffect(() => {
+    if (me?.id) loadMyRequests(me.id, 30).then(setMyReqs);
+  }, [me?.id]);
+  // 2026-10-02 (Sandra): My Requests card = pending + decided in last 7 days.
+  const recentReqs = myReqs.filter((r) => r.status === "pending" || (r.decidedAt && Date.now() - new Date(r.decidedAt).getTime() <= 7 * 86400000));
 
   const isFullAccess = me?.access_level === "full";
   const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
@@ -1232,24 +1240,24 @@ export default function MyDashboard() {
           )}
 
           <div className="dash-card" style={{ marginBottom: 0 }}>
-            <SectionHeader title="Pending Approvals" to={hasApprovalAuthority ? "/approval-center" : "/time-tracking?scope=mine"} small="Requests you've sent that are still awaiting a decision" />
-            {mySubmittedItems.length === 0 ? (
-              <p style={{ fontSize: 12, color: "var(--muted)" }}>You have no pending requests right now.</p>
+            <SectionHeader title="My Requests" to="/approval-center?tab=requests" small="Pending, plus anything decided in the last 7 days" />
+            {recentReqs.length === 0 ? (
+              <p style={{ fontSize: 12, color: "var(--muted)" }}>No pending or recently decided requests.</p>
             ) : (
               <>
                 <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
                   <span style={{ flex: "1 1 40%" }}>Item</span>
-                  <span style={{ flex: "1 1 25%" }}>Project</span>
-                  <span style={{ flex: "0 0 90px" }}>Submitted</span>
+                  <span style={{ flex: "1 1 25%" }}>Type</span>
+                  <span style={{ flex: "0 0 90px" }}>Date</span>
                   <span style={{ flex: "0 0 90px", textAlign: "right" }}>Status</span>
                 </div>
-                {mySubmittedItems.slice(0, 5).map((item) => (
-                  <Link key={item.key} to={item.to} className="dash-row" style={{ textDecoration: "none", color: "inherit" }}>
-                    <span style={{ flex: "1 1 40%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>{item.label}</span>
-                    <span style={{ flex: "1 1 25%", fontSize: 11.5, color: "var(--text-secondary)" }}>{item.project}</span>
-                    <span style={{ flex: "0 0 90px", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(item.date)}</span>
+                {recentReqs.slice(0, 6).map((r) => (
+                  <Link key={r.key} to="/approval-center?tab=requests" className="dash-row" style={{ textDecoration: "none", color: "inherit", background: r.status === "rejected" ? "var(--danger-bg)" : undefined }} title={r.note ?? undefined}>
+                    <span style={{ flex: "1 1 40%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>{r.item}</span>
+                    <span style={{ flex: "1 1 25%", fontSize: 11.5, color: "var(--text-secondary)" }}>{r.typeLabel}</span>
+                    <span style={{ flex: "0 0 90px", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(r.decidedAt ?? r.submittedAt)}</span>
                     <span style={{ flex: "0 0 90px", textAlign: "right" }}>
-                      <span className="status-pill warning" style={{ fontSize: 9.5 }}>PENDING</span>
+                      <span className={`status-pill ${r.status === "pending" ? "warning" : r.status === "approved" ? "success" : "danger"}`} style={{ fontSize: 9.5 }}>{r.statusLabel.toUpperCase()}</span>
                     </span>
                   </Link>
                 ))}
