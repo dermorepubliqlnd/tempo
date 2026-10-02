@@ -324,6 +324,10 @@ export default function Utilization() {
   // Phase 1 utilization UX: make the display intent explicit instead of
   // treating hours as a secondary on/off decoration.
   const [displayMode, setDisplayMode] = useState<"both" | "utilization" | "hours">("both");
+  // Capacity lens: keep the existing committed-utilization model intact, but
+  // let managers flip the same grid to remaining bandwidth without changing
+  // dates, filters, allocation rules, or the pending-project scope.
+  const [capacityLens, setCapacityLens] = useState<"committed" | "bandwidth">("committed");
   const [taskSort, setTaskSort] = useState<"project" | "oldest" | "newest">("project");
   const [taskSearch, setTaskSearch] = useState("");
   const [detailTab, setDetailTab] = useState<"workload" | "timeline" | "pipeline">("workload");
@@ -843,6 +847,8 @@ export default function Utilization() {
       avgPct: workingDaysCount > 0 ? pctSum / workingDaysCount : 0,
       plannedHours,
       availableHours,
+      remainingHours: availableHours - plannedHours,
+      remainingPct: availableHours > 0 ? ((availableHours - plannedHours) / availableHours) * 100 : 0,
       peakPct,
       overloadedDays,
       workingDaysCount,
@@ -885,6 +891,8 @@ export default function Utilization() {
       capacityHours,
       utilizationPct: capacityHours > 0 ? (plannedHours / capacityHours) * 100 : 0,
       availableCapacityHours,
+      netBandwidthHours: capacityHours - plannedHours,
+      bandwidthPct: capacityHours > 0 ? ((capacityHours - plannedHours) / capacityHours) * 100 : 0,
       overloadedMembers,
     };
   })();
@@ -1397,6 +1405,16 @@ export default function Utilization() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>View:</span>
+            <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
+              {([
+                ["committed", "Committed"],
+                ["bandwidth", "Available Bandwidth"],
+              ] as const).map(([mode, label]) => (
+                <button key={mode} onClick={() => setCapacityLens(mode)} style={{ fontSize: 11, fontWeight: 600, padding: "5px 10px", border: "none", cursor: "pointer", background: capacityLens === mode ? "var(--accent)" : "transparent", color: capacityLens === mode ? "#fff" : "var(--muted)" }}>{label}</button>
+              ))}
+            </div>
+            <div style={{ width: 1, height: 18, background: "var(--border)" }} />
             <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
               {(["daily", "weekly"] as const).map((mode) => (
                 <button key={mode} onClick={() => setViewMode(mode)} style={{ fontSize: 11, fontWeight: 600, textTransform: "capitalize", padding: "5px 12px", border: "none", cursor: "pointer", background: viewMode === mode ? "var(--accent)" : "transparent", color: viewMode === mode ? "#fff" : "var(--muted)" }}>{mode}</button>
@@ -1445,18 +1463,27 @@ export default function Utilization() {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginBottom: 10 }}>
         <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "var(--surface)" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>TEAM UTILIZATION</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>{capacityLens === "committed" ? "TEAM UTILIZATION" : "TEAM BANDWIDTH"}</div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
-            <span style={{ fontSize: 23, fontWeight: 600, color: tierOf(teamPlanningSummary.utilizationPct).fg }}>{displayPct(teamPlanningSummary.utilizationPct)}%</span>
-            <span style={{ fontSize: 9.5, color: "var(--muted)" }}>{teamPlanningSummary.plannedHours.toFixed(1)}h / {teamPlanningSummary.capacityHours.toFixed(1)}h</span>
+            {capacityLens === "committed" ? (
+              <>
+                <span style={{ fontSize: 23, fontWeight: 600, color: tierOf(teamPlanningSummary.utilizationPct).fg }}>{displayPct(teamPlanningSummary.utilizationPct)}%</span>
+                <span style={{ fontSize: 9.5, color: "var(--muted)" }}>{teamPlanningSummary.plannedHours.toFixed(1)}h / {teamPlanningSummary.capacityHours.toFixed(1)}h</span>
+              </>
+            ) : (
+              <>
+                <span style={{ fontSize: 23, fontWeight: 600, color: teamPlanningSummary.netBandwidthHours < 0 ? "var(--danger)" : "#059669" }}>{teamPlanningSummary.netBandwidthHours.toFixed(1)}h</span>
+                <span style={{ fontSize: 9.5, color: teamPlanningSummary.bandwidthPct < 0 ? "var(--danger)" : "var(--muted)" }}>{displayPct(teamPlanningSummary.bandwidthPct)}% available</span>
+              </>
+            )}
           </div>
           <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>{summaryDays.length ? `${summaryDays[0].toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${summaryDays[summaryDays.length-1].toLocaleDateString("en-US",{month:"short",day:"numeric"})}` : "Selected period"}</div>
         </div>
 
         <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "var(--surface)" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>AVAILABLE CAPACITY</div>
-          <div style={{ fontSize: 23, fontWeight: 600, color: "#059669" }}>{teamPlanningSummary.availableCapacityHours.toFixed(1)}h</div>
-          <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>Remaining positive capacity in the planning period</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 5 }}>{capacityLens === "committed" ? "AVAILABLE CAPACITY" : "COMMITTED HOURS"}</div>
+          <div style={{ fontSize: 23, fontWeight: 600, color: capacityLens === "committed" ? "#059669" : "var(--navy)" }}>{capacityLens === "committed" ? `${teamPlanningSummary.availableCapacityHours.toFixed(1)}h` : `${teamPlanningSummary.plannedHours.toFixed(1)}h`}</div>
+          <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>{capacityLens === "committed" ? "Remaining positive capacity in the planning period" : `of ${teamPlanningSummary.capacityHours.toFixed(1)}h total capacity`}</div>
         </div>
 
         <div className="card" style={{ padding: "12px 14px", borderRadius: 16, background: "var(--surface)" }}>
@@ -1580,8 +1607,8 @@ export default function Utilization() {
 
       <div ref={utilScrollRef} className="card" style={{ padding: 0, overflowX: "auto", overflowY: "visible" }}>
         <div style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", background: "var(--surface)" }}>
-          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", marginRight: 2 }}>UTILIZATION</span>
-          {UTIL_LEGEND.map(({ pct, label, tone }) => {
+          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", marginRight: 2 }}>{capacityLens === "committed" ? "UTILIZATION" : "AVAILABLE BANDWIDTH"}</span>
+          {capacityLens === "committed" ? UTIL_LEGEND.map(({ pct, label, tone }) => {
             const Icon = LEGEND_ICON_BY_LABEL[label] ?? Minus;
             return (
               <div key={label} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9.5 }}>
@@ -1589,7 +1616,13 @@ export default function Utilization() {
                 <span style={{ color: "var(--muted)" }}>{label}</span>
               </div>
             );
-          })}
+          }) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9.5 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: "rgba(16,185,129,.45)" }} /><span style={{ color: "var(--muted)" }}>Capacity available</span></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9.5 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: "rgba(239,68,68,.45)" }} /><span style={{ color: "var(--muted)" }}>Over capacity</span></div>
+              <span style={{ fontSize: 9.5, color: "var(--muted)" }}>Hours and % are calculated from the same committed allocation model.</span>
+            </>
+          )}
         </div>
         {loading ? (
           <div style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>
@@ -1818,10 +1851,13 @@ export default function Utilization() {
                               const pct = capacity > 0 ? (value / capacity) * 100 : value > 0 ? 999 : 0;
                               const tier = tierOf(pct);
                               const Icon = TIER_ICONS[tier.key] ?? Minus;
+                              const remaining = capacity - value;
+                              const remainingPct = capacity > 0 ? (remaining / capacity) * 100 : 0;
+                              const bandwidthOver = remaining < 0;
                               return (
                                 <td
                                   key={i}
-                                  title={`${tier.label} · ${value.toFixed(1)}h allocated / ${capacity.toFixed(1)}h capacity`}
+                                  title={capacityLens === "committed" ? `${tier.label} · ${value.toFixed(1)}h allocated / ${capacity.toFixed(1)}h capacity` : bandwidthOver ? `Over capacity by ${Math.abs(remaining).toFixed(1)}h · ${value.toFixed(1)}h committed / ${capacity.toFixed(1)}h capacity` : `${remaining.toFixed(1)}h available · ${displayPct(remainingPct)}% bandwidth · ${value.toFixed(1)}h committed`}
                                   onClick={() => {
                                     setDetailPersonId(null);
                                     setSelectedCell({ personId: person.id, dateStr });
@@ -1829,8 +1865,8 @@ export default function Utilization() {
                                   role="button"
                                   style={{
                                     ...rollupCellStyle(i),
-                                    background: tier.bg,
-                                    color: tier.fg,
+                                    background: capacityLens === "committed" ? tier.bg : bandwidthOver ? "rgba(239,68,68,.08)" : remaining === capacity ? "var(--hover-bg)" : "rgba(16,185,129,.08)",
+                                    color: capacityLens === "committed" ? tier.fg : bandwidthOver ? "var(--danger)" : "#047857",
                                     fontSize: 12.5,
                                     fontWeight: 600,
                                     cursor: "pointer",
@@ -1839,16 +1875,16 @@ export default function Utilization() {
                                   }}
                                 >
                                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                                    <Icon size={13} />
+                                    {capacityLens === "committed" ? <Icon size={13} /> : bandwidthOver ? <AlertTriangle size={13} /> : <Circle size={13} />}
                                     {displayMode !== "hours" && (
                                       <span>
-                                        {tier.key === "unallocated" ? "–" : `${displayPct(pct)}%`}
+                                        {capacityLens === "committed" ? (tier.key === "unallocated" ? "–" : `${displayPct(pct)}%`) : bandwidthOver ? `-${displayPct(Math.abs(remainingPct))}%` : `${displayPct(remainingPct)}%`}
                                         {av?.status === "half_day" && <span style={{ fontSize: 9, marginLeft: 2 }}>½</span>}
                                       </span>
                                     )}
                                     {displayMode !== "utilization" && (
                                       <span style={{ fontSize: displayMode === "hours" ? 11 : 9, fontWeight: displayMode === "hours" ? 700 : 500, opacity: displayMode === "hours" ? 1 : 0.78 }}>
-                                        {value.toFixed(1)}h
+                                        {capacityLens === "committed" ? `${value.toFixed(1)}h` : bandwidthOver ? `${Math.abs(remaining).toFixed(1)}h over` : `${remaining.toFixed(1)}h free`}
                                       </span>
                                     )}
                                   </div>
@@ -1859,30 +1895,33 @@ export default function Utilization() {
                               const stats = weekStatsForPerson(person, week);
                               const tier = tierOf(stats.avgPct);
                               const Icon = TIER_ICONS[tier.key] ?? Minus;
+                              const bandwidthOver = stats.remainingHours < 0;
                               const title =
                                 stats.workingDaysCount === 0
                                   ? "No working days this week"
-                                  : `${displayPct(stats.avgPct)}% ${tier.label} · Planned ${stats.plannedHours.toFixed(1)}h / ${stats.availableHours.toFixed(1)}h · Peak day ${displayPct(
-                                      stats.peakPct
-                                    )}% · Overloaded days: ${stats.overloadedDays}`;
+                                  : capacityLens === "committed"
+                                  ? `${displayPct(stats.avgPct)}% ${tier.label} · Planned ${stats.plannedHours.toFixed(1)}h / ${stats.availableHours.toFixed(1)}h · Peak day ${displayPct(stats.peakPct)}% · Overloaded days: ${stats.overloadedDays}`
+                                  : bandwidthOver
+                                  ? `Over capacity by ${Math.abs(stats.remainingHours).toFixed(1)}h · ${stats.plannedHours.toFixed(1)}h committed / ${stats.availableHours.toFixed(1)}h capacity`
+                                  : `${stats.remainingHours.toFixed(1)}h available · ${displayPct(stats.remainingPct)}% bandwidth · ${stats.plannedHours.toFixed(1)}h committed`;
                               return (
                                 <td
                                   key={wi}
                                   style={{
                                     ...rollupWeekCellStyle(wi),
-                                    background: stats.workingDaysCount === 0 ? undefined : tier.bg,
-                                    color: stats.workingDaysCount === 0 ? "var(--muted)" : tier.fg,
+                                    background: stats.workingDaysCount === 0 ? undefined : capacityLens === "committed" ? tier.bg : bandwidthOver ? "rgba(239,68,68,.08)" : "rgba(16,185,129,.08)",
+                                    color: stats.workingDaysCount === 0 ? "var(--muted)" : capacityLens === "committed" ? tier.fg : bandwidthOver ? "var(--danger)" : "#047857",
                                     fontSize: 12.5,
                                     fontWeight: 600,
                                   }}
                                   title={title}
                                 >
                                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                                    <Icon size={13} />
-                                    {displayMode !== "hours" && <span>{stats.workingDaysCount === 0 ? "–" : `${displayPct(stats.avgPct)}%`}</span>}
+                                    {capacityLens === "committed" ? <Icon size={13} /> : bandwidthOver ? <AlertTriangle size={13} /> : <Circle size={13} />}
+                                    {displayMode !== "hours" && <span>{stats.workingDaysCount === 0 ? "–" : capacityLens === "committed" ? `${displayPct(stats.avgPct)}%` : bandwidthOver ? `-${displayPct(Math.abs(stats.remainingPct))}%` : `${displayPct(stats.remainingPct)}%`}</span>}
                                     {displayMode !== "utilization" && (
                                       <span style={{ fontSize: displayMode === "hours" ? 11 : 9, fontWeight: displayMode === "hours" ? 700 : 500, opacity: displayMode === "hours" ? 1 : 0.78 }}>
-                                        {stats.plannedHours.toFixed(1)}h{displayMode === "both" ? ` / ${stats.availableHours.toFixed(1)}h` : ""}
+                                        {capacityLens === "committed" ? `${stats.plannedHours.toFixed(1)}h${displayMode === "both" ? ` / ${stats.availableHours.toFixed(1)}h` : ""}` : bandwidthOver ? `${Math.abs(stats.remainingHours).toFixed(1)}h over` : `${stats.remainingHours.toFixed(1)}h free`}
                                       </span>
                                     )}
                                   </div>
