@@ -115,3 +115,27 @@ export function nonWorkingDayConfirmMessage(dateStr: string, holidayNames: Holid
   }
   return null;
 }
+
+// 2026-10-02 (Sandra): extension day counts are shown in WORKING days
+// (Mon-Fri minus holidays); calendar days stay available (tooltip) for
+// analytics. Signed: working days in (from, to] when to > from, negative
+// when to < from. Inputs are YYYY-MM-DD (or ISO; only the date part used).
+export function workingDayDelta(fromISO: string, toISODate: string, holidays: HolidaySet): number {
+  const a = parseLocalDate(fromISO);
+  const b = parseLocalDate(toISODate);
+  if (b.getTime() === a.getTime()) return 0;
+  const sign = b > a ? 1 : -1;
+  const [lo, hi] = sign > 0 ? [a, b] : [b, a];
+  let n = 0;
+  for (let d = addDays(lo, 1); d <= hi; d = addDays(d, 1)) if (isWorkingDay(d, holidays)) n++;
+  return sign * n;
+}
+
+export function calendarDayDelta(fromISO: string, toISODate: string): number {
+  return Math.round((parseLocalDate(toISODate).getTime() - parseLocalDate(fromISO).getTime()) / 86400000);
+}
+
+/** "+3 working days" / "-1 working day" / "0 working days" */
+export function formatWorkingDayDelta(n: number): string {
+  return `${n > 0 ? "+" : ""}${n} working day${Math.abs(n) === 1 ? "" : "s"}`;
+}

@@ -25,6 +25,8 @@ import {
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
+import { workingDayDelta, formatWorkingDayDelta } from "../lib/workingDays";
+import { useHolidaySet } from "../lib/useHolidaySet";
 import { loadRoutingData, routeApproval, activeDelegationFor, type RoutingData } from "../lib/approvalRouting";
 import OverrideReasonModal from "../components/OverrideReasonModal";
 import DelegateApprovalsModal from "../components/DelegateApprovalsModal";
@@ -482,6 +484,7 @@ export default function ApprovalCenter() {
   // up here (keyed by kind, so each section's state is independent and
   // survives every re-render), and pass it down as props instead.
   const [expandedKinds, setExpandedKinds] = useState<Set<ApprovalKind>>(new Set());
+  const holidaySet = useHolidaySet();
   // phase130: routing, tabs, overrides, delegation.
   const [routing, setRouting] = useState<RoutingData | null>(null);
   const [tab, setTab] = useState<"mine" | "team">("mine");
@@ -1649,7 +1652,8 @@ export default function ApprovalCenter() {
               if (!ext) return null;
               const isProjectLevel = !!ext.project;
               const currentDeadline = ext.project ? ext.project.end_date : ext.task?.current_due_date ?? null;
-              const extensionDays = currentDeadline ? daysBetween(currentDeadline, ext.requested_new_due_date) : null;
+              // 2026-10-02 (Sandra): working days shown; calendar days in the tooltip.
+              const extensionDays = currentDeadline ? workingDayDelta(currentDeadline, ext.requested_new_due_date, holidaySet) : null;
               const assigneeId = isProjectLevel ? null : ext.task?.assignee_id ?? null;
               const onBehalf = !isProjectLevel && ext.requester && assigneeId && ext.requester.id !== assigneeId;
               return (
@@ -1690,7 +1694,7 @@ export default function ApprovalCenter() {
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(currentDeadline)}</td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(ext.requested_new_due_date)}</td>
                   <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>
-                    {extensionDays === null ? "—" : `${extensionDays >= 0 ? "+" : ""}${extensionDays} day${Math.abs(extensionDays) === 1 ? "" : "s"}`}
+                    {extensionDays === null ? "—" : <span title={currentDeadline ? `${daysBetween(currentDeadline, ext.requested_new_due_date)} calendar days` : undefined}>{formatWorkingDayDelta(extensionDays)}</span>}
                   </td>
                   <td style={{ ...td, maxWidth: 220, whiteSpace: "normal", wordBreak: "break-word" }}>
                     <span className="status-pill neutral" style={{ fontSize: 9.5 }}>

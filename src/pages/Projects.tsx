@@ -413,6 +413,15 @@ function toDateKey(date: Date): string {
 
 // Inclusive count of working days between two dates (start and end both
 // count if they themselves are working days). Returns 0 if end < start.
+// Working days strictly after `fromIso` up to and including `toIso`.
+function countWorkingDaysAfter(fromIso: string, toIso: string, holidayDates: Set<string>): number {
+  const a = new Date(fromIso.slice(0, 10) + "T00:00:00");
+  const b = new Date(toIso.slice(0, 10) + "T00:00:00");
+  let n = 0;
+  for (let d = new Date(a.getTime() + 86400000); d <= b; d = new Date(d.getTime() + 86400000)) if (isWorkingDay(d, holidayDates)) n++;
+  return n;
+}
+
 export function countWorkingDays(start: Date, end: Date, holidayDates: Set<string>): number {
   if (end < start) return 0;
   let count = 0;
@@ -2933,9 +2942,11 @@ export default function Projects() {
         // locked at least once (no baseline yet to compare against).
         render: (p) => {
           if (!p.original_due_date || !p.end_date) return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>—</span>;
-          const days = Math.round((new Date(p.end_date).getTime() - new Date(p.original_due_date).getTime()) / 86400000);
-          if (days <= 0) return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>0 days</span>;
-          return <span className="status-pill gold">+{days} day{days === 1 ? "" : "s"}</span>;
+          // 2026-10-02 (Sandra): working days shown; calendar days in the tooltip.
+          const calDays = Math.round((new Date(p.end_date).getTime() - new Date(p.original_due_date).getTime()) / 86400000);
+          const days = countWorkingDaysAfter(p.original_due_date, p.end_date, holidayDates);
+          if (calDays <= 0) return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>0 working days</span>;
+          return <span className="status-pill gold" title={`${calDays} calendar days`}>+{days} working day{days === 1 ? "" : "s"}</span>;
         },
       },
     ],

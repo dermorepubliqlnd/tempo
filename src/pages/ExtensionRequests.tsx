@@ -1,3 +1,5 @@
+import { workingDayDelta, calendarDayDelta, formatWorkingDayDelta } from "../lib/workingDays";
+import { useHolidaySet } from "../lib/useHolidaySet";
 import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Clock, ShieldCheck, BarChart3, ListChecks, Folder, User, Calendar, CalendarClock, ChevronRight } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -53,8 +55,9 @@ const STATUS_TONE: Record<string, string> = {
   Rejected: "danger",
 };
 
-function daysBetween(a: string, b: string): number {
-  return Math.round((new Date(b).getTime() - new Date(a).getTime()) / (1000 * 60 * 60 * 24));
+// 2026-10-02: calendar days kept for analytics (tooltips / averages sub).
+function calendarDaysBetween(a: string, b: string): number {
+  return calendarDayDelta(a, b);
 }
 
 function initials(name: string): string {
@@ -72,6 +75,9 @@ function notOnArchived(r: unknown): boolean {
 }
 
 export default function ExtensionRequests() {
+  // 2026-10-02 (Sandra): every "days" figure here is WORKING days.
+  const holidays = useHolidaySet();
+  const daysBetween = (a: string, b: string) => workingDayDelta(a, b, holidays);
   const { person: me } = useSession();
   const { dialog: confirmDialog } = useConfirm();
   const [tab, setTab] = useState<"requests" | "report">("requests");
@@ -204,7 +210,7 @@ export default function ExtensionRequests() {
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(currentDeadline)}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(row.requested_new_due_date)}</td>
                     <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>
-                      {extensionDays === null ? "—" : `${extensionDays >= 0 ? "+" : ""}${extensionDays} day${Math.abs(extensionDays) === 1 ? "" : "s"}`}
+                      {extensionDays === null ? "—" : <span title={currentDeadline ? `${calendarDaysBetween(currentDeadline, row.requested_new_due_date)} calendar days` : undefined}>{formatWorkingDayDelta(extensionDays)}</span>}
                     </td>
                     <td style={{ ...td, maxWidth: 220, whiteSpace: "normal", wordBreak: "break-word" }}>
                       <span className="status-pill neutral" style={{ fontSize: 9.5 }}>
@@ -257,6 +263,8 @@ export default function ExtensionRequests() {
       .filter((r) => r.task?.original_due_date)
       .map((r) => daysBetween(r.task!.original_due_date, r.requested_new_due_date));
     const avgDaysExtended = daysExtendedList.length > 0 ? Math.round((daysExtendedList.reduce((a, b) => a + b, 0) / daysExtendedList.length) * 10) / 10 : null;
+    const calList = approved.filter((r) => r.task?.original_due_date).map((r) => calendarDaysBetween(r.task!.original_due_date, r.requested_new_due_date));
+    const avgCalendarDays = calList.length > 0 ? Math.round((calList.reduce((a, b) => a + b, 0) / calList.length) * 10) / 10 : null;
 
     const categoryCounts = useMemo(() => {
       const counts: Record<string, number> = {};
@@ -264,7 +272,7 @@ export default function ExtensionRequests() {
         counts[r.reason_category] = (counts[r.reason_category] ?? 0) + 1;
       });
       return Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    }, [requests_]);
+    }, [requests_, holidays]);
     const topCategory = categoryCounts[0]?.[0] ?? "—";
 
     // "On behalf of" = requester isn't the task's assignee -- almost
@@ -295,7 +303,7 @@ export default function ExtensionRequests() {
         if (r.task && r.task.assignee_id !== r.requester?.id) map[id].onBehalf += 1;
       });
       return Object.values(map).sort((a, b) => b.total - a.total);
-    }, [requests_]);
+    }, [requests_, holidays]);
 
     // Per assignee: same shape as byRequester above, but grouped by who
     // the *task* belongs to rather than who filed the request -- these
@@ -318,7 +326,7 @@ export default function ExtensionRequests() {
         if (r.requester?.id === r.task.assignee_id) map[id].selfRequested += 1;
       });
       return Object.values(map).sort((a, b) => b.total - a.total);
-    }, [requests_]);
+    }, [requests_, holidays]);
 
     // Per task: request count + net days drifted (current vs original due
     // date on the task itself -- exact, no reconstruction needed).
@@ -338,7 +346,7 @@ export default function ExtensionRequests() {
         map[id].count += 1;
       });
       return Object.values(map).sort((a, b) => b.count - a.count);
-    }, [requests_]);
+    }, [requests_, holidays]);
 
     // Requests per month, oldest to newest -- simple trend read.
     const byMonth = useMemo(() => {
@@ -348,7 +356,7 @@ export default function ExtensionRequests() {
         map[month] = (map[month] ?? 0) + 1;
       });
       return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0]));
-    }, [requests_]);
+    }, [requests_, holidays]);
     const maxMonthCount = Math.max(1, ...byMonth.map(([, c]) => c));
 
     if (requests_.length === 0) {
@@ -360,7 +368,7 @@ export default function ExtensionRequests() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 24 }}>
           <SummaryCard label="Total requests" value={String(requests_.length)} />
           <SummaryCard label="Approval rate" value={approvalRate === null ? "—" : `${approvalRate}%`} sub={`${approved.length} approved / ${rejected.length} rejected`} />
-          <SummaryCard label="Avg. days extended" value={avgDaysExtended === null ? "—" : `${avgDaysExtended}d`} sub="beyond original due date, approved only" />
+          <SummaryCard label="Avg. working days extended" value={avgDaysExtended === null ? "—" : `${avgDaysExtended}d`} sub={`beyond original due date, approved only${avgCalendarDays === null ? "" : ` · ${avgCalendarDays} calendar days`}`} />
           <SummaryCard label="Top reason" value={topCategory} />
           <SummaryCard label="Requested on behalf" value={onBehalfRate === null ? "—" : `${onBehalfRate}%`} sub={`${onBehalfCount} of ${requests_.length} -- not the assignee`} />
         </div>
@@ -434,7 +442,7 @@ export default function ExtensionRequests() {
               <th>Task</th>
               <th>Project</th>
               <th>Requests</th>
-              <th>Net days drifted</th>
+              <th>Net working days drifted</th>
             </tr>
           </thead>
           <tbody>
