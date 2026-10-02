@@ -318,6 +318,7 @@ export default function Utilization() {
   }, [me?.id]);
   const [personFilterOpen, setPersonFilterOpen] = useState(false);
   const [personFilterSearch, setPersonFilterSearch] = useState("");
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   // Role filter (2026-09-18, Sandra: "add option to filter by role") --
   // filters by the same job_title field shown under each name.
   const [roleFilter, setRoleFilter] = useState<string | null>(null);
@@ -1363,10 +1364,14 @@ export default function Utilization() {
                 ["next_week", "Next week"],
                 ["next_2_weeks", "Next 2 weeks"],
                 ["month", "This month"],
+                ["custom", "Custom"],
               ] as const).map(([preset, label]) => (
                 <button
                   key={preset}
-                  onClick={() => applyPlanningPreset(preset)}
+                  onClick={() => {
+                    if (preset === "custom") setPlanningPreset("custom");
+                    else applyPlanningPreset(preset);
+                  }}
                   style={{
                     border: "none",
                     borderRadius: 999,
@@ -1383,9 +1388,6 @@ export default function Utilization() {
                 </button>
               ))}
             </div>
-            {planningPreset === "custom" && (
-              <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--accent)", padding: "4px 7px", borderRadius: 999, background: "rgba(59,130,246,.08)" }}>Custom</span>
-            )}
             <div style={{ width: 1, height: 20, background: "var(--border)" }} />
             <button onClick={() => shiftRange(-1)} className="planner-nav-btn" disabled={isAtEarliestAnchor} title={isAtEarliestAnchor ? "Can't go earlier than Jan 2026" : "Previous"} style={isAtEarliestAnchor ? { opacity: 0.4, cursor: "default" } : undefined}>
               <ChevronLeft size={14} />
@@ -1395,71 +1397,105 @@ export default function Utilization() {
               {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
             </span>
             <button onClick={() => shiftRange(1)} className="planner-nav-btn" title="Next"><ChevronRight size={14} /></button>
-            <div style={{ width: 1, height: 18, background: "var(--border)" }} />
-            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
-              From
-              <input type="date" min="2026-01-01" value={toISO(rangeStart)} onChange={(e) => setRangeStartFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
-              To
-              <input type="date" min="2026-01-01" value={toISO(rangeEnd)} onChange={(e) => setRangeEndFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
-            </label>
+            {planningPreset === "custom" && (
+              <>
+                <div style={{ width: 1, height: 18, background: "var(--border)" }} />
+                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
+                  From
+                  <input type="date" min="2026-01-01" value={toISO(rangeStart)} onChange={(e) => setRangeStartFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
+                  To
+                  <input type="date" min="2026-01-01" value={toISO(rangeEnd)} onChange={(e) => setRangeEndFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
+                </label>
+              </>
+            )}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>View:</span>
-            <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
-              {([
-                ["committed", "Committed"],
-                ["bandwidth", "Available Bandwidth"],
-              ] as const).map(([mode, label]) => (
-                <button key={mode} onClick={() => setCapacityLens(mode)} style={{ fontSize: 11, fontWeight: 600, padding: "5px 10px", border: "none", cursor: "pointer", background: capacityLens === mode ? "var(--accent)" : "transparent", color: capacityLens === mode ? "#fff" : "var(--muted)" }}>{label}</button>
-              ))}
-            </div>
-            <div style={{ width: 1, height: 18, background: "var(--border)" }} />
-            <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
-              {(["daily", "weekly"] as const).map((mode) => (
-                <button key={mode} onClick={() => setViewMode(mode)} style={{ fontSize: 11, fontWeight: 600, textTransform: "capitalize", padding: "5px 12px", border: "none", cursor: "pointer", background: viewMode === mode ? "var(--accent)" : "transparent", color: viewMode === mode ? "#fff" : "var(--muted)" }}>{mode}</button>
-              ))}
-            </div>
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>Display:</span>
-            <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
-              {([
-                ["both", "Both"],
-                ["utilization", "Utilization"],
-                ["hours", "Hours"],
-              ] as const).map(([mode, label]) => (
-                <button key={mode} onClick={() => setDisplayMode(mode)} style={{ fontSize: 11, fontWeight: 600, padding: "5px 10px", border: "none", cursor: "pointer", background: displayMode === mode ? "var(--accent)" : "transparent", color: displayMode === mode ? "#fff" : "var(--muted)" }}>{label}</button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap", width: "100%" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>
+              Capacity View
+              <select value={capacityLens} onChange={(e) => setCapacityLens(e.target.value as "committed" | "bandwidth")} style={{ minWidth: 152, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 9px", background: "var(--surface)" }}>
+                <option value="committed">Committed</option>
+                <option value="bandwidth">Available Bandwidth</option>
+              </select>
+            </label>
 
-      <div className="card" style={{ padding: 9, marginBottom: 8 }}>
-        <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
-          <UtilPersonFilterButton people={scopedPeople} selected={personFilter} open={personFilterOpen} setOpen={setPersonFilterOpen} search={personFilterSearch} setSearch={setPersonFilterSearch} onChange={setPersonFilter} />
-          <MultiSelectFilter options={projects.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name))} selected={projectFilter} onChange={setProjectFilter} noun="projects" singular="Project" />
-          <label title="Draft and Awaiting Baseline Approval projects are left out by default -- tick to see the pipeline on top of approved work" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 8px", cursor: "pointer", whiteSpace: "nowrap", background: includePending ? "var(--accent-bg, #eaf2fb)" : "var(--surface)" }}>
-            <input type="checkbox" checked={includePending} onChange={(e) => toggleIncludePending(e.target.checked)} />
-            Include pending projects
-          </label>
-          <select value={showAllPeople ? "all" : "active"} onChange={(e) => { setShowAllPeople(e.target.value === "all"); if (activeViewId.startsWith("personal:")) setActiveViewId("system:all"); }} title="Deactivated team members' past hours are retained" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
-            <option value="active">Active team members only</option>
-            <option value="all">Show all (incl. deactivated)</option>
-          </select>
-          {roleOptions.length > 0 && (
-            <select value={roleFilter ?? "__all__"} onChange={(e) => { setRoleFilter(e.target.value === "__all__" ? null : e.target.value); if (activeViewId.startsWith("personal:")) setActiveViewId("system:all"); }} title="Filter by role" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
-              <option value="__all__">All roles</option>
-              {roleOptions.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-          )}
-          <button
-            onClick={() => { setPersonFilter(null); setProjectFilter([]); setRoleFilter(null); setShowAllPeople(false); }}
-            style={{ marginLeft: "auto", border: "1px solid var(--border)", borderRadius: 999, background: "var(--surface)", color: "var(--accent)", fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: "6px 11px" }}
-          >
-            Clear filters
-          </button>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>
+              Time View
+              <select value={viewMode} onChange={(e) => setViewMode(e.target.value as "daily" | "weekly")} style={{ minWidth: 104, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 9px", background: "var(--surface)" }}>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </label>
+
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>
+              Display
+              <select value={displayMode} onChange={(e) => setDisplayMode(e.target.value as "both" | "utilization" | "hours")} style={{ minWidth: 170, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 9px", background: "var(--surface)" }}>
+                <option value="both">Both (Utilization & Hours)</option>
+                <option value="utilization">Utilization only</option>
+                <option value="hours">Hours only</option>
+              </select>
+            </label>
+
+            <div style={{ width: 1, height: 34, background: "var(--border)", margin: "0 2px" }} />
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>Team Members</span>
+              <UtilPersonFilterButton people={scopedPeople} selected={personFilter} open={personFilterOpen} setOpen={setPersonFilterOpen} search={personFilterSearch} setSearch={setPersonFilterSearch} onChange={setPersonFilter} allLabel="All active team members" />
+            </div>
+
+            <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>Advanced Filters</span>
+              <button
+                onClick={() => setAdvancedFiltersOpen((v) => !v)}
+                style={{ display: "inline-flex", alignItems: "center", gap: 7, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", background: "var(--surface)", color: "var(--navy)", fontSize: 11, fontWeight: 600, padding: "6px 9px", cursor: "pointer", minHeight: 31 }}
+              >
+                Advanced Filters
+                {(projectFilter.length > 0 || includePending || showAllPeople) && (
+                  <span style={{ minWidth: 18, height: 18, borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", background: "var(--accent)", color: "#fff", fontSize: 9, fontWeight: 700 }}>
+                    {(projectFilter.length > 0 ? 1 : 0) + (includePending ? 1 : 0) + (showAllPeople ? 1 : 0)}
+                  </span>
+                )}
+              </button>
+
+              {advancedFiltersOpen && (
+                <div className="card" style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, width: 310, padding: 12, boxShadow: "0 8px 24px rgba(15,35,65,.14)" }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", marginBottom: 10 }}>Advanced Filters</div>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)", marginBottom: 5 }}>Projects</div>
+                      <MultiSelectFilter options={projects.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name))} selected={projectFilter} onChange={setProjectFilter} noun="projects" singular="Project" />
+                    </div>
+                    <label title="Draft and Awaiting Baseline Approval projects are excluded by default" style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "var(--navy)", cursor: "pointer" }}>
+                      <input type="checkbox" checked={includePending} onChange={(e) => toggleIncludePending(e.target.checked)} />
+                      Include pending projects
+                    </label>
+                    <label title="Inactive team members are hidden by default but retained for historical analysis" style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "var(--navy)", cursor: "pointer" }}>
+                      <input type="checkbox" checked={showAllPeople} onChange={(e) => setShowAllPeople(e.target.checked)} />
+                      Show inactive team members
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {(personFilter !== null || projectFilter.length > 0 || includePending || showAllPeople) && (
+              <button
+                onClick={() => {
+                  setPersonFilter(null);
+                  setProjectFilter([]);
+                  toggleIncludePending(false);
+                  setShowAllPeople(false);
+                  setRoleFilter(null);
+                }}
+                title="Reset team member and advanced filters only"
+                style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--accent)", fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: "7px 4px" }}
+              >
+                Reset filters
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
