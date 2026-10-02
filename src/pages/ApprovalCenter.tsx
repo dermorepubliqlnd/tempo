@@ -1891,7 +1891,7 @@ export default function ApprovalCenter() {
       </div>
 
       {(() => {
-        if (!me || !routing) return null;
+        if (!me || !routing || tab === "requests") return null;
         const mine = activeDelegationFor(routing, me.id);
         const covering = routing.delegations.filter((d) => d.delegate_id === me.id && !d.cancelled_at && d.start_date <= routing.today && d.end_date >= routing.today);
         const banner = { display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", background: "var(--surface)", marginBottom: 10, color: "var(--text-secondary)" } as const;
@@ -1927,7 +1927,7 @@ export default function ApprovalCenter() {
             {label}
           </button>
         ))}
-        {hasAuthority && <button
+        {hasAuthority && tab !== "requests" && <button
           onClick={() => setDelegateOpen(true)}
           style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--accent)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 10px", cursor: "pointer", marginBottom: 6 }}
         >

@@ -195,7 +195,7 @@ export async function loadMyRequests(meId: string, sinceDays = 90): Promise<MyRe
       context: r.project?.name ?? "—",
       asked: `Completed ${fmtShort(r.actual_completion_date ?? r.submitted_on)}`,
       status: validated ? "approved" : "pending",
-      statusLabel: validated ? "Validated" : "Pending",
+      statusLabel: validated ? "Validated" : "Awaiting validation",
       submittedAt: r.submitted_on ?? r.actual_completion_date ?? new Date().toISOString(),
       decidedBy: pn(r.validated_by),
       decidedAt: r.validation_performed_at ?? (validated ? r.validated_completion_date : null),
