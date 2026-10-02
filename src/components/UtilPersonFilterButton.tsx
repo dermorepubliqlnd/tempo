@@ -22,14 +22,18 @@ interface Props {
   setOpen: (open: boolean) => void;
   search: string;
   setSearch: (v: string) => void;
+  // 2026-10-02 (Sandra): owner + task assignees of this project.
+  contributorIds?: string[];
 }
 
 const PANEL_WIDTH = 240;
 
-export default function UtilPersonFilterButton({ people, selected, onChange, open, setOpen, search, setSearch }: Props) {
+export default function UtilPersonFilterButton({ people, selected, onChange, open, setOpen, search, setSearch, contributorIds = [] }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
 
-  const label = selected === null ? "All team members" : selected.size === 0 ? "No team members" : `${selected.size} of ${people.length} team members`;
+  const contribSet = new Set(contributorIds.filter((id) => people.some((p) => p.id === id)));
+  const isContributors = selected !== null && contribSet.size > 0 && selected.size === contribSet.size && [...contribSet].every((id) => selected.has(id));
+  const label = selected === null ? "All team members" : isContributors ? `Project contributors (${contribSet.size})` : selected.size === 0 ? "No team members" : `${selected.size} of ${people.length} team members`;
 
   function toggle(id: string) {
     const base = selected ?? new Set(people.map((p) => p.id));
@@ -53,6 +57,16 @@ export default function UtilPersonFilterButton({ people, selected, onChange, ope
         {label}
         <ChevronDown size={12} />
       </button>
+      {contribSet.size > 0 && (
+        <button
+          onClick={() => onChange(isContributors ? null : new Set(contribSet))}
+          className={`timeline-segmented-btn${isContributors ? " active" : ""}`}
+          style={{ borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", marginLeft: 6, whiteSpace: "nowrap" }}
+          title="Show only the project owner and people assigned to this project's tasks"
+        >
+          Project contributors
+        </button>
+      )}
 
       {open &&
         createPortal(
@@ -92,6 +106,14 @@ export default function UtilPersonFilterButton({ people, selected, onChange, ope
                 >
                   Select all
                 </button>
+                {contribSet.size > 0 && (
+                  <button
+                    onClick={() => onChange(new Set(contribSet))}
+                    style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", padding: 0, fontWeight: 600 }}
+                  >
+                    Contributors
+                  </button>
+                )}
                 <button
                   onClick={() => onChange(new Set())}
                   style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", padding: 0, fontWeight: 600 }}

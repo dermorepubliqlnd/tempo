@@ -5374,6 +5374,7 @@ export default function WbsPlanning() {
                 search={utilPersonSearch}
                 setSearch={setUtilPersonSearch}
                 onChange={setUtilPersonFilter}
+                contributorIds={[...new Set([project.owner_id, ...tasks.filter((t) => t.status !== "Cancelled").map((t) => t.assignee_id)].filter((x): x is string => !!x))]}
               />
               <span style={{ width: 1, height: 20, background: "var(--border)", margin: "0 2px" }} />
               {/* Expand all / Collapse all (2026-08-28, Sandra): bulk
