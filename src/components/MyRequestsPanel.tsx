@@ -183,14 +183,7 @@ export default function MyRequestsPanel({ meId }: { meId: string }) {
                               <span className={`status-pill ${STATUS_TONE[r.status]}`} style={{ fontSize: 9.5, whiteSpace: "nowrap" }}>{r.statusLabel}</span>
                             </td>
                             <td style={{ ...td, whiteSpace: "nowrap" }}>
-                              {r.status === "pending" ? (
-                                <span title="Waiting on">{r.pendingWith ?? "—"}</span>
-                              ) : (
-                                <>
-                                  <span style={{ fontSize: 10, color: "var(--muted)" }}>{r.status === "approved" ? (r.kind === "task_completion" ? "Validated by " : "Approved by ") : r.kind === "baseline" || r.kind === "closure" ? "Declined by " : "Rejected by "}</span>
-                                  {r.decidedBy ?? "Auto"}
-                                </>
-                              )}
+                              {r.status === "pending" ? <span title="Waiting on">{r.pendingWith ?? "—"}</span> : r.decidedBy ?? "Auto"}
                             </td>
                             <td style={{ ...td, whiteSpace: "nowrap" }}>{r.status === "pending" ? "—" : fmt(r.decidedAt)}</td>
                             <td style={{ ...td, maxWidth: 280, whiteSpace: "normal", wordBreak: "break-word" }}>{r.note ?? "—"}</td>
