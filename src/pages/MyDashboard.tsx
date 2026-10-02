@@ -905,12 +905,12 @@ export default function MyDashboard() {
       </div>
 
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
-        <MetricCard icon={<Folder size={16} />} colors={METRIC_COLORS.blue} label="My Active Projects" value={myProjects.length} sub={`of ${projects.length} total projects`} />
-        <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Tasks Due This Week" value={tasksThisWeek.length} sub={`${tasksDueToday.length} due today`} />
-        <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="Pending Approvals" value={myPendingApprovalsCount} sub="Sent by you, awaiting decision" />
+        <MetricCard icon={<Folder size={16} />} colors={METRIC_COLORS.blue} label="My Active Projects" value={myProjects.length} />
+        <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Tasks Due This Week" value={tasksThisWeek.length} />
+        <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Items" value={overdueTasks.length} />
+        <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="Pending Approvals" value={myPendingApprovalsCount} />
         <MetricCard icon={<BarChart3 size={16} />} colors={METRIC_COLORS.teal} label="Utilization This Week" value={`${Math.round(weekUtilPct)}%`} sub={`of ${weekCapacityTotal.toFixed(1)}h capacity`} />
         <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={notTrackingTime ? "Not expected to log time" : `of ${weekExpectedTotal.toFixed(1)}h expected`} />
-        <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Items" value={overdueTasks.length} sub="Needs attention" />
       </div>
 
       {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
@@ -1499,7 +1499,7 @@ function SectionHeader({ title, to, small }: { title: string; to: string; small?
   );
 }
 
-function MetricCard({ icon, colors, label, value, sub }: { icon: JSX.Element; colors: { bg: string; fg: string }; label: string; value: number | string; sub: string }) {
+function MetricCard({ icon, colors, label, value, sub }: { icon: JSX.Element; colors: { bg: string; fg: string }; label: string; value: number | string; sub?: string }) {
   return (
     <div className="dash-card" style={{ display: "flex", alignItems: "flex-start", gap: 12, flex: "1 1 180px", minWidth: 165, marginBottom: 0, padding: "16px" }}>
       <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: "50%", background: colors.bg, color: colors.fg, flexShrink: 0 }}>
@@ -1508,7 +1508,7 @@ function MetricCard({ icon, colors, label, value, sub }: { icon: JSX.Element; co
       <div>
         <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)" }}>{label}</div>
         <div style={{ fontSize: 21, fontWeight: 700, color: "var(--navy)", lineHeight: 1.25 }}>{value}</div>
-        <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{sub}</div>
+        {sub && <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{sub}</div>}
       </div>
     </div>
   );
