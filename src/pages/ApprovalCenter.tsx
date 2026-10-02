@@ -19,10 +19,15 @@ import {
   Calendar,
   RefreshCw,
   FilePen,
+  UserCheck,
+  ShieldAlert,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
+import { loadRoutingData, routeApproval, activeDelegationFor, type RoutingData } from "../lib/approvalRouting";
+import OverrideReasonModal from "../components/OverrideReasonModal";
+import DelegateApprovalsModal from "../components/DelegateApprovalsModal";
 import { formatDate } from "../lib/formatDate";
 import { decideTimeEntry, decideTimeEntryCorrection, formatDuration, FOLLOW_UP_REASON_LABEL, timeLogId, type FollowUpReason } from "../lib/timeTracking";
 
@@ -294,6 +299,14 @@ interface Row {
   taskIdLabel?: string;
   // Project ID ("P-0012") for project-level requests (close, baseline).
   refId?: string;
+  // phase130: routing -- "mine" (routed to me), "acting" (covering for
+  // someone), "team" (routed elsewhere; read-only unless overridden).
+  route?: "mine" | "acting" | "team";
+  actingForName?: string | null;
+  routedToName?: string | null;
+  overridable?: boolean;
+  itemId?: string;
+  subjectId?: string | null;
 }
 
 // phase104: requests on an archived task/project stay out of every list
@@ -469,6 +482,13 @@ export default function ApprovalCenter() {
   // up here (keyed by kind, so each section's state is independent and
   // survives every re-render), and pass it down as props instead.
   const [expandedKinds, setExpandedKinds] = useState<Set<ApprovalKind>>(new Set());
+  // phase130: routing, tabs, overrides, delegation.
+  const [routing, setRouting] = useState<RoutingData | null>(null);
+  const [tab, setTab] = useState<"mine" | "team">("mine");
+  const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({});
+  const [overrideTarget, setOverrideTarget] = useState<Row | null>(null);
+  const [delegateOpen, setDelegateOpen] = useState(false);
+  const [recentOverrides, setRecentOverrides] = useState<{ id: string; kind: string; decision: string; reason: string; created_at: string; overridden_by: string; routed_approver_id: string | null; subject_person_id: string | null }[]>([]);
 
   async function loadAll() {
     setLoading(true);
@@ -553,6 +573,13 @@ export default function ApprovalCenter() {
     setAllTimeEntries((allTeData as { task_id: string; duration_minutes: number | null; status: "confirmed" | "approved" }[]) ?? []);
     setChainPeople((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []);
     setParentTaskIds(new Set(((parentIdData as { parent_task_id: string }[]) ?? []).map((r) => r.parent_task_id)));
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const [rd, { data: ovData }] = await Promise.all([
+      loadRoutingData((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []),
+      supabase.from("approval_overrides").select("id,kind,decision,reason,created_at,overridden_by,routed_approver_id,subject_person_id").gte("created_at", since).order("created_at", { ascending: false }).limit(50),
+    ]);
+    setRouting(rd);
+    setRecentOverrides((ovData as typeof recentOverrides) ?? []);
     setLoading(false);
   }
 
@@ -677,6 +704,20 @@ export default function ApprovalCenter() {
   // 2026-09-22: the old modal confirm() for "Reject ...?" is gone -- the
   // Reject icon's required-note popover (DecideButtons) IS the
   // confirmation step now, so this no longer asks twice.
+  // phase130: record an override after a successful decision.
+  async function logOverride(key: string, kind: ApprovalKind, itemId: string, subjectId: string | null, decision: string) {
+    const reason = overrideReasons[key];
+    if (!reason) return;
+    const routed = routing ? routeApproval(routing, subjectId).approverId : null;
+    const { error } = await supabase.from("approval_overrides").insert({ kind, item_id: itemId, subject_person_id: subjectId, routed_approver_id: routed, decision, reason });
+    setOverrideReasons((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    if (error) await alert(`Decision saved, but the override note couldn't be logged: ${error.message}`);
+  }
+
   async function decideExtension(row: ExtensionRow, status: "Approved" | "Rejected", note: string | null = null) {
     const key = `ext-${row.id}`;
     setDecidingKey(key);
@@ -690,6 +731,7 @@ export default function ApprovalCenter() {
       await alert(`Couldn't ${status === "Approved" ? "approve" : "reject"} this request: ${error.message}`);
       return;
     }
+    await logOverride(key, "extension", row.id, row.requester?.id ?? null, status.toLowerCase());
     loadAll();
   }
 
@@ -704,6 +746,7 @@ export default function ApprovalCenter() {
       await alert(`Couldn't ${status === "approved" ? "approve" : "reject"} this entry: ${res.error}`);
       return;
     }
+    await logOverride(key, "time", row.id, row.person_id, status);
     loadAll();
   }
 
@@ -729,6 +772,7 @@ export default function ApprovalCenter() {
       await alert(`Couldn't ${decision === "approved" ? "approve" : "reject"} this correction: ${res.error}`);
       return;
     }
+    await logOverride(key, "correction", row.id, row.requested_by, decision);
     loadAll();
   }
 
@@ -782,6 +826,7 @@ export default function ApprovalCenter() {
       // leaving the row unlocked with no explanation.
       await alert(`"${row.name}" was validated, but couldn't be locked: ${lockError.message}`);
     }
+    await logOverride(key, "task_completion", row.id, row.assignee_id, "validated");
     loadAll();
   }
 
@@ -866,11 +911,50 @@ export default function ApprovalCenter() {
     );
   }
 
+  // phase130: who an item is routed to, and whether I may decide it now.
+  function gate(key: string, subjectId: string | null, perm: boolean): Pick<Row, "canDecide" | "route" | "actingForName" | "routedToName" | "overridable" | "subjectId"> {
+    if (!me || !routing) return { canDecide: perm, route: perm ? "mine" : "team", overridable: false, subjectId };
+    const r = routeApproval(routing, subjectId);
+    if (r.approverId === me.id) {
+      return { canDecide: true, route: r.actingFor ? "acting" : "mine", actingForName: r.actingFor ? personName(r.actingFor) : null, routedToName: null, overridable: false, subjectId };
+    }
+    return { canDecide: perm && !!overrideReasons[key], route: "team", routedToName: r.approverId ? personName(r.approverId) : null, overridable: perm, subjectId };
+  }
+
+  function OverrideButton({ row }: { row: Row }) {
+    return (
+      <button
+        onClick={() => setOverrideTarget(row)}
+        title={row.routedToName ? `Routed to ${row.routedToName}` : undefined}
+        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--warning-text, #9a6700)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 9px", cursor: "pointer", whiteSpace: "nowrap" }}
+      >
+        <ShieldAlert size={12} /> Override
+      </button>
+    );
+  }
+
+  function withActing(g: { route?: string; actingForName?: string | null; canDecide: boolean }, el: JSX.Element | null, key: string): JSX.Element | null {
+    if (!el) return null;
+    const pill = g.route === "acting" && g.actingForName ? (
+      <span className="status-pill purple" style={{ fontSize: 9, padding: "1px 6px", whiteSpace: "nowrap" }}>Acting for {g.actingForName}</span>
+    ) : overrideReasons[key] ? (
+      <span className="status-pill gold" style={{ fontSize: 9, padding: "1px 6px", whiteSpace: "nowrap" }}>Override</span>
+    ) : null;
+    if (!pill) return el;
+    return (
+      <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+        {pill}
+        {el}
+      </div>
+    );
+  }
+
   const allRows: Row[] = useMemo(() => {
     const rows: Row[] = [];
 
     extensions.forEach((row) => {
       const key = `ext-${row.id}`;
+      const gExt = gate(key, row.requester?.id ?? null, canDecideExtension(row));
       rows.push({
         key,
         kind: "extension",
@@ -884,10 +968,11 @@ export default function ApprovalCenter() {
         reasonCategory: row.reason_category,
         reasonNotes: row.reason_notes,
         extraLine: `${formatDate(row.project ? row.project.end_date : row.task?.current_due_date)} → ${formatDate(row.requested_new_due_date)}`,
-        canDecide: canDecideExtension(row),
-        action: canDecideExtension(row) ? (
-          <DecideButtons onApprove={() => decideExtension(row, "Approved")} onReject={(n) => decideExtension(row, "Rejected", n)} />
-        ) : null,
+        ...gExt,
+        itemId: row.id,
+        action: gExt.canDecide
+          ? withActing(gExt, <DecideButtons onApprove={() => decideExtension(row, "Approved")} onReject={(n) => decideExtension(row, "Rejected", n)} />, key)
+          : null,
         extensionRow: row,
       });
     });
@@ -899,6 +984,7 @@ export default function ApprovalCenter() {
       // typeLabel instead of "Time Entry" so it reads distinctly in the
       // shared list.
       const isNonProject = Boolean(row.activity_type_id);
+      const gTime = gate(key, row.person_id, canDecideTimeEntry(row));
       rows.push({
         key,
         kind: "time",
@@ -925,17 +1011,18 @@ export default function ApprovalCenter() {
           : row.non_project_entry_number
           ? `NP-${String(row.non_project_entry_number).padStart(4, "0")}`
           : "—",
-        canDecide: canDecideTimeEntry(row),
-        action: canDecideTimeEntry(row) ? (
-          <DecideButtons onApprove={() => decideTime(row, "approved")} onReject={(n) => decideTime(row, "rejected", n)} />
-        ) : null,
+        ...gTime,
+        itemId: row.id,
+        action: gTime.canDecide
+          ? withActing(gTime, <DecideButtons onApprove={() => decideTime(row, "approved")} onReject={(n) => decideTime(row, "rejected", n)} />, key)
+          : null,
       });
     });
 
     correctionRequests.forEach((row) => {
       const key = `corr-${row.id}`;
       const isNonProject = Boolean(row.entry?.activity_type_id);
-      const canDecide = canDecideCorrection(row);
+      const gCorr = gate(key, row.requested_by, canDecideCorrection(row));
       rows.push({
         key,
         kind: "correction",
@@ -950,10 +1037,11 @@ export default function ApprovalCenter() {
         reasonCategory: null,
         reasonNotes: row.reason,
         extraLine: null,
-        canDecide,
-        action: canDecide ? (
-          <DecideButtons onApprove={() => decideCorrection(row, "approved")} onReject={(n) => decideCorrection(row, "rejected", n)} />
-        ) : null,
+        ...gCorr,
+        itemId: row.id,
+        action: gCorr.canDecide
+          ? withActing(gCorr, <DecideButtons onApprove={() => decideCorrection(row, "approved")} onReject={(n) => decideCorrection(row, "rejected", n)} />, key)
+          : null,
         correctionRow: row,
       });
     });
@@ -976,6 +1064,7 @@ export default function ApprovalCenter() {
         reasonNotes: "Captures the current plan as the official Baseline and marks the project as started.",
         extraLine: null,
         canDecide: canDecideBaseline,
+        route: canDecideBaseline ? "mine" : "team",
         action: canDecideBaseline ? <ReviewLink projectId={row.project_id} label="Review WBS" button /> : null,
         linkProjectId: row.project_id,
       });
@@ -999,6 +1088,7 @@ export default function ApprovalCenter() {
         reasonNotes: "Locks in the current plan as Final Scope — final, no re-opening.",
         extraLine: null,
         canDecide: canDecideClosure(row),
+        route: canDecideClosure(row) ? "mine" : "team",
         action: canDecideClosure(row) ? <ReviewLink projectId={row.project_id} /> : null,
       });
     });
@@ -1010,7 +1100,7 @@ export default function ApprovalCenter() {
       // show a row nobody can ever act on.
       if (parentTaskIds.has(row.id)) return;
       const key = `taskval-${row.id}`;
-      const canDecide = canDecideTaskCompletion(row);
+      const gTask = gate(key, row.assignee_id, canDecideTaskCompletion(row));
       // 2026-09-21 (Sandra: "show in the validation list the Due Date,
       // Actual Completion Date -- tag them accordingly"): both dates
       // surfaced here so a validator can see, before confirming, whether
@@ -1037,28 +1127,33 @@ export default function ApprovalCenter() {
         // through so the table can read Due Date / Reported Completion
         // straight off it.
         extraLine: null,
-        canDecide,
+        ...gTask,
+        itemId: row.id,
         action: null,
         taskCompletionRow: row,
       });
     });
 
+    // phase130: routed elsewhere but I hold the right -> Override button.
+    rows.forEach((r) => {
+      if (r.route === "team" && r.overridable && !r.canDecide) r.action = <OverrideButton row={r} />;
+    });
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensions, timeEntries, correctionRequests, baselineRequests, closureRequests, taskCompletions, allTimeEntries, parentTaskIds, chainPeople, people, projects, me]);
+  }, [extensions, timeEntries, correctionRequests, baselineRequests, closureRequests, taskCompletions, allTimeEntries, parentTaskIds, chainPeople, people, projects, me, routing, overrideReasons]);
 
-  const counts = {
-    extension: extensions.length,
-    time: timeEntries.length,
-    correction: correctionRequests.length,
-    baseline: baselineRequests.length,
-    closure: closureRequests.length,
-    task_completion: taskCompletions.filter((t) => !parentTaskIds.has(t.id)).length,
-  };
-  const totalPending = counts.extension + counts.time + counts.correction + counts.baseline + counts.closure + counts.task_completion;
+  // phase130: cards count only the active tab's rows.
+  const inTab = (r: Row) => (tab === "mine" ? r.route === "mine" || r.route === "acting" : r.route === "team");
+  const mineCount = allRows.filter((r) => r.route === "mine" || r.route === "acting").length;
+  const teamCount = allRows.filter((r) => r.route === "team").length;
+  const counts = Object.fromEntries(
+    (["extension", "time", "correction", "baseline", "closure", "task_completion"] as ApprovalKind[]).map((k) => [k, allRows.filter((r) => r.kind === k && inTab(r)).length])
+  ) as Record<ApprovalKind, number>;
+  const totalPending = Object.values(counts).reduce((a, b) => a + b, 0);
 
   const visibleRows = useMemo(() => {
-    let rows = kindFilter ? allRows.filter((r) => r.kind === kindFilter) : allRows;
+    let rows = allRows.filter(inTab);
+    if (kindFilter) rows = rows.filter((r) => r.kind === kindFilter);
     if (personFilter.length) rows = rows.filter((r) => r.personId && personFilter.includes(r.personId));
     if (projectFilter.length) rows = rows.filter((r) => r.projectId && projectFilter.includes(r.projectId));
     // 2026-09-24 (Sandra): search anything -- IDs (TL-/T-/NP-/P-),
@@ -1088,7 +1183,7 @@ export default function ApprovalCenter() {
     }
     return [...rows].sort((a, b) => (sortNewestFirst ? 1 : -1) * (new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allRows, kindFilter, search, sortNewestFirst, personFilter, projectFilter]);
+  }, [allRows, kindFilter, search, sortNewestFirst, personFilter, projectFilter, tab]);
 
   const personFilterOptions = useMemo(() => {
     const m = new Map<string, string>();
@@ -1106,8 +1201,7 @@ export default function ApprovalCenter() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allRows]);
 
-  const needsDecision = visibleRows.filter((r) => r.canDecide);
-  const otherPending = visibleRows.filter((r) => !r.canDecide);
+  const showTeamTab = isFullAccess || teamCount > 0;
 
   function AllRequestsSummaryCard() {
     const active = kindFilter === null;
@@ -1134,7 +1228,7 @@ export default function ApprovalCenter() {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>All Requests</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: "var(--navy)", lineHeight: 1.15 }}>{totalPending}</div>
-          <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Awaiting your approval</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)" }}>{tab === "mine" ? "Awaiting your approval" : "Routed to others"}</div>
         </div>
         <ChevronRight size={16} style={{ color: "var(--muted)", flexShrink: 0 }} />
       </button>
@@ -1171,7 +1265,7 @@ export default function ApprovalCenter() {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>{meta.pluralLabel}</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: "var(--navy)", lineHeight: 1.15 }}>{counts[kind]}</div>
-          <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Awaiting your approval</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)" }}>{tab === "mine" ? "Awaiting your approval" : "Routed to others"}</div>
         </div>
         <ChevronRight size={16} style={{ color: "var(--muted)", flexShrink: 0 }} />
       </button>
@@ -1302,6 +1396,11 @@ export default function ApprovalCenter() {
                         {initials(row.requestedByName)}
                       </span>
                       {row.requestedByName}
+                      {row.kind === "task_completion" && (row.route === "acting" || overrideReasons[row.key]) && (
+                        <span className={`status-pill ${row.route === "acting" ? "purple" : "gold"}`} style={{ fontSize: 9, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                          {row.route === "acting" ? `Acting for ${row.actingForName}` : "Override"}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{row.workStartedAt ? formatWorkDate(row.workStartedAt) : "—"}</td>
@@ -1382,6 +1481,11 @@ export default function ApprovalCenter() {
                         {initials(row.requestedByName)}
                       </span>
                       {row.requestedByName}
+                      {row.kind === "task_completion" && (row.route === "acting" || overrideReasons[row.key]) && (
+                        <span className={`status-pill ${row.route === "acting" ? "purple" : "gold"}`} style={{ fontSize: 9, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                          {row.route === "acting" ? `Acting for ${row.actingForName}` : "Override"}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{formatWorkDate(c.proposed_started_at)}</td>
@@ -1451,6 +1555,11 @@ export default function ApprovalCenter() {
                         {initials(row.requestedByName)}
                       </span>
                       {row.requestedByName}
+                      {row.kind === "task_completion" && (row.route === "acting" || overrideReasons[row.key]) && (
+                        <span className={`status-pill ${row.route === "acting" ? "purple" : "gold"}`} style={{ fontSize: 9, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                          {row.route === "acting" ? `Acting for ${row.actingForName}` : "Override"}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(tc.current_due_date)}</td>
@@ -1460,7 +1569,7 @@ export default function ApprovalCenter() {
                   ) : (
                     <>
                       <td style={td}>—</td>
-                      <td style={{ ...td, textAlign: "center", color: "var(--muted)" }}>—</td>
+                      <td style={{ ...td, textAlign: "center", color: "var(--muted)" }}>{row.overridable ? <OverrideButton row={row} /> : "—"}</td>
                     </>
                   )}
                 </tr>
@@ -1540,6 +1649,11 @@ export default function ApprovalCenter() {
                         {initials(row.requestedByName)}
                       </span>
                       {row.requestedByName}
+                      {row.kind === "task_completion" && (row.route === "acting" || overrideReasons[row.key]) && (
+                        <span className={`status-pill ${row.route === "acting" ? "purple" : "gold"}`} style={{ fontSize: 9, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                          {row.route === "acting" ? `Acting for ${row.actingForName}` : "Override"}
+                        </span>
+                      )}
                     </div>
                     {onBehalf && (
                       <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>(on behalf: {personName(assigneeId)})</div>
@@ -1722,8 +1836,57 @@ export default function ApprovalCenter() {
     <div>
       <div style={{ marginBottom: 16 }}>
         <h1 style={{ marginBottom: 2 }}>Approval Center</h1>
-        <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: 0 }}>Review requests requiring your decision.</p>
+        <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: 0 }}>Review requests routed to you. Everything else stays visible in Team view.</p>
       </div>
+
+      {(() => {
+        if (!me || !routing) return null;
+        const mine = activeDelegationFor(routing, me.id);
+        const covering = routing.delegations.filter((d) => d.delegate_id === me.id && !d.cancelled_at && d.start_date <= routing.today && d.end_date >= routing.today);
+        const banner = { display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", background: "var(--surface)", marginBottom: 10, color: "var(--text-secondary)" } as const;
+        return (
+          <>
+            {mine && (
+              <div style={banner}>
+                <UserCheck size={14} style={{ color: "var(--accent)" }} />
+                Your approvals are delegated to <strong style={{ color: "var(--navy)" }}>{personName(mine.delegate_id)}</strong> until {formatDate(mine.end_date)}.
+              </div>
+            )}
+            {covering.map((d) => (
+              <div key={d.id} style={banner}>
+                <UserCheck size={14} style={{ color: "var(--accent)" }} />
+                You're covering approvals for <strong style={{ color: "var(--navy)" }}>{personName(d.delegator_id)}</strong> until {formatDate(d.end_date)} — tagged "Acting for" in Mine to approve.
+              </div>
+            ))}
+          </>
+        );
+      })()}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14, borderBottom: "1px solid var(--border)" }}>
+        {([
+          ["mine", `Mine to approve (${mineCount})`],
+          ...(showTeamTab ? [["team", `Team view (${teamCount})`]] : []),
+        ] as [("mine" | "team"), string][]).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => { setTab(k); setKindFilter(null); }}
+            style={{ fontSize: 12.5, fontWeight: 600, padding: "8px 12px", background: "none", border: "none", borderBottom: tab === k ? "2px solid var(--accent)" : "2px solid transparent", color: tab === k ? "var(--navy)" : "var(--muted)", cursor: "pointer", marginBottom: -1 }}
+          >
+            {label}
+          </button>
+        ))}
+        <button
+          onClick={() => setDelegateOpen(true)}
+          style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--accent)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 10px", cursor: "pointer", marginBottom: 6 }}
+        >
+          <UserCheck size={13} /> Delegate approvals
+        </button>
+      </div>
+      {tab === "team" && (
+        <p style={{ fontSize: 11.5, color: "var(--muted)", marginTop: -6, marginBottom: 12 }}>
+          Read-only. These are routed to someone else — use Override (reason required) only when needed.
+        </p>
+      )}
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         {AllRequestsSummaryCard()}
@@ -1764,19 +1927,48 @@ export default function ApprovalCenter() {
         </button>
       </div>
 
-      <h2 style={{ fontSize: 13 }}>Needs your decision ({needsDecision.length})</h2>
-      {RequestList({ rows: needsDecision, emptyLabel: "Nothing needs your decision right now." })}
+      {tab === "mine"
+        ? RequestList({ rows: visibleRows, emptyLabel: "Nothing is routed to you right now." })
+        : RequestList({ rows: visibleRows, emptyLabel: "Nothing pending for others." })}
 
-      {/* 2026-09-24 (Sandra: "only show what they need to see") --
-          requests someone else must decide are an oversight view for
-          Full Access only. */}
-      {isFullAccess && (
-        <>
-          <h2 style={{ fontSize: 13, marginTop: 24 }}>Other pending approvals ({otherPending.length})</h2>
-          {RequestList({ rows: otherPending, emptyLabel: "No other pending approvals." })}
-        </>
+      {tab === "team" && recentOverrides.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <h2 style={{ fontSize: 13 }}>Overrides — last 30 days ({recentOverrides.length})</h2>
+          <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--surface)" }}>
+            {recentOverrides.map((o) => (
+              <div key={o.id} style={{ display: "flex", gap: 12, padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 11.5, color: "var(--text-secondary)" }}>
+                <span style={{ whiteSpace: "nowrap", color: "var(--muted)" }}>{formatDateTime(o.created_at)}</span>
+                <span style={{ flex: 1 }}>
+                  <strong style={{ color: "var(--navy)" }}>{personName(o.overridden_by)}</strong> {o.decision} a {KIND_META[o.kind as ApprovalKind]?.label ?? o.kind} for {personName(o.subject_person_id)}
+                  {o.routed_approver_id ? <> (routed to {personName(o.routed_approver_id)})</> : null} — <em>{o.reason}</em>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
+      {overrideTarget && (
+        <OverrideReasonModal
+          itemLabel={`${overrideTarget.typeLabel}: ${overrideTarget.subject} (${overrideTarget.requestedByName})`}
+          approverName={overrideTarget.routedToName ?? null}
+          onCancel={() => setOverrideTarget(null)}
+          onConfirm={(reason) => {
+            setOverrideReasons((prev) => ({ ...prev, [overrideTarget.key]: reason }));
+            setOverrideTarget(null);
+          }}
+        />
+      )}
+      {delegateOpen && me && (
+        <DelegateApprovalsModal
+          meId={me.id}
+          isFullAccess={isFullAccess}
+          people={people}
+          delegations={routing?.delegations ?? []}
+          onClose={() => setDelegateOpen(false)}
+          onChanged={() => loadAll()}
+        />
+      )}
       {confirmDialog}
       {validating && (
         <ValidateCompletionModal

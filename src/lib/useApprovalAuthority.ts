@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { useSession } from "./useSession";
+import { toISO } from "./workingDays";
 
 // 2026-09-24 (Sandra: "Approval Center should only appear for users who
 // actually have approval authority"). No new permission flag -- derived
@@ -31,7 +32,18 @@ export function useApprovalAuthority(): boolean | null {
       // phase112: project ownership no longer grants approval rights --
       // only having someone in your reporting line does.
       const { count: reportCount } = await supabase.from("people").select("id", { count: "exact", head: true }).eq("reports_to", me.id).eq("is_active", true);
-      if (!cancelled) setHas((reportCount ?? 0) > 0);
+      if ((reportCount ?? 0) > 0) {
+        if (!cancelled) setHas(true);
+        return;
+      }
+      // phase130: someone delegated their approvals to me (active or upcoming).
+      const { count: delCount } = await supabase
+        .from("approval_delegations")
+        .select("id", { count: "exact", head: true })
+        .eq("delegate_id", me.id)
+        .is("cancelled_at", null)
+        .gte("end_date", toISO(new Date()));
+      if (!cancelled) setHas((delCount ?? 0) > 0);
     }
     check();
     return () => {
