@@ -1328,7 +1328,9 @@ export default function Utilization() {
 
           {activeViewId.startsWith("personal:") && (
             <>
-              <button onClick={setActiveViewAsDefault} style={{ border: "1px solid var(--border)", borderRadius: 999, background: "var(--surface)", color: "var(--accent)", fontSize: 10, fontWeight: 600, padding: "6px 10px", cursor: "pointer" }}>Set as default</button>
+              {!savedViews.find((view) => view.id === activeViewId)?.isDefault && (
+                <button onClick={setActiveViewAsDefault} style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", color: "var(--accent)", fontSize: 10, fontWeight: 600, padding: "6px 10px", cursor: "pointer" }}>Set as default</button>
+              )}
               <button onClick={deleteActiveView} style={{ border: "none", background: "transparent", color: "var(--danger)", fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Delete</button>
             </>
           )}
