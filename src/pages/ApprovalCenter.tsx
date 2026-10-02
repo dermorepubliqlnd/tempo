@@ -576,7 +576,7 @@ export default function ApprovalCenter() {
     const since = new Date(Date.now() - 30 * 86400000).toISOString();
     const [rd, { data: ovData }] = await Promise.all([
       loadRoutingData((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []),
-      supabase.from("approval_overrides").select("id,kind,decision,reason,created_at,overridden_by,routed_approver_id,subject_person_id").gte("created_at", since).order("created_at", { ascending: false }).limit(50),
+      supabase.from("approval_overrides").select("id,kind,decision,reason,created_at,overridden_by,routed_approver_id,subject_person_id").gte("created_at", since).not("decision", "in", "(pending,failed)").order("created_at", { ascending: false }).limit(50),
     ]);
     setRouting(rd);
     setRecentOverrides((ovData as typeof recentOverrides) ?? []);
@@ -704,22 +704,40 @@ export default function ApprovalCenter() {
   // 2026-09-22: the old modal confirm() for "Reject ...?" is gone -- the
   // Reject icon's required-note popover (DecideButtons) IS the
   // confirmation step now, so this no longer asks twice.
-  // phase130: record an override after a successful decision.
-  async function logOverride(key: string, kind: ApprovalKind, itemId: string, subjectId: string | null, decision: string) {
+  // phase130/131: an override is logged BEFORE deciding (the DB requires
+  // it for items routed to someone else), then stamped with the outcome.
+  async function beginOverride(key: string, kind: ApprovalKind, itemId: string, subjectId: string | null): Promise<string | null | false> {
     const reason = overrideReasons[key];
-    if (!reason) return;
+    if (!reason) return null;
     const routed = routing ? routeApproval(routing, subjectId).approverId : null;
-    const { error } = await supabase.from("approval_overrides").insert({ kind, item_id: itemId, subject_person_id: subjectId, routed_approver_id: routed, decision, reason });
-    setOverrideReasons((prev) => {
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-    if (error) await alert(`Decision saved, but the override note couldn't be logged: ${error.message}`);
+    const { data, error } = await supabase
+      .from("approval_overrides")
+      .insert({ kind, item_id: itemId, subject_person_id: subjectId, routed_approver_id: routed, decision: "pending", reason })
+      .select("id")
+      .single();
+    if (error) {
+      await alert(`Couldn't record the override: ${error.message}`);
+      return false;
+    }
+    return (data as { id: string }).id;
+  }
+
+  async function finishOverride(key: string, overrideId: string | null, decision: string) {
+    if (!overrideId) return;
+    await supabase.from("approval_overrides").update({ decision }).eq("id", overrideId);
+    if (decision !== "failed") {
+      setOverrideReasons((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
   }
 
   async function decideExtension(row: ExtensionRow, status: "Approved" | "Rejected", note: string | null = null) {
     const key = `ext-${row.id}`;
+    const ovId = await beginOverride(key, "extension", row.id, row.requester?.id ?? null);
+    if (ovId === false) return;
     setDecidingKey(key);
     const { error } = await supabase.rpc(row.project ? "decide_project_extension_request" : "decide_extension_request", {
       p_request_id: row.id,
@@ -728,10 +746,11 @@ export default function ApprovalCenter() {
     });
     setDecidingKey(null);
     if (error) {
+      await finishOverride(key, ovId, "failed");
       await alert(`Couldn't ${status === "Approved" ? "approve" : "reject"} this request: ${error.message}`);
       return;
     }
-    await logOverride(key, "extension", row.id, row.requester?.id ?? null, status.toLowerCase());
+    await finishOverride(key, ovId, status.toLowerCase());
     loadAll();
   }
 
@@ -739,14 +758,17 @@ export default function ApprovalCenter() {
   // confirmation now.
   async function decideTime(row: TimeEntryRowLite, status: "approved" | "rejected", note: string | null = null) {
     const key = `time-${row.id}`;
+    const ovId = await beginOverride(key, "time", row.id, row.person_id);
+    if (ovId === false) return;
     setDecidingKey(key);
     const res = await decideTimeEntry(row.id, status, note?.trim() || notesDraft[key]?.trim() || null);
     setDecidingKey(null);
     if (res.error) {
+      await finishOverride(key, ovId, "failed");
       await alert(`Couldn't ${status === "approved" ? "approve" : "reject"} this entry: ${res.error}`);
       return;
     }
-    await logOverride(key, "time", row.id, row.person_id, status);
+    await finishOverride(key, ovId, status);
     loadAll();
   }
 
@@ -765,14 +787,17 @@ export default function ApprovalCenter() {
 
   async function decideCorrection(row: CorrectionRequestRowLite, decision: "approved" | "rejected", note: string | null = null) {
     const key = `corr-${row.id}`;
+    const ovId = await beginOverride(key, "correction", row.id, row.requested_by);
+    if (ovId === false) return;
     setDecidingKey(key);
     const res = await decideTimeEntryCorrection(row.id, decision, note?.trim() || notesDraft[key]?.trim() || null);
     setDecidingKey(null);
     if (res.error) {
+      await finishOverride(key, ovId, "failed");
       await alert(`Couldn't ${decision === "approved" ? "approve" : "reject"} this correction: ${res.error}`);
       return;
     }
-    await logOverride(key, "correction", row.id, row.requested_by, decision);
+    await finishOverride(key, ovId, decision);
     loadAll();
   }
 
@@ -809,10 +834,13 @@ export default function ApprovalCenter() {
   // that second step when validation happens through this page.
   async function decideTaskCompletion(row: TaskCompletionRow, validatedDate: string, reason: string | null = null) {
     const key = `taskval-${row.id}`;
+    const ovId = await beginOverride(key, "task_completion", row.id, row.assignee_id);
+    if (ovId === false) return;
     setDecidingKey(key);
     const { error } = await supabase.rpc("validate_task_completion", { p_task_id: row.id, p_validated_date: new Date(validatedDate).toISOString(), p_adjustment_reason: reason });
     if (error) {
       setDecidingKey(null);
+      await finishOverride(key, ovId, "failed");
       // phase122: show inside the modal (an alert would open behind it).
       setValidating((prev) => (prev ? { ...prev, error: error.message } : prev));
       return;
@@ -826,7 +854,7 @@ export default function ApprovalCenter() {
       // leaving the row unlocked with no explanation.
       await alert(`"${row.name}" was validated, but couldn't be locked: ${lockError.message}`);
     }
-    await logOverride(key, "task_completion", row.id, row.assignee_id, "validated");
+    await finishOverride(key, ovId, "validated");
     loadAll();
   }
 

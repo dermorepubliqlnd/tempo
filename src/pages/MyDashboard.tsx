@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   Calendar,
   Play,
+  CalendarClock,
   Square,
   Eye,
   EyeOff,
@@ -25,6 +26,7 @@ import { tierOf, displayPct, UTIL_LEGEND } from "../lib/utilizationBands";
 import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { supabase } from "../lib/supabaseClient";
 import Modal from "../components/Modal";
+import RequestExtensionModal from "../components/RequestExtensionModal";
 import NonProjectTimerQuickStart from "../components/NonProjectTimerQuickStart";
 import { useSession } from "../lib/useSession";
 import { useApprovalAuthority } from "../lib/useApprovalAuthority";
@@ -230,6 +232,7 @@ export default function MyDashboard() {
   }, [monthEntries]);
 
   const [extensions, setExtensions] = useState<ExtensionRow[]>([]);
+  const [extensionTask, setExtensionTask] = useState<{ id: string; name: string; current_due_date: string } | null>(null);
   const [pendingTimeEntries, setPendingTimeEntries] = useState<PendingTimeEntryRow[]>([]);
   const [baselineRequests, setBaselineRequests] = useState<BaselineRow[]>([]);
   const [closureRequests, setClosureRequests] = useState<ClosureRow[]>([]);
@@ -451,6 +454,115 @@ export default function MyDashboard() {
     return { label: "On track", tone: "success" };
   }
 
+  // 2026-10-02 (Sandra): one row renderer shared by My Work Today and the
+  // full-width "Overdue & Due This Week" card (same columns + timer).
+  function renderWorkRow(t: (typeof myOpenTasks)[number], mode: "today" | "deadline") {
+              const isHidden = mode === "today" && hiddenTodayIds.has(t.id);
+              const isRunningHere = running?.task_id === t.id;
+              const timerDisabled = timerBusy || (Boolean(running) && !isRunningHere);
+              const timing = workTodayTiming(t);
+              const logged = loggedHoursForTask(t.id);
+              const variance = hoursVarianceOf(t.estimated_hours, logged);
+              const varianceTone = hoursVarianceTone(variance?.percent ?? null);
+              // Every cell carries the row's padding/border/opacity (display:contents rows have no box).
+              const td: CSSProperties = { fontSize: 12, minWidth: 0, padding: `10px ${MWT_GAP}px 10px 0`, borderBottom: "1px solid var(--border)", opacity: isHidden ? 0.55 : 1, display: "flex", flexDirection: "column", justifyContent: "center" };
+              const iconBtn: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: "var(--radius-sm)", border: "none", cursor: "pointer", padding: 0 };
+              return (
+                <div key={t.id} style={{ display: "contents" }}>
+                  <div style={{ ...td, fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap" }}>T-{String(t.task_number).padStart(4, "0")}</div>
+                  <div style={td}>
+                    <div style={{ maxWidth: 260, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</div>
+                  </div>
+                  <div style={{ ...td, alignItems: "flex-start" }}>
+                    <span className={`status-pill ${myWorkTodayStatusTone(t.status)}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span>
+                  </div>
+                  <div style={{ ...td, alignItems: "flex-start" }}>
+                    <span className={`status-pill ${timing.tone}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{timing.label}</span>
+                  </div>
+                  <div style={{ ...td, color: "var(--text-secondary)" }} title={t.project?.name ?? undefined}>
+                    <div style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{t.project?.name ?? "—"}</div>
+                  </div>
+                  <div style={{ ...td, color: "var(--text-secondary)", fontSize: 11.5, whiteSpace: "nowrap" }}>
+                    {t.start_date ? formatDate(t.start_date) : "—"} → {formatDate(t.current_due_date)}
+                  </div>
+                  <div style={td}>
+                    <div style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                      <strong style={{ color: "var(--navy)" }}>{logged > 0 ? `${logged.toFixed(1)}h` : "0h"}</strong>
+                      <span style={{ color: "var(--muted)" }}> / {t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
+                    </div>
+                    {variance && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                        <div style={{ flex: "0 0 90px", height: 5, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
+                          <div
+                            style={{
+                              width: `${Math.min(Math.max(variance.percent, 0), 100)}%`,
+                              height: "100%",
+                              borderRadius: 3,
+                              background: varianceTone === "success" ? "var(--accent)" : varianceTone === "warning" ? "var(--warning-text)" : "var(--danger-text)",
+                            }}
+                          />
+                        </div>
+                        <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{variance.percent}%</span>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ ...td, alignItems: "flex-start" }}>
+                    {variance ? (
+                      <span className={`status-pill ${variance.hours <= 0 ? "success" : varianceTone}`} style={{ fontSize: 10, whiteSpace: "nowrap" }}>
+                        {variance.hours <= 0 ? `${Math.abs(variance.hours).toFixed(1)}h remaining` : `${variance.hours.toFixed(1)}h over`}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11.5, color: "var(--muted)" }}>—</span>
+                    )}
+                  </div>
+                  <div style={{ ...td, paddingRight: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
+                    <button
+                      onClick={async () => {
+                        if (isRunningHere) {
+                          const res = await requestStop();
+                          if (res.error) alert(`Couldn't stop timer: ${res.error}`);
+                        } else {
+                          // Weekend/holiday soft check (never blocks), checked against TODAY.
+                          const warnMsg = nonWorkingDayConfirmMessage(todayIso, holidayNames);
+                          if (warnMsg && !(await confirm({ message: warnMsg, confirmLabel: "Yes, start" }))) return;
+                          const res = await startTaskTimer({ id: t.id, name: t.name });
+                          if (res.error) alert(`Couldn't start timer: ${res.error}`);
+                        }
+                      }}
+                      disabled={timerDisabled}
+                      title={isRunningHere ? "Stop timer" : running ? `Stop the timer running on "${running.task_name}" first` : "Start timer"}
+                      style={{
+                        ...iconBtn,
+                        background: isRunningHere ? "var(--danger-text)" : "var(--accent)",
+                        color: "#fff",
+                        cursor: timerDisabled ? "default" : "pointer",
+                        opacity: Boolean(running) && !isRunningHere ? 0.35 : 1,
+                      }}
+                    >
+                      {isRunningHere ? <Square size={11} fill="currentColor" /> : <Play size={11} fill="currentColor" />}
+                    </button>
+                    {mode === "today" ? (
+                      isHidden ? (
+                        <button onClick={() => unhideTaskFromToday(t.id)} title="Restore to My Work Today" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--accent)" }}>
+                          <EyeOff size={13} />
+                        </button>
+                      ) : (
+                        <button onClick={() => hideTaskFromToday(t.id, t.name)} title="Hide task for today" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--muted)" }}>
+                          <Eye size={13} />
+                        </button>
+                      )
+                    ) : pendingExtTaskIds.has(t.id) ? (
+                      <span className="status-pill gold" title="Extension request awaiting approval" style={{ fontSize: 9, marginLeft: 6, whiteSpace: "nowrap" }}>Ext. pending</span>
+                    ) : (
+                      <button onClick={() => setExtensionTask({ id: t.id, name: t.name, current_due_date: t.current_due_date ?? todayIso })} title="Request a due-date extension" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--gold-text, #9a6700)" }}>
+                        <CalendarClock size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+  }
+
   async function hideTaskFromToday(taskId: string, taskName: string) {
     if (!me) return;
     setHiddenToday((prev) => [...prev, { task_id: taskId, hidden_date: todayIso }]);
@@ -480,6 +592,27 @@ export default function MyDashboard() {
   const weekEndIso = toISO(weekDays[4]);
   const weekStartIso = toISO(weekDays[0]);
   const tasksThisWeek = myOpenTasks.filter((t) => !isPausedTask(t) && t.current_due_date && t.current_due_date.slice(0, 10) >= weekStartIso && t.current_due_date.slice(0, 10) <= weekEndIso);
+  // 2026-10-02 (Sandra): full-width deadline card -- overdue first, then
+  // the rest of this week (today onward; past days this week are overdue).
+  const dueRestOfWeek = tasksThisWeek.filter((t) => (t.current_due_date ?? "").slice(0, 10) >= todayIso);
+  const pendingExtTaskIds = new Set(extensions.filter((e) => e.requester?.id === me?.id && e.task?.id).map((e) => e.task!.id));
+  async function submitExtension(newDueDate: string, reasonCategory: string, reasonNotes: string) {
+    if (!extensionTask || !me) return;
+    const { error } = await supabase.from("extension_requests").insert({
+      task_id: extensionTask.id,
+      requested_by: me.id,
+      requested_new_due_date: newDueDate,
+      reason_category: reasonCategory,
+      reason_notes: reasonNotes,
+    });
+    if (error) {
+      await alert(`Couldn't submit extension request: ${error.message}`);
+      return;
+    }
+    setExtensionTask(null);
+    await alert("Extension request submitted -- it goes to your supervisor in Approval Center. The due date moves once it's approved.");
+    loadAll();
+  }
 
   // 2026-09-24 (Sandra): My Projects lists only projects whose WBS is NOT
   // closed -- a closed WBS is final, nothing left to act on.
@@ -995,108 +1128,53 @@ export default function MyDashboard() {
           {myWorkTodayVisible.length === 0 ? (
             <p style={{ gridColumn: "1 / -1", fontSize: 12, color: "var(--muted)", padding: "10px 0" }}>Nothing left to show -- everything scheduled for today is hidden.</p>
           ) : (
-            myWorkTodayVisible.map((t) => {
-              const isHidden = hiddenTodayIds.has(t.id);
-              const isRunningHere = running?.task_id === t.id;
-              const timerDisabled = timerBusy || (Boolean(running) && !isRunningHere);
-              const timing = workTodayTiming(t);
-              const logged = loggedHoursForTask(t.id);
-              const variance = hoursVarianceOf(t.estimated_hours, logged);
-              const varianceTone = hoursVarianceTone(variance?.percent ?? null);
-              // Every cell carries the row's padding/border/opacity (display:contents rows have no box).
-              const td: CSSProperties = { fontSize: 12, minWidth: 0, padding: `10px ${MWT_GAP}px 10px 0`, borderBottom: "1px solid var(--border)", opacity: isHidden ? 0.55 : 1, display: "flex", flexDirection: "column", justifyContent: "center" };
-              const iconBtn: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: "var(--radius-sm)", border: "none", cursor: "pointer", padding: 0 };
-              return (
-                <div key={t.id} style={{ display: "contents" }}>
-                  <div style={{ ...td, fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap" }}>T-{String(t.task_number).padStart(4, "0")}</div>
-                  <div style={td}>
-                    <div style={{ maxWidth: 260, fontWeight: 600, color: "var(--navy)", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.name}>{t.name}</div>
-                  </div>
-                  <div style={{ ...td, alignItems: "flex-start" }}>
-                    <span className={`status-pill ${myWorkTodayStatusTone(t.status)}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{t.status ?? "—"}</span>
-                  </div>
-                  <div style={{ ...td, alignItems: "flex-start" }}>
-                    <span className={`status-pill ${timing.tone}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{timing.label}</span>
-                  </div>
-                  <div style={{ ...td, color: "var(--text-secondary)" }} title={t.project?.name ?? undefined}>
-                    <div style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{t.project?.name ?? "—"}</div>
-                  </div>
-                  <div style={{ ...td, color: "var(--text-secondary)", fontSize: 11.5, whiteSpace: "nowrap" }}>
-                    {t.start_date ? formatDate(t.start_date) : "—"} → {formatDate(t.current_due_date)}
-                  </div>
-                  <div style={td}>
-                    <div style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-                      <strong style={{ color: "var(--navy)" }}>{logged > 0 ? `${logged.toFixed(1)}h` : "0h"}</strong>
-                      <span style={{ color: "var(--muted)" }}> / {t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
-                    </div>
-                    {variance && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-                        <div style={{ flex: "0 0 90px", height: 5, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
-                          <div
-                            style={{
-                              width: `${Math.min(Math.max(variance.percent, 0), 100)}%`,
-                              height: "100%",
-                              borderRadius: 3,
-                              background: varianceTone === "success" ? "var(--accent)" : varianceTone === "warning" ? "var(--warning-text)" : "var(--danger-text)",
-                            }}
-                          />
-                        </div>
-                        <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{variance.percent}%</span>
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ ...td, alignItems: "flex-start" }}>
-                    {variance ? (
-                      <span className={`status-pill ${variance.hours <= 0 ? "success" : varianceTone}`} style={{ fontSize: 10, whiteSpace: "nowrap" }}>
-                        {variance.hours <= 0 ? `${Math.abs(variance.hours).toFixed(1)}h remaining` : `${variance.hours.toFixed(1)}h over`}
-                      </span>
-                    ) : (
-                      <span style={{ fontSize: 11.5, color: "var(--muted)" }}>—</span>
-                    )}
-                  </div>
-                  <div style={{ ...td, paddingRight: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
-                    <button
-                      onClick={async () => {
-                        if (isRunningHere) {
-                          const res = await requestStop();
-                          if (res.error) alert(`Couldn't stop timer: ${res.error}`);
-                        } else {
-                          // Weekend/holiday soft check (never blocks), checked against TODAY.
-                          const warnMsg = nonWorkingDayConfirmMessage(todayIso, holidayNames);
-                          if (warnMsg && !(await confirm({ message: warnMsg, confirmLabel: "Yes, start" }))) return;
-                          const res = await startTaskTimer({ id: t.id, name: t.name });
-                          if (res.error) alert(`Couldn't start timer: ${res.error}`);
-                        }
-                      }}
-                      disabled={timerDisabled}
-                      title={isRunningHere ? "Stop timer" : running ? `Stop the timer running on "${running.task_name}" first` : "Start timer"}
-                      style={{
-                        ...iconBtn,
-                        background: isRunningHere ? "var(--danger-text)" : "var(--accent)",
-                        color: "#fff",
-                        cursor: timerDisabled ? "default" : "pointer",
-                        opacity: Boolean(running) && !isRunningHere ? 0.35 : 1,
-                      }}
-                    >
-                      {isRunningHere ? <Square size={11} fill="currentColor" /> : <Play size={11} fill="currentColor" />}
-                    </button>
-                    {isHidden ? (
-                      <button onClick={() => unhideTaskFromToday(t.id)} title="Restore to My Work Today" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--accent)" }}>
-                        <EyeOff size={13} />
-                      </button>
-                    ) : (
-                      <button onClick={() => hideTaskFromToday(t.id, t.name)} title="Hide task for today" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--muted)" }}>
-                        <Eye size={13} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })
+            myWorkTodayVisible.map((t) => renderWorkRow(t, "today"))
           )}
             </div>
           </div>
         </div>
+      )}
+
+      {(overdueTasks.length > 0 || dueRestOfWeek.length > 0) && (
+        <div className="dash-card">
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
+            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>Overdue &amp; Due This Week</h2>
+            <Link to="/projects?assignee=me" style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>View all tasks</Link>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <div style={MWT_GRID}>
+              {["Task ID", "Task", "Status", "Timing", "Project", "Dates", "Hours (Logged / Est.)", "Remaining / Variance", "Actions"].map((h, i, arr) => (
+                <span
+                  key={`dh${i}`}
+                  style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap", textAlign: i === arr.length - 1 ? "right" : "left", padding: `8px ${i === arr.length - 1 ? 0 : MWT_GAP}px 6px 0`, borderBottom: "1px solid var(--border)" }}
+                >
+                  {h}
+                </span>
+              ))}
+              {overdueTasks.length > 0 && (
+                <div style={{ gridColumn: "1 / -1", padding: "10px 0 2px", fontSize: 11, fontWeight: 700, color: "var(--danger-text)", textTransform: "uppercase", letterSpacing: 0.3 }}>
+                  Overdue ({overdueTasks.length}) <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--muted)" }}>— finish it, or request an extension</span>
+                </div>
+              )}
+              {overdueTasks.map((t) => renderWorkRow(t, "deadline"))}
+              {dueRestOfWeek.length > 0 && (
+                <div style={{ gridColumn: "1 / -1", padding: "12px 0 2px", fontSize: 11, fontWeight: 700, color: "var(--navy)", textTransform: "uppercase", letterSpacing: 0.3 }}>
+                  Due this week ({dueRestOfWeek.length})
+                </div>
+              )}
+              {dueRestOfWeek.map((t) => renderWorkRow(t, "deadline"))}
+            </div>
+          </div>
+        </div>
+      )}
+      {extensionTask && (
+        <RequestExtensionModal
+          taskName={extensionTask.name}
+          currentDueDate={extensionTask.current_due_date.slice(0, 10)}
+          onClose={() => setExtensionTask(null)}
+          approvalNote="This goes to your supervisor in Approval Center -- the due date only updates once it's approved."
+          onSubmit={submitExtension}
+        />
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)", gap: 20, alignItems: "start" }}>
@@ -1152,43 +1230,6 @@ export default function MyDashboard() {
             </div>
           </div>
           )}
-
-          <div className="dash-card">
-            <SectionHeader title={`Tasks Due This Week (${tasksThisWeek.length})`} to="/projects?assignee=me" />
-            {tasksThisWeek.length === 0 ? (
-              <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing due this week.</p>
-            ) : (
-              <>
-                <div style={{ display: "flex", alignItems: "center", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
-                  <span style={{ flex: "0 0 24px" }} />
-                  <span style={{ flex: "1 1 35%" }}>Task</span>
-                  <span style={{ flex: "1 1 25%" }}>Project</span>
-                  <span style={{ flex: "0 0 90px" }}>Due Date</span>
-                  <span style={{ flex: "0 0 110px", textAlign: "right" }}>Status</span>
-                </div>
-                {tasksThisWeek.slice(0, 8).map((t) => {
-                  const overdue = t.current_due_date && t.current_due_date.slice(0, 10) < todayIso;
-                  return (
-                    <div key={t.id} className="dash-row" onClick={() => navigate(`/projects/${t.project_id}`)}>
-                      <span style={{ flex: "0 0 24px" }}>
-                        <input type="checkbox" disabled title="Update status from the task's own page" style={{ cursor: "not-allowed" }} />
-                      </span>
-                      <span style={{ flex: "1 1 35%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>{t.name}</span>
-                      <span style={{ flex: "1 1 25%", fontSize: 11.5, color: "var(--text-secondary)" }}>{t.project?.name ?? "—"}</span>
-                      <span style={{ flex: "0 0 90px", fontSize: 11.5, color: overdue ? "var(--danger-text)" : "var(--text-secondary)", fontWeight: overdue ? 700 : 400 }}>
-                        {overdue ? "Overdue" : t.current_due_date?.slice(0, 10) === todayIso ? "Today" : formatDate(t.current_due_date)}
-                      </span>
-                      <span style={{ flex: "0 0 110px", textAlign: "right" }}>
-                        <span className={`status-pill ${t.status === "In Progress" ? "accent" : "neutral"}`} style={{ fontSize: 9.5 }}>
-                          {(t.status ?? "Not Started").toUpperCase()}
-                        </span>
-                      </span>
-                    </div>
-                  );
-                })}
-              </>
-            )}
-          </div>
 
           <div className="dash-card" style={{ marginBottom: 0 }}>
             <SectionHeader title="Pending Approvals" to={hasApprovalAuthority ? "/approval-center" : "/time-tracking?scope=mine"} small="Requests you've sent that are still awaiting a decision" />
@@ -1493,7 +1534,7 @@ function AttentionPill({
   const style: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, padding: "7px 12px", textDecoration: "none" };
   if (onClick) {
     return (
-      <button type="button" onClick={onClick} className={`status-pill ${tone}`} style={{ ...style, border: "none", cursor: "pointer", font: "inherit" }}>
+      <button type="button" onClick={onClick} className={`status-pill ${tone}`} style={{ ...style, border: "none", cursor: "pointer", fontFamily: "inherit" }}>
         {content}
       </button>
     );
