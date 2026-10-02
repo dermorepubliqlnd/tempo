@@ -489,6 +489,12 @@ export default function MyDashboard() {
                   </div>
                   <div style={{ ...td, color: "var(--text-secondary)" }} title={t.project?.name ?? undefined}>
                     <div style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{t.project?.name ?? "—"}</div>
+                    {/* 2026-10-02 (Sandra): project owner, so the member knows who to reach out to. */}
+                    {(() => {
+                      const ownerId = (t.project as { owner_id?: string | null } | null)?.owner_id;
+                      const owner = ownerId ? people.find((p) => p.id === ownerId)?.name : null;
+                      return owner ? <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2, whiteSpace: "nowrap" }}>Owner: {owner}</div> : null;
+                    })()}
                   </div>
                   <div style={{ ...td, color: "var(--text-secondary)", fontSize: 11.5, whiteSpace: "nowrap" }}>
                     {t.start_date ? formatDate(t.start_date) : "—"} → {formatDate(t.current_due_date)}
