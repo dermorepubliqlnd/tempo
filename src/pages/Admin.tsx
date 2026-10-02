@@ -1,3 +1,4 @@
+import { canAccessPage } from "../lib/pageAccess";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type CSSProperties } from "react";
 import { UserPlus, Upload, Download, Copy, Search } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -180,7 +181,7 @@ export default function Admin() {
   }, [people]);
 
   if (sessionLoading) return null;
-  if (!me || me.access_level !== "full") return <AccessDenied />;
+  if (!me || !canAccessPage(me, "user_management")) return <AccessDenied />;
 
   // Sandra, 2026-08-14: an invite-email link expired on her ("otp_expired")
   // -- she doesn't want email-link auth at all, same as another app (LEAP)
@@ -373,7 +374,7 @@ export default function Admin() {
   // with skip level option as fallback." can_approve_closures/
   // can_approve_rebaseline are unaffected -- both are genuinely wired
   // (can_decide_closure, can_decide_baseline_request).
-  async function toggleApprovalFlag(p: Person, field: "can_approve_closures" | "can_approve_rebaseline", value: boolean) {
+  async function toggleApprovalFlag(p: Person, field: "can_approve_closures" | "can_approve_rebaseline" | "can_view_team_dashboard" | "can_access_user_management" | "can_access_reports" | "can_access_site_settings", value: boolean) {
     setPeople((prev) => prev.map((x) => (x.id === p.id ? { ...x, [field]: value } : x)));
     const { error } = await supabase.from("people").update({ [field]: value }).eq("id", p.id);
     if (error) {
@@ -939,6 +940,7 @@ export default function Admin() {
           onSaveEdit={() => saveEdit(selectedPerson)}
           onChangeAccessLevel={(level) => changeAccessLevel(selectedPerson, level)}
           onToggleApprovalFlag={(field, value) => toggleApprovalFlag(selectedPerson, field, value)}
+          meId={me?.id}
           onToggleTracksTime={(value) => toggleTracksTime(selectedPerson, value)}
           onSaveColor={(hex) => saveColor(selectedPerson, hex)}
         />

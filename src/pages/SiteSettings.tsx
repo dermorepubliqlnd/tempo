@@ -1,3 +1,4 @@
+import { canAccessPage } from "../lib/pageAccess";
 import { useEffect, useState, type CSSProperties } from "react";
 import { ShieldCheck, ShieldOff, Pencil, Check, X, Plus, ArrowUp, ArrowDown, Trash2, CalendarClock, CalendarDays, GripVertical, ChevronRight } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -1838,7 +1839,7 @@ export default function SiteSettings() {
   }, [me?.access_level]);
 
   if (sessionLoading) return null;
-  if (!me || me.access_level !== "full") return <AccessDenied />;
+  if (!me || !canAccessPage(me, "site_settings")) return <AccessDenied />;
 
   return (
     <div>

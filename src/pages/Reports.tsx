@@ -1,3 +1,4 @@
+import { canAccessPage } from "../lib/pageAccess";
 // Admin > Reports (phase128, 2026-10-01). Sandra: "a report builder ... to
 // generate a deck for me" -- first report = the weekly L&D report for Brad.
 // Data comes live from Tempo (lib/weeklyReport/data.ts); every narrative line
@@ -77,7 +78,7 @@ export default function Reports() {
   }
 
   if (sessionLoading) return null;
-  if (me?.access_level !== "full") {
+  if (!canAccessPage(me, "reports")) {
     return (
       <div>
         <h1>Reports</h1>

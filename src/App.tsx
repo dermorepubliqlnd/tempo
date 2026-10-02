@@ -1,3 +1,5 @@
+import { useSession } from "./lib/useSession";
+import { canAccessPage } from "./lib/pageAccess";
 import { HashRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
 import { TimeTrackingProvider } from "./lib/TimeTrackingContext";
@@ -26,6 +28,13 @@ import SetPassword from "./pages/SetPassword";
 // decisions live in Approval Center. Old links/bookmarks send approvers
 // there and everyone else to Projects & Tasks (a task's extension history
 // is on the task itself). The page file is kept, just unrouted.
+// phase132: Team Dashboard is a per-user toggle (User Management).
+function TeamDashboardGate() {
+  const { person, loading } = useSession();
+  if (loading || !person) return null;
+  return canAccessPage(person, "team_dashboard") ? <TeamDashboard /> : <Navigate to="/" replace />;
+}
+
 function ExtensionRequestsRedirect() {
   const has = useApprovalAuthority();
   if (has === null) return null;
@@ -76,7 +85,7 @@ export default function App() {
         >
           <Route path="/" element={<MyDashboard />} />
           <Route path="/projects-portfolio" element={<Navigate to="/team-dashboard?view=portfolio" replace />} />
-          <Route path="/team-dashboard" element={<TeamDashboard />} />
+          <Route path="/team-dashboard" element={<TeamDashboardGate />} />
           <Route path="/materials-output" element={<MaterialsOutput />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:projectId" element={<Projects />} />

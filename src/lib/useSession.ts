@@ -19,6 +19,11 @@ export interface Person {
   // was never wired to anything -- see canReopenTask in Projects.tsx for
   // the real manager-chain check that replaced it for task reopening.)
   can_approve_rebaseline: boolean;
+  // phase132: page access toggles.
+  can_view_team_dashboard?: boolean;
+  can_access_user_management?: boolean;
+  can_access_reports?: boolean;
+  can_access_site_settings?: boolean;
   // Sandra, 2026-08-14: CSV bulk-import fields for User Management --
   // Employee ID (org identifier, distinct from the internal uuid) and
   // Role/job title (function like "Trainer" or "Content Developer",

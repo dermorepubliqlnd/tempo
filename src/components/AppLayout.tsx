@@ -1,3 +1,4 @@
+import { canAccessPage } from "../lib/pageAccess";
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
@@ -119,10 +120,14 @@ function NavGroup({ title, items, collapsed }: { title: string; items: NavItem[]
 export default function AppLayout() {
   const navigate = useNavigate();
   const { person } = useSession();
-  const groups = person?.access_level === "full" ? [mainItems, adminItems] : [mainItems];
+  // phase132: per-user page access.
+  const adminVisible = adminItems.filter((i) =>
+    i.to === "/admin" ? canAccessPage(person, "user_management") : i.to === "/reports" ? canAccessPage(person, "reports") : i.to === "/site-settings" ? canAccessPage(person, "site_settings") : true
+  );
+  const groups = adminVisible.length ? [mainItems, adminVisible] : [mainItems];
   const hasApprovalAuthority = useApprovalAuthority();
   // 2026-10-02: Approval Center visible to all (non-approvers see My Requests only).
-  const visibleMainItems = mainItems;
+  const visibleMainItems = mainItems.filter((i) => i.to !== "/team-dashboard" || canAccessPage(person, "team_dashboard"));
   void hasApprovalAuthority;
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -229,7 +234,7 @@ export default function AppLayout() {
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", display: "flex", flexDirection: "column" }}>
           <NavGroup title="Main" items={visibleMainItems} collapsed={collapsed} />
           <NavGroup title="Resource Planning" items={resourcePlanningItems} collapsed={collapsed} />
-          {groups.length > 1 && <NavGroup title="Admin" items={adminItems} collapsed={collapsed} />}
+          {groups.length > 1 && <NavGroup title="Admin" items={adminVisible} collapsed={collapsed} />}
           <div className="nav-spacer" style={{ flex: 1 }} />
         </div>
 

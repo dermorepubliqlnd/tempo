@@ -55,7 +55,9 @@ export interface UserDrawerProps {
 
   // Immediate-save handlers (unchanged from the pre-redesign page)
   onChangeAccessLevel: (level: "limited" | "full") => void;
-  onToggleApprovalFlag: (field: "can_approve_closures" | "can_approve_rebaseline", value: boolean) => void;
+  onToggleApprovalFlag: (field: "can_approve_closures" | "can_approve_rebaseline" | "can_view_team_dashboard" | "can_access_user_management" | "can_access_reports" | "can_access_site_settings", value: boolean) => void;
+  // phase132: the signed-in admin (can't switch off their own User Management).
+  meId?: string;
   onSaveColor: (hex: string | null) => void;
   onToggleTracksTime: (value: boolean) => void;
 }
@@ -111,6 +113,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 export default function UserDrawer({
+  meId,
   person,
   people,
   mode,
@@ -352,6 +355,48 @@ export default function UserDrawer({
                 {approvalCount === 0 && <div style={{ fontSize: 11, color: "var(--muted)" }}>No approval permissions granted.</div>}
               </>
             )}
+          </Section>
+
+          {/* phase132 (Sandra): per-user page access. Admin pages also need Full Access. */}
+          <Section title="Page access">
+            {(() => {
+              const isFull = person.access_level === "full";
+              const items: { field: "can_view_team_dashboard" | "can_access_user_management" | "can_access_reports" | "can_access_site_settings"; label: string; admin: boolean }[] = [
+                { field: "can_view_team_dashboard", label: "Team Dashboard", admin: false },
+                { field: "can_access_user_management", label: "User Management", admin: true },
+                { field: "can_access_reports", label: "Reports", admin: true },
+                { field: "can_access_site_settings", label: "Site Settings", admin: true },
+              ];
+              const valueOf = (f: (typeof items)[number]["field"], admin: boolean) => (admin ? isFull && person[f] !== false : person[f] !== false);
+              if (!isEdit) {
+                return (
+                  <>
+                    {items.map((it) => (
+                      <Field key={it.field} label={it.label}>{valueOf(it.field, it.admin) ? "Yes" : "No"}</Field>
+                    ))}
+                  </>
+                );
+              }
+              return (
+                <>
+                  {items.map((it) => {
+                    const lockedSelf = it.field === "can_access_user_management" && meId === person.id;
+                    const disabled = (it.admin && !isFull) || lockedSelf;
+                    return (
+                      <label
+                        key={it.field}
+                        style={{ display: "flex", alignItems: "center", gap: 8, cursor: disabled ? "not-allowed" : "pointer", fontSize: 13, opacity: it.admin && !isFull ? 0.55 : 1 }}
+                        title={it.admin && !isFull ? "Requires Full Access" : lockedSelf ? "You can't remove your own User Management access" : undefined}
+                      >
+                        <input type="checkbox" disabled={disabled} checked={valueOf(it.field, it.admin)} onChange={(e) => onToggleApprovalFlag(it.field, e.target.checked)} />
+                        {it.label}
+                      </label>
+                    );
+                  })}
+                  {!isFull && <div style={{ fontSize: 11, color: "var(--muted)" }}>Admin pages require Full Access.</div>}
+                </>
+              );
+            })()}
           </Section>
         </div>
 
