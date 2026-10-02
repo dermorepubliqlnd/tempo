@@ -1942,7 +1942,7 @@ export default function Projects() {
         `Moving "${p.name}" to Design first needs its WBS Baseline locked -- that's now done from the WBS Planning page (it needs the full task plan, not just a quick toggle here).\n\nGo to WBS Planning now to Start Project?`
       )
     ) {
-      navigate(`/projects/${p.id}/wbs`);
+      navigate(`/projects/${p.id}`);
     }
     return false;
   }
@@ -2360,7 +2360,7 @@ export default function Projects() {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigate(`/projects/${p.id}/wbs`);
+                  navigate(`/projects/${p.id}`);
                 }}
                 title={p.description || "Open this project's WBS page (name and owner are edited there)"}
                 style={{
