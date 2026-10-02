@@ -493,7 +493,7 @@ export default function MyDashboard() {
                     {(() => {
                       const ownerId = (t.project as { owner_id?: string | null } | null)?.owner_id;
                       const owner = ownerId ? people.find((p) => p.id === ownerId)?.name : null;
-                      return owner ? <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2, whiteSpace: "nowrap" }}>Owner: {owner}</div> : null;
+                      return owner ? <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2, whiteSpace: "nowrap" }} title="Project owner">{owner}</div> : null;
                     })()}
                   </div>
                   <div style={{ ...td, color: "var(--text-secondary)", fontSize: 11.5, whiteSpace: "nowrap" }}>
