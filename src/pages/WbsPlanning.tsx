@@ -459,7 +459,7 @@ const UTIL_MODE_TO_SCENARIO: Partial<Record<UtilPreviewMode, ScenarioKey>> = {
 // Phase 21 (2026-08-24): "Manual Override" relabeled "Forecasted" to
 // match the rename everywhere else.
 const UTIL_PREVIEW_LABEL: Record<UtilPreviewMode, string> = {
-  actual: "Committed (Existing)",
+  actual: "Committed (Approved)",
   full_capacity: "Theoretical",
   standard_suggested: "Capacity-Based",
   standard_committed: "Forecasted",
@@ -4233,13 +4233,23 @@ export default function WbsPlanning() {
   // the Phase 9 version, just callable once per scenario.
   function buildEffectiveForMode(mode: UtilPreviewMode): { tasks: UtilTaskRow[]; projects: UtilProjectRow[] } {
     const chain = previewChainFor(mode);
+    // 2026-10-02 (Sandra): "Committed would show me all baseline approved
+    // numbers while Forecasted and Theoretical would show how bandwidth
+    // would look if I approve this." Committed = STARTED projects only
+    // (anything past Draft -- Draft includes Awaiting Baseline Approval);
+    // Forecasted/Theoretical = that same committed load + THIS project's
+    // plan. Other Draft/pending projects never count.
+    const isCommitted = (pid: string | null | undefined) => {
+      const p = allProjects.find((x) => x.id === pid);
+      return !!p && !!p.wbs_status && p.wbs_status !== "draft";
+    };
     // Phase 23 (2026-08-24) bugfix: estimated_hours now carried through
     // onto these rows -- see previewDailyHoursFor below for why this
     // matters (the old points-based dailyPointsFor never used it at all,
     // which was the actual bug Sandra reported).
     const tasks: UtilTaskRow[] =
       mode === "actual"
-        ? allTasks.map((t) => ({
+        ? allTasks.filter((t) => isCommitted(t.project_id)).map((t) => ({
             id: t.id,
             project_id: t.project_id,
             parent_task_id: t.parent_task_id ?? null,
@@ -4252,7 +4262,7 @@ export default function WbsPlanning() {
           }))
         : [
             ...allTasks
-              .filter((t) => t.project_id !== projectId)
+              .filter((t) => t.project_id !== projectId && isCommitted(t.project_id))
               .map((t) => ({
                 id: t.id,
                 project_id: t.project_id,
@@ -4332,8 +4342,10 @@ export default function WbsPlanning() {
     // TS just can't see across this nested function's boundary, hence
     // the assertions.
     const proj = project!;
+    const thisCommitted = isCommitted(projectId);
     const projects: UtilProjectRow[] = [
-      ...allProjects.filter((p) => p.id !== projectId),
+      ...allProjects.filter((p) => p.id !== projectId && isCommitted(p.id)),
+      ...(mode === "actual" && !thisCommitted ? [] : [
       mode === "actual"
         // Actual: use this project's own already-committed row verbatim
         // (falls back to the live draft Owner/Start only if it's somehow
@@ -4350,6 +4362,7 @@ export default function WbsPlanning() {
             start_date: proj.start_date,
             end_date: previewEnd ?? proj.start_date,
           },
+      ]),
     ];
     return { tasks, projects };
   }

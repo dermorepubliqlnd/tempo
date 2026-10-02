@@ -242,9 +242,32 @@ export default function Utilization() {
   // flip to seeing everyone, same toggle as HoursOverview.tsx.
   const [allPeople, setAllPeople] = useState<PersonRow[]>([]);
   const [showAllPeople, setShowAllPeople] = useState(false);
-  const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [rawProjects, setProjects] = useState<ProjectRow[]>([]);
+  // 2026-10-02 (Sandra): default = approved work only (projects past Draft);
+  // Draft / Awaiting Baseline Approval only with "Include pending projects".
+  const [includePending, setIncludePending] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("tempo.util.includePending") === "1";
+    } catch {
+      return false;
+    }
+  });
+  function toggleIncludePending(v: boolean) {
+    setIncludePending(v);
+    try {
+      localStorage.setItem("tempo.util.includePending", v ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }
   const [projectTypes, setProjectTypes] = useState<{ id: string; name: string; sort_order: number | null }[]>([]);
-  const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [rawTasks, setTasks] = useState<TaskRow[]>([]);
+  const projects = useMemo(() => (includePending ? rawProjects : rawProjects.filter((p) => !!p.wbs_status && p.wbs_status !== "draft")), [rawProjects, includePending]);
+  const tasks = useMemo(() => {
+    if (includePending) return rawTasks;
+    const ok = new Set(projects.map((p) => p.id));
+    return rawTasks.filter((t) => ok.has(t.project_id));
+  }, [rawTasks, projects, includePending]);
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
   const [holidays, setHolidays] = useState<HolidayRow[]>([]);
   const [workTypes, setWorkTypes] = useState<{ id: string; is_fixed_schedule: boolean }[]>([]);
@@ -1397,6 +1420,10 @@ export default function Utilization() {
         <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
           <UtilPersonFilterButton people={scopedPeople} selected={personFilter} open={personFilterOpen} setOpen={setPersonFilterOpen} search={personFilterSearch} setSearch={setPersonFilterSearch} onChange={setPersonFilter} />
           <MultiSelectFilter options={projects.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name))} selected={projectFilter} onChange={setProjectFilter} noun="projects" singular="Project" />
+          <label title="Draft and Awaiting Baseline Approval projects are left out by default -- tick to see the pipeline on top of approved work" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 8px", cursor: "pointer", whiteSpace: "nowrap", background: includePending ? "var(--accent-bg, #eaf2fb)" : "var(--surface)" }}>
+            <input type="checkbox" checked={includePending} onChange={(e) => toggleIncludePending(e.target.checked)} />
+            Include pending projects
+          </label>
           <select value={showAllPeople ? "all" : "active"} onChange={(e) => { setShowAllPeople(e.target.value === "all"); if (activeViewId.startsWith("personal:")) setActiveViewId("system:all"); }} title="Deactivated team members' past hours are retained" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
             <option value="active">Active team members only</option>
             <option value="all">Show all (incl. deactivated)</option>
