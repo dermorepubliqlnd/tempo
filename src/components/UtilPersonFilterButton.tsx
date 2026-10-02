@@ -52,7 +52,7 @@ export default function UtilPersonFilterButton({ people, selected, onChange, ope
         ref={btnRef}
         onClick={() => setOpen(!open)}
         className={`timeline-segmented-btn${selected !== null ? " active" : ""}`}
-        style={{ height: 36, borderRadius: 8, border: "1px solid var(--border)", display: "inline-flex", alignItems: "center", gap: 6, padding: "0 10px", background: "var(--surface)", color: "var(--navy)", fontSize: 11, fontWeight: 500 }}
+        style={{ height: 32, borderRadius: 8, border: "1px solid var(--border)", display: "inline-flex", alignItems: "center", gap: 6, padding: "0 8px", background: "var(--surface)", color: "var(--navy)", fontSize: 11, fontWeight: 500 }}
         title="Choose which team members appear in the snapshot"
       >
         {label}
