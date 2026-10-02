@@ -20,6 +20,8 @@ export interface MyRequestRow {
   statusLabel: string;
   submittedAt: string;
   decidedBy: string | null;
+  // 2026-10-02 (Sandra): who it's waiting on (pending) -- routed approver.
+  pendingWith?: string | null;
   decidedAt: string | null;
   note: string | null;
   link: string;
@@ -50,7 +52,7 @@ const fmtShort = (d: string | null | undefined) =>
 export async function loadMyRequests(meId: string, sinceDays = 90): Promise<MyRequestRow[]> {
   const since = new Date(Date.now() - sinceDays * 86400000).toISOString();
   const [{ data: people }, { data: te }, { data: corr }, { data: ext }, { data: bl }, { data: cl }, { data: tasks }] = await Promise.all([
-    supabase.from("people").select("id,name"),
+    supabase.from("people").select("id,name,is_active,access_level,can_approve_rebaseline,can_approve_closures"),
     supabase
       .from("time_entries")
       .select("id,entry_number,status,started_at,ended_at,duration_minutes,created_at,decided_by,decided_at,decision_notes,is_follow_up,task:tasks(id,name,project_id,project:projects(name)),activity_type:non_project_activity_types(name)")
@@ -79,6 +81,11 @@ export async function loadMyRequests(meId: string, sinceDays = 90): Promise<MyRe
       .eq("is_archived", false)
       .gte("actual_completion_date", since.slice(0, 10)),
   ]);
+  const { data: routedId } = await supabase.rpc("effective_approver", { p_person_id: meId });
+  const peopleArr = ((people as { id: string; name: string; is_active: boolean; access_level: string; can_approve_rebaseline: boolean; can_approve_closures: boolean }[]) ?? []);
+  const routedName = routedId ? (routedId === meId ? "You (auto)" : peopleArr.find((p) => p.id === routedId)?.name ?? null) : null;
+  const startApprovers = peopleArr.filter((p) => p.is_active && p.can_approve_rebaseline).map((p) => (p.id === meId ? "You" : p.name)).join(", ") || null;
+  const closeApprovers = peopleArr.filter((p) => p.is_active && (p.can_approve_closures || p.access_level === "full")).map((p) => (p.id === meId ? "You" : p.name)).join(", ") || null;
   const nameOf = new Map(((people as { id: string; name: string }[]) ?? []).map((p) => [p.id, p.name]));
   const pn = (id: string | null | undefined) => (id ? nameOf.get(id) ?? "—" : null);
   const rows: MyRequestRow[] = [];
@@ -202,6 +209,10 @@ export async function loadMyRequests(meId: string, sinceDays = 90): Promise<MyRe
       note: r.completion_adjustment_reason ?? null,
       link: `/projects/${r.project_id}`,
     });
+  });
+  rows.forEach((r) => {
+    if (r.status !== "pending") return;
+    r.pendingWith = r.kind === "baseline" ? startApprovers : r.kind === "closure" ? closeApprovers : routedName;
   });
   return rows.sort((a, b) => new Date(b.decidedAt ?? b.submittedAt).getTime() - new Date(a.decidedAt ?? a.submittedAt).getTime());
 }

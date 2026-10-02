@@ -161,7 +161,7 @@ export default function MyRequestsPanel({ meId }: { meId: string }) {
                           <th style={th}>Request</th>
                           <th style={th}>Submitted</th>
                           <th style={th}>Status</th>
-                          <th style={th}>Decided by</th>
+                          <th style={th}>Approver</th>
                           <th style={th}>Decided on</th>
                           <th style={th}>Note / Reason</th>
                         </tr>
@@ -182,7 +182,16 @@ export default function MyRequestsPanel({ meId }: { meId: string }) {
                             <td style={td}>
                               <span className={`status-pill ${STATUS_TONE[r.status]}`} style={{ fontSize: 9.5, whiteSpace: "nowrap" }}>{r.statusLabel}</span>
                             </td>
-                            <td style={{ ...td, whiteSpace: "nowrap" }}>{r.status === "pending" ? "—" : r.decidedBy ?? "Auto"}</td>
+                            <td style={{ ...td, whiteSpace: "nowrap" }}>
+                              {r.status === "pending" ? (
+                                <span title="Waiting on">{r.pendingWith ?? "—"}</span>
+                              ) : (
+                                <>
+                                  <span style={{ fontSize: 10, color: "var(--muted)" }}>{r.status === "approved" ? (r.kind === "task_completion" ? "Validated by " : "Approved by ") : r.kind === "baseline" || r.kind === "closure" ? "Declined by " : "Rejected by "}</span>
+                                  {r.decidedBy ?? "Auto"}
+                                </>
+                              )}
+                            </td>
                             <td style={{ ...td, whiteSpace: "nowrap" }}>{r.status === "pending" ? "—" : fmt(r.decidedAt)}</td>
                             <td style={{ ...td, maxWidth: 280, whiteSpace: "normal", wordBreak: "break-word" }}>{r.note ?? "—"}</td>
                           </tr>
