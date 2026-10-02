@@ -817,6 +817,8 @@ export default function Utilization() {
     avgPct: number;
     plannedHours: number;
     availableHours: number;
+    remainingHours: number;
+    remainingPct: number;
     peakPct: number;
     overloadedDays: number;
     workingDaysCount: number;
