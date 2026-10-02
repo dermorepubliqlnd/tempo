@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: utilization-cleanup-preview
+  cancel-in-progress: true
+
 jobs:
   preview:
     runs-on: ubuntu-latest
