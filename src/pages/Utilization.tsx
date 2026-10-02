@@ -1313,7 +1313,7 @@ export default function Utilization() {
                 applyBuiltInView(id);
               }
             }}
-            style={{ minWidth: 180, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 10, padding: "6px 9px", background: "var(--surface)" }}
+            style={{ minWidth: 180, height: 42, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 10, padding: "0 12px", background: "var(--surface)" }}
           >
             <optgroup label="Built-in views">
               <option value="system:me">My View</option>
@@ -1417,7 +1417,7 @@ export default function Utilization() {
           <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap", width: "100%" }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>
               Capacity View
-              <select value={capacityLens} onChange={(e) => setCapacityLens(e.target.value as "committed" | "bandwidth")} style={{ minWidth: 152, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 9px", background: "var(--surface)" }}>
+              <select value={capacityLens} onChange={(e) => setCapacityLens(e.target.value as "committed" | "bandwidth")} style={{ minWidth: 152, height: 42, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 10, padding: "0 12px", background: "var(--surface)" }}>
                 <option value="committed">Committed</option>
                 <option value="bandwidth">Available Bandwidth</option>
               </select>
@@ -1425,7 +1425,7 @@ export default function Utilization() {
 
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>
               Time View
-              <select value={viewMode} onChange={(e) => setViewMode(e.target.value as "daily" | "weekly")} style={{ minWidth: 104, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 9px", background: "var(--surface)" }}>
+              <select value={viewMode} onChange={(e) => setViewMode(e.target.value as "daily" | "weekly")} style={{ minWidth: 104, height: 42, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 10, padding: "0 12px", background: "var(--surface)" }}>
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
               </select>
@@ -1433,7 +1433,7 @@ export default function Utilization() {
 
             <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>
               Display
-              <select value={displayMode} onChange={(e) => setDisplayMode(e.target.value as "both" | "utilization" | "hours")} style={{ minWidth: 170, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 9px", background: "var(--surface)" }}>
+              <select value={displayMode} onChange={(e) => setDisplayMode(e.target.value as "both" | "utilization" | "hours")} style={{ minWidth: 170, height: 42, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 10, padding: "0 12px", background: "var(--surface)" }}>
                 <option value="both">Both (Utilization & Hours)</option>
                 <option value="utilization">Utilization only</option>
                 <option value="hours">Hours only</option>
@@ -1451,7 +1451,7 @@ export default function Utilization() {
               <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>Advanced Filters</span>
               <button
                 onClick={() => setAdvancedFiltersOpen((v) => !v)}
-                style={{ display: "inline-flex", alignItems: "center", gap: 7, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", background: "var(--surface)", color: "var(--navy)", fontSize: 11, fontWeight: 600, padding: "6px 9px", cursor: "pointer", minHeight: 31 }}
+                style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 42, border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", color: "var(--navy)", fontSize: 11, fontWeight: 600, padding: "0 12px", cursor: "pointer" }}
               >
                 Advanced Filters
                 {(projectFilter.length > 0 || includePending || showAllPeople) && (
