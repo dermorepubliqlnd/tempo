@@ -24,16 +24,17 @@ interface Props {
   setSearch: (v: string) => void;
   // 2026-10-02 (Sandra): owner + task assignees of this project.
   contributorIds?: string[];
+  allLabel?: string;
 }
 
 const PANEL_WIDTH = 240;
 
-export default function UtilPersonFilterButton({ people, selected, onChange, open, setOpen, search, setSearch, contributorIds = [] }: Props) {
+export default function UtilPersonFilterButton({ people, selected, onChange, open, setOpen, search, setSearch, contributorIds = [], allLabel = "All team members" }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
 
   const contribSet = new Set(contributorIds.filter((id) => people.some((p) => p.id === id)));
   const isContributors = selected !== null && contribSet.size > 0 && selected.size === contribSet.size && [...contribSet].every((id) => selected.has(id));
-  const label = selected === null ? "All team members" : isContributors ? `Project contributors (${contribSet.size})` : selected.size === 0 ? "No team members" : `${selected.size} of ${people.length} team members`;
+  const label = selected === null ? allLabel : isContributors ? `Project contributors (${contribSet.size})` : selected.size === 0 ? "No team members" : `${selected.size} of ${people.length} team members`;
 
   function toggle(id: string) {
     const base = selected ?? new Set(people.map((p) => p.id));
@@ -51,7 +52,7 @@ export default function UtilPersonFilterButton({ people, selected, onChange, ope
         ref={btnRef}
         onClick={() => setOpen(!open)}
         className={`timeline-segmented-btn${selected !== null ? " active" : ""}`}
-        style={{ borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", display: "inline-flex", alignItems: "center", gap: 4 }}
+        style={{ height: 32, borderRadius: 8, border: "1px solid var(--border)", display: "inline-flex", alignItems: "center", gap: 6, padding: "0 8px", background: "var(--surface)", color: "var(--navy)", fontSize: 11, fontWeight: 500 }}
         title="Choose which team members appear in the snapshot"
       >
         {label}

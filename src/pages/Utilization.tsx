@@ -318,6 +318,7 @@ export default function Utilization() {
   }, [me?.id]);
   const [personFilterOpen, setPersonFilterOpen] = useState(false);
   const [personFilterSearch, setPersonFilterSearch] = useState("");
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   // Role filter (2026-09-18, Sandra: "add option to filter by role") --
   // filters by the same job_title field shown under each name.
   const [roleFilter, setRoleFilter] = useState<string | null>(null);
@@ -1288,16 +1289,16 @@ export default function Utilization() {
 
   return (
     <div>
-      <div style={{ marginBottom: 14 }}>
-        <h1 style={{ marginBottom: 4 }}>Utilization</h1>
-        <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.45 }}>
-          View scoped task effort across your team to plan capacity and identify potential overloads. Utilization is based on planned/scoped hours and does not reflect actual time worked.
+      <div style={{ marginBottom: 12, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 280, flex: "1 1 520px" }}>
+          <h1 style={{ marginBottom: 4 }}>Utilization</h1>
+          <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.45 }}>
+            View scoped task effort across your team to plan capacity and identify potential overloads. Utilization is based on planned/scoped hours and does not reflect actual time worked.
+          </div>
         </div>
-      </div>
 
-      <div className="card" style={{ padding: "8px 10px", marginBottom: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", letterSpacing: ".03em" }}>VIEW</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", paddingTop: 2 }}>
+          <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)", letterSpacing: ".03em" }}>VIEW</span>
           <select
             value={activeViewId}
             onChange={(e) => {
@@ -1312,7 +1313,7 @@ export default function Utilization() {
                 applyBuiltInView(id);
               }
             }}
-            style={{ minWidth: 180, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 10, padding: "6px 9px", background: "var(--surface)" }}
+            style={{ minWidth: 170, height: 32, fontSize: 11, fontWeight: 500, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 8, padding: "0 8px", background: "var(--surface)" }}
           >
             <optgroup label="Built-in views">
               <option value="system:me">My View</option>
@@ -1325,31 +1326,29 @@ export default function Utilization() {
             )}
           </select>
 
+          {activeViewId.startsWith("personal:") && !savedViews.find((view) => view.id === activeViewId)?.isDefault && (
+            <button onClick={setActiveViewAsDefault} style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--accent)", fontSize: 10, fontWeight: 600, height: 32, padding: "0 9px", cursor: "pointer" }}>Set as default</button>
+          )}
           {activeViewId.startsWith("personal:") && (
-            <>
-              <button onClick={setActiveViewAsDefault} style={{ border: "1px solid var(--border)", borderRadius: 999, background: "var(--surface)", color: "var(--accent)", fontSize: 10, fontWeight: 600, padding: "6px 10px", cursor: "pointer" }}>Set as default</button>
-              <button onClick={deleteActiveView} style={{ border: "none", background: "transparent", color: "var(--danger)", fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Delete</button>
-            </>
+            <button onClick={deleteActiveView} style={{ border: "none", background: "transparent", color: "var(--danger)", fontSize: 10, fontWeight: 600, cursor: "pointer", padding: "0 4px" }}>Delete</button>
           )}
 
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-            {showSaveView ? (
-              <>
-                <input
-                  autoFocus
-                  value={saveViewName}
-                  onChange={(e) => setSaveViewName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") saveCurrentView(); if (e.key === "Escape") setShowSaveView(false); }}
-                  placeholder="View name"
-                  style={{ width: 180, fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 10, padding: "6px 9px" }}
-                />
-                <button onClick={saveCurrentView} disabled={!saveViewName.trim()} style={{ border: "none", borderRadius: 999, background: "var(--accent)", color: "#fff", fontSize: 10, fontWeight: 600, padding: "6px 11px", cursor: saveViewName.trim() ? "pointer" : "default", opacity: saveViewName.trim() ? 1 : .5 }}>Save</button>
-                <button onClick={() => { setShowSaveView(false); setSaveViewName(""); }} style={{ border: "none", background: "transparent", color: "var(--muted)", fontSize: 10, cursor: "pointer" }}>Cancel</button>
-              </>
-            ) : (
-              <button onClick={() => setShowSaveView(true)} style={{ border: "1px solid var(--border)", borderRadius: 999, background: "var(--surface)", color: "var(--accent)", fontSize: 10.5, fontWeight: 600, padding: "6px 11px", cursor: "pointer" }}>Save current view</button>
-            )}
-          </div>
+          {showSaveView ? (
+            <>
+              <input
+                autoFocus
+                value={saveViewName}
+                onChange={(e) => setSaveViewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") saveCurrentView(); if (e.key === "Escape") setShowSaveView(false); }}
+                placeholder="View name"
+                style={{ width: 150, height: 32, fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 8, padding: "0 8px" }}
+              />
+              <button onClick={saveCurrentView} disabled={!saveViewName.trim()} style={{ border: "none", borderRadius: 8, background: "var(--accent)", color: "#fff", fontSize: 10, fontWeight: 600, height: 32, padding: "0 10px", cursor: saveViewName.trim() ? "pointer" : "default", opacity: saveViewName.trim() ? 1 : .5 }}>Save</button>
+              <button onClick={() => { setShowSaveView(false); setSaveViewName(""); }} style={{ border: "none", background: "transparent", color: "var(--muted)", fontSize: 10, cursor: "pointer" }}>Cancel</button>
+            </>
+          ) : (
+            <button onClick={() => setShowSaveView(true)} style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: "0 4px" }}>Save view</button>
+          )}
         </div>
       </div>
 
@@ -1363,10 +1362,14 @@ export default function Utilization() {
                 ["next_week", "Next week"],
                 ["next_2_weeks", "Next 2 weeks"],
                 ["month", "This month"],
+                ["custom", "Custom"],
               ] as const).map(([preset, label]) => (
                 <button
                   key={preset}
-                  onClick={() => applyPlanningPreset(preset)}
+                  onClick={() => {
+                    if (preset === "custom") setPlanningPreset("custom");
+                    else applyPlanningPreset(preset);
+                  }}
                   style={{
                     border: "none",
                     borderRadius: 999,
@@ -1383,9 +1386,6 @@ export default function Utilization() {
                 </button>
               ))}
             </div>
-            {planningPreset === "custom" && (
-              <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--accent)", padding: "4px 7px", borderRadius: 999, background: "rgba(59,130,246,.08)" }}>Custom</span>
-            )}
             <div style={{ width: 1, height: 20, background: "var(--border)" }} />
             <button onClick={() => shiftRange(-1)} className="planner-nav-btn" disabled={isAtEarliestAnchor} title={isAtEarliestAnchor ? "Can't go earlier than Jan 2026" : "Previous"} style={isAtEarliestAnchor ? { opacity: 0.4, cursor: "default" } : undefined}>
               <ChevronLeft size={14} />
@@ -1395,71 +1395,105 @@ export default function Utilization() {
               {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
             </span>
             <button onClick={() => shiftRange(1)} className="planner-nav-btn" title="Next"><ChevronRight size={14} /></button>
-            <div style={{ width: 1, height: 18, background: "var(--border)" }} />
-            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
-              From
-              <input type="date" min="2026-01-01" value={toISO(rangeStart)} onChange={(e) => setRangeStartFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
-              To
-              <input type="date" min="2026-01-01" value={toISO(rangeEnd)} onChange={(e) => setRangeEndFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
-            </label>
+            {planningPreset === "custom" && (
+              <>
+                <div style={{ width: 1, height: 18, background: "var(--border)" }} />
+                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
+                  From
+                  <input type="date" min="2026-01-01" value={toISO(rangeStart)} onChange={(e) => setRangeStartFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
+                  To
+                  <input type="date" min="2026-01-01" value={toISO(rangeEnd)} onChange={(e) => setRangeEndFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
+                </label>
+              </>
+            )}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>View:</span>
-            <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
-              {([
-                ["committed", "Committed"],
-                ["bandwidth", "Available Bandwidth"],
-              ] as const).map(([mode, label]) => (
-                <button key={mode} onClick={() => setCapacityLens(mode)} style={{ fontSize: 11, fontWeight: 600, padding: "5px 10px", border: "none", cursor: "pointer", background: capacityLens === mode ? "var(--accent)" : "transparent", color: capacityLens === mode ? "#fff" : "var(--muted)" }}>{label}</button>
-              ))}
-            </div>
-            <div style={{ width: 1, height: 18, background: "var(--border)" }} />
-            <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
-              {(["daily", "weekly"] as const).map((mode) => (
-                <button key={mode} onClick={() => setViewMode(mode)} style={{ fontSize: 11, fontWeight: 600, textTransform: "capitalize", padding: "5px 12px", border: "none", cursor: "pointer", background: viewMode === mode ? "var(--accent)" : "transparent", color: viewMode === mode ? "#fff" : "var(--muted)" }}>{mode}</button>
-              ))}
-            </div>
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>Display:</span>
-            <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
-              {([
-                ["both", "Both"],
-                ["utilization", "Utilization"],
-                ["hours", "Hours"],
-              ] as const).map(([mode, label]) => (
-                <button key={mode} onClick={() => setDisplayMode(mode)} style={{ fontSize: 11, fontWeight: 600, padding: "5px 10px", border: "none", cursor: "pointer", background: displayMode === mode ? "var(--accent)" : "transparent", color: displayMode === mode ? "#fff" : "var(--muted)" }}>{label}</button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", width: "100%" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>
+              Capacity View
+              <select value={capacityLens} onChange={(e) => setCapacityLens(e.target.value as "committed" | "bandwidth")} style={{ minWidth: 152, height: 32, fontSize: 11, fontWeight: 500, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 8, padding: "0 8px", background: "var(--surface)" }}>
+                <option value="committed">Committed</option>
+                <option value="bandwidth">Available Bandwidth</option>
+              </select>
+            </label>
 
-      <div className="card" style={{ padding: 9, marginBottom: 8 }}>
-        <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}>
-          <UtilPersonFilterButton people={scopedPeople} selected={personFilter} open={personFilterOpen} setOpen={setPersonFilterOpen} search={personFilterSearch} setSearch={setPersonFilterSearch} onChange={setPersonFilter} />
-          <MultiSelectFilter options={projects.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name))} selected={projectFilter} onChange={setProjectFilter} noun="projects" singular="Project" />
-          <label title="Draft and Awaiting Baseline Approval projects are left out by default -- tick to see the pipeline on top of approved work" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 8px", cursor: "pointer", whiteSpace: "nowrap", background: includePending ? "var(--accent-bg, #eaf2fb)" : "var(--surface)" }}>
-            <input type="checkbox" checked={includePending} onChange={(e) => toggleIncludePending(e.target.checked)} />
-            Include pending projects
-          </label>
-          <select value={showAllPeople ? "all" : "active"} onChange={(e) => { setShowAllPeople(e.target.value === "all"); if (activeViewId.startsWith("personal:")) setActiveViewId("system:all"); }} title="Deactivated team members' past hours are retained" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
-            <option value="active">Active team members only</option>
-            <option value="all">Show all (incl. deactivated)</option>
-          </select>
-          {roleOptions.length > 0 && (
-            <select value={roleFilter ?? "__all__"} onChange={(e) => { setRoleFilter(e.target.value === "__all__" ? null : e.target.value); if (activeViewId.startsWith("personal:")) setActiveViewId("system:all"); }} title="Filter by role" style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "5px 7px" }}>
-              <option value="__all__">All roles</option>
-              {roleOptions.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-          )}
-          <button
-            onClick={() => { setPersonFilter(null); setProjectFilter([]); setRoleFilter(null); setShowAllPeople(false); }}
-            style={{ marginLeft: "auto", border: "1px solid var(--border)", borderRadius: 999, background: "var(--surface)", color: "var(--accent)", fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: "6px 11px" }}
-          >
-            Clear filters
-          </button>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>
+              Time View
+              <select value={viewMode} onChange={(e) => setViewMode(e.target.value as "daily" | "weekly")} style={{ minWidth: 104, height: 32, fontSize: 11, fontWeight: 500, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 8, padding: "0 8px", background: "var(--surface)" }}>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </label>
+
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>
+              Display
+              <select value={displayMode} onChange={(e) => setDisplayMode(e.target.value as "both" | "utilization" | "hours")} style={{ minWidth: 170, height: 32, fontSize: 11, fontWeight: 500, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 8, padding: "0 8px", background: "var(--surface)" }}>
+                <option value="both">Both (Utilization & Hours)</option>
+                <option value="utilization">Utilization only</option>
+                <option value="hours">Hours only</option>
+              </select>
+            </label>
+
+            <div style={{ width: 1, height: 34, background: "var(--border)", margin: "0 2px" }} />
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>Team Members</span>
+              <UtilPersonFilterButton people={scopedPeople} selected={personFilter} open={personFilterOpen} setOpen={setPersonFilterOpen} search={personFilterSearch} setSearch={setPersonFilterSearch} onChange={setPersonFilter} allLabel="All active team members" />
+            </div>
+
+            <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>Advanced Filters</span>
+              <button
+                onClick={() => setAdvancedFiltersOpen((v) => !v)}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 32, border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--navy)", fontSize: 11, fontWeight: 500, padding: "0 8px", cursor: "pointer" }}
+              >
+                Advanced Filters
+                {(projectFilter.length > 0 || includePending || showAllPeople) && (
+                  <span style={{ minWidth: 18, height: 18, borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", background: "var(--accent)", color: "#fff", fontSize: 9, fontWeight: 700 }}>
+                    {(projectFilter.length > 0 ? 1 : 0) + (includePending ? 1 : 0) + (showAllPeople ? 1 : 0)}
+                  </span>
+                )}
+              </button>
+
+              {advancedFiltersOpen && (
+                <div className="card" style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, width: 310, padding: 12, boxShadow: "0 8px 24px rgba(15,35,65,.14)" }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", marginBottom: 10 }}>Advanced Filters</div>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)", marginBottom: 5 }}>Projects</div>
+                      <MultiSelectFilter options={projects.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name))} selected={projectFilter} onChange={setProjectFilter} noun="projects" singular="Project" />
+                    </div>
+                    <label title="Draft and Awaiting Baseline Approval projects are excluded by default" style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "var(--navy)", cursor: "pointer" }}>
+                      <input type="checkbox" checked={includePending} onChange={(e) => toggleIncludePending(e.target.checked)} />
+                      Include pending projects
+                    </label>
+                    <label title="Inactive team members are hidden by default but retained for historical analysis" style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "var(--navy)", cursor: "pointer" }}>
+                      <input type="checkbox" checked={showAllPeople} onChange={(e) => setShowAllPeople(e.target.checked)} />
+                      Show inactive team members
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {(personFilter !== null || projectFilter.length > 0 || includePending || showAllPeople) && (
+              <button
+                onClick={() => {
+                  setPersonFilter(null);
+                  setProjectFilter([]);
+                  toggleIncludePending(false);
+                  setShowAllPeople(false);
+                  setRoleFilter(null);
+                }}
+                title="Reset team member and advanced filters only"
+                style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--accent)", fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: "7px 4px" }}
+              >
+                Reset filters
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1494,8 +1528,8 @@ export default function Utilization() {
           <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 4 }}>Members with at least one day above 100%</div>
         </div>
 
-        <div className="card" style={{ padding: "12px 14px", borderRadius: 16 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 7 }}>PROJECT TYPE MIX</div>
+        <div className="card" style={{ padding: "10px 12px", borderRadius: 16, background: "var(--hover-bg)", borderColor: "transparent" }}>
+          <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: ".04em", color: "var(--muted)", marginBottom: 6 }}>PROJECT TYPE MIX</div>
           {teamProjectTypeMix.length === 0 ? (
             <div style={{ fontSize: 10, color: "var(--muted)" }}>No typed project effort in this period.</div>
           ) : (
@@ -1503,8 +1537,8 @@ export default function Utilization() {
               <div
                 title={teamProjectTypeMix.map((mix) => `${mix.name} ${mix.hours.toFixed(1)}h`).join(" · ")}
                 style={{
-                  width: 58,
-                  height: 58,
+                  width: 50,
+                  height: 50,
                   borderRadius: "50%",
                   flexShrink: 0,
                   background: (() => {
@@ -1520,7 +1554,7 @@ export default function Utilization() {
                   position: "relative",
                 }}
               >
-                <div style={{ position: "absolute", inset: 9, borderRadius: "50%", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 600, color: "var(--navy)" }}>
+                <div style={{ position: "absolute", inset: 8, borderRadius: "50%", background: "var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 600, color: "var(--navy)" }}>
                   {teamProjectTypeTotal.toFixed(1)}h
                 </div>
               </div>
@@ -1544,20 +1578,22 @@ export default function Utilization() {
         </div>
       </div>
 
-      <div className="card" style={{ padding: "10px 12px", marginBottom: 8, borderRadius: 14 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "220px minmax(0,1fr) auto", gap: 12, alignItems: "center" }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-              <AlertTriangle size={14} style={{ color: topCapacityRisks.length ? "var(--danger)" : "#059669" }} />
-              <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>Needs Attention</span>
-            </div>
-            <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>Highest daily capacity risks</div>
+      <div className="card" style={{ padding: "8px 10px", marginBottom: 8, borderRadius: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            <AlertTriangle size={13} style={{ color: topCapacityRisks.length ? "var(--danger)" : "#059669" }} />
+            <span style={{ fontSize: 10.8, fontWeight: 600, color: "var(--navy)" }}>Needs Attention</span>
+            <span style={{ fontSize: 9.5, fontWeight: 600, color: topCapacityRisks.length ? "var(--danger)" : "#059669", padding: "3px 7px", borderRadius: 999, background: topCapacityRisks.length ? "rgba(239,68,68,.07)" : "rgba(16,185,129,.08)" }}>
+              {capacityRisks.length} risk{capacityRisks.length === 1 ? "" : "s"}
+            </span>
           </div>
 
+          <div style={{ width: 1, height: 18, background: "var(--border)" }} />
+
           {topCapacityRisks.length === 0 ? (
-            <div style={{ fontSize: 10.5, color: "#059669", fontWeight: 600 }}>No team member exceeds daily capacity in this planning period.</div>
+            <span style={{ fontSize: 10.5, color: "#059669", fontWeight: 500 }}>No daily capacity risks in this planning period.</span>
           ) : (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minWidth: 0, alignItems: "stretch" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0, flex: 1 }}>
               {displayedCapacityRisks.map((risk) => (
                 <button
                   key={`${risk.person.id}-${risk.dateStr}`}
@@ -1565,66 +1601,51 @@ export default function Utilization() {
                     setDetailPersonId(null);
                     setSelectedCell({ personId: risk.person.id, dateStr: risk.dateStr });
                   }}
-                  style={{
-                    flex: "0 0 190px",
-                    minHeight: 74,
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "space-between",
-                    textAlign: "left",
-                    border: "1px solid rgba(239,68,68,.18)",
-                    borderRadius: 11,
-                    background: "linear-gradient(180deg, var(--surface), rgba(239,68,68,.04))",
-                    padding: "9px 11px",
-                    cursor: "pointer",
-                    minWidth: 0,
-                    boxShadow: "0 1px 3px rgba(15,35,65,.025)",
-                  }}
+                  title={`${risk.person.name} · ${parseLocalDate(risk.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} · ${displayPct(risk.pct)}% · +${risk.overHours.toFixed(1)}h`}
+                  style={{ border: "1px solid rgba(239,68,68,.18)", borderRadius: 999, background: "rgba(239,68,68,.04)", color: "var(--navy)", padding: "4px 8px", fontSize: 9.8, cursor: "pointer", whiteSpace: "nowrap" }}
                 >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 10.8, fontWeight: 600, color: "var(--navy)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{risk.person.name}</div>
-                    <div style={{ fontSize: 9.2, color: "var(--muted)", marginTop: 2 }}>{parseLocalDate(risk.dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginTop: 8 }}>
-                    <div style={{ fontSize: 17, fontWeight: 600, color: "var(--danger)" }}>{displayPct(risk.pct)}%</div>
-                    <div style={{ fontSize: 9, fontWeight: 600, color: "var(--danger)" }}>+{risk.overHours.toFixed(1)}h</div>
-                  </div>
+                  <strong style={{ fontWeight: 600 }}>{risk.person.name}</strong>
+                  <span style={{ color: "var(--danger)", marginLeft: 5 }}>{displayPct(risk.pct)}%</span>
                 </button>
               ))}
             </div>
           )}
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 9.5, fontWeight: 600, color: topCapacityRisks.length ? "var(--danger)" : "#059669", padding: "5px 9px", borderRadius: 999, background: topCapacityRisks.length ? "rgba(239,68,68,.07)" : "rgba(16,185,129,.08)", whiteSpace: "nowrap" }}>
-              {capacityRisks.length} risk{capacityRisks.length === 1 ? "" : "s"}
-            </span>
-            {topCapacityRisks.length > 3 && (
-              <button onClick={() => setShowAllRisks((v) => !v)} style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 9.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
-                {showAllRisks ? "Show less" : "View all"}
-              </button>
-            )}
-          </div>
+          {topCapacityRisks.length > 3 && (
+            <button onClick={() => setShowAllRisks((v) => !v)} style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--accent)", fontSize: 9.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+              {showAllRisks ? "Show less" : "View all"}
+            </button>
+          )}
         </div>
       </div>
 
       <div ref={utilScrollRef} className="card" style={{ padding: 0, overflowX: "auto", overflowY: "visible" }}>
-        <div style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", background: "var(--surface)" }}>
-          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", marginRight: 2 }}>{capacityLens === "committed" ? "UTILIZATION" : "AVAILABLE BANDWIDTH"}</span>
-          {capacityLens === "committed" ? UTIL_LEGEND.map(({ pct, label, tone }) => {
-            const Icon = LEGEND_ICON_BY_LABEL[label] ?? Minus;
-            return (
-              <div key={label} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9.5 }}>
-                <span className={`status-pill ${tone}`} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Icon size={10} />{pct}</span>
-                <span style={{ color: "var(--muted)" }}>{label}</span>
-              </div>
-            );
-          }) : (
-            <>
-              <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9.5 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: "rgba(16,185,129,.45)" }} /><span style={{ color: "var(--muted)" }}>Capacity available</span></div>
-              <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9.5 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: "rgba(239,68,68,.45)" }} /><span style={{ color: "var(--muted)" }}>Over capacity</span></div>
-              <span style={{ fontSize: 9.5, color: "var(--muted)" }}>Hours and % are calculated from the same committed allocation model.</span>
-            </>
-          )}
+        <div style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "var(--surface)" }}>
+          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)" }}>{capacityLens === "committed" ? "UTILIZATION" : "AVAILABLE BANDWIDTH"}</span>
+          <details style={{ position: "relative" }}>
+            <summary style={{ listStyle: "none", cursor: "pointer", fontSize: 9.5, fontWeight: 600, color: "var(--accent)" }}>Legend</summary>
+            <div className="card" style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 40, width: 330, padding: 10, boxShadow: "0 8px 24px rgba(15,35,65,.14)" }}>
+              {capacityLens === "committed" ? (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {UTIL_LEGEND.map(({ pct, label, tone }) => {
+                    const Icon = LEGEND_ICON_BY_LABEL[label] ?? Minus;
+                    return (
+                      <div key={label} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 9.5 }}>
+                        <span className={`status-pill ${tone}`} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Icon size={10} />{pct}</span>
+                        <span style={{ color: "var(--muted)" }}>{label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 7 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9.5 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: "rgba(16,185,129,.45)" }} /><span style={{ color: "var(--muted)" }}>Capacity available</span></div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9.5 }}><span style={{ width: 9, height: 9, borderRadius: "50%", background: "rgba(239,68,68,.45)" }} /><span style={{ color: "var(--muted)" }}>Over capacity</span></div>
+                  <span style={{ fontSize: 9.5, color: "var(--muted)" }}>Hours and % use the same committed allocation model.</span>
+                </div>
+              )}
+            </div>
+          </details>
         </div>
         {loading ? (
           <div style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>

@@ -1,0 +1,50 @@
+name: Build Utilization Cleanup Preview
+
+on:
+  push:
+    branches: [preview-utilization-cleanup]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: utilization-cleanup-preview
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm install
+
+      - name: Build preview
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Publish preview build branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/tempo-preview
+          cp -R dist/. /tmp/tempo-preview/
+          touch /tmp/tempo-preview/.nojekyll
+          cd /tmp/tempo-preview
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b preview-utilization-integration
+          git add -A
+          git commit -m "Build Utilization cleanup preview"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin preview-utilization-integration
