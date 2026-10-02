@@ -1,0 +1,4 @@
+-- phase134 (2026-10-02): applied live via SQL editor. tasks.due_locked; lock_task_dues_on_start trigger;
+-- wbs_save_task_schedule keeps current_due_date for locked tasks (only approved extensions move it);
+-- restored Testing (10-23) and REVISED 1 PH Sprout Module 2/3 (09-28) to approved dates.
+-- See phase133 note: first version keyed on approved extensions only.

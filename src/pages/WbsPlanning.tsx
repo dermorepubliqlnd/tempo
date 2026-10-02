@@ -3399,6 +3399,10 @@ export default function WbsPlanning() {
       // Every write below now surfaces its error and stops the loop
       // rather than continuing to optimistically update local state.
       const batchId = crypto.randomUUID();
+      // phase134 (Sandra: "it should be reflective of the approved extension
+      // only"): on a started project a locked task keeps its due date --
+      // only an approved extension moves it. Collected to tell the owner.
+      const keptDue: { name: string; plan: string; kept: string }[] = [];
       for (const t of orderedTasks) {
         const chosen = chosenChain.get(t.id);
         if (!chosen) continue;
@@ -3419,7 +3423,12 @@ export default function WbsPlanning() {
         // downstream dependency math, we just don't write it back; the
         // snapshot/Audit Trail recording below is unaffected either way.
         if (!isLockedStatus(t.status)) {
-          const patch: Partial<TaskRow> = { start_date: chosen.start, current_due_date: chosen.end };
+          const dueLocked = project.wbs_status !== "draft" && !!(t as { due_locked?: boolean }).due_locked && !!t.current_due_date;
+          const curDue = (t.current_due_date ?? "").slice(0, 10);
+          const finalDue = dueLocked ? curDue : chosen.end;
+          const finalStart = dueLocked && chosen.start > finalDue ? finalDue : chosen.start;
+          if (dueLocked && chosen.end !== curDue) keptDue.push({ name: t.name, plan: chosen.end, kept: curDue });
+          const patch: Partial<TaskRow> = { start_date: finalStart, current_due_date: finalDue };
           // Bugfix (2026-08-28, Phase 26): on a STARTED project this
           // write used to fail outright with "current_due_date can only
           // be changed via an approved extension request" --
@@ -3444,7 +3453,7 @@ export default function WbsPlanning() {
           const { error: taskDateError } =
             project.wbs_status === "draft"
               ? await supabase.from("tasks").update(patch).eq("id", t.id)
-              : await supabase.rpc("wbs_save_task_schedule", { p_task_id: t.id, p_start: chosen.start, p_due: chosen.end });
+              : await supabase.rpc("wbs_save_task_schedule", { p_task_id: t.id, p_start: finalStart, p_due: finalDue });
           if (taskDateError) {
             await alert(`Couldn't save "${t.name}"'s dates: ${taskDateError.message}. Stopping here -- reloading to show what actually saved.`);
             await loadAll();
@@ -3526,6 +3535,11 @@ export default function WbsPlanning() {
       await alert(
         project.wbs_status === "draft"
           ? "Timelines have been saved. Start the project to lock the timelines."
+          : keptDue.length
+          ? `Timelines have been saved. Due dates on a started project only change through an approved extension, so these kept their current due date:\n\n${keptDue
+              .slice(0, 12)
+              .map((k) => `• ${k.name}: plan says ${formatDate(k.plan)}, kept ${formatDate(k.kept)}`)
+              .join("\n")}${keptDue.length > 12 ? `\n…and ${keptDue.length - 12} more` : ""}\n\nIf a task needs more time, request an extension.`
           : "Timelines have been saved. This project is already started, so the change is tracked as variance against its Baseline (see the Audit Trail)."
       );
     } finally {
