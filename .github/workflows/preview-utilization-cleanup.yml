@@ -2,7 +2,7 @@ name: Build Utilization Cleanup Preview
 
 on:
   push:
-    branches: [preview-utilization-cleanup]
+    branches: [preview-utilization-cleanup, preview-utilization-lifecycle-guardrails]
   workflow_dispatch:
 
 permissions:

@@ -78,6 +78,11 @@ export function isProjectPausedOn(p: UtilProjectRow | undefined, dateStr: string
   if (p.resumed_at) return dateStr < localIsoOf(p.resumed_at);
   return false;
 }
+
+function projectStopsFutureCapacity(p: UtilProjectRow | undefined): boolean {
+  if (!p) return false;
+  return p.wbs_status === "closed" || p.status === "Completed" || p.status === "Cancelled";
+}
 export interface UtilPersonRow {
   id: string;
   daily_capacity_hours: number;
@@ -158,6 +163,41 @@ export function taskAllocationDays(t: UtilTaskRow, holidays: HolidaySet, offDays
     if (isAllocatableDay(d, holidays, offDays)) days.push(toISO(d));
   }
   return days.length ? days : [nearestAllocatableDay(end, holidays, offDays)];
+}
+
+/** Shared-engine guardrail: committed task effort must never appear before
+ * the project's own planned start. If a task has no explicit start, the
+ * project start becomes its effective start; if its dates are inconsistent
+ * (due before project start), keep the effort at/after the project start
+ * rather than fabricating pre-project utilization. */
+function taskAllocationDaysWithinProject(
+  t: UtilTaskRow,
+  project: UtilProjectRow | undefined,
+  holidays: HolidaySet,
+  offDays?: OffDaySet
+): string[] {
+  if (!t.current_due_date) return [];
+  const projectStart = project?.start_date?.slice(0, 10) ?? null;
+  let startStr = (t.start_date ?? projectStart ?? t.current_due_date).slice(0, 10);
+  if (projectStart && startStr < projectStart) startStr = projectStart;
+
+  const start = parseLocalDate(startStr);
+  const rawEnd = parseLocalDate(t.current_due_date.slice(0, 10));
+  const end = rawEnd < start ? start : rawEnd;
+
+  const days: string[] = [];
+  for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
+    if (isAllocatableDay(d, holidays, offDays)) days.push(toISO(d));
+  }
+  if (days.length) return days;
+
+  // If the effective window is entirely non-working, search forward only:
+  // never back-fill a weekend/holiday onto a day before the project starts.
+  for (let i = 0; i <= 30; i++) {
+    const d = addDays(end, i);
+    if (isAllocatableDay(d, holidays, offDays)) return [toISO(d)];
+  }
+  return [];
 }
 
 /** A task's hours on one date -- 0 if that date isn't one of its own
@@ -289,8 +329,9 @@ export interface AllocationEngineConfig {
   availability?: { person_id: string; date: string; status: "off" | "half_day" }[];
   assigneeHistory?: AssigneeHistoryRow[];
   ownerHistory?: OwnerHistoryRow[];
-  /** Today's ISO date. Closed projects stop consuming capacity from here on.
-   * Omit to apply no closed-project cutoff at all (draft previews). */
+  /** Today's ISO date. Closed, Completed and Cancelled projects stop
+   * consuming future capacity from here on while historical days stay intact.
+   * Omit to apply no current-state future cutoff (draft previews). */
   todayStr?: string;
   /** Archived per-person-per-day hours from permanently-deleted work. */
   deletedHours?: { person_id: string; date: string; hours: number }[];
@@ -323,8 +364,7 @@ export function createAllocationEngine(config: AllocationEngineConfig): Allocati
 
   const parentTaskIds = parentTaskIdsOf(tasks);
   const leafTasks = tasks.filter((t) => !parentTaskIds.has(t.id));
-  const closed = closedProjectIds(projects);
-  const projectByIdForPause = new Map(projects.map((p) => [p.id, p]));
+  const projectById = new Map(projects.map((p) => [p.id, p]));
 
   const offByPerson = new Map<string, OffDaySet>();
   function offDaysFor(personId: string): OffDaySet {
@@ -341,7 +381,7 @@ export function createAllocationEngine(config: AllocationEngineConfig): Allocati
     const key = `${task.id}|${personId}`;
     let s = taskDayCache.get(key);
     if (!s) {
-      s = new Set(taskAllocationDays(task, holidays, offDaysFor(personId)));
+      s = new Set(taskAllocationDaysWithinProject(task, projectById.get(task.project_id), holidays, offDaysFor(personId)));
       taskDayCache.set(key, s);
     }
     return s;
@@ -380,8 +420,9 @@ export function createAllocationEngine(config: AllocationEngineConfig): Allocati
     // todayStr (a draft preview with no "today" concept) means no cutoff at
     // all, matching the closed-project check's own fallback below.
     if (!isOpenTask(task) && todayStr && dateStr >= todayStr) return 0;
-    if (todayStr && dateStr >= todayStr && closed.has(task.project_id)) return 0;
-    if (isProjectPausedOn(projectByIdForPause.get(task.project_id), dateStr)) return 0;
+    const project = projectById.get(task.project_id);
+    if (todayStr && dateStr >= todayStr && projectStopsFutureCapacity(project)) return 0;
+    if (isProjectPausedOn(project, dateStr)) return 0;
     if (!assigneeMatchesOnDate(task, personId, dateStr, assigneeHistory)) return 0;
     const days = taskDays(personId, task);
     if (!days.has(dateStr)) return 0;
@@ -389,7 +430,7 @@ export function createAllocationEngine(config: AllocationEngineConfig): Allocati
   }
 
   function pmHoursOnDateFn(personId: string, project: UtilProjectRow, dateStr: string): number {
-    if (todayStr && dateStr >= todayStr && project.wbs_status === "closed") return 0;
+    if (todayStr && dateStr >= todayStr && projectStopsFutureCapacity(project)) return 0;
     if (isProjectPausedOn(project, dateStr)) return 0;
     if (!ownerMatchesOnDate(project, personId, dateStr, ownerHistory)) return 0;
     return pmDays(personId, project).has(dateStr) ? PROJECT_PM_DAILY_HOURS : 0;
