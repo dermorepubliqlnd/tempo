@@ -1,15 +1,15 @@
-name: Build Utilization Cleanup Preview
+name: Build Projects Tasks Revamp Preview
 
 on:
   push:
-    branches: [preview/wbs-project-info-v2-20261003]
+    branches: [preview/projects-tasks-revamp-20261003]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: wbs-project-info-v2-preview
+  group: projects-tasks-revamp-preview
   cancel-in-progress: true
 
 jobs:
@@ -43,8 +43,8 @@ jobs:
           git init
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b preview-wbs-project-info-v2-integration
+          git checkout -b preview-projects-tasks-revamp-integration
           git add -A
-          git commit -m "Build WBS project info v2 preview"
+          git commit -m "Build Projects Tasks revamp preview"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force origin preview-wbs-project-info-v2-integration
+          git push --force origin preview-projects-tasks-revamp-integration
