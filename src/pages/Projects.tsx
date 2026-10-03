@@ -348,7 +348,7 @@ function CategoryIcon({ iconName, tone, size = 13 }: { iconName?: string; tone?:
   return <Icon size={size} color={color} style={{ flexShrink: 0 }} />;
 }
 
-const PROJECT_COLUMN_ORDER = ["name", "project_number", "created_at", "closed_at", "owner", "category", "source", "planning_type", "project_type", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at"];
+const PROJECT_COLUMN_ORDER = ["name", "owner", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "category", "source", "planning_type", "project_type", "project_number", "created_at", "closed_at", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at"];
 
 // Default hidden-columns set for a brand-new Projects Timeline view (see
 // timelineDefaultHiddenColumns on ViewTabs / initialHiddenColumns on
@@ -1056,6 +1056,7 @@ export default function Projects() {
   const wantsMyProjectsView = searchParams.get("owner") === "me";
   const wantsMyTasksView = searchParams.get("assignee") === "me";
   const [pageSection, setPageSection] = useState<"projects" | "tasks">(wantsMyTasksView ? "tasks" : "projects");
+  const [projectSystemView, setProjectSystemView] = useState<"all" | "active" | "attention" | "mine">("all");
 
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
@@ -2303,7 +2304,7 @@ export default function Projects() {
     // columns.
     // 2026-09-21: bumped again for the new "project_type" column inserted
     // after Planning Type -- same reasoning.
-    columnOrderVersion: 6,
+    columnOrderVersion: 7,
     hiddenColumns: [],
     columnWidths: {},
     groupBy: null,
@@ -2337,6 +2338,47 @@ export default function Projects() {
     }
     return out;
   }, [projects, projectViews.activeView, me?.id]);
+
+  const projectPortfolioMeta = useMemo(() => {
+    const meta = projects.map((p) => {
+      const health = healthOf(p, tasks, holidayDates);
+      const status = projectStatusOf(p);
+      const progress = actualProgress(p.id, tasks);
+      return { p, health, status, progress };
+    });
+    const active = meta.filter(({ status }) => status === "In Progress" || status === "Paused").length;
+    const awaitingStart = meta.filter(({ p, status }) => p.wbs_status === "draft" || status === "Not Started").length;
+    const needsAttention = meta.filter(({ health }) =>
+      health.tone === "danger" ||
+      health.tone === "warning" ||
+      health.label === "Schedule review" ||
+      health.label.includes("close pending") ||
+      health.label === "Completed – open tasks"
+    ).length;
+    const closePending = meta.filter(({ status, progress }) => status !== "Completed" && status !== "Cancelled" && progress === 100).length;
+    return { active, awaitingStart, needsAttention, closePending };
+  }, [projects, tasks, holidayDates]);
+
+  const systemFilteredProjects = useMemo(() => {
+    if (projectSystemView === "all") return filteredProjects;
+    if (projectSystemView === "mine") return filteredProjects.filter((p) => p.owner_id === me?.id);
+    if (projectSystemView === "active") {
+      return filteredProjects.filter((p) => {
+        const status = projectStatusOf(p);
+        return status === "In Progress" || status === "Paused";
+      });
+    }
+    return filteredProjects.filter((p) => {
+      const health = healthOf(p, tasks, holidayDates);
+      return (
+        health.tone === "danger" ||
+        health.tone === "warning" ||
+        health.label === "Schedule review" ||
+        health.label.includes("close pending") ||
+        health.label === "Completed – open tasks"
+      );
+    });
+  }, [filteredProjects, projectSystemView, me?.id, tasks, holidayDates]);
 
   const projectColumns: ColumnDef<ProjectRow>[] = useMemo(
     () => [
@@ -5127,7 +5169,9 @@ export default function Projects() {
           <div>
             <h1 style={{ margin: 0, fontSize: 22 }}>Projects &amp; Tasks</h1>
             <div style={{ marginTop: 4, color: "var(--muted)", fontSize: 11.5 }}>
-              Manage portfolio-level projects separately from day-to-day task execution.
+              {pageSection === "projects"
+                ? "Portfolio planning, governance and project health."
+                : "Day-to-day execution, ownership and task completion."}
             </div>
           </div>
           {pageSection === "projects" && canCreateProject && (
@@ -5154,18 +5198,7 @@ export default function Projects() {
           )}
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            gap: 4,
-            marginTop: 14,
-            padding: 4,
-            width: "fit-content",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            background: "#f7f9fc",
-          }}
-        >
+        <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 14 }}>
           {(["projects", "tasks"] as const).map((section) => {
             const active = pageSection === section;
             return (
@@ -5174,15 +5207,15 @@ export default function Projects() {
                 type="button"
                 onClick={() => setPageSection(section)}
                 style={{
-                  border: active ? "1px solid #d7e2ef" : "1px solid transparent",
-                  background: active ? "#fff" : "transparent",
-                  color: active ? "#17324f" : "var(--muted)",
-                  borderRadius: 7,
-                  padding: "7px 16px",
+                  border: "none",
+                  borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent",
+                  background: "transparent",
+                  color: active ? "var(--accent)" : "var(--text)",
+                  padding: "8px 2px 9px",
+                  marginBottom: -1,
                   fontSize: 12.5,
                   fontWeight: active ? 700 : 600,
                   cursor: "pointer",
-                  boxShadow: active ? "0 1px 2px rgba(15,41,66,.08)" : "none",
                 }}
               >
                 {section === "projects" ? "Projects" : "Tasks"}
@@ -5190,11 +5223,78 @@ export default function Projects() {
             );
           })}
         </div>
+
+        {pageSection === "projects" && (
+          <>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 18,
+                padding: "10px 2px 8px",
+                fontSize: 11.5,
+                color: "var(--muted)",
+                flexWrap: "wrap",
+              }}
+            >
+              <button type="button" onClick={() => setProjectSystemView("active")} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
+                <strong style={{ color: "#17324f", fontSize: 13 }}>{projectPortfolioMeta.active}</strong> Active
+              </button>
+              <span style={{ color: "#cbd5e1" }}>·</span>
+              <button type="button" onClick={() => setProjectSystemView("attention")} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
+                <strong style={{ color: projectPortfolioMeta.needsAttention ? "var(--danger-text)" : "#17324f", fontSize: 13 }}>{projectPortfolioMeta.needsAttention}</strong> Need attention
+              </button>
+              <span style={{ color: "#cbd5e1" }}>·</span>
+              <button type="button" onClick={() => setProjectSystemView("all")} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
+                <strong style={{ color: "#17324f", fontSize: 13 }}>{projectPortfolioMeta.awaitingStart}</strong> Awaiting start
+              </button>
+              <span style={{ color: "#cbd5e1" }}>·</span>
+              <button type="button" onClick={() => setProjectSystemView("attention")} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
+                <strong style={{ color: projectPortfolioMeta.closePending ? "var(--warning-text)" : "#17324f", fontSize: 13 }}>{projectPortfolioMeta.closePending}</strong> Close pending
+              </button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 2, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)", marginRight: 2 }}>System views</span>
+              {([
+                ["all", "All Projects"],
+                ["active", "Active Projects"],
+                ["attention", "Needs Attention"],
+                ["mine", "My Projects"],
+              ] as const).map(([key, label]) => {
+                const active = projectSystemView === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setProjectSystemView(key)}
+                    style={{
+                      border: active ? "1px solid #bdd5f2" : "1px solid var(--border)",
+                      background: active ? "#eef6ff" : "#fff",
+                      color: active ? "var(--accent)" : "var(--text-secondary)",
+                      borderRadius: 999,
+                      padding: "5px 10px",
+                      fontSize: 11,
+                      fontWeight: active ? 700 : 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+              <span style={{ marginLeft: 4, fontSize: 10.5, color: "var(--muted)" }}>
+                System views define scope; your saved views below control layout, grouping and additional filters.
+              </span>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="card" style={{ padding: 0, marginBottom: 20, display: pageSection === "projects" ? undefined : "none" }}>
         <div className="sticky-toolbar-cluster" ref={projectClusterRef}>
         <div className="table-toolbar">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+            <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: "var(--muted)", marginLeft: 4 }}>My views</span>
           <ViewTabs
             views={projectViews.views}
             activeViewId={projectViews.activeViewId}
@@ -5213,9 +5313,10 @@ export default function Projects() {
             onReorder={projectViews.reorderViews}
             confirm={confirm}
           />
+          </div>
           <div className="toolbar-actions">
             <ViewSettingsMenu
-              rows={filteredProjects}
+              rows={systemFilteredProjects}
               columns={projectColumns}
               hiddenColumns={projectViews.activeView.hiddenColumns}
               onHiddenColumnsChange={(hiddenColumns) => projectViews.updateActiveView({ hiddenColumns })}
@@ -5374,7 +5475,7 @@ export default function Projects() {
         ) : projectViews.activeView.viewType === "board" ? (
           <>
             <BoardView
-              rows={sortRows(filteredProjects, projectViews.activeView.sorts, projectSortOptions)}
+              rows={sortRows(systemFilteredProjects, projectViews.activeView.sorts, projectSortOptions)}
               rowKey={(p) => p.id}
               columns={getProjectBoardColumns(resolveBoardGroupBy(projectViews.activeView.groupBy, PROJECT_BOARD_GROUPABLE_KEYS, "phase"))}
               getValue={(p) => getProjectBoardValue(p, resolveBoardGroupBy(projectViews.activeView.groupBy, PROJECT_BOARD_GROUPABLE_KEYS, "phase"))}
@@ -5393,7 +5494,7 @@ export default function Projects() {
         ) : projectViews.activeView.viewType === "timeline" ? (
           <>
             <TimelineView
-              rows={sortRows(filteredProjects, projectViews.activeView.sorts, projectSortOptions)}
+              rows={sortRows(systemFilteredProjects, projectViews.activeView.sorts, projectSortOptions)}
               rowKey={(p) => p.id}
               renderLabel={(p) => projectColumns.find((c) => c.key === "name")?.render(p)}
               getStart={(p) => p.start_date}
@@ -5428,7 +5529,7 @@ export default function Projects() {
         ) : projectViews.activeView.viewType === "calendar" ? (
           <>
             <CalendarView
-              rows={sortRows(filteredProjects, projectViews.activeView.sorts, projectSortOptions)}
+              rows={sortRows(systemFilteredProjects, projectViews.activeView.sorts, projectSortOptions)}
               rowKey={(p) => p.id}
               renderLabel={(p) => projectColumns.find((c) => c.key === "name")?.render(p)}
               getStart={(p) => p.start_date}
@@ -5465,7 +5566,7 @@ export default function Projects() {
           <div className="data-table-dense">
             <DataTable
               columns={projectColumns}
-              rows={filteredProjects}
+              rows={systemFilteredProjects}
               rowKey={(p) => p.id}
               view={projectViews.activeView}
               onViewChange={projectViews.updateActiveView}
