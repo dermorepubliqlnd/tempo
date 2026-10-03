@@ -3356,6 +3356,24 @@ export default function WbsPlanning() {
   async function saveDraft() {
     if (!project || !projectId) return;
 
+    if (project.is_unsaved) {
+      const missing = [
+        !project.name?.trim() ? "Project Name" : null,
+        !project.owner_id ? "Owner" : null,
+        !project.start_date ? "Start Date" : null,
+        !project.category ? "Category" : null,
+        !project.source_id ? "Source" : null,
+        !project.project_type_id ? "Project Type" : null,
+        !project.effort_level ? "Complexity" : null,
+        !project.description?.trim() ? "Description" : null,
+      ].filter((x): x is string => !!x);
+
+      if (missing.length) {
+        await alert(`Complete the required Project Information before continuing: ${missing.join(", ")}.`);
+        return;
+      }
+    }
+
     const chosenChain = chainByMode[activeMode];
     const unresolved = orderedTasks.filter((t) => !chosenChain.get(t.id));
     if (unresolved.length) {
@@ -3381,7 +3399,9 @@ export default function WbsPlanning() {
     // extra click), Save is what actually records that an edit happened
     // and flips status to Changed After Baseline (record_wbs_edit below).
     const wasBaselineLocked = project.wbs_status === "baseline_locked";
-    const confirmMsg = wasBaselineLocked
+    const confirmMsg = project.is_unsaved
+      ? "Save Project Information?\n\nThis saves the project details and opens the WBS planning sections. You can still update the information while the project is in Draft."
+      : wasBaselineLocked
       ? `Save this project's timelines using ${verb}?\n\nThis writes every task's computed End date, records both modes for reporting, and marks the project Changed After Baseline since this is an edit made after the Baseline was locked.`
       : `Save this project's timelines using ${verb}?\n\nThis writes every task's computed End date (Start dates are already saved per-task) and records both modes for reporting.${
           project.wbs_status === "draft" ? " Nothing is locked yet -- use Start Project from the actions above when you're ready." : ""
@@ -5077,6 +5097,7 @@ export default function WbsPlanning() {
                                         value={owner?.name ?? ""}
                                         editable={canEditWbs}
                                         alwaysSelect
+                                        searchable
                                         allowEmpty
                                         emptyLabel="No owner"
                                         options={people.map((p) => p.name)}
@@ -5102,23 +5123,25 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Category</span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Category <span style={{ color: "#d92d20" }}>*</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.category, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect value={project.category ?? ""} editable={canEditWbs}
-                                        alwaysSelect allowEmpty emptyLabel="No category" options={categoryPickerOptions} onCommit={(v) => saveProjectField({ category: v || null })} />
+                                        alwaysSelect
+                                        searchable allowEmpty emptyLabel="No category" options={categoryPickerOptions} onCommit={(v) => saveProjectField({ category: v || null })} />
                   </div>
                 </div>
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Source</span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Source <span style={{ color: "#d92d20" }}>*</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.source_id, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
                                         value={projectSourceOptions.find((s) => s.id === project.source_id)?.name ?? ""}
                                         editable={canEditWbs}
                                         alwaysSelect
+                                        searchable
                                         allowEmpty
                                         emptyLabel="No source"
                                         options={sourcePickerOptions}
@@ -5132,13 +5155,14 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Type</span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Type <span style={{ color: "#d92d20" }}>*</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.project_type_id, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
                                         value={projectTypeOptions.find((t) => t.id === project.project_type_id)?.name ?? ""}
                                         editable={canEditWbs}
                                         alwaysSelect
+                                        searchable
                                         allowEmpty
                                         emptyLabel="No type"
                                         options={projectTypePickerOptions}
@@ -5152,13 +5176,14 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Complexity</span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Complexity <span style={{ color: "#d92d20" }}>*</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.effort_level, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
                                         value={project.effort_level ? effortLevelLabel(project.effort_level) : ""}
                                         editable={canEditWbs}
                                         alwaysSelect
+                                        searchable
                                         allowEmpty
                                         emptyLabel="Not set"
                                         options={PROJECT_EFFORT_LEVEL_OPTIONS.map((lvl) => effortLevelLabel(lvl))}
@@ -5182,12 +5207,12 @@ export default function WbsPlanning() {
             </div>
 
               <div style={{ display: "grid", gridTemplateRows: "auto 1fr", minWidth: 0 }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#304963", marginBottom: 5 }}>Description</div>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#304963", marginBottom: 5 }}>Description <span style={{ color: "#d92d20" }}>*</span></div>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.description, undefined, !canEditWbs), width: "100%", minHeight: 0, height: "100%", alignItems: "stretch" }}>
                   <InlineTextArea
                     value={project.description ?? ""}
                     editable={canEditWbs}
-                    placeholder="What is this project about? (optional)"
+                    placeholder="What is this project about?"
                     onCommit={(v) => saveProjectField({ description: v })}
                   />
                 </div>
