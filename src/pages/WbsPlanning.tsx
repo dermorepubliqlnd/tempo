@@ -857,6 +857,10 @@ export default function WbsPlanning() {
   // Phase 10: no longer a single selected preview -- all 4 scenarios
   // render simultaneously as rows now, see effectiveForMode below.
   const [saving, setSaving] = useState(false);
+  // Most WBS users do not need the bandwidth diagnostic by default.
+  // Keep it opt-in while preserving the existing calculation and controls
+  // when someone explicitly opens it.
+  const [showAvailableBandwidth, setShowAvailableBandwidth] = useState(false);
   const [utilWindowOffset, setUtilWindowOffset] = useState(0); // in units of UTIL_WINDOW_DAYS blocks
   // Auto-scroll-to-today (2026-08-25): Sandra reported losing sight of a
   // date column in this panel between two browser zoom levels. The date
@@ -5306,7 +5310,20 @@ export default function WbsPlanning() {
               lines of nested scenario rows/tables below) is riskier than
               this one-line style change; behavior is identical either
               way for a closed project. */}
-          <div className="card" style={{ padding: 14, marginBottom: 12, display: project.wbs_status === "closed" ? "none" : undefined }}>
+          {project.wbs_status !== "closed" && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: showAvailableBandwidth ? 8 : 12 }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 11.5, fontWeight: 600, color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}>
+                <input
+                  type="checkbox"
+                  checked={showAvailableBandwidth}
+                  onChange={(e) => setShowAvailableBandwidth(e.target.checked)}
+                  style={{ width: 14, height: 14, accentColor: "var(--accent)", cursor: "pointer" }}
+                />
+                Show available bandwidth snapshot
+              </label>
+            </div>
+          )}
+          <div className="card" style={{ padding: 14, marginBottom: 12, display: project.wbs_status === "closed" || !showAvailableBandwidth ? "none" : undefined }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
               <strong style={{ fontSize: 12.5, color: "var(--navy)" }}>Available bandwidth</strong>
               <span
