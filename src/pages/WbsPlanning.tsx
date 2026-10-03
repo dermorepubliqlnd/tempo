@@ -4825,7 +4825,7 @@ export default function WbsPlanning() {
         }
         @media (max-width: 1250px) {
           .wbs-modern-page .wbs-project-setup-layout { grid-template-columns: 1fr !important; }
-          .wbs-modern-page .wbs-project-info-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+          .wbs-modern-page .wbs-project-info-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
           .wbs-modern-page .wbs-project-setup-layout > div:last-child { min-height: 96px; }
         }
         @media (max-width: 900px) {
@@ -4839,6 +4839,133 @@ export default function WbsPlanning() {
       {dialog}
       {assigneePicker.element}
       {startDatePrompt.element}
+      {rowActionsMenu &&
+        (() => {
+          const task = orderedTasks.find((x) => x.id === rowActionsMenu.taskId);
+          if (!task) return null;
+          const siblings = siblingsFor(task);
+          const at = siblings.findIndex((x) => x.id === task.id);
+          const canMoveUp = at > 0;
+          const canMoveDown = at >= 0 && at < siblings.length - 1;
+          const isDraft = project?.wbs_status === "draft";
+          const hasKids = hasChildren(task.id);
+          const closeMenu = () => setRowActionsMenu(null);
+          const menuItem = (label: string, icon: React.ReactNode, onClick: () => void, opts?: { danger?: boolean; disabled?: boolean }) => (
+            <button
+              type="button"
+              disabled={opts?.disabled}
+              onClick={() => { closeMenu(); onClick(); }}
+              style={{
+                display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 9px",
+                border: "none", background: "transparent", textAlign: "left", fontSize: 12,
+                color: opts?.danger ? "var(--danger-text)" : "var(--text)", cursor: opts?.disabled ? "default" : "pointer",
+                opacity: opts?.disabled ? 0.4 : 1,
+              }}
+            >
+              {icon}<span>{label}</span>
+            </button>
+          );
+          return createPortal(
+            <>
+              <div style={{ position: "fixed", inset: 0, zIndex: 1180 }} onClick={closeMenu} />
+              <div
+                className="card"
+                style={{
+                  position: "fixed",
+                  left: Math.min(rowActionsMenu.x - 220, window.innerWidth - 228),
+                  top: Math.min(rowActionsMenu.y, window.innerHeight - 330),
+                  zIndex: 1181,
+                  width: 220,
+                  padding: 5,
+                  boxShadow: "0 8px 24px rgba(15,41,66,.18)",
+                }}
+              >
+                {task.depth === 0 && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
+                {menuItem("Add task below", <CornerDownRight size={13} />, () => void addTaskBelow(task))}
+                {menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
+                <div style={{ height: 1, background: "var(--border)", margin: "4px 2px" }} />
+                {menuItem("Move up", <ArrowUp size={13} />, () => void moveTaskDirection(task, -1), { disabled: !canMoveUp })}
+                {menuItem("Move down", <ArrowDown size={13} />, () => void moveTaskDirection(task, 1), { disabled: !canMoveDown })}
+                {!hasKids && menuItem("Move to parent…", <CornerDownRight size={13} />, () => setMoveParentTaskId(task.id))}
+                {task.depth === 1 && menuItem("Move to top level", <ArrowLeft size={13} />, () => void moveTaskToParent(task, null))}
+                <div style={{ height: 1, background: "var(--border)", margin: "4px 2px" }} />
+                {isDraft && menuItem(
+                  hasKids ? `Delete task and ${tasks.filter((x) => x.parent_task_id === task.id).length} sub-task(s)` : "Delete task",
+                  <Trash2 size={13} />,
+                  () => void deleteTask(task),
+                  { danger: true }
+                )}
+                {!isDraft && task.status !== "Cancelled" && task.depth > 0 && menuItem("Cancel task", <XCircle size={13} />, () => setCancelTaskDialogOpen({ taskId: task.id, label: `"${task.name}"` }))}
+                {task.status === "Cancelled" && menuItem("Uncancel task", <RefreshCw size={13} />, () => void uncancelTask(task.id))}
+              </div>
+            </>,
+            document.body
+          );
+        })()}
+      {moveParentTaskId &&
+        (() => {
+          const task = orderedTasks.find((x) => x.id === moveParentTaskId);
+          if (!task) return null;
+          const parents = orderedTasks.filter((x) => x.depth === 0 && x.id !== task.id && x.id !== task.parent_task_id);
+          return createPortal(
+            <div
+              style={{ position: "fixed", inset: 0, zIndex: 1200, background: "rgba(15,41,66,.28)", display: "flex", alignItems: "center", justifyContent: "center" }}
+              onClick={() => setMoveParentTaskId(null)}
+            >
+              <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 360, maxWidth: "calc(100vw - 32px)", padding: 16 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>Move task to parent</div>
+                <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 10 }}>Choose the parent task for “{task.name}”.</div>
+                <div style={{ display: "grid", gap: 5, maxHeight: 260, overflowY: "auto" }}>
+                  {parents.length === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", padding: 8 }}>No other parent tasks available.</div>}
+                  {parents.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => void moveTaskToParent(task, p.id)}
+                      style={{ textAlign: "left", justifyContent: "flex-start" }}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                  <button type="button" className="btn-secondary" onClick={() => setMoveParentTaskId(null)}>Cancel</button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          );
+        })()}
+      {lastDeletedTask &&
+        createPortal(
+          <div
+            style={{
+              position: "fixed", right: 22, bottom: 22, zIndex: 1250, display: "flex", alignItems: "center", gap: 12,
+              background: "#17324f", color: "#fff", borderRadius: 9, padding: "10px 12px 10px 14px", boxShadow: "0 8px 24px rgba(15,41,66,.24)",
+              fontSize: 12,
+            }}
+          >
+            <span>“{lastDeletedTask.name}” moved to Archive.</span>
+            <button
+              type="button"
+              onClick={async () => {
+                const target = lastDeletedTask;
+                setLastDeletedTask(null);
+                const { error } = await restoreItem("task", target.id);
+                if (error) {
+                  await alert(`Couldn't undo delete: ${error.message}`);
+                  return;
+                }
+                await loadAll(true);
+              }}
+              style={{ border: "none", background: "transparent", color: "#fff", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}
+            >
+              <Undo2 size={13} /> Undo
+            </button>
+          </div>,
+          document.body
+        )}
       {wbsHeaderMenu &&
         createPortal(
           <>
@@ -5251,7 +5378,7 @@ export default function WbsPlanning() {
             </div>
 
             <div className="wbs-project-setup-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(300px, 1fr)", gap: 18, alignItems: "stretch" }}>
-              <div className="wbs-project-info-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "12px 16px", alignContent: "start" }}>
+              <div className="wbs-project-info-grid" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: "12px 16px", alignContent: "start" }}>
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project ID</span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(true, undefined, true), width: "100%" }}>
@@ -5300,6 +5427,22 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Priority <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.priority, undefined, !canEditWbs), width: "100%" }}>
+                  <InlineSelect
+                    value={project.priority ?? ""}
+                    editable={canEditWbs}
+                    alwaysSelect
+                    searchable
+                    allowEmpty
+                    emptyLabel="No priority"
+                    options={PROJECT_PRIORITY_OPTIONS}
+                    onCommit={(value) => saveProjectField({ priority: value || null })}
+                  />
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Category <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.category, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
@@ -5332,7 +5475,26 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Type</span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Planning Type <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.planning_type_id, undefined, !canEditWbs), width: "100%" }}>
+                  <InlineSelect
+                    value={projectPlanningTypeOptions.find((t) => t.id === project.planning_type_id)?.name ?? ""}
+                    editable={canEditWbs}
+                    alwaysSelect
+                    searchable
+                    allowEmpty
+                    emptyLabel="No planning type"
+                    options={planningTypePickerOptions}
+                    onCommit={(name) => {
+                      const type = projectPlanningTypeOptions.find((t) => t.name === name);
+                      saveProjectField({ planning_type_id: type?.id ?? null });
+                    }}
+                  />
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Type <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.project_type_id, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
@@ -6433,36 +6595,28 @@ export default function WbsPlanning() {
                             />
                           </div>
                           {rowEditable && t.depth === 0 && (
-                            <button className="add-subtask-btn" tabIndex={-1} onClick={() => addSubtask(t)} title="Add sub-task">
+                            <button
+                              className="add-subtask-btn"
+                              tabIndex={-1}
+                              onClick={() => addSubtask(t)}
+                              title="Add sub-task"
+                              aria-label="Add sub-task"
+                            >
                               <Plus size={14} />
                             </button>
                           )}
-                          {rowEditable && project?.wbs_status === "draft" && (
-                            <button className="add-subtask-btn" tabIndex={-1} onClick={() => deleteTask(t)} title={isParent ? "Delete task (and its sub-tasks)" : "Delete task"}>
-                              <Trash2 size={14} />
-                            </button>
-                          )}
-                          {/* 2026-09-10: Cancel/Uncancel reachable from WBS
-                              too, per spec ("do NOT restrict Cancel to WBS
-                              only" -- the reverse also holds: WBS needs it
-                              as well, not just the Tasks page). Not a full
-                              Status dropdown -- WBS deliberately doesn't
-                              have one (see the Phase 24/governance-
-                              lockdown note elsewhere: Status editing lives
-                              on the Tasks page) -- just this one action,
-                              same "button next to Delete" affordance. */}
-                          {rowEditable && project?.wbs_status !== "draft" && !isParent && (
+                          {(rowEditable || t.status === "Cancelled") && (
                             <button
                               className="add-subtask-btn"
-                              onClick={() => setCancelTaskDialogOpen({ taskId: t.id, label: `"${t.name}"` })}
-                              title="Cancel task"
+                              tabIndex={-1}
+                              onClick={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setRowActionsMenu({ taskId: t.id, x: rect.right, y: rect.bottom + 4 });
+                              }}
+                              title="More actions"
+                              aria-label="More task actions"
                             >
-                              <XCircle size={14} />
-                            </button>
-                          )}
-                          {canEditWbs && t.status === "Cancelled" && (
-                            <button className="add-subtask-btn" tabIndex={-1} onClick={() => uncancelTask(t.id)} title="Uncancel -- restore to In Progress">
-                              <RefreshCw size={14} />
+                              <MoreHorizontal size={14} />
                             </button>
                           )}
                         </div>
