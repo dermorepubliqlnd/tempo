@@ -256,6 +256,9 @@ export default function ProjectOverview() {
         <Link to={`/projects/${project.id}/wbs`} style={{ padding: "9px 2px", color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}>
           WBS
         </Link>
+        <Link to={`/projects/${project.id}/resource-plan`} style={{ padding: "9px 2px", color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}>
+          Resource Plan
+        </Link>
       </div>
 
       <div style={{ ...cardStyle(), display: "grid", gridTemplateColumns: "minmax(0,1.6fr) minmax(220px,.75fr) minmax(220px,.75fr)", gap: 0, padding: 0, overflow: "hidden", marginBottom: 12 }}>
