@@ -1053,12 +1053,16 @@ export default function Projects() {
   // not a persistent filter of its own. Every later visit, whether via the
   // dashboard link or the tab itself, just reuses that same saved view.
   const [searchParams] = useSearchParams();
-  const previewAsIndividual = searchParams.get("previewPersona") === "individual";
+  const previewPersonId = searchParams.get("previewPerson");
+  const previewPersonName = searchParams.get("previewName") || null;
+  const previewAsIndividual = searchParams.get("previewPersona") === "individual" || !!previewPersonId;
   const wantsMyProjectsView = searchParams.get("owner") === "me";
   const wantsMyTasksView = searchParams.get("assignee") === "me";
   const [pageSection, setPageSection] = useState<"projects" | "tasks">(wantsMyTasksView ? "tasks" : "projects");
   const [projectSystemView, setProjectSystemView] = useState<"all" | "active" | "attention" | "mine" | "team">("all");
   const [usingSystemProjectView, setUsingSystemProjectView] = useState(true);
+  const [renamingProjectView, setRenamingProjectView] = useState(false);
+  const [projectViewNameDraft, setProjectViewNameDraft] = useState("");
   const initialProjectScopeApplied = useRef(false);
 
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -2396,10 +2400,12 @@ export default function Projects() {
     return { active, awaitingStart, needsAttention, closePending };
   }, [projects, tasks, holidayDates]);
 
+  const projectPerspectivePersonId = previewPersonId || me?.id || null;
+
   function myProjectRole(p: ProjectRow): "Owner" | "Contributor" | null {
-    if (!me?.id) return null;
-    if (p.owner_id === me.id) return "Owner";
-    if (tasks.some((t) => !t.is_archived && t.project_id === p.id && t.assignee_id === me.id)) return "Contributor";
+    if (!projectPerspectivePersonId) return null;
+    if (p.owner_id === projectPerspectivePersonId) return "Owner";
+    if (tasks.some((t) => !t.is_archived && t.project_id === p.id && t.assignee_id === projectPerspectivePersonId)) return "Contributor";
     return null;
   }
 
@@ -2436,7 +2442,7 @@ export default function Projects() {
     const involved = filteredProjects.filter((p) => myProjectRole(p) !== null);
     const owned = involved.filter((p) => myProjectRole(p) === "Owner").length;
     return { total: involved.length, owned, contributing: involved.length - owned };
-  }, [filteredProjects, me?.id, tasks]);
+  }, [filteredProjects, projectPerspectivePersonId, tasks]);
 
   const teamProjectScopeCounts = useMemo(() => {
     const involved = filteredProjects.filter((p) => teamProjectRole(p) !== null);
@@ -5323,7 +5329,7 @@ export default function Projects() {
                   fontWeight: 700,
                 }}
               >
-                Testing perspective: Individual Contributor
+                Testing perspective: {previewPersonName ? `${previewPersonName} · Individual Contributor` : "Individual Contributor"}
               </div>
             )}
             <div
@@ -5436,14 +5442,64 @@ export default function Projects() {
                 const type = projectViews.activeView.viewType;
                 const base = type === "board" ? "New board" : type === "timeline" ? "New timeline" : type === "calendar" ? "New calendar" : "New view";
                 const existing = projectViews.views.filter((v) => v.name === base || v.name.startsWith(base + " ")).length;
-                projectViews.createView(existing ? `${base} ${existing + 1}` : base, type, type === "board" ? "phase" : undefined, type === "timeline" || type === "calendar" ? PROJECT_TIMELINE_DEFAULT_HIDDEN_COLUMNS : undefined);
+                const nextName = existing ? `${base} ${existing + 1}` : base;
+                projectViews.createView(nextName, type, type === "board" ? "phase" : undefined, type === "timeline" || type === "calendar" ? PROJECT_TIMELINE_DEFAULT_HIDDEN_COLUMNS : undefined);
                 setUsingSystemProjectView(false);
                 setProjectSystemView("all");
+                setProjectViewNameDraft(nextName);
+                setRenamingProjectView(true);
               }}
               style={{ height: 32, border: "none", background: "transparent", color: "var(--accent)", fontSize: 10.5, fontWeight: 700, cursor: "pointer", padding: "0 3px" }}
             >
               + New view
             </button>
+
+            {!usingSystemProjectView && projectViews.activeViewId !== "default" && (
+              renamingProjectView ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 5, height: 32 }}>
+                  <input
+                    autoFocus
+                    value={projectViewNameDraft}
+                    onChange={(e) => setProjectViewNameDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && projectViewNameDraft.trim()) {
+                        projectViews.renameView(projectViews.activeViewId, projectViewNameDraft.trim());
+                        setRenamingProjectView(false);
+                      }
+                      if (e.key === "Escape") setRenamingProjectView(false);
+                    }}
+                    placeholder="View name"
+                    style={{ width: 160, height: 32, fontSize: 11, border: "1px solid var(--border)", borderRadius: 8, padding: "0 9px" }}
+                  />
+                  <button
+                    type="button"
+                    disabled={!projectViewNameDraft.trim()}
+                    onClick={() => {
+                      if (!projectViewNameDraft.trim()) return;
+                      projectViews.renameView(projectViews.activeViewId, projectViewNameDraft.trim());
+                      setRenamingProjectView(false);
+                    }}
+                    style={{ height: 32, border: "none", borderRadius: 8, background: "var(--accent)", color: "#fff", fontSize: 10.5, fontWeight: 700, padding: "0 10px", cursor: projectViewNameDraft.trim() ? "pointer" : "default", opacity: projectViewNameDraft.trim() ? 1 : .5 }}
+                  >
+                    Save name
+                  </button>
+                  <button type="button" onClick={() => setRenamingProjectView(false)} style={{ border: "none", background: "transparent", color: "var(--muted)", fontSize: 10.5, cursor: "pointer" }}>Cancel</button>
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProjectViewNameDraft(projectViews.activeView.name);
+                      setRenamingProjectView(true);
+                    }}
+                    style={{ height: 32, border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--text-secondary)", fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: "0 9px" }}
+                  >
+                    Rename
+                  </button>
+                </>
+              )
+            )}
 
             {!usingSystemProjectView && projectViews.activeViewId !== "default" && (
               <>
@@ -5747,7 +5803,6 @@ export default function Projects() {
               groupOptions={projectGroupOptions}
               sortOptions={projectSortOptions}
               collapseAllContainer={projectPillsRowEl}
-              maxBodyHeight={`max(300px, calc(100vh - ${Math.round(projectClusterHeight)}px - 260px))`}
               emptyLabel="No projects yet. Add one below."
               selectable
               selectedKeys={selectedProjectIds}
