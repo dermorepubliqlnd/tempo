@@ -201,7 +201,7 @@ const WBS_TASK_COLUMN_DEFAULTS: Record<string, number> = {
   changes: 190,
 };
 const WBS_TASK_COLUMN_ORDER = ["task", "depends_on", "assignee", "work_type", "output_type", "output_count", "effort_hours", "spent_hrs", "effort", "changes"];
-const WBS_DATE_COLUMN_WIDTHS = [110, 100, 90, 110, 100, 90, 110, 100, 90]; // Start/End/Duration x3 modes, fixed
+const WBS_DATE_COLUMN_WIDTHS = [110, 100, 90, 110, 100, 90]; // Start/End/Duration x Forecasted + Theoretical, fixed
 const WBS_COL_WIDTHS_STORAGE_KEY = "capaciq_wbs_task_col_widths";
 const WBS_FREEZE_STORAGE_KEY = "capaciq_wbs_freeze_task_col"; // legacy -- read once as a migration fallback
 const WBS_FREEZE_COL_STORAGE_KEY = "capaciq_wbs_freeze_col_key";
@@ -3914,7 +3914,7 @@ export default function WbsPlanning() {
       position: "sticky",
       left,
       zIndex: isTd ? 2 : 3,
-      background: rowLocked ? "var(--hover-bg)" : "var(--surface)",
+      background: rowLocked ? "var(--hover-bg)" : isTd ? "var(--surface)" : "#f8fbff",
       ...(idx === frozenIdx ? { boxShadow: "1px 0 0 0 var(--border)" } : {}),
     };
   }
