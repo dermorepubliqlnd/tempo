@@ -4687,6 +4687,12 @@ export default function WbsPlanning() {
         >
           WBS
         </Link>
+        <Link
+          to={`/projects/${projectId}/resource-plan`}
+          style={{ padding: "9px 2px", color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}
+        >
+          Resource Plan
+        </Link>
       </div>
       {/* phase118: Paused details / Schedule Review Required banner. */}
       <PauseReviewBanner
