@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useId, useRef, useState, type ChangeEvent } from "react";
 import type { OptionGroup } from "../lib/notionOptions";
 import { formatDate } from "../lib/formatDate";
 
@@ -48,6 +48,7 @@ interface InlineSelectProps extends BaseProps {
   allowEmpty?: boolean;
   renderReadOnly?: (value: string) => React.ReactNode;
   alwaysSelect?: boolean;
+  searchable?: boolean;
   // Optional display-text mapper for each <option> in the edit dropdown
   // (e.g. Priority prefixing "Low" -> "↓ Low") -- the underlying stored
   // value/onCommit argument is always the raw option string, only the
@@ -59,9 +60,15 @@ function isGrouped(options: string[] | OptionGroup[]): options is OptionGroup[] 
   return options.length > 0 && typeof options[0] !== "string";
 }
 
-export function InlineSelect({ value, onCommit, options, editable, allowEmpty, emptyLabel = "—", renderReadOnly, alwaysSelect = false, labelFor }: InlineSelectProps) {
+export function InlineSelect({ value, onCommit, options, editable, allowEmpty, emptyLabel = "—", renderReadOnly, alwaysSelect = false, searchable = false, labelFor }: InlineSelectProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [searchDraft, setSearchDraft] = useState(value);
   const selectRef = useRef<HTMLSelectElement>(null);
+  const listId = useId();
+
+  useEffect(() => {
+    setSearchDraft(value);
+  }, [value]);
 
   useEffect(() => {
     if (isEditing && selectRef.current) {
@@ -89,6 +96,66 @@ export function InlineSelect({ value, onCommit, options, editable, allowEmpty, e
   }
 
   const grouped = isGrouped(options);
+  const flatOptions = grouped ? (options as OptionGroup[]).flatMap((g) => g.options) : (options as string[]);
+
+  if (searchable) {
+    return (
+      <>
+        <input
+          className="inline-cell"
+          list={listId}
+          value={searchDraft}
+          placeholder={emptyLabel}
+          autoComplete="off"
+          onFocus={(e) => {
+            setSearchDraft(value);
+            e.currentTarget.select();
+          }}
+          onChange={(e) => {
+            const next = e.target.value;
+            setSearchDraft(next);
+            if (flatOptions.includes(next) && next !== value) onCommit(next);
+            if (allowEmpty && next === "" && value !== "") onCommit("");
+          }}
+          onBlur={() => {
+            if (searchDraft === "" && allowEmpty) {
+              if (value !== "") onCommit("");
+              return;
+            }
+            if (flatOptions.includes(searchDraft)) {
+              if (searchDraft !== value) onCommit(searchDraft);
+              return;
+            }
+            setSearchDraft(value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setSearchDraft(value);
+              (e.target as HTMLInputElement).blur();
+            }
+            if (e.key === "Enter") {
+              const exact = flatOptions.find((o) => o.toLowerCase() === searchDraft.trim().toLowerCase());
+              if (exact) {
+                if (exact !== value) onCommit(exact);
+                setSearchDraft(exact);
+                (e.target as HTMLInputElement).blur();
+              }
+            }
+          }}
+          onClick={(e) => e.stopPropagation()}
+          style={{ width: "100%" }}
+        />
+        <datalist id={listId}>
+          {flatOptions.map((o) => (
+            <option key={o} value={o}>
+              {labelFor ? labelFor(o) : o}
+            </option>
+          ))}
+        </datalist>
+      </>
+    );
+  }
+
   return (
     <select
       ref={alwaysSelect ? undefined : selectRef}
