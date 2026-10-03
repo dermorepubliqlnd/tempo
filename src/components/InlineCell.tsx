@@ -47,6 +47,7 @@ interface InlineSelectProps extends BaseProps {
   options: string[] | OptionGroup[];
   allowEmpty?: boolean;
   renderReadOnly?: (value: string) => React.ReactNode;
+  alwaysSelect?: boolean;
   // Optional display-text mapper for each <option> in the edit dropdown
   // (e.g. Priority prefixing "Low" -> "↓ Low") -- the underlying stored
   // value/onCommit argument is always the raw option string, only the
@@ -58,7 +59,7 @@ function isGrouped(options: string[] | OptionGroup[]): options is OptionGroup[] 
   return options.length > 0 && typeof options[0] !== "string";
 }
 
-export function InlineSelect({ value, onCommit, options, editable, allowEmpty, emptyLabel = "—", renderReadOnly, labelFor }: InlineSelectProps) {
+export function InlineSelect({ value, onCommit, options, editable, allowEmpty, emptyLabel = "—", renderReadOnly, alwaysSelect = false, labelFor }: InlineSelectProps) {
   const [isEditing, setIsEditing] = useState(false);
   const selectRef = useRef<HTMLSelectElement>(null);
 
@@ -79,7 +80,7 @@ export function InlineSelect({ value, onCommit, options, editable, allowEmpty, e
 
   if (!editable) return <>{renderReadOnly ? renderReadOnly(value) : value || emptyLabel}</>;
 
-  if (!isEditing) {
+  if (!alwaysSelect && !isEditing) {
     return (
       <span className="inline-select-trigger" onClick={() => setIsEditing(true)}>
         {renderReadOnly ? renderReadOnly(value) : value || emptyLabel}
@@ -90,14 +91,16 @@ export function InlineSelect({ value, onCommit, options, editable, allowEmpty, e
   const grouped = isGrouped(options);
   return (
     <select
-      ref={selectRef}
+      ref={alwaysSelect ? undefined : selectRef}
       className="inline-cell"
       value={value}
       onChange={(e: ChangeEvent<HTMLSelectElement>) => {
         onCommit(e.target.value);
-        setIsEditing(false);
+        if (!alwaysSelect) setIsEditing(false);
       }}
-      onBlur={() => setIsEditing(false)}
+      onBlur={() => {
+        if (!alwaysSelect) setIsEditing(false);
+      }}
       onClick={(e) => e.stopPropagation()}
     >
       {allowEmpty && <option value="">{emptyLabel}</option>}
