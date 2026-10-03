@@ -436,19 +436,109 @@ export default function ProjectOverview() {
               <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Logged Hours</div>
             </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(180px,1.4fr) repeat(3,minmax(80px,.7fr))", fontSize: 11 }}>
-            <div style={{ color: "var(--muted)", padding: "6px 8px" }}>Team member</div>
-            <div style={{ color: "var(--muted)", padding: "6px 8px", textAlign: "right" }}>Planned</div>
-            <div style={{ color: "var(--muted)", padding: "6px 8px", textAlign: "right" }}>Avg Util.</div>
-            <div style={{ color: "var(--muted)", padding: "6px 8px", textAlign: "right" }}>Peak</div>
-            {resourceRows.slice(0, 6).map((r) => (
-              <>
-                <div key={r.person.id + "-name"} style={{ padding: "8px", borderTop: "1px solid var(--border)", fontWeight: 600 }}>{r.person.name}</div>
-                <div key={r.person.id + "-planned"} style={{ padding: "8px", borderTop: "1px solid var(--border)", textAlign: "right" }}>{Math.round(r.planned * 10) / 10}h</div>
-                <div key={r.person.id + "-avg"} style={{ padding: "8px", borderTop: "1px solid var(--border)", textAlign: "right" }}>{Math.round(r.avgPct)}%</div>
-                <div key={r.person.id + "-peak"} style={{ padding: "8px", borderTop: "1px solid var(--border)", textAlign: "right", fontWeight: 700, color: r.peakPct > 100 ? "var(--danger-text)" : r.peakPct >= 80 ? "var(--warning-text)" : "var(--success-text)" }}>{Math.round(r.peakPct)}%</div>
-              </>
-            ))}
+          <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: `minmax(170px,1.4fr) repeat(${nextTwoWeeks.length}, minmax(54px, .55fr)) 64px`,
+                minWidth: 980,
+                fontSize: 10.5,
+              }}
+            >
+              <div style={{ padding: "7px 8px", color: "var(--muted)", fontWeight: 600, background: "var(--hover-bg)" }}>Team member</div>
+              {nextTwoWeeks.map((d) => {
+                const date = toISO(d);
+                const weekend = d.getDay() === 0 || d.getDay() === 6;
+                const holiday = !weekend && !isWorkingDay(d, holidaySet);
+                return (
+                  <div
+                    key={date}
+                    style={{
+                      padding: "5px 4px",
+                      textAlign: "center",
+                      color: "var(--muted)",
+                      background: weekend || holiday ? "var(--hover-bg)" : "var(--surface)",
+                      borderLeft: "1px solid var(--border)",
+                      lineHeight: 1.25,
+                    }}
+                  >
+                    <div style={{ fontSize: 9.5 }}>{d.toLocaleDateString(undefined, { weekday: "short" })}</div>
+                    <div style={{ fontWeight: 700, color: "var(--text-secondary)" }}>{d.getDate()}</div>
+                  </div>
+                );
+              })}
+              <div style={{ padding: "7px 6px", textAlign: "center", color: "var(--muted)", fontWeight: 600, background: "var(--hover-bg)", borderLeft: "1px solid var(--border)" }}>
+                Avg
+              </div>
+
+              {resourceRows.map((r) => {
+                const daily = nextTwoWeeks.map((d) => {
+                  const date = toISO(d);
+                  const weekend = d.getDay() === 0 || d.getDay() === 6;
+                  const holiday = !weekend && !isWorkingDay(d, holidaySet);
+                  const av = availability.find((a) => a.person_id === r.person.id && a.date === date);
+                  const isOff = weekend || holiday || av?.status === "off";
+                  if (isOff) return { date, pct: null as number | null, label: weekend ? "Weekend" : holiday ? "Holiday" : "Off" };
+                  const cap = dailyCapacityHours(r.person, av?.status === "half_day");
+                  const hours = engine.totalFor(r.person.id, date);
+                  const pct = cap > 0 ? Math.round((hours / cap) * 100) : 0;
+                  return { date, pct, label: `${Math.round(hours * 10) / 10}h / ${Math.round(cap * 10) / 10}h` };
+                });
+
+                return (
+                  <>
+                    <div key={r.person.id + "-name"} style={{ padding: "8px", borderTop: "1px solid var(--border)", fontWeight: 600, background: "var(--surface)", whiteSpace: "nowrap" }}>
+                      {r.person.name}
+                    </div>
+                    {daily.map((cell) => {
+                      const pct = cell.pct;
+                      const bg =
+                        pct == null ? "var(--hover-bg)" :
+                        pct > 100 ? "#fff1f1" :
+                        pct >= 80 ? "#fff7e8" :
+                        "#ecfdf3";
+                      const fg =
+                        pct == null ? "var(--muted)" :
+                        pct > 100 ? "var(--danger-text)" :
+                        pct >= 80 ? "var(--warning-text)" :
+                        "var(--success-text)";
+                      return (
+                        <div
+                          key={r.person.id + "-" + cell.date}
+                          title={pct == null ? cell.label : `${pct}% · ${cell.label}`}
+                          style={{
+                            padding: "8px 4px",
+                            borderTop: "1px solid var(--border)",
+                            borderLeft: "1px solid var(--border)",
+                            textAlign: "center",
+                            background: bg,
+                            color: fg,
+                            fontWeight: pct != null && pct >= 80 ? 700 : 600,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {pct == null ? "—" : `${pct}%`}
+                        </div>
+                      );
+                    })}
+                    <div
+                      key={r.person.id + "-avg"}
+                      style={{
+                        padding: "8px 4px",
+                        borderTop: "1px solid var(--border)",
+                        borderLeft: "1px solid var(--border)",
+                        textAlign: "center",
+                        fontWeight: 700,
+                        color: r.avgPct > 100 ? "var(--danger-text)" : r.avgPct >= 80 ? "var(--warning-text)" : "var(--success-text)",
+                        background: "var(--surface)",
+                      }}
+                    >
+                      {Math.round(r.avgPct)}%
+                    </div>
+                  </>
+                );
+              })}
+            </div>
           </div>
         </section>
 
