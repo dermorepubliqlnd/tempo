@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, ExternalLink, GripVertical, RotateCcw, Save } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -27,7 +27,7 @@ interface AvailabilityRow {
   status: "off" | "half_day";
 }
 
-type PeriodKey = "this_week" | "next_week" | "next_2_weeks" | "this_month";
+type PeriodKey = "this_week" | "next_week" | "next_2_weeks" | "this_month" | "custom";
 
 interface PendingChange {
   start_date?: string | null;
@@ -64,7 +64,7 @@ function startOfWeek(d: Date): Date {
   return copy;
 }
 
-function periodDates(key: PeriodKey): Date[] {
+function periodDates(key: PeriodKey, customStart?: string, customEnd?: string): Date[] {
   const today = new Date();
   const monday = startOfWeek(today);
   if (key === "this_week") return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
@@ -75,8 +75,14 @@ function periodDates(key: PeriodKey): Date[] {
   if (key === "this_month") {
     const start = new Date(today.getFullYear(), today.getMonth(), 1);
     const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-    const days = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
-    return Array.from({ length: days }, (_, i) => addDays(start, i));
+    const count = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+    return Array.from({ length: count }, (_, i) => addDays(start, i));
+  }
+  if (key === "custom" && customStart && customEnd && customEnd >= customStart) {
+    const start = parseLocalDate(customStart);
+    const end = parseLocalDate(customEnd);
+    const count = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+    return Array.from({ length: count }, (_, i) => addDays(start, i));
   }
   return Array.from({ length: 14 }, (_, i) => addDays(today, i));
 }
@@ -113,6 +119,11 @@ export default function ResourcePlan() {
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
   const [holidayDates, setHolidayDates] = useState<string[]>([]);
   const [period, setPeriod] = useState<PeriodKey>("next_2_weeks");
+  const [customStart, setCustomStart] = useState(() => toISO(new Date()));
+  const [customEnd, setCustomEnd] = useState(() => toISO(addDays(new Date(), 13)));
+  const bandwidthScrollRef = useRef<HTMLDivElement | null>(null);
+  const taskPlanScrollRef = useRef<HTMLDivElement | null>(null);
+  const syncingScrollRef = useRef(false);
   const [changes, setChanges] = useState<Record<string, PendingChange>>({});
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [applying, setApplying] = useState(false);
@@ -148,8 +159,20 @@ export default function ResourcePlan() {
     };
   }, [projectId]);
 
-  const days = useMemo(() => periodDates(period), [period]);
+  const days = useMemo(() => periodDates(period, customStart, customEnd), [period, customStart, customEnd]);
   const holidaySet = useMemo(() => buildHolidaySet(holidayDates), [holidayDates]);
+
+  function syncPlannerScroll(source: "bandwidth" | "tasks") {
+    if (syncingScrollRef.current) return;
+    const from = source === "bandwidth" ? bandwidthScrollRef.current : taskPlanScrollRef.current;
+    const to = source === "bandwidth" ? taskPlanScrollRef.current : bandwidthScrollRef.current;
+    if (!from || !to) return;
+    syncingScrollRef.current = true;
+    to.scrollLeft = from.scrollLeft;
+    window.requestAnimationFrame(() => {
+      syncingScrollRef.current = false;
+    });
+  }
 
   function effectiveTask(task: TaskRow): TaskRow {
     const ch = changes[task.id];
@@ -494,6 +517,121 @@ export default function ResourcePlan() {
     return a.name.localeCompare(b.name);
   });
 
+  const recommendations = useMemo(() => {
+    if (!project) return [];
+    const issues = resourceRows
+      .flatMap((row) =>
+        row.cells
+          .filter((cell) => cell.bandwidthPct != null && cell.bandwidthPct < 0)
+          .map((cell) => ({ row, cell }))
+      )
+      .sort((a, b) => (a.cell.bandwidthPct ?? 0) - (b.cell.bandwidthPct ?? 0));
+
+    const usedTasks = new Set<string>();
+    const out: Array<{
+      key: string;
+      personName: string;
+      date: string;
+      bandwidthPct: number;
+      availableHours: number;
+      taskId?: string;
+      taskName?: string;
+      taskHours?: number;
+      proposedStart?: string;
+      proposedDue?: string;
+      projectedBandwidth?: number;
+      kind: "move" | "review";
+      reason: string;
+    }> = [];
+
+    for (const issue of issues) {
+      if (out.length >= 5) break;
+      const { row, cell } = issue;
+      const allocation = projectEngine.allocationFor(row.person.id, cell.date);
+      const candidates = Array.from(allocation.taskHours.entries())
+        .map(([taskId, hours]) => ({ task: scenarioTasks.find((t) => t.id === taskId), hours }))
+        .filter((x): x is { task: TaskRow; hours: number } => !!x.task)
+        .filter((x) => !usedTasks.has(x.task.id))
+        .filter((x) => {
+          const dueLocked = Boolean((x.task as TaskRow & { due_locked?: boolean }).due_locked);
+          return !dueLocked && !!x.task.current_due_date;
+        })
+        .sort((a, b) => b.hours - a.hours);
+
+      const candidate = candidates[0];
+      if (!candidate) {
+        out.push({
+          key: `review-${row.person.id}-${cell.date}`,
+          personName: row.person.name,
+          date: cell.date,
+          bandwidthPct: cell.bandwidthPct ?? 0,
+          availableHours: cell.availableHours,
+          kind: "review",
+          reason: cell.projectHours > 0
+            ? "This project contributes to the overload, but no low-risk movable task was found within the current guardrails."
+            : "The overload is coming from other committed work; this project's tasks are not contributing hours on this date.",
+        });
+        continue;
+      }
+
+      const task = candidate.task;
+      const currentStart = task.start_date?.slice(0, 10) ?? task.current_due_date.slice(0, 10);
+      const currentDue = task.current_due_date.slice(0, 10);
+      const durationDays = Math.max(
+        0,
+        Math.round((parseLocalDate(currentDue).getTime() - parseLocalDate(currentStart).getTime()) / 86400000)
+      );
+
+      let nextStartDate = addDays(parseLocalDate(cell.date), 1);
+      let guard = 0;
+      while (!isWorkingDay(nextStartDate, holidaySet) && guard < 14) {
+        nextStartDate = addDays(nextStartDate, 1);
+        guard += 1;
+      }
+      const proposedStart = toISO(nextStartDate);
+      const proposedDue = toISO(addDays(nextStartDate, durationDays));
+      const projectEnd = project.end_date?.slice(0, 10) ?? null;
+
+      if (projectEnd && proposedDue > projectEnd) {
+        out.push({
+          key: `review-${row.person.id}-${cell.date}-${task.id}`,
+          personName: row.person.name,
+          date: cell.date,
+          bandwidthPct: cell.bandwidthPct ?? 0,
+          availableHours: cell.availableHours,
+          taskId: task.id,
+          taskName: task.name,
+          taskHours: candidate.hours,
+          kind: "review",
+          reason: `"${task.name}" is contributing ${Math.round(candidate.hours * 10) / 10}h, but moving it past this conflict would exceed the project's current end date.`,
+        });
+        usedTasks.add(task.id);
+        continue;
+      }
+
+      const projectedAvailableHours = cell.availableHours + candidate.hours;
+      const projectedBandwidth = cell.capacity > 0 ? (projectedAvailableHours / cell.capacity) * 100 : 0;
+      out.push({
+        key: `move-${row.person.id}-${cell.date}-${task.id}`,
+        personName: row.person.name,
+        date: cell.date,
+        bandwidthPct: cell.bandwidthPct ?? 0,
+        availableHours: cell.availableHours,
+        taskId: task.id,
+        taskName: task.name,
+        taskHours: candidate.hours,
+        proposedStart,
+        proposedDue,
+        projectedBandwidth,
+        kind: "move",
+        reason: `This task contributes ${Math.round(candidate.hours * 10) / 10}h on the overloaded date. Moving it after the conflict removes that contribution from this day without changing scoped hours.`,
+      });
+      usedTasks.add(task.id);
+    }
+
+    return out;
+  }, [resourceRows, projectEngine, scenarioTasks, project, holidaySet]);
+
   function taskBar(task: TaskRow) {
     const start = task.start_date?.slice(0, 10) ?? task.current_due_date?.slice(0, 10) ?? null;
     const end = task.current_due_date?.slice(0, 10) ?? start;
@@ -575,6 +713,7 @@ export default function ResourcePlan() {
               ["next_week", "Next week"],
               ["next_2_weeks", "Next 2 weeks"],
               ["this_month", "This month"],
+              ["custom", "Custom"],
             ] as [PeriodKey, string][]).map(([key, label]) => (
               <button
                 key={key}
@@ -596,6 +735,37 @@ export default function ResourcePlan() {
             ))}
           </div>
         </div>
+
+        {period === "custom" && (
+          <div style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap", marginBottom: 12 }}>
+            <label style={{ display: "grid", gap: 4, fontSize: 10.5, color: "var(--muted)" }}>
+              From
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setCustomStart(next);
+                  if (customEnd && next > customEnd) setCustomEnd(next);
+                }}
+                style={{ border: "1px solid var(--border)", borderRadius: 7, background: "var(--surface)", color: "var(--text)", padding: "6px 8px", fontSize: 11 }}
+              />
+            </label>
+            <label style={{ display: "grid", gap: 4, fontSize: 10.5, color: "var(--muted)" }}>
+              To
+              <input
+                type="date"
+                value={customEnd}
+                min={customStart}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                style={{ border: "1px solid var(--border)", borderRadius: 7, background: "var(--surface)", color: "var(--text)", padding: "6px 8px", fontSize: 11 }}
+              />
+            </label>
+            <div style={{ fontSize: 10, color: "var(--muted)", paddingBottom: 7 }}>
+              Use Custom for plans that span month-end or any cross-month review window.
+            </div>
+          </div>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 8 }}>
           <div style={{ background: "var(--hover-bg)", borderRadius: 8, padding: "10px 11px" }}>
@@ -631,7 +801,7 @@ export default function ResourcePlan() {
           </Link>
         </div>
 
-        <div style={{ overflowX: "auto" }}>
+        <div ref={bandwidthScrollRef} onScroll={() => syncPlannerScroll("bandwidth")} style={{ overflowX: "auto" }}>
           <div style={{ display: "grid", gridTemplateColumns: `${PLANNER_META_W}px repeat(${days.length}, ${DAY_W}px) ${AVG_W}px`, minWidth: PLANNER_META_W + days.length * DAY_W + AVG_W, fontSize: 10.5 }}>
             <div style={{ padding: "7px 10px", color: "var(--muted)", fontWeight: 700, background: "var(--hover-bg)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
               <span>Contributor</span>
@@ -702,6 +872,68 @@ export default function ResourcePlan() {
         </div>
       </section>
 
+      <section style={{ ...cardStyle(), marginBottom: 12, overflow: "hidden" }}>
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>Planning Recommendations</div>
+            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
+              Focuses on overloaded dates and suggests low-risk moves from this project first. Recommendations only stage a scenario; they never auto-apply.
+            </div>
+          </div>
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: recommendations.length ? "var(--danger-text)" : "var(--success-text)" }}>
+            {recommendations.length ? `${recommendations.length} item${recommendations.length === 1 ? "" : "s"} to review` : "No overload recommendations"}
+          </span>
+        </div>
+
+        {recommendations.length === 0 ? (
+          <div style={{ padding: "14px", fontSize: 11, color: "var(--muted)" }}>
+            No negative bandwidth detected in the selected planning period.
+          </div>
+        ) : (
+          <div>
+            {recommendations.map((rec) => (
+              <div key={rec.key} style={{ display: "grid", gridTemplateColumns: "170px minmax(220px,1fr) 175px 130px", gap: 10, alignItems: "center", padding: "10px 14px", borderTop: "1px solid var(--border)" }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700 }}>{rec.personName}</div>
+                  <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>{formatDate(rec.date)} · {Math.round(rec.bandwidthPct * 10) / 10}% free</div>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: rec.kind === "move" ? "var(--navy)" : "var(--warning-text)" }}>
+                    {rec.kind === "move" ? `Suggested move: ${rec.taskName}` : rec.taskName ? `Review: ${rec.taskName}` : "Review workload mix"}
+                  </div>
+                  <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.35 }}>{rec.reason}</div>
+                </div>
+                <div style={{ fontSize: 9.5, color: "var(--text-secondary)" }}>
+                  {rec.kind === "move" && rec.proposedStart && rec.proposedDue ? (
+                    <>
+                      <div style={{ fontWeight: 700 }}>{formatDate(rec.proposedStart)} → {formatDate(rec.proposedDue)}</div>
+                      <div style={{ marginTop: 2, color: "var(--muted)" }}>
+                        Projected: {Math.round((rec.projectedBandwidth ?? 0) * 10) / 10}% free on conflict date
+                      </div>
+                    </>
+                  ) : (
+                    <span style={{ color: "var(--muted)" }}>No low-risk schedule move</span>
+                  )}
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  {rec.kind === "move" && rec.taskId && rec.proposedStart && rec.proposedDue ? (
+                    <button
+                      type="button"
+                      onClick={() => setTaskChange(rec.taskId!, { start_date: rec.proposedStart!, current_due_date: rec.proposedDue! })}
+                      style={{ border: "1px solid var(--accent)", background: "var(--surface)", color: "var(--accent)", borderRadius: 7, padding: "6px 9px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}
+                    >
+                      Apply to Scenario
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 9.5, fontWeight: 700, color: "var(--warning-text)" }}>Review Required</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
       <section style={{ ...cardStyle(), overflow: "hidden" }}>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div>
@@ -715,8 +947,8 @@ export default function ResourcePlan() {
           </Link>
         </div>
 
-        <div style={{ overflowX: "auto" }}>
-          <div style={{ minWidth: PLANNER_META_W + days.length * DAY_W }}>
+        <div ref={taskPlanScrollRef} onScroll={() => syncPlannerScroll("tasks")} style={{ overflowX: "auto" }}>
+          <div style={{ minWidth: PLANNER_META_W + days.length * DAY_W, paddingRight: AVG_W }}>
             <div style={{ display: "grid", gridTemplateColumns: `${TASK_W}px ${ASSIGNEE_W}px ${SCOPED_W}px ${days.length * DAY_W}px`, background: "var(--hover-bg)", color: "var(--muted)", fontSize: 10, fontWeight: 700 }}>
               <div style={{ padding: "7px 9px" }}>Task</div>
               <div style={{ padding: "7px 8px", borderLeft: "1px solid var(--border)" }}>Assignee</div>
