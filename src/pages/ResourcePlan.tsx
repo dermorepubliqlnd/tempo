@@ -339,8 +339,8 @@ export default function ResourcePlan() {
   );
 
   const committedProjects = useMemo(
-    () => allProjects.filter((p) => p.wbs_status && p.wbs_status !== "draft"),
-    [allProjects]
+    () => allProjects.filter((p) => p.id === project?.id || (p.wbs_status && p.wbs_status !== "draft")),
+    [allProjects, project?.id]
   );
 
   const orgEngine = useMemo(
@@ -353,6 +353,18 @@ export default function ResourcePlan() {
         todayStr: toISO(new Date()),
       }),
     [scenarioAllTasks, committedProjects, holidaySet, availability]
+  );
+
+  const baselineOrgEngine = useMemo(
+    () =>
+      createAllocationEngine({
+        tasks: allTasks as UtilTaskRow[],
+        projects: committedProjects as UtilProjectRow[],
+        holidays: holidaySet,
+        availability,
+        todayStr: toISO(new Date()),
+      }),
+    [allTasks, committedProjects, holidaySet, availability]
   );
 
   const projectEngine = useMemo(
@@ -381,17 +393,30 @@ export default function ResourcePlan() {
       const holiday = !weekend && !isWorkingDay(d, holidaySet);
       const av = availability.find((a) => a.person_id === person.id && a.date === date);
       if (weekend || holiday || av?.status === "off") {
-        return { date, pct: null as number | null, totalHours: 0, projectHours: 0, capacity: 0, label: weekend ? "Weekend" : holiday ? "Holiday" : "Off" };
+        return { date, pct: null as number | null, baselinePct: null as number | null, deltaPct: 0, totalHours: 0, baselineTotalHours: 0, projectHours: 0, capacity: 0, label: weekend ? "Weekend" : holiday ? "Holiday" : "Off" };
       }
       const cap = dailyCapacityHours(person, av?.status === "half_day");
       const total = orgEngine.totalFor(person.id, date);
+      const baselineTotal = baselineOrgEngine.totalFor(person.id, date);
       const own = projectEngine.totalFor(person.id, date);
       const pct = cap > 0 ? (total / cap) * 100 : 0;
+      const baselinePct = cap > 0 ? (baselineTotal / cap) * 100 : 0;
+      const deltaPct = pct - baselinePct;
       periodHours += total;
       projectHours += own;
       capacity += cap;
       peak = Math.max(peak, pct);
-      return { date, pct, totalHours: total, projectHours: own, capacity: cap, label: av?.status === "half_day" ? "Half day" : "Working day" };
+      return {
+        date,
+        pct,
+        baselinePct,
+        deltaPct,
+        totalHours: total,
+        baselineTotalHours: baselineTotal,
+        projectHours: own,
+        capacity: cap,
+        label: av?.status === "half_day" ? "Half day" : "Working day",
+      };
     });
     const projectScoped = leafTasks
       .filter((t) => t.assignee_id === person.id)
@@ -558,7 +583,7 @@ export default function ResourcePlan() {
           <div>
             <div style={{ fontSize: 12.5, fontWeight: 700 }}>Contributor Capacity</div>
             <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
-              Same date grid as the task plan below · large % = total cross-project utilization · small line = hours from this project.
+              Same date grid as the task plan below · values update live as you move, resize, or reassign tasks · delta shows change vs saved plan.
             </div>
           </div>
           <Link to="/utilization" style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -594,17 +619,33 @@ export default function ResourcePlan() {
                   </div>
                 </div>
                 {r.cells.map((cell) => {
-                  const rounded = cell.pct == null ? null : Math.round(cell.pct);
+                  const rounded = cell.pct == null ? null : Math.round(cell.pct * 10) / 10;
                   const tone = pctTone(rounded);
+                  const changed = rounded != null && Math.abs(cell.deltaPct) >= 0.05;
+                  const deltaRounded = Math.round(cell.deltaPct * 10) / 10;
                   return (
                     <div
                       key={cell.date}
-                      title={rounded == null ? cell.label : `${rounded}% total utilization · ${Math.round(cell.totalHours * 10) / 10}h / ${Math.round(cell.capacity * 10) / 10}h capacity · ${Math.round(cell.projectHours * 10) / 10}h from this project`}
-                      style={{ padding: "6px 3px", borderTop: "1px solid var(--border)", borderLeft: "1px solid var(--border)", textAlign: "center", background: tone.bg, color: tone.fg, minHeight: 42 }}
+                      title={rounded == null ? cell.label : `${rounded}% total utilization · ${Math.round(cell.totalHours * 10) / 10}h / ${Math.round(cell.capacity * 10) / 10}h capacity · ${Math.round(cell.projectHours * 10) / 10}h from this project${changed ? ` · was ${Math.round((cell.baselinePct ?? 0) * 10) / 10}%` : ""}`}
+                      style={{
+                        padding: "5px 3px",
+                        borderTop: "1px solid var(--border)",
+                        borderLeft: "1px solid var(--border)",
+                        textAlign: "center",
+                        background: tone.bg,
+                        color: tone.fg,
+                        minHeight: 46,
+                        boxShadow: changed ? "inset 0 0 0 1px rgba(59,130,246,.35)" : "none",
+                      }}
                     >
                       <div style={{ fontWeight: 800 }}>{rounded == null ? "—" : `${rounded}%`}</div>
+                      {changed && (
+                        <div style={{ fontSize: 8.5, marginTop: 1, fontWeight: 700, color: deltaRounded > 0 ? "var(--danger-text)" : "var(--success-text)" }}>
+                          {deltaRounded > 0 ? "+" : ""}{deltaRounded} pts
+                        </div>
+                      )}
                       {rounded != null && cell.projectHours > 0 && (
-                        <div style={{ fontSize: 8.5, marginTop: 2, opacity: 0.85 }}>{Math.round(cell.projectHours * 10) / 10}h project</div>
+                        <div style={{ fontSize: 8.5, marginTop: 1, opacity: 0.85 }}>{Math.round(cell.projectHours * 10) / 10}h project</div>
                       )}
                     </div>
                   );
