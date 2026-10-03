@@ -1056,8 +1056,9 @@ export default function Projects() {
   const wantsMyProjectsView = searchParams.get("owner") === "me";
   const wantsMyTasksView = searchParams.get("assignee") === "me";
   const [pageSection, setPageSection] = useState<"projects" | "tasks">(wantsMyTasksView ? "tasks" : "projects");
-  const [projectSystemView, setProjectSystemView] = useState<"all" | "active" | "attention" | "mine">("all");
+  const [projectSystemView, setProjectSystemView] = useState<"all" | "active" | "attention" | "mine" | "team">("all");
   const [usingSystemProjectView, setUsingSystemProjectView] = useState(true);
+  const initialProjectScopeApplied = useRef(false);
 
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
@@ -1194,6 +1195,30 @@ export default function Projects() {
   // authorization gate is the validate_task_completion RPC server-side,
   // so an approximate client-side check here is fine.
   const [chainPeople, setChainPeople] = useState<{ id: string; reports_to: string | null; is_active: boolean }[]>([]);
+  const directReportIds = useMemo(
+    () => new Set(chainPeople.filter((p) => p.is_active && p.reports_to === me?.id).map((p) => p.id)),
+    [chainPeople, me?.id]
+  );
+  const teamMemberIds = useMemo(() => {
+    if (!me?.id) return new Set<string>();
+    const result = new Set<string>();
+    let frontier = chainPeople.filter((p) => p.is_active && p.reports_to === me.id).map((p) => p.id);
+    let depth = 0;
+    while (frontier.length && depth < 20) {
+      const next: string[] = [];
+      for (const id of frontier) {
+        if (result.has(id)) continue;
+        result.add(id);
+        for (const person of chainPeople) {
+          if (person.is_active && person.reports_to === id && !result.has(person.id)) next.push(person.id);
+        }
+      }
+      frontier = next;
+      depth += 1;
+    }
+    return result;
+  }, [chainPeople, me?.id]);
+  const hasTeam = directReportIds.size > 0;
   // Project Notes (2026-08-14): per-project note count for the list/board
   // bubble, and which project (if any) currently has the Notes sidebar
   // open. Counts are fetched once in loadAll() and kept in sync afterward
@@ -1688,6 +1713,14 @@ export default function Projects() {
   // collaborator on (see can_see_project() in Supabase). Approval
   // authorities (editing, closing, reopening, extension decisions, etc.)
   // are untouched -- only *visibility* and *creation* are now open to all.
+  useEffect(() => {
+    if (initialProjectScopeApplied.current || !me?.id || chainPeople.length === 0) return;
+    initialProjectScopeApplied.current = true;
+    if (me.access_level === "full") setProjectSystemView("all");
+    else if (directReportIds.size > 0) setProjectSystemView("team");
+    else setProjectSystemView("mine");
+  }, [me?.id, me?.access_level, chainPeople.length, directReportIds.size]);
+
   const canCreateProject = true;
   const [creatingProject, setCreatingProject] = useState(false);
   const canCreateTask = isFullAccess || projects.some((p) => p.owner_id === me?.id);
