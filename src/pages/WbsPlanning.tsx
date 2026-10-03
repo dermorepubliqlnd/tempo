@@ -629,6 +629,17 @@ export default function WbsPlanning() {
       return next;
     });
   }
+  const [wbsHeaderMenu, setWbsHeaderMenu] = useState<{ x: number; y: number; colKey: string } | null>(null);
+  useEffect(() => {
+    if (!wbsHeaderMenu) return;
+    const close = () => setWbsHeaderMenu(null);
+    window.addEventListener("blur", close);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("blur", close);
+      window.removeEventListener("resize", close);
+    };
+  }, [wbsHeaderMenu]);
   // Gutter is a fixed 22px; the Task column's own width is whatever
   // wbsColWidth("task") currently resolves to (resizable) -- the frozen
   // Task column's sticky offset must track that live, not a constant.
@@ -3893,17 +3904,15 @@ export default function WbsPlanning() {
   }
   function ResizableTh({ colKey, title, children }: { colKey: string; title?: string; children: React.ReactNode }) {
     const w = wbsColWidth(colKey);
-    // `position:relative` on an unfrozen header would break
-    // `position:sticky` freezing that relies on the nearest scrolling
-    // ancestor being the `.card` container, so it's only applied when
-    // actually needed for the resize-handle overlay below (still fine to
-    // combine with sticky -- sticky elements can be positioning contexts
-    // too).
     const sticky = wbsColStickyStyle(colKey, false);
-    const isPinned = wbsFreezeColKey === colKey;
     return (
       <th
         rowSpan={2}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setWbsHeaderMenu({ x: e.clientX, y: e.clientY, colKey });
+        }}
         style={{
           width: w,
           minWidth: WBS_MIN_COL_WIDTH,
@@ -3913,31 +3922,7 @@ export default function WbsPlanning() {
         }}
         title={title}
       >
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          {children}
-          {/* Freeze panes (2026-08-26, Sandra: "I want the freeze task
-              pin to be in the column headers in the table"; generalized
-              2026-08-27, Sandra: "can we pin any column, not just Task")
-              -- every resizable column gets its own pin, mutually
-              exclusive with every other column's. stopPropagation so it
-              doesn't also trigger the resize-handle span, its sibling in
-              this same <th>. */}
-          <span
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleWbsFreezeCol(colKey);
-            }}
-            title={isPinned ? "Unfreeze this column" : "Freeze this column (and every column to its left) so it stays visible while scrolling"}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              cursor: "pointer",
-              color: isPinned ? "var(--accent, #4f46e5)" : "var(--muted)",
-            }}
-          >
-            <Pin size={12} />
-          </span>
-        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{children}</span>
         <span
           onMouseDown={(e) => startWbsColResize(colKey, e)}
           title="Drag to resize"
@@ -4581,6 +4566,52 @@ export default function WbsPlanning() {
       {dialog}
       {assigneePicker.element}
       {startDatePrompt.element}
+      {wbsHeaderMenu &&
+        createPortal(
+          <>
+            <div style={{ position: "fixed", inset: 0, zIndex: 190 }} onClick={() => setWbsHeaderMenu(null)} onContextMenu={(e) => { e.preventDefault(); setWbsHeaderMenu(null); }} />
+            <div
+              className="card"
+              style={{
+                position: "fixed",
+                left: Math.min(wbsHeaderMenu.x, window.innerWidth - 210),
+                top: Math.min(wbsHeaderMenu.y, window.innerHeight - 110),
+                zIndex: 191,
+                width: 200,
+                padding: 5,
+                boxShadow: "0 6px 18px rgba(15,41,66,0.18)",
+              }}
+            >
+              <button
+                type="button"
+                className="row-menu-item"
+                onClick={() => {
+                  toggleWbsFreezeCol(wbsHeaderMenu.colKey);
+                  setWbsHeaderMenu(null);
+                }}
+                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 9px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12.5, textAlign: "left" }}
+              >
+                <Pin size={13} />
+                {wbsFreezeColKey === wbsHeaderMenu.colKey ? "Unfreeze columns" : "Freeze up to this column"}
+              </button>
+              {wbsFreezeColKey && wbsFreezeColKey !== wbsHeaderMenu.colKey && (
+                <button
+                  type="button"
+                  className="row-menu-item"
+                  onClick={() => {
+                    setWbsFreezeColKey(null);
+                    try { localStorage.setItem(WBS_FREEZE_COL_STORAGE_KEY, ""); } catch {}
+                    setWbsHeaderMenu(null);
+                  }}
+                  style={{ display: "flex", width: "100%", padding: "7px 9px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12.5, textAlign: "left", color: "var(--text-secondary)" }}
+                >
+                  Unfreeze all columns
+                </button>
+              )}
+            </div>
+          </>,
+          document.body
+        )}
       {leaveTarget && (
         <Modal title="This project hasn't been saved" onClose={() => (leaveBusy ? undefined : setLeaveTarget(null))} width={440}>
           <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: "0 0 14px", lineHeight: 1.5 }}>
@@ -4673,8 +4704,11 @@ export default function WbsPlanning() {
       <Link to={`/projects/${projectId}`} className="back-link" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
         <ArrowLeft size={13} /> Back to {project.name}
       </Link>
-      <h1>WBS Planning — {project.name}</h1>
-      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 10, marginBottom: 14 }}>
+      <h1 style={{ marginBottom: 2 }}>WBS Planning — {project.name}</h1>
+      <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 4 }}>
+        Define the project, build the work plan, and review resource capacity before it starts.
+      </div>
+      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 4, marginBottom: 8 }}>
         <Link
           to={`/projects/${projectId}`}
           style={{ padding: "9px 2px", color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}
@@ -4701,8 +4735,8 @@ export default function WbsPlanning() {
       <div
         className="card"
         style={{
-          padding: "8px 14px",
-          marginBottom: 10,
+          padding: "7px 12px",
+          marginBottom: 8,
           display: "flex",
           alignItems: "center",
           gap: 10,
@@ -4712,7 +4746,13 @@ export default function WbsPlanning() {
         }}
       >
         <span style={{ fontSize: 12, fontWeight: 700, color: wbsMeta.color }}>{wbsMeta.label}</span>
-        <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{wbsMeta.hint}</span>
+        <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
+          {project.wbs_status === "draft"
+            ? project.is_unsaved
+              ? "Planning mode — complete Project Information and save to unlock WBS planning."
+              : "Planning mode — build the WBS and review the forecast before requesting project start."
+            : wbsMeta.hint}
+        </span>
         {activeBaseline && (
           <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
             Baseline V{activeBaseline.version_number} (locked {formatDate(activeBaseline.captured_at.slice(0, 10))})
@@ -4904,7 +4944,15 @@ export default function WbsPlanning() {
           alongside the main content (not a full-width toggle panel like
           before), matching her reference mockup. Main content is the
           flex:1 left column; the rail is a fixed-width sibling. */}
-          <div className="card" style={{ padding: 14, marginBottom: 12, display: "flex", alignItems: "center", gap: 16, flexWrap: "nowrap", overflowX: "auto" }}>
+          <div className="card" style={{ padding: 14, marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 12 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: "50%", background: "var(--accent)", color: "#fff", fontSize: 11.5, fontWeight: 700 }}>1</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>Project Information</span>
+              <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                {project.is_unsaved ? "Complete the basic details, then save to unlock WBS planning." : "Basic project details."}
+              </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
             {/* Project ID -- added 2026-09-07 (Sandra: "add a project ID,
                 automated sequence number based on the date the project
                 was added/created"). Always read-only, same treatment as
@@ -4929,6 +4977,7 @@ export default function WbsPlanning() {
                 <InlineSelect
                   value={owner?.name ?? ""}
                   editable={canEditWbs}
+                  alwaysSelect
                   allowEmpty
                   emptyLabel="No owner"
                   options={people.map((p) => p.name)}
@@ -4948,16 +4997,6 @@ export default function WbsPlanning() {
                   onCommit={(v) => saveProjectField({ start_date: v })}
                 />
               </div>
-              <span
-                title={
-                  anyTaskDone
-                    ? "Locked -- at least one task is already Done, so the project has genuinely started and this date is now historical."
-                    : "Your own plotted anchor -- used as the default Start for the very first task in each mode when there's nothing earlier to chain from. No longer auto-pulled from tasks."
-                }
-                style={{ display: "inline-flex", cursor: "help", flexShrink: 0 }}
-              >
-                <Info size={13} style={{ color: "var(--muted)" }} />
-              </span>
             </div>
             {/* 2026-09-03 (Sandra: "add these 3 new fields in the WBS UI
                 along with name/owner/start date... push that these are
@@ -4976,6 +5015,7 @@ export default function WbsPlanning() {
                 <InlineSelect
                   value={project.category ?? ""}
                   editable={canEditWbs}
+                  alwaysSelect
                   allowEmpty
                   emptyLabel="No category"
                   options={categoryPickerOptions}
@@ -4989,6 +5029,7 @@ export default function WbsPlanning() {
                 <InlineSelect
                   value={projectSourceOptions.find((s) => s.id === project.source_id)?.name ?? ""}
                   editable={canEditWbs}
+                  alwaysSelect
                   allowEmpty
                   emptyLabel="No source"
                   options={sourcePickerOptions}
@@ -5005,6 +5046,7 @@ export default function WbsPlanning() {
                 <InlineSelect
                   value={project.effort_level ? effortLevelLabel(project.effort_level) : ""}
                   editable={canEditWbs}
+                  alwaysSelect
                   allowEmpty
                   emptyLabel="Not set"
                   options={PROJECT_EFFORT_LEVEL_OPTIONS.map((lvl) => effortLevelLabel(lvl))}
@@ -5047,7 +5089,7 @@ export default function WbsPlanning() {
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                 {canEditWbs && (
                   <button className="btn-primary" disabled={saving} onClick={saveDraft} style={{ flexShrink: 0 }}>
-                    {saving ? "Saving…" : "Save"}
+                    {saving ? "Saving…" : project.is_unsaved ? "Save & Continue" : "Save"}
                   </button>
                 )}
               </div>
@@ -5062,6 +5104,7 @@ export default function WbsPlanning() {
               ) : (
                 <span style={{ fontSize: 11, color: "var(--muted)" }}>Not saved yet</span>
               )}
+            </div>
             </div>
           </div>
 
@@ -5088,7 +5131,14 @@ export default function WbsPlanning() {
               />
             </div>
           </div>
+          {project.is_unsaved && (
+            <div style={{ margin: "-2px 2px 10px", fontSize: 11.5, color: "var(--muted)" }}>
+              WBS, resource planning, timeline and forecast sections will appear after Project Information is saved.
+            </div>
+          )}
 
+          {!project.is_unsaved && (
+            <>
           {/* Project-level summary: fixed total effort (left) + a
               duration comparison bar per mode (right) -- redesigned per
               Sandra's own mockup (2026-07-24): a big "Total Effort
@@ -6601,6 +6651,8 @@ export default function WbsPlanning() {
               just no longer duplicated as its own button down here. */}
         </div>
       </div>
+            </>
+          )}
     </div>
   );
 }
