@@ -88,6 +88,13 @@ function pctTone(pct: number | null) {
   return { bg: "#ecfdf3", fg: "var(--success-text)" };
 }
 
+function bandwidthTone(pct: number | null) {
+  if (pct == null) return { bg: "var(--hover-bg)", fg: "var(--muted)" };
+  if (pct < 0) return { bg: "#fff1f1", fg: "var(--danger-text)" };
+  if (pct <= 20) return { bg: "#fff7e8", fg: "var(--warning-text)" };
+  return { bg: "#ecfdf3", fg: "var(--success-text)" };
+}
+
 const PLANNER_META_W = 460;
 const TASK_W = 240;
 const ASSIGNEE_W = 145;
@@ -393,24 +400,31 @@ export default function ResourcePlan() {
       const holiday = !weekend && !isWorkingDay(d, holidaySet);
       const av = availability.find((a) => a.person_id === person.id && a.date === date);
       if (weekend || holiday || av?.status === "off") {
-        return { date, pct: null as number | null, baselinePct: null as number | null, deltaPct: 0, totalHours: 0, baselineTotalHours: 0, projectHours: 0, capacity: 0, label: weekend ? "Weekend" : holiday ? "Holiday" : "Off" };
+        return { date, pct: null as number | null, baselinePct: null as number | null, deltaPct: 0, bandwidthPct: null as number | null, baselineBandwidthPct: null as number | null, deltaBandwidthPct: 0, availableHours: 0, totalHours: 0, baselineTotalHours: 0, projectHours: 0, capacity: 0, label: weekend ? "Weekend" : holiday ? "Holiday" : "Off" };
       }
       const cap = dailyCapacityHours(person, av?.status === "half_day");
       const total = orgEngine.totalFor(person.id, date);
       const baselineTotal = baselineOrgEngine.totalFor(person.id, date);
       const own = projectEngine.totalFor(person.id, date);
-      const pct = cap > 0 ? (total / cap) * 100 : 0;
-      const baselinePct = cap > 0 ? (baselineTotal / cap) * 100 : 0;
-      const deltaPct = pct - baselinePct;
+      const loadPct = cap > 0 ? (total / cap) * 100 : 0;
+      const baselineLoadPct = cap > 0 ? (baselineTotal / cap) * 100 : 0;
+      const bandwidthPct = 100 - loadPct;
+      const baselineBandwidthPct = 100 - baselineLoadPct;
+      const deltaBandwidthPct = bandwidthPct - baselineBandwidthPct;
+      const availableHours = cap - total;
       periodHours += total;
       projectHours += own;
       capacity += cap;
-      peak = Math.max(peak, pct);
+      peak = Math.max(peak, loadPct);
       return {
         date,
-        pct,
-        baselinePct,
-        deltaPct,
+        pct: loadPct,
+        baselinePct: baselineLoadPct,
+        deltaPct: loadPct - baselineLoadPct,
+        bandwidthPct,
+        baselineBandwidthPct,
+        deltaBandwidthPct,
+        availableHours,
         totalHours: total,
         baselineTotalHours: baselineTotal,
         projectHours: own,
@@ -429,6 +443,7 @@ export default function ResourcePlan() {
       capacity,
       peak,
       avg: capacity > 0 ? (periodHours / capacity) * 100 : 0,
+      avgBandwidth: capacity > 0 ? 100 - (periodHours / capacity) * 100 : 0,
       projectScoped,
     };
   });
@@ -581,9 +596,9 @@ export default function ResourcePlan() {
       <section style={{ ...cardStyle(), marginBottom: 12, overflow: "hidden" }}>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div>
-            <div style={{ fontSize: 12.5, fontWeight: 700 }}>Contributor Capacity</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>Available Bandwidth</div>
             <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
-              Same date grid as the task plan below · values update live as you move, resize, or reassign tasks · delta shows change vs saved plan.
+              Remaining capacity after all committed workload. Values update live as you move, resize, or reassign tasks; negative bandwidth means the person is overloaded.
             </div>
           </div>
           <Link to="/utilization" style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -608,7 +623,7 @@ export default function ResourcePlan() {
                 </div>
               );
             })}
-            <div style={{ padding: "7px 5px", textAlign: "center", color: "var(--muted)", fontWeight: 700, background: "var(--hover-bg)", borderLeft: "1px solid var(--border)" }}>Avg</div>
+            <div style={{ padding: "7px 5px", textAlign: "center", color: "var(--muted)", fontWeight: 700, background: "var(--hover-bg)", borderLeft: "1px solid var(--border)" }}>Avg Free</div>
 
             {resourceRows.map((r) => (
               <Fragment key={r.person.id}>
@@ -619,14 +634,15 @@ export default function ResourcePlan() {
                   </div>
                 </div>
                 {r.cells.map((cell) => {
-                  const rounded = cell.pct == null ? null : Math.round(cell.pct * 10) / 10;
-                  const tone = pctTone(rounded);
-                  const changed = rounded != null && Math.abs(cell.deltaPct) >= 0.05;
-                  const deltaRounded = Math.round(cell.deltaPct * 10) / 10;
+                  const bandwidth = cell.bandwidthPct == null ? null : Math.round(cell.bandwidthPct * 10) / 10;
+                  const tone = bandwidthTone(bandwidth);
+                  const changed = bandwidth != null && Math.abs(cell.deltaBandwidthPct) >= 0.05;
+                  const deltaRounded = Math.round(cell.deltaBandwidthPct * 10) / 10;
+                  const availableHours = Math.round(cell.availableHours * 10) / 10;
                   return (
                     <div
                       key={cell.date}
-                      title={rounded == null ? cell.label : `${rounded}% total utilization · ${Math.round(cell.totalHours * 10) / 10}h / ${Math.round(cell.capacity * 10) / 10}h capacity · ${Math.round(cell.projectHours * 10) / 10}h from this project${changed ? ` · was ${Math.round((cell.baselinePct ?? 0) * 10) / 10}%` : ""}`}
+                      title={bandwidth == null ? cell.label : `${bandwidth}% available bandwidth · ${availableHours}h remaining · ${Math.round(cell.totalHours * 10) / 10}h planned / ${Math.round(cell.capacity * 10) / 10}h capacity · ${Math.round(cell.projectHours * 10) / 10}h from this project${changed ? ` · was ${Math.round((cell.baselineBandwidthPct ?? 0) * 10) / 10}% free` : ""}`}
                       style={{
                         padding: "5px 3px",
                         borderTop: "1px solid var(--border)",
@@ -634,24 +650,26 @@ export default function ResourcePlan() {
                         textAlign: "center",
                         background: tone.bg,
                         color: tone.fg,
-                        minHeight: 46,
+                        minHeight: 48,
                         boxShadow: changed ? "inset 0 0 0 1px rgba(59,130,246,.35)" : "none",
                       }}
                     >
-                      <div style={{ fontWeight: 800 }}>{rounded == null ? "—" : `${rounded}%`}</div>
-                      {changed && (
-                        <div style={{ fontSize: 8.5, marginTop: 1, fontWeight: 700, color: deltaRounded > 0 ? "var(--danger-text)" : "var(--success-text)" }}>
-                          {deltaRounded > 0 ? "+" : ""}{deltaRounded} pts
+                      <div style={{ fontWeight: 800 }}>{bandwidth == null ? "—" : `${bandwidth}%`}</div>
+                      {bandwidth != null && (
+                        <div style={{ fontSize: 8.5, marginTop: 1, opacity: .88 }}>
+                          {availableHours < 0 ? `${Math.abs(availableHours)}h over` : `${availableHours}h free`}
                         </div>
                       )}
-                      {rounded != null && cell.projectHours > 0 && (
-                        <div style={{ fontSize: 8.5, marginTop: 1, opacity: 0.85 }}>{Math.round(cell.projectHours * 10) / 10}h project</div>
+                      {changed && (
+                        <div style={{ fontSize: 8.5, marginTop: 1, fontWeight: 700, color: deltaRounded >= 0 ? "var(--success-text)" : "var(--danger-text)" }}>
+                          {deltaRounded > 0 ? "+" : ""}{deltaRounded} pts
+                        </div>
                       )}
                     </div>
                   );
                 })}
-                <div style={{ padding: "8px 3px", borderTop: "1px solid var(--border)", borderLeft: "1px solid var(--border)", textAlign: "center", fontWeight: 800, color: pctTone(Math.round(r.avg)).fg }}>
-                  {Math.round(r.avg)}%
+                <div style={{ padding: "8px 3px", borderTop: "1px solid var(--border)", borderLeft: "1px solid var(--border)", textAlign: "center", fontWeight: 800, color: bandwidthTone(Math.round(r.avgBandwidth * 10) / 10).fg }}>
+                  {Math.round(r.avgBandwidth * 10) / 10}%
                 </div>
               </Fragment>
             ))}
