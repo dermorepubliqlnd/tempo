@@ -184,6 +184,26 @@ export default function ProjectOverview() {
 
   const projectCode = `P-${String(project.project_number ?? "").padStart(4, "0")}`;
 
+  const scheduleStartMs = baselineStart ? parseLocalDate(baselineStart).getTime() : null;
+  const baselineEndMs = baselineEnd ? parseLocalDate(baselineEnd).getTime() : null;
+  const forecastEndMs = forecastEnd ? parseLocalDate(forecastEnd).getTime() : null;
+  const scheduleMaxMs =
+    scheduleStartMs !== null && baselineEndMs !== null && forecastEndMs !== null
+      ? Math.max(baselineEndMs, forecastEndMs)
+      : null;
+  const scheduleSpanMs =
+    scheduleStartMs !== null && scheduleMaxMs !== null
+      ? Math.max(86400000, scheduleMaxMs - scheduleStartMs)
+      : null;
+  const baselineWidthPct =
+    scheduleSpanMs && scheduleStartMs !== null && baselineEndMs !== null
+      ? Math.max(4, Math.min(100, ((baselineEndMs - scheduleStartMs) / scheduleSpanMs) * 100))
+      : 0;
+  const forecastWidthPct =
+    scheduleSpanMs && scheduleStartMs !== null && forecastEndMs !== null
+      ? Math.max(4, Math.min(100, ((forecastEndMs - scheduleStartMs) / scheduleSpanMs) * 100))
+      : 0;
+
   return (
     <div style={{ paddingBottom: 24 }}>
       <Link to="/projects" className="back-link" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
@@ -263,18 +283,86 @@ export default function ProjectOverview() {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gap: 12 }}>
         <section style={{ ...cardStyle(), gridColumn: "span 4" }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>Key Dates</div>
-          {[
-            { label: "Baseline Start", value: baselineStart ? formatDate(baselineStart) : "—" },
-            { label: "Baseline End", value: baselineEnd ? formatDate(baselineEnd) : "—" },
-            { label: "Forecast End", value: forecastEnd ? formatDate(forecastEnd) : "—", alert: varianceDays > 0 },
-            { label: "Variance", value: varianceDays === 0 ? "On baseline" : `${varianceDays > 0 ? "+" : ""}${varianceDays} day${Math.abs(varianceDays) === 1 ? "" : "s"}`, alert: varianceDays > 0 },
-          ].map(({ label, value, alert }, i) => (
-            <div key={label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderTop: i ? "1px solid var(--border)" : "none", gap: 10 }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 11.5, color: "var(--text-secondary)" }}><CalendarDays size={13} /> {label}</span>
-              <strong style={{ fontSize: 11.5, color: alert ? "var(--danger-text)" : "var(--navy)" }}>{value}</strong>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>Schedule Snapshot</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10.5, color: "var(--muted)" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: "#98a2b3" }} /> Baseline
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: "#2e90fa" }} /> Current Forecast
+              </span>
             </div>
-          ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", marginBottom: 14 }}>
+            {[
+              ["Baseline Start", baselineStart ? formatDate(baselineStart) : "—"],
+              ["Baseline End", baselineEnd ? formatDate(baselineEnd) : "—"],
+              ["Forecast End", forecastEnd ? formatDate(forecastEnd) : "—"],
+              ["Variance", varianceDays === 0 ? "On baseline" : `${varianceDays > 0 ? "+" : ""}${varianceDays} day${Math.abs(varianceDays) === 1 ? "" : "s"}`],
+            ].map(([label, value], i) => (
+              <div key={label} style={{ padding: "8px 9px", borderLeft: i ? "1px solid var(--border)" : "none", minWidth: 0 }}>
+                <div style={{ fontSize: 9.5, color: "var(--muted)", whiteSpace: "nowrap" }}>{label}</div>
+                <div style={{
+                  fontSize: 11.5,
+                  fontWeight: 700,
+                  marginTop: 3,
+                  color: (label === "Forecast End" || label === "Variance") && varianceDays > 0 ? "var(--danger-text)" : "var(--navy)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}>
+                  {value}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {baselineStart && baselineEnd && forecastEnd ? (
+            <div style={{ padding: "2px 2px 0" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "68px 1fr", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 10.5, color: "var(--muted)" }}>Baseline</span>
+                <div style={{ position: "relative", height: 16 }}>
+                  <div style={{ position: "absolute", left: 0, right: 0, top: 6, height: 4, background: "var(--hover-bg)", borderRadius: 999 }} />
+                  <div style={{ position: "absolute", left: 0, top: 3, width: `${baselineWidthPct}%`, height: 10, background: "#98a2b3", borderRadius: 999 }} />
+                  <span style={{ position: "absolute", left: `calc(${baselineWidthPct}% + 6px)`, top: 0, fontSize: 10, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+                    {formatDate(baselineEnd)}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "68px 1fr", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 10.5, color: "var(--muted)" }}>Forecast</span>
+                <div style={{ position: "relative", height: 20 }}>
+                  <div style={{ position: "absolute", left: 0, right: 0, top: 6, height: 4, background: "var(--hover-bg)", borderRadius: 999 }} />
+                  <div style={{ position: "absolute", left: 0, top: 3, width: `${forecastWidthPct}%`, height: 10, background: "#2e90fa", borderRadius: 999 }} />
+                  {varianceDays > 0 && (
+                    <div style={{
+                      position: "absolute",
+                      left: `${baselineWidthPct}%`,
+                      top: 3,
+                      width: `${Math.max(0, forecastWidthPct - baselineWidthPct)}%`,
+                      height: 10,
+                      background: "repeating-linear-gradient(135deg, rgba(255,255,255,.78) 0 3px, rgba(255,255,255,.18) 3px 6px)",
+                      borderRadius: "0 999px 999px 0",
+                    }} />
+                  )}
+                  <span style={{ position: "absolute", left: `calc(${forecastWidthPct}% + 6px)`, top: 0, fontSize: 10, color: varianceDays > 0 ? "var(--danger-text)" : "var(--text-secondary)", whiteSpace: "nowrap", fontWeight: 600 }}>
+                    {formatDate(forecastEnd)}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 7, textAlign: "right", fontSize: 10.5, fontWeight: 700, color: varianceDays > 0 ? "var(--danger-text)" : varianceDays < 0 ? "var(--success-text)" : "var(--text-secondary)" }}>
+                {varianceDays === 0 ? "On baseline" : `${varianceDays > 0 ? "+" : ""}${varianceDays} day${Math.abs(varianceDays) === 1 ? "" : "s"} vs baseline`}
+              </div>
+            </div>
+          ) : (
+            <div style={{ padding: "16px 4px 4px", textAlign: "center", fontSize: 11.5, color: "var(--muted)" }}>
+              Baseline and forecast dates will appear here once the project schedule is available.
+            </div>
+          )}
         </section>
 
         <section style={{ ...cardStyle(), gridColumn: "span 4" }}>
