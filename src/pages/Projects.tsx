@@ -1733,36 +1733,6 @@ export default function Projects() {
   // collaborator on (see can_see_project() in Supabase). Approval
   // authorities (editing, closing, reopening, extension decisions, etc.)
   // are untouched -- only *visibility* and *creation* are now open to all.
-  useEffect(() => {
-    if (initialProjectScopeApplied.current || !me?.id || chainPeople.length === 0 || !projectViews.loaded) return;
-    initialProjectScopeApplied.current = true;
-
-    const savedDefault = localStorage.getItem(projectDefaultViewStorageKey());
-    setProjectDefaultViewId(savedDefault);
-
-    if (savedDefault?.startsWith("personal:")) {
-      const personalId = savedDefault.slice(9);
-      if (projectViews.views.some((v) => v.id === personalId)) {
-        setUsingSystemProjectView(false);
-        projectViews.setActiveViewId(personalId);
-        return;
-      }
-    }
-    if (savedDefault?.startsWith("system:")) {
-      const scope = savedDefault.slice(7) as "all" | "active" | "attention" | "owned" | "mine" | "team";
-      if (scope !== "team" || showTeamProjectScope) {
-        setUsingSystemProjectView(true);
-        setProjectSystemView(scope);
-        return;
-      }
-    }
-
-    if (previewAsIndividual) setProjectSystemView("owned");
-    else if (me.access_level === "full") setProjectSystemView("all");
-    else if (directReportIds.size > 0) setProjectSystemView("team");
-    else setProjectSystemView("owned");
-  }, [me?.id, me?.access_level, chainPeople.length, directReportIds.size, previewAsIndividual, projectViews.loaded, projectViews.views.length, showTeamProjectScope]);
-
   const canCreateProject = true;
   const [creatingProject, setCreatingProject] = useState(false);
   const canCreateTask = isFullAccess || projects.some((p) => p.owner_id === me?.id);
@@ -2391,7 +2361,41 @@ export default function Projects() {
     progressDisplay: "bar",
   });
 
+  useEffect(() => {
+    if (initialProjectScopeApplied.current || !me?.id || chainPeople.length === 0 || !projectViews.loaded) return;
+    initialProjectScopeApplied.current = true;
+
+    const savedDefault = localStorage.getItem(projectDefaultViewStorageKey());
+    setProjectDefaultViewId(savedDefault);
+
+    if (savedDefault?.startsWith("personal:")) {
+      const personalId = savedDefault.slice(9);
+      if (projectViews.views.some((v) => v.id === personalId)) {
+        setUsingSystemProjectView(false);
+        projectViews.setActiveViewId(personalId);
+        return;
+      }
+    }
+    if (savedDefault?.startsWith("system:")) {
+      const scope = savedDefault.slice(7) as "all" | "active" | "attention" | "owned" | "mine" | "team";
+      if (scope !== "team" || showTeamProjectScope) {
+        setUsingSystemProjectView(true);
+        setProjectSystemView(scope);
+        return;
+      }
+    }
+
+    if (previewAsIndividual) setProjectSystemView("owned");
+    else if (me.access_level === "full") setProjectSystemView("all");
+    else if (directReportIds.size > 0) setProjectSystemView("team");
+    else setProjectSystemView("owned");
+  }, [me?.id, me?.access_level, chainPeople.length, directReportIds.size, previewAsIndividual, projectViews.loaded, projectViews.views.length, showTeamProjectScope]);
+
   const SYSTEM_PROJECT_SORTS = [{ key: "project_number", direction: "asc" as const }];
+  const IC_INVOLVED_PROJECT_SORTS = [
+    { key: "my_relationship", direction: "asc" as const },
+    { key: "project_number", direction: "asc" as const },
+  ];
   const projectDisplayView: TableView = usingSystemProjectView
     ? {
         ...projectViews.activeView,
@@ -2403,7 +2407,7 @@ export default function Projects() {
         hiddenGroups: [],
         filterPersonIds: [],
         filterStatuses: [],
-        sorts: SYSTEM_PROJECT_SORTS,
+        sorts: projectSystemView === "mine" ? IC_INVOLVED_PROJECT_SORTS : SYSTEM_PROJECT_SORTS,
         columnOrder:
           projectSystemView === "owned"
             ? IC_OWNED_PROJECT_COLUMN_ORDER
@@ -2414,7 +2418,11 @@ export default function Projects() {
       }
     : projectViews.activeView;
 
-  const projectDisplaySorts = usingSystemProjectView ? SYSTEM_PROJECT_SORTS : projectViews.activeView.sorts;
+  const projectDisplaySorts = usingSystemProjectView
+    ? projectSystemView === "mine"
+      ? IC_INVOLVED_PROJECT_SORTS
+      : SYSTEM_PROJECT_SORTS
+    : projectViews.activeView.sorts;
 
   function systemViewLabel(): string {
     if (projectSystemView === "owned") return "My Owned Projects";
@@ -3581,6 +3589,7 @@ export default function Projects() {
   }
 
   const projectSortOptions: SortOption<ProjectRow>[] = [
+    { key: "my_relationship", label: "My Relationship", getValue: (p) => myProjectRole(p) === "Owner" ? 0 : myProjectRole(p) === "Contributor" ? 1 : 2 },
     { key: "name", label: "Project", getValue: (p) => p.name ?? "" },
     { key: "project_number", label: "Project ID", getValue: (p) => p.project_number },
     { key: "created_at", label: "Created", getValue: (p) => new Date(p.created_at).getTime() },
