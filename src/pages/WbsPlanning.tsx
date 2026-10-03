@@ -619,17 +619,14 @@ export default function WbsPlanning() {
       return "task";
     }
   });
-  function toggleWbsFreezeCol(colKey: string) {
-    setWbsFreezeColKey((prev) => {
-      const next = prev === colKey ? null : colKey;
-      try {
-        localStorage.setItem(WBS_FREEZE_COL_STORAGE_KEY, next ?? "");
-      } catch {
-        // ignore -- private browsing / storage full, toggle still works
-        // for the rest of this session, it just won't persist
-      }
-      return next;
-    });
+  function setWbsFreezePoint(colKey: string | null) {
+    setWbsFreezeColKey(colKey);
+    try {
+      localStorage.setItem(WBS_FREEZE_COL_STORAGE_KEY, colKey ?? "");
+    } catch {
+      // ignore -- private browsing / storage full; preference still works
+      // for the rest of the session.
+    }
   }
   // Gutter is a fixed 22px; the Task column's own width is whatever
   // wbsColWidth("task") currently resolves to (resizable) -- the frozen
@@ -3910,7 +3907,6 @@ export default function WbsPlanning() {
     // combine with sticky -- sticky elements can be positioning contexts
     // too).
     const sticky = wbsColStickyStyle(colKey, false);
-    const isPinned = wbsFreezeColKey === colKey;
     return (
       <th
         rowSpan={2}
@@ -3925,28 +3921,7 @@ export default function WbsPlanning() {
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           {children}
-          {/* Freeze panes (2026-08-26, Sandra: "I want the freeze task
-              pin to be in the column headers in the table"; generalized
-              2026-08-27, Sandra: "can we pin any column, not just Task")
-              -- every resizable column gets its own pin, mutually
-              exclusive with every other column's. stopPropagation so it
-              doesn't also trigger the resize-handle span, its sibling in
-              this same <th>. */}
-          <span
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleWbsFreezeCol(colKey);
-            }}
-            title={isPinned ? "Unfreeze this column" : "Freeze this column (and every column to its left) so it stays visible while scrolling"}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              cursor: "pointer",
-              color: isPinned ? "var(--accent, #4f46e5)" : "var(--muted)",
-            }}
-          >
-            <Pin size={12} />
-          </span>
+
         </span>
         <span
           onMouseDown={(e) => startWbsColResize(colKey, e)}
@@ -5909,6 +5884,42 @@ export default function WbsPlanning() {
                   <RefreshCw size={13} /> Refresh Dates
                 </button>
 
+                <label
+                  className="btn-secondary"
+                  title="Keep the selected column and every column to its left visible while you scroll horizontally."
+                  style={{ display: "inline-flex", alignItems: "center", gap: 7, paddingRight: 10, cursor: "pointer" }}
+                >
+                  <span style={{ fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }}>Freeze columns</span>
+                  <select
+                    value={wbsFreezeColKey ?? ""}
+                    onChange={(e) => setWbsFreezePoint(e.target.value || null)}
+                    aria-label="Freeze columns through"
+                    style={{
+                      border: "none",
+                      outline: "none",
+                      background: "transparent",
+                      color: "var(--text)",
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      padding: 0,
+                      maxWidth: 120,
+                    }}
+                  >
+                    <option value="">None</option>
+                    <option value="task">Task</option>
+                    <option value="depends_on">Through Depends On</option>
+                    <option value="assignee">Through Assignee</option>
+                    <option value="work_type">Through Work Type</option>
+                    <option value="output_type">Through Output Type</option>
+                    <option value="output_count">Through Output Count</option>
+                    <option value="effort_hours">Through Scoped Hours</option>
+                    <option value="spent_hrs">Through Logged Hours</option>
+                    <option value="effort">Through Effort</option>
+                    <option value="changes">Through Changes</option>
+                  </select>
+                </label>
+
                 {canEditWbs && (
                   <button type="button" className="btn-primary" onClick={addTopLevelTask} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                     <Plus size={13} /> Add Task
@@ -6013,8 +6024,20 @@ export default function WbsPlanning() {
               <tbody>
                 {orderedTasks.length === 0 && (
                   <tr>
-                    <td colSpan={17} style={{ padding: "32px 20px 34px", background: "#fff" }}>
-                      <div style={{ maxWidth: 720, margin: "0 auto", display: "grid", gridTemplateColumns: "110px minmax(0,1fr)", gap: 22, alignItems: "center" }}>
+                    <td colSpan={17} style={{ padding: "32px 20px 34px", background: "#fff", position: "relative" }}>
+                      <div
+                        style={{
+                          position: "sticky",
+                          left: 0,
+                          width: "min(720px, calc(100vw - 140px))",
+                          maxWidth: "calc(100vw - 48px)",
+                          margin: "0 auto",
+                          display: "grid",
+                          gridTemplateColumns: "110px minmax(0,1fr)",
+                          gap: 22,
+                          alignItems: "center",
+                        }}
+                      >
                         <div style={{ width: 96, height: 96, borderRadius: "50%", background: "#eef6ff", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
                           <div style={{ width: 54, height: 62, border: "1px solid #c8daf0", borderRadius: 8, background: "#fff", padding: "11px 9px", display: "grid", gap: 7 }}>
                             {[0,1,2].map((n) => <div key={n} style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#d8e9fb" }} /><span style={{ height: 5, flex: 1, borderRadius: 3, background: "#dce6f2" }} /></div>)}
