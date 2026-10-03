@@ -3976,11 +3976,12 @@ export default function WbsPlanning() {
       };
     }
     return {
-      border: `1px ${isFilled ? "solid" : "dashed"} ${isFilled ? "var(--border)" : "var(--warning-text, #b45309)"}`,
-      borderRadius: 6,
+      border: "1px solid var(--border)",
+      borderRadius: 8,
       padding: "1px 4px",
       minWidth,
       background: "var(--surface)",
+      boxShadow: isFilled ? "none" : "inset 0 0 0 1px rgba(148,163,184,.06)",
     };
   }
 
@@ -4596,7 +4597,7 @@ export default function WbsPlanning() {
     <div className="wbs-modern-page">
       <style>{`
         .wbs-modern-page {
-          background: #f4f9ff;
+          background: var(--bg);
           margin: -16px;
           padding: 18px 22px 40px;
           min-height: 100vh;
@@ -4634,11 +4635,26 @@ export default function WbsPlanning() {
           display: flex;
           align-items: center;
         }
+        .wbs-modern-page .wbs-project-info-grid .wbs-field-box {
+          width: 100%;
+          min-width: 0 !important;
+          box-sizing: border-box;
+        }
+        .wbs-modern-page .btn-primary,
+        .wbs-modern-page .btn-secondary {
+          border-radius: 999px;
+          padding-left: 16px;
+          padding-right: 16px;
+        }
         .wbs-modern-page .btn-primary {
           box-shadow: 0 1px 2px rgba(37, 99, 235, .12);
         }
-        @media (max-width: 900px) {
+        @media (max-width: 1100px) {
+          .wbs-modern-page .wbs-project-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+        }
+        @media (max-width: 650px) {
           .wbs-modern-page { margin: -10px; padding: 14px 12px 32px; }
+          .wbs-modern-page .wbs-project-info-grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
       {dialog}
@@ -5003,7 +5019,7 @@ export default function WbsPlanning() {
               <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Start by providing the basic details for this project.</div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px 16px" }}>
+            <div className="wbs-project-info-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "12px 16px" }}>
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project ID</span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(true, undefined, true), width: "100%" }}>
@@ -5021,17 +5037,20 @@ export default function WbsPlanning() {
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Owner <span style={{ color: "#d92d20" }}>*</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!owner, undefined, !canEditWbs), width: "100%" }}>
-                  <InlineSelect
-                    value={owner?.name ?? ""}
-                    editable={canEditWbs}
-                    allowEmpty
-                    emptyLabel="No owner"
-                    options={people.map((p) => p.name)}
-                    onCommit={(name) => {
-                      const p = people.find((pp) => pp.name === name);
-                      saveProjectField({ owner_id: p?.id ?? null });
-                    }}
-                  />
+<div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
+                                      <InlineSelect
+                                        value={owner?.name ?? ""}
+                                        editable={canEditWbs}
+                                        allowEmpty
+                                        emptyLabel="No owner"
+                                        options={people.map((p) => p.name)}
+                                        onCommit={(name) => {
+                                          const p = people.find((pp) => pp.name === name);
+                                          saveProjectField({ owner_id: p?.id ?? null });
+                                        }}
+                                      />
+                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginRight: 4, pointerEvents: "none" }} />
+                  </div>
                 </div>
               </label>
 
@@ -5039,7 +5058,10 @@ export default function WbsPlanning() {
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Start Date <span style={{ color: "#d92d20" }}>*</span></span>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.start_date, undefined, !canEditWbs || anyTaskDone), width: "100%" }}>
+<div style={{ display: "flex", alignItems: "center", width: "100%" }}>
                     <InlineDate value={project.start_date} editable={canEditWbs && !anyTaskDone} onCommit={(v) => saveProjectField({ start_date: v })} />
+                      <Calendar size={14} style={{ color: "var(--muted)", marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
+                    </div>
                   </div>
                   <span title={anyTaskDone ? "Locked once work has started." : "Project scheduling anchor."} style={{ display: "inline-flex", color: "var(--muted)" }}><Info size={13} /></span>
                 </div>
@@ -5048,58 +5070,70 @@ export default function WbsPlanning() {
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Category</span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.category, undefined, !canEditWbs), width: "100%" }}>
-                  <InlineSelect value={project.category ?? ""} editable={canEditWbs} allowEmpty emptyLabel="No category" options={categoryPickerOptions} onCommit={(v) => saveProjectField({ category: v || null })} />
+<div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
+                                      <InlineSelect value={project.category ?? ""} editable={canEditWbs} allowEmpty emptyLabel="No category" options={categoryPickerOptions} onCommit={(v) => saveProjectField({ category: v || null })} />
+                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginRight: 4, pointerEvents: "none" }} />
+                  </div>
                 </div>
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Source</span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.source_id, undefined, !canEditWbs), width: "100%" }}>
-                  <InlineSelect
-                    value={projectSourceOptions.find((s) => s.id === project.source_id)?.name ?? ""}
-                    editable={canEditWbs}
-                    allowEmpty
-                    emptyLabel="No source"
-                    options={sourcePickerOptions}
-                    onCommit={(name) => {
-                      const src = projectSourceOptions.find((s) => s.name === name);
-                      saveProjectField({ source_id: src?.id ?? null });
-                    }}
-                  />
+<div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
+                                      <InlineSelect
+                                        value={projectSourceOptions.find((s) => s.id === project.source_id)?.name ?? ""}
+                                        editable={canEditWbs}
+                                        allowEmpty
+                                        emptyLabel="No source"
+                                        options={sourcePickerOptions}
+                                        onCommit={(name) => {
+                                          const src = projectSourceOptions.find((s) => s.name === name);
+                                          saveProjectField({ source_id: src?.id ?? null });
+                                        }}
+                                      />
+                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginRight: 4, pointerEvents: "none" }} />
+                  </div>
                 </div>
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Type</span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.project_type_id, undefined, !canEditWbs), width: "100%" }}>
-                  <InlineSelect
-                    value={projectTypeOptions.find((t) => t.id === project.project_type_id)?.name ?? ""}
-                    editable={canEditWbs}
-                    allowEmpty
-                    emptyLabel="No type"
-                    options={projectTypePickerOptions}
-                    onCommit={(name) => {
-                      const type = projectTypeOptions.find((t) => t.name === name);
-                      saveProjectField({ project_type_id: type?.id ?? null });
-                    }}
-                  />
+<div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
+                                      <InlineSelect
+                                        value={projectTypeOptions.find((t) => t.id === project.project_type_id)?.name ?? ""}
+                                        editable={canEditWbs}
+                                        allowEmpty
+                                        emptyLabel="No type"
+                                        options={projectTypePickerOptions}
+                                        onCommit={(name) => {
+                                          const type = projectTypeOptions.find((t) => t.name === name);
+                                          saveProjectField({ project_type_id: type?.id ?? null });
+                                        }}
+                                      />
+                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginRight: 4, pointerEvents: "none" }} />
+                  </div>
                 </div>
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Complexity</span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.effort_level, undefined, !canEditWbs), width: "100%" }}>
-                  <InlineSelect
-                    value={project.effort_level ? effortLevelLabel(project.effort_level) : ""}
-                    editable={canEditWbs}
-                    allowEmpty
-                    emptyLabel="Not set"
-                    options={PROJECT_EFFORT_LEVEL_OPTIONS.map((lvl) => effortLevelLabel(lvl))}
-                    onCommit={(label) => {
-                      const lvl = PROJECT_EFFORT_LEVEL_OPTIONS.find((l) => effortLevelLabel(l) === label);
-                      saveProjectField({ effort_level: lvl ?? null });
-                    }}
-                  />
+<div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
+                                      <InlineSelect
+                                        value={project.effort_level ? effortLevelLabel(project.effort_level) : ""}
+                                        editable={canEditWbs}
+                                        allowEmpty
+                                        emptyLabel="Not set"
+                                        options={PROJECT_EFFORT_LEVEL_OPTIONS.map((lvl) => effortLevelLabel(lvl))}
+                                        onCommit={(label) => {
+                                          const lvl = PROJECT_EFFORT_LEVEL_OPTIONS.find((l) => effortLevelLabel(l) === label);
+                                          saveProjectField({ effort_level: lvl ?? null });
+                                        }}
+                                      />
+                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginRight: 4, pointerEvents: "none" }} />
+                  </div>
                 </div>
               </label>
 
@@ -5125,6 +5159,23 @@ export default function WbsPlanning() {
               </div>
             </div>
           </section>
+
+          {project.wbs_status !== "closed" && (
+            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", margin: "-2px 2px 12px" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 9, fontSize: 11.5, fontWeight: 600, color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}>
+                <span>Show available bandwidth snapshot</span>
+                <span style={{ position: "relative", width: 36, height: 20, borderRadius: 999, background: showAvailableBandwidth ? "var(--accent)" : "#cbd5e1", transition: "background .15s ease" }}>
+                  <input
+                    type="checkbox"
+                    checked={showAvailableBandwidth}
+                    onChange={(e) => setShowAvailableBandwidth(e.target.checked)}
+                    style={{ position: "absolute", opacity: 0, inset: 0, width: "100%", height: "100%", cursor: "pointer", margin: 0 }}
+                  />
+                  <span style={{ position: "absolute", top: 3, left: showAvailableBandwidth ? 19 : 3, width: 14, height: 14, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,.18)", transition: "left .15s ease", pointerEvents: "none" }} />
+                </span>
+              </label>
+            </div>
+          )}
 
           {/* Project-level summary: fixed total effort (left) + a
               duration comparison bar per mode (right) -- redesigned per
@@ -5850,10 +5901,7 @@ export default function WbsPlanning() {
                 >
                   <RefreshCw size={13} /> Refresh Dates
                 </button>
-                <label className="btn-secondary" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}>
-                  <input type="checkbox" checked={showAvailableBandwidth} onChange={(e) => setShowAvailableBandwidth(e.target.checked)} style={{ display: "none" }} />
-                  View {showAvailableBandwidth ? "✓" : "⌄"}
-                </label>
+
                 {canEditWbs && (
                   <button type="button" className="btn-primary" onClick={addTopLevelTask} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                     <Plus size={13} /> Add Task
