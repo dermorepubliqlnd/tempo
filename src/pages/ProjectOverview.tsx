@@ -136,6 +136,7 @@ export default function ProjectOverview() {
   const owner = project ? people.find((p) => p.id === project.owner_id) : null;
   const assigneeIds = useMemo(() => Array.from(new Set(leafTasks.map((t) => t.assignee_id).filter((x): x is string => !!x))), [leafTasks]);
   const scopedHours = leafTasks.reduce((sum, t) => sum + Number(t.estimated_hours ?? 0), 0);
+  const unassignedScopedHours = leafTasks.filter((t) => !t.assignee_id).reduce((sum, t) => sum + Number(t.estimated_hours ?? 0), 0);
   const loggedHours = Math.round((timeEntries.reduce((sum, e) => sum + Number(e.duration_minutes ?? 0), 0) / 60) * 10) / 10;
   const completedCount = leafTasks.filter((t) => statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete").length;
   const cancelledCount = leafTasks.filter((t) => statusGroupOf(TASK_STATUS_GROUPED, t.status) === "cancelled").length;
@@ -395,7 +396,6 @@ export default function ProjectOverview() {
             { Icon: AlertTriangle, label: "Overdue tasks", count: overdueTasks },
             { Icon: Users, label: "Overallocated assignees", count: overloadedAssignees },
             { Icon: Clock3, label: "Pending extension requests", count: pendingExtensions },
-            { Icon: AlertTriangle, label: "Unassigned open tasks", count: unassignedTasks },
             { Icon: CheckCircle2, label: "Changed after baseline", count: tasksChangedAfterBaseline ? 1 : 0 },
           ].map(({ Icon, label, count }, i) => (
             <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: i ? "1px solid var(--border)" : "none", fontSize: 11.5 }}>
@@ -414,17 +414,27 @@ export default function ProjectOverview() {
             <Link to="/utilization" style={{ fontSize: 11.5, color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>Open Utilization →</Link>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 8, marginBottom: 12 }}>
-            {[
-              ["Assignees", assigneeIds.length],
-              ["Scoped Hours", `${Math.round(scopedHours * 10) / 10}h`],
-              ["Logged Hours", `${loggedHours}h`],
-              ["Overallocated", overloadedAssignees],
-            ].map(([label, value]) => (
-              <div key={label as string} style={{ background: "var(--hover-bg)", borderRadius: 8, padding: "10px 11px" }}>
-                <div style={{ fontSize: 15, fontWeight: 800 }}>{value}</div>
-                <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>{label}</div>
-              </div>
-            ))}
+            <div style={{ background: "var(--hover-bg)", borderRadius: 8, padding: "10px 11px" }}>
+              <div style={{ fontSize: 15, fontWeight: 800 }}>{assigneeIds.length}</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Total Contributors</div>
+            </div>
+            <div style={{ background: overloadedAssignees > 0 ? "#fff1f1" : "var(--hover-bg)", borderRadius: 8, padding: "10px 11px" }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: overloadedAssignees > 0 ? "var(--danger-text)" : "var(--navy)" }}>{overloadedAssignees}</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Overallocated</div>
+            </div>
+            <div style={{ background: "var(--hover-bg)", borderRadius: 8, padding: "10px 11px" }}>
+              <div style={{ fontSize: 15, fontWeight: 800 }}>{Math.round(scopedHours * 10) / 10}h</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Scoped Hours</div>
+              {unassignedScopedHours > 0 && (
+                <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3 }}>
+                  {Math.round(unassignedScopedHours * 10) / 10}h unassigned
+                </div>
+              )}
+            </div>
+            <div style={{ background: "var(--hover-bg)", borderRadius: 8, padding: "10px 11px" }}>
+              <div style={{ fontSize: 15, fontWeight: 800 }}>{loggedHours}h</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Logged Hours</div>
+            </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "minmax(180px,1.4fr) repeat(3,minmax(80px,.7fr))", fontSize: 11 }}>
             <div style={{ color: "var(--muted)", padding: "6px 8px" }}>Team member</div>
