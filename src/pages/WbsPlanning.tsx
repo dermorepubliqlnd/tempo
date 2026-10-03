@@ -4593,7 +4593,54 @@ export default function WbsPlanning() {
   }
 
   return (
-    <div>
+    <div className="wbs-modern-page">
+      <style>{`
+        .wbs-modern-page {
+          background: #f4f9ff;
+          margin: -16px;
+          padding: 18px 22px 40px;
+          min-height: 100vh;
+          color: var(--text);
+        }
+        .wbs-modern-page .card {
+          background: #ffffff;
+          border: 1px solid #dce7f3;
+          border-radius: 10px;
+          box-shadow: 0 1px 2px rgba(31, 71, 117, 0.035);
+        }
+        .wbs-modern-page h1 {
+          margin: 0;
+          font-size: 21px;
+          line-height: 1.25;
+          letter-spacing: -0.015em;
+          color: #17324f;
+        }
+        .wbs-modern-page .back-link {
+          color: #2563eb;
+          font-weight: 600;
+          text-decoration: none;
+        }
+        .wbs-modern-page .data-table thead th {
+          background: #f8fbff;
+          color: #71839a;
+          font-size: 10.5px;
+          letter-spacing: .015em;
+        }
+        .wbs-modern-page .data-table td {
+          background: #fff;
+        }
+        .wbs-modern-page .wbs-field-box {
+          min-height: 34px;
+          display: flex;
+          align-items: center;
+        }
+        .wbs-modern-page .btn-primary {
+          box-shadow: 0 1px 2px rgba(37, 99, 235, .12);
+        }
+        @media (max-width: 900px) {
+          .wbs-modern-page { margin: -10px; padding: 14px 12px 32px; }
+        }
+      `}</style>
       {dialog}
       {assigneePicker.element}
       {startDatePrompt.element}
@@ -4689,7 +4736,31 @@ export default function WbsPlanning() {
       <Link to={`/projects/${projectId}`} className="back-link" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
         <ArrowLeft size={13} /> Back to {project.name}
       </Link>
-      <h1>WBS Planning — {project.name}</h1>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 2 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+            <h1>WBS Planning — {project.name}</h1>
+            <span style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              padding: "3px 9px",
+              borderRadius: 999,
+              fontSize: 10.5,
+              fontWeight: 700,
+              background: wbsMeta.bg,
+              color: wbsMeta.color,
+              border: `1px solid ${wbsMeta.border}`,
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: wbsMeta.color }} />
+              {wbsMeta.label}
+            </span>
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
+            Define the project, add tasks, and review the forecast. Lock the baseline when the plan is ready.
+          </div>
+        </div>
+      </div>
       <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 10, marginBottom: 14 }}>
         <Link
           to={`/projects/${projectId}`}
@@ -4717,18 +4788,18 @@ export default function WbsPlanning() {
       <div
         className="card"
         style={{
-          padding: "8px 14px",
-          marginBottom: 10,
+          padding: "8px 10px",
+          marginBottom: 12,
           display: "flex",
           alignItems: "center",
           gap: 10,
           flexWrap: "wrap",
-          background: wbsMeta.bg,
-          borderColor: wbsMeta.border,
+          background: "transparent",
+          borderColor: "transparent",
+          boxShadow: "none",
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 700, color: wbsMeta.color }}>{wbsMeta.label}</span>
-        <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{wbsMeta.hint}</span>
+        <span style={{ fontSize: 11, color: "var(--muted)" }}>{wbsMeta.hint}</span>
         {activeBaseline && (
           <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
             Baseline V{activeBaseline.version_number} (locked {formatDate(activeBaseline.captured_at.slice(0, 10))})
@@ -4925,177 +4996,135 @@ export default function WbsPlanning() {
           alongside the main content (not a full-width toggle panel like
           before), matching her reference mockup. Main content is the
           flex:1 left column; the rail is a fixed-width sibling. */}
-          <div className="card" style={{ padding: 14, marginBottom: 12, display: "flex", alignItems: "center", gap: 16, flexWrap: "nowrap", overflowX: "auto" }}>
-            {/* Project ID -- added 2026-09-07 (Sandra: "add a project ID,
-                automated sequence number based on the date the project
-                was added/created"). Always read-only, same treatment as
-                Baseline below -- there's no direct-edit path, it's
-                assigned once by the DB (see project_number in
-                phase41_migration.sql) and never changes. */}
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Project ID:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 80, true)}>
-                <span style={{ fontSize: 12.5 }}>P-{String(project.project_number).padStart(4, "0")}</span>
-              </div>
+          <section className="card" style={{ padding: 16, marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800, flexShrink: 0 }}>1</span>
+              <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Project Setup</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Start by providing the basic details for this project.</div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Project:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(!!project.name, 170, !canEditWbs)}>
-                <InlineText value={project.name} editable={canEditWbs} onCommit={(v) => saveProjectField({ name: v })} />
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Owner:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 110, !canEditWbs)}>
-                <InlineSelect
-                  value={owner?.name ?? ""}
-                  editable={canEditWbs}
-                  allowEmpty
-                  emptyLabel="No owner"
-                  options={people.map((p) => p.name)}
-                  onCommit={(name) => {
-                    const p = people.find((pp) => pp.name === name);
-                    saveProjectField({ owner_id: p?.id ?? null });
-                  }}
-                />
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Start date:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 110, !canEditWbs || anyTaskDone)}>
-                <InlineDate
-                  value={project.start_date}
-                  editable={canEditWbs && !anyTaskDone}
-                  onCommit={(v) => saveProjectField({ start_date: v })}
-                />
-              </div>
-              <span
-                title={
-                  anyTaskDone
-                    ? "Locked -- at least one task is already Done, so the project has genuinely started and this date is now historical."
-                    : "Your own plotted anchor -- used as the default Start for the very first task in each mode when there's nothing earlier to chain from. No longer auto-pulled from tasks."
-                }
-                style={{ display: "inline-flex", cursor: "help", flexShrink: 0 }}
-              >
-                <Info size={13} style={{ color: "var(--muted)" }} />
-              </span>
-            </div>
-            {/* 2026-09-03 (Sandra: "add these 3 new fields in the WBS UI
-                along with name/owner/start date... push that these are
-                filled in before starting project or locking baseline")
-                -- Category/Source/Complexity move here alongside the
-                fields that already lived on this page, staying editable
-                at any wbs_status short of Closed (canEditWbs), same as
-                Name/Owner above. Required (see handleRequestBaseline/
-                handleDecideBaselineRequest's gate) before Start Project,
-                not before Save -- same "gate the milestone, not every
-                keystroke" philosophy as the rest of this page's soft
-                checks. */}
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Category:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 130, !canEditWbs)}>
-                <InlineSelect
-                  value={project.category ?? ""}
-                  editable={canEditWbs}
-                  allowEmpty
-                  emptyLabel="No category"
-                  options={categoryPickerOptions}
-                  onCommit={(v) => saveProjectField({ category: v || null })}
-                />
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Source:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 120, !canEditWbs)}>
-                <InlineSelect
-                  value={projectSourceOptions.find((s) => s.id === project.source_id)?.name ?? ""}
-                  editable={canEditWbs}
-                  allowEmpty
-                  emptyLabel="No source"
-                  options={sourcePickerOptions}
-                  onCommit={(name) => {
-                    const src = projectSourceOptions.find((s) => s.name === name);
-                    saveProjectField({ source_id: src?.id ?? null });
-                  }}
-                />
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Project Type:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 120, !canEditWbs)}>
-                <InlineSelect
-                  value={projectTypeOptions.find((t) => t.id === project.project_type_id)?.name ?? ""}
-                  editable={canEditWbs}
-                  allowEmpty
-                  emptyLabel="No type"
-                  options={projectTypePickerOptions}
-                  onCommit={(name) => {
-                    const type = projectTypeOptions.find((t) => t.name === name);
-                    saveProjectField({ project_type_id: type?.id ?? null });
-                  }}
-                />
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Complexity:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 100, !canEditWbs)}>
-                <InlineSelect
-                  value={project.effort_level ? effortLevelLabel(project.effort_level) : ""}
-                  editable={canEditWbs}
-                  allowEmpty
-                  emptyLabel="Not set"
-                  options={PROJECT_EFFORT_LEVEL_OPTIONS.map((lvl) => effortLevelLabel(lvl))}
-                  onCommit={(label) => {
-                    const lvl = PROJECT_EFFORT_LEVEL_OPTIONS.find((l) => effortLevelLabel(l) === label);
-                    saveProjectField({ effort_level: lvl ?? null });
-                  }}
-                />
-              </div>
-            </div>
-            {activeBaseline && (
-              // Design spec item 2 (Sandra, 2026-07-29): Baseline version
-              // shown in the Project Details strip, but READ-ONLY --
-              // unlike Project/Owner/Start date/Scoping Effort, there's no
-              // direct-edit path for this (it only changes via Start
-              // Project in the Actions menu -- Re-baseline removed
-              // 2026-08-27, so this stays V1 for the life of the project),
-              // so it renders as plain text in a muted box rather than an
-              // InlineX field.
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Baseline:</span>
-                <div className="wbs-field-box" style={fieldBoxStyle(true, 90, true)}>
-                  <span style={{ fontSize: 12.5 }}>
-                    V{activeBaseline.version_number} ({formatDate(activeBaseline.captured_at.slice(0, 10))})
-                  </span>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px 16px" }}>
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project ID</span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(true, undefined, true), width: "100%" }}>
+                  <span style={{ fontSize: 12.5 }}>P-{String(project.project_number).padStart(4, "0")}</span>
                 </div>
-              </div>
-            )}
+              </label>
 
-          </div>
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Name <span style={{ color: "#d92d20" }}>*</span></span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.name, undefined, !canEditWbs), width: "100%" }}>
+                  <InlineText value={project.name} editable={canEditWbs} onCommit={(v) => saveProjectField({ name: v })} />
+                </div>
+              </label>
 
-          {/* Project Description -- added 2026-09-07 (Sandra: "add project
-              description in the WBS please, just below the project
-              information. And have this been required before starting a
-              project or locking baseline" + follow-up: "for those baseline
-              that are already locked make it mandatory before closing a
-              project"). Sits in its own full-width card right below the
-              Project Details strip above. Same canEditWbs gate as the rest
-              of this header -- required at Start Project (see
-              handleRequestBaseline/handleDecideBaselineRequest) and, for
-              projects that were already baselined before this field
-              existed, at Closure instead (handleRequestClosure/
-              handleDecideClosure). */}
-          <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>Description:</div>
-            <div className="wbs-field-box" style={fieldBoxStyle(!!project.description, undefined, !canEditWbs)}>
-              <InlineTextArea
-                value={project.description ?? ""}
-                editable={canEditWbs}
-                placeholder="What is this project about?"
-                onCommit={(v) => saveProjectField({ description: v })}
-              />
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Owner <span style={{ color: "#d92d20" }}>*</span></span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!owner, undefined, !canEditWbs), width: "100%" }}>
+                  <InlineSelect
+                    value={owner?.name ?? ""}
+                    editable={canEditWbs}
+                    allowEmpty
+                    emptyLabel="No owner"
+                    options={people.map((p) => p.name)}
+                    onCommit={(name) => {
+                      const p = people.find((pp) => pp.name === name);
+                      saveProjectField({ owner_id: p?.id ?? null });
+                    }}
+                  />
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Start Date <span style={{ color: "#d92d20" }}>*</span></span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.start_date, undefined, !canEditWbs || anyTaskDone), width: "100%" }}>
+                    <InlineDate value={project.start_date} editable={canEditWbs && !anyTaskDone} onCommit={(v) => saveProjectField({ start_date: v })} />
+                  </div>
+                  <span title={anyTaskDone ? "Locked once work has started." : "Project scheduling anchor."} style={{ display: "inline-flex", color: "var(--muted)" }}><Info size={13} /></span>
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Category</span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.category, undefined, !canEditWbs), width: "100%" }}>
+                  <InlineSelect value={project.category ?? ""} editable={canEditWbs} allowEmpty emptyLabel="No category" options={categoryPickerOptions} onCommit={(v) => saveProjectField({ category: v || null })} />
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Source</span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.source_id, undefined, !canEditWbs), width: "100%" }}>
+                  <InlineSelect
+                    value={projectSourceOptions.find((s) => s.id === project.source_id)?.name ?? ""}
+                    editable={canEditWbs}
+                    allowEmpty
+                    emptyLabel="No source"
+                    options={sourcePickerOptions}
+                    onCommit={(name) => {
+                      const src = projectSourceOptions.find((s) => s.name === name);
+                      saveProjectField({ source_id: src?.id ?? null });
+                    }}
+                  />
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Type</span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.project_type_id, undefined, !canEditWbs), width: "100%" }}>
+                  <InlineSelect
+                    value={projectTypeOptions.find((t) => t.id === project.project_type_id)?.name ?? ""}
+                    editable={canEditWbs}
+                    allowEmpty
+                    emptyLabel="No type"
+                    options={projectTypePickerOptions}
+                    onCommit={(name) => {
+                      const type = projectTypeOptions.find((t) => t.name === name);
+                      saveProjectField({ project_type_id: type?.id ?? null });
+                    }}
+                  />
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Complexity</span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.effort_level, undefined, !canEditWbs), width: "100%" }}>
+                  <InlineSelect
+                    value={project.effort_level ? effortLevelLabel(project.effort_level) : ""}
+                    editable={canEditWbs}
+                    allowEmpty
+                    emptyLabel="Not set"
+                    options={PROJECT_EFFORT_LEVEL_OPTIONS.map((lvl) => effortLevelLabel(lvl))}
+                    onCommit={(label) => {
+                      const lvl = PROJECT_EFFORT_LEVEL_OPTIONS.find((l) => effortLevelLabel(l) === label);
+                      saveProjectField({ effort_level: lvl ?? null });
+                    }}
+                  />
+                </div>
+              </label>
+
+              {activeBaseline && (
+                <label style={{ display: "grid", gap: 5 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Baseline</span>
+                  <div className="wbs-field-box" style={{ ...fieldBoxStyle(true, undefined, true), width: "100%" }}>
+                    <span style={{ fontSize: 12.5 }}>V{activeBaseline.version_number} · {formatDate(activeBaseline.captured_at.slice(0, 10))}</span>
+                  </div>
+                </label>
+              )}
             </div>
-          </div>
+
+            <div style={{ marginTop: 13 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: "#304963", marginBottom: 5 }}>Description</div>
+              <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.description, undefined, !canEditWbs), width: "100%", minHeight: 66, alignItems: "stretch" }}>
+                <InlineTextArea
+                  value={project.description ?? ""}
+                  editable={canEditWbs}
+                  placeholder="What is this project about? (optional)"
+                  onCommit={(v) => saveProjectField({ description: v })}
+                />
+              </div>
+            </div>
+          </section>
 
           {/* Project-level summary: fixed total effort (left) + a
               duration comparison bar per mode (right) -- redesigned per
@@ -5112,191 +5141,197 @@ export default function WbsPlanning() {
               the RIGHT, once there's a baseline to compare against. Draft
               projects (no baseline yet) keep the single full-width card
               as before -- there's nothing to show variance against. */}
-          <div
-            style={{
-              display: "grid",
-              // Phase 13 (2026-08-21): Sandra -- "once the baseline is
-              // locked... the width... decreases because there is a
-              // place order for version history in the second column...
-              // lock the version history size to match the first row...
-              // keep the width at full window view." Revision
-              // Summary/History used to be a page-spanning flex sibling
-              // (shrinking the ENTIRE main content -- table, both
-              // Gantts, Utilization snapshot -- for the whole page
-              // height once a baseline existed). Moved into THIS grid
-              // row only, as a 3rd fixed-width column, so everything
-              // below reclaims full page width unconditionally.
-              gridTemplateColumns: project.wbs_status === "draft" ? "1fr" : "1fr 1fr 260px",
-              gap: 12,
-              marginBottom: 12,
-              // Sandra, 2026-07-29: "align the overall variance box
-              // height with the timelines" -- was "start" (each card
-              // sized to its own content, so Overall Variance's shorter
-              // table left visible extra whitespace/mismatch next to
-              // the taller Effort Comparison card). "stretch" makes
-              // both grid cells -- and therefore both .card children --
-              // the same height as whichever is tallest.
-              alignItems: "stretch",
-            }}
-          >
-          <div className="card" style={{ padding: 16, display: "flex", gap: 28, flexWrap: "wrap" }}>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-                gap: 6,
-                minWidth: 150,
-                paddingRight: 28,
-                borderRight: "1px solid var(--border)",
-              }}
-            >
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>
-                Total Effort Needed
-              </div>
-              <div style={{ fontSize: 30, fontWeight: 700, color: "var(--navy)", lineHeight: 1.1 }}>
-                {totalEffortHours}
-                <span style={{ fontSize: 15, fontWeight: 600, marginLeft: 3 }}>h</span>
-              </div>
-              <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
-                across {orderedTasks.filter((t) => t.depth === 0).length} task(s)
-              </div>
-            </div>
-
-            <div style={{ flex: 1, minWidth: 340 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 12 }}>Effort Comparison (by Duration)</div>
-              {MODES.map((m, i) => {
-                const s = summaries[m];
-                // Phase 12 (2026-08-21): 3rd mode added -- reuse the same
-                // blue/green/yellow identity everywhere else on the page.
-                const color =
-                  m === "full_capacity" ? UTIL_PREVIEW_COLOR.full_capacity : m === "standard" ? UTIL_PREVIEW_COLOR.standard_suggested : UTIL_PREVIEW_COLOR.standard_committed;
-                const rate = m === "full_capacity" ? "7.5 h/day" : null;
-                const maxDuration = Math.max(summaries.full_capacity.durationDays, summaries.manual.durationDays, 1);
-                const widthPct = s.durationDays ? Math.max(18, Math.round((s.durationDays / maxDuration) * 100)) : 0;
-                // Sandra, 2026-07-29 follow-up: label moved ABOVE the bar
-                // (was to its left) per her reference mockup -- same
-                // colors, just the layout direction changed.
-                return (
-                  <div key={m} style={{ marginBottom: i === MODES.length - 1 ? 0 : 14 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color, marginBottom: 6 }}>
-                      {MODE_LABEL[m]}{rate ? ` (${rate})` : ""}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                      <div style={{ flex: 1, minWidth: 100 }}>
-                        {s.durationDays ? (
+          {orderedTasks.length > 0 && (
+            <>
+                        <div
+                          style={{
+                            display: "grid",
+                            // Phase 13 (2026-08-21): Sandra -- "once the baseline is
+                            // locked... the width... decreases because there is a
+                            // place order for version history in the second column...
+                            // lock the version history size to match the first row...
+                            // keep the width at full window view." Revision
+                            // Summary/History used to be a page-spanning flex sibling
+                            // (shrinking the ENTIRE main content -- table, both
+                            // Gantts, Utilization snapshot -- for the whole page
+                            // height once a baseline existed). Moved into THIS grid
+                            // row only, as a 3rd fixed-width column, so everything
+                            // below reclaims full page width unconditionally.
+                            gridTemplateColumns: project.wbs_status === "draft" ? "1fr" : "1fr 1fr 260px",
+                            gap: 12,
+                            marginBottom: 12,
+                            // Sandra, 2026-07-29: "align the overall variance box
+                            // height with the timelines" -- was "start" (each card
+                            // sized to its own content, so Overall Variance's shorter
+                            // table left visible extra whitespace/mismatch next to
+                            // the taller Effort Comparison card). "stretch" makes
+                            // both grid cells -- and therefore both .card children --
+                            // the same height as whichever is tallest.
+                            alignItems: "stretch",
+                          }}
+                        >
+                        <div className="card" style={{ padding: 16, display: "flex", gap: 28, flexWrap: "wrap" }}>
                           <div
                             style={{
-                              width: `${widthPct}%`,
-                              minWidth: 90,
-                              background: color,
-                              color: "#fff",
-                              fontSize: 11,
-                              fontWeight: 600,
-                              textAlign: "center",
-                              padding: "6px 8px",
-                              borderRadius: 4,
-                              whiteSpace: "nowrap",
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "flex-start",
+                              gap: 6,
+                              minWidth: 150,
+                              paddingRight: 28,
+                              borderRight: "1px solid var(--border)",
                             }}
                           >
-                            {s.durationDays} working day{s.durationDays === 1 ? "" : "s"}
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>
+                              Total Effort Needed
+                            </div>
+                            <div style={{ fontSize: 30, fontWeight: 700, color: "var(--navy)", lineHeight: 1.1 }}>
+                              {totalEffortHours}
+                              <span style={{ fontSize: 15, fontWeight: 600, marginLeft: 3 }}>h</span>
+                            </div>
+                            <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                              across {orderedTasks.filter((t) => t.depth === 0).length} task(s)
+                            </div>
                           </div>
-                        ) : (
-                          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>no schedule yet</span>
+              
+                          <div style={{ flex: 1, minWidth: 340 }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 12 }}>Effort Comparison (by Duration)</div>
+                            {MODES.map((m, i) => {
+                              const s = summaries[m];
+                              // Phase 12 (2026-08-21): 3rd mode added -- reuse the same
+                              // blue/green/yellow identity everywhere else on the page.
+                              const color =
+                                m === "full_capacity" ? UTIL_PREVIEW_COLOR.full_capacity : m === "standard" ? UTIL_PREVIEW_COLOR.standard_suggested : UTIL_PREVIEW_COLOR.standard_committed;
+                              const rate = m === "full_capacity" ? "7.5 h/day" : null;
+                              const maxDuration = Math.max(summaries.full_capacity.durationDays, summaries.manual.durationDays, 1);
+                              const widthPct = s.durationDays ? Math.max(18, Math.round((s.durationDays / maxDuration) * 100)) : 0;
+                              // Sandra, 2026-07-29 follow-up: label moved ABOVE the bar
+                              // (was to its left) per her reference mockup -- same
+                              // colors, just the layout direction changed.
+                              return (
+                                <div key={m} style={{ marginBottom: i === MODES.length - 1 ? 0 : 14 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color, marginBottom: 6 }}>
+                                    {MODE_LABEL[m]}{rate ? ` (${rate})` : ""}
+                                  </div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                                    <div style={{ flex: 1, minWidth: 100 }}>
+                                      {s.durationDays ? (
+                                        <div
+                                          style={{
+                                            width: `${widthPct}%`,
+                                            minWidth: 90,
+                                            background: color,
+                                            color: "#fff",
+                                            fontSize: 11,
+                                            fontWeight: 600,
+                                            textAlign: "center",
+                                            padding: "6px 8px",
+                                            borderRadius: 4,
+                                            whiteSpace: "nowrap",
+                                          }}
+                                        >
+                                          {s.durationDays} working day{s.durationDays === 1 ? "" : "s"}
+                                        </div>
+                                      ) : (
+                                        <span style={{ fontSize: 11.5, color: "var(--muted)" }}>no schedule yet</span>
+                                      )}
+                                    </div>
+                                    <div style={{ width: 85, fontSize: 11.5, flexShrink: 0 }}>
+                                      <div style={{ fontWeight: 600, color: "var(--muted)", fontSize: 10 }}>Start</div>
+                                      <div>{formatDate(s.start)}</div>
+                                    </div>
+                                    <div style={{ width: 85, fontSize: 11.5, flexShrink: 0 }}>
+                                      <div style={{ fontWeight: 600, color: "var(--muted)", fontSize: 10 }}>End</div>
+                                      <div>{formatDate(s.end)}</div>
+                                    </div>
+                                    {!s.complete && s.end && (
+                                      <div style={{ fontSize: 11.5, color: "var(--muted)", flexShrink: 0 }}>incomplete</div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {/* Sandra, 2026-07-29 follow-up: removed the "Total Effort
+                                reflects the current plan..." helper line entirely. */}
+                          </div>
+                        </div>
+                        {project.wbs_status !== "draft" && (
+                          <CompareWithBaselinePanel projectId={project.id} liveTasks={buildTaskSnapshotPayload()} />
                         )}
-                      </div>
-                      <div style={{ width: 85, fontSize: 11.5, flexShrink: 0 }}>
-                        <div style={{ fontWeight: 600, color: "var(--muted)", fontSize: 10 }}>Start</div>
-                        <div>{formatDate(s.start)}</div>
-                      </div>
-                      <div style={{ width: 85, fontSize: 11.5, flexShrink: 0 }}>
-                        <div style={{ fontWeight: 600, color: "var(--muted)", fontSize: 10 }}>End</div>
-                        <div>{formatDate(s.end)}</div>
-                      </div>
-                      {!s.complete && s.end && (
-                        <div style={{ fontSize: 11.5, color: "var(--muted)", flexShrink: 0 }}>incomplete</div>
+                      {project.wbs_status !== "draft" && (
+                        <div style={{ width: 260, flexShrink: 0 }}>
+                          <div className="card" style={{ padding: 14 }}>
+                            {/* Sandra, 2026-07-29 follow-up: plain icon+label+value rows,
+                                no per-row card/box (per her reference mockup). */}
+                            {latestRevisionChanges.length > 0 && (
+                              <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
+                                <strong style={{ fontSize: 12.5, color: "var(--navy)" }}>Revision Summary</strong>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8, fontSize: 11.5 }}>
+                                  {[
+                                    { icon: <Clock size={13} />, label: "Total effort change", value: `${revisionSummary.totalAddedHours > 0 ? "+" : ""}${revisionSummary.totalAddedHours}h` },
+                                    { icon: <ListPlus size={13} />, label: "Total tasks added", value: revisionSummary.tasksAdded },
+                                    { icon: <Trash2 size={13} />, label: "Total tasks removed", value: revisionSummary.tasksRemoved },
+                                    { icon: <TrendingUp size={13} />, label: "Estimates increased", value: revisionSummary.hoursIncreased },
+                                    { icon: <TrendingDown size={13} />, label: "Estimates decreased", value: revisionSummary.hoursDecreased },
+                                    { icon: <Calendar size={13} />, label: "Dates changed", value: revisionSummary.datesChanged },
+                                    { icon: <Link2 size={13} />, label: "Dependencies changed", value: revisionSummary.dependenciesChanged },
+                                    { icon: <User size={13} />, label: "Assignees changed", value: revisionSummary.assigneesChanged },
+                                  ].map((row) => (
+                                    <div key={row.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                      <span style={{ color: "var(--muted)", flexShrink: 0, display: "inline-flex" }}>{row.icon}</span>
+                                      <span style={{ flex: 1, color: "var(--text-secondary)" }}>{row.label}</span>
+                                      <strong>{row.value}</strong>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {/* Round (2026-08-26): the old "Revision History" panel here
+                                read from project_revisions/project_revision_changes --
+                                the Phase 6 Start Revision/Apply Revision flow, which had
+                                gone dead when re-baselining was disabled (see
+                                project_capaciq_rebaseline_disabled memory) and always
+                                showed "No changes made yet" even on projects with real,
+                                visible changes. It was replaced with a "Start Date
+                                Change Requests" log; that per-task request/approval
+                                feature was itself removed 2026-08-27 (Sandra: start
+                                dates only change via Re-baseline now), so this whole
+                                panel is gone too. Phase 24 (2026-08-26) revived
+                                re-baselining, so project_revision_changes is written to
+                                again on each approved re-baseline (see
+                                decide_baseline_request) -- the Revision Summary panel
+                                above (latestRevisionChanges) and the dedicated Audit
+                                Trail page below are the current source of history. */}
+                            <button
+                              className="btn-secondary"
+                              style={{ width: "100%", marginTop: 12 }}
+                              onClick={() => navigate(`/projects/${project.id}/audit-trail`)}
+                            >
+                              View Full Audit Trail
+                            </button>
+                          </div>
+                        </div>
                       )}
-                    </div>
-                  </div>
-                );
-              })}
-              {/* Sandra, 2026-07-29 follow-up: removed the "Total Effort
-                  reflects the current plan..." helper line entirely. */}
-            </div>
-          </div>
-          {project.wbs_status !== "draft" && (
-            <CompareWithBaselinePanel projectId={project.id} liveTasks={buildTaskSnapshotPayload()} />
-          )}
-        {project.wbs_status !== "draft" && (
-          <div style={{ width: 260, flexShrink: 0 }}>
-            <div className="card" style={{ padding: 14 }}>
-              {/* Sandra, 2026-07-29 follow-up: plain icon+label+value rows,
-                  no per-row card/box (per her reference mockup). */}
-              {latestRevisionChanges.length > 0 && (
-                <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
-                  <strong style={{ fontSize: 12.5, color: "var(--navy)" }}>Revision Summary</strong>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8, fontSize: 11.5 }}>
-                    {[
-                      { icon: <Clock size={13} />, label: "Total effort change", value: `${revisionSummary.totalAddedHours > 0 ? "+" : ""}${revisionSummary.totalAddedHours}h` },
-                      { icon: <ListPlus size={13} />, label: "Total tasks added", value: revisionSummary.tasksAdded },
-                      { icon: <Trash2 size={13} />, label: "Total tasks removed", value: revisionSummary.tasksRemoved },
-                      { icon: <TrendingUp size={13} />, label: "Estimates increased", value: revisionSummary.hoursIncreased },
-                      { icon: <TrendingDown size={13} />, label: "Estimates decreased", value: revisionSummary.hoursDecreased },
-                      { icon: <Calendar size={13} />, label: "Dates changed", value: revisionSummary.datesChanged },
-                      { icon: <Link2 size={13} />, label: "Dependencies changed", value: revisionSummary.dependenciesChanged },
-                      { icon: <User size={13} />, label: "Assignees changed", value: revisionSummary.assigneesChanged },
-                    ].map((row) => (
-                      <div key={row.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ color: "var(--muted)", flexShrink: 0, display: "inline-flex" }}>{row.icon}</span>
-                        <span style={{ flex: 1, color: "var(--text-secondary)" }}>{row.label}</span>
-                        <strong>{row.value}</strong>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {/* Round (2026-08-26): the old "Revision History" panel here
-                  read from project_revisions/project_revision_changes --
-                  the Phase 6 Start Revision/Apply Revision flow, which had
-                  gone dead when re-baselining was disabled (see
-                  project_capaciq_rebaseline_disabled memory) and always
-                  showed "No changes made yet" even on projects with real,
-                  visible changes. It was replaced with a "Start Date
-                  Change Requests" log; that per-task request/approval
-                  feature was itself removed 2026-08-27 (Sandra: start
-                  dates only change via Re-baseline now), so this whole
-                  panel is gone too. Phase 24 (2026-08-26) revived
-                  re-baselining, so project_revision_changes is written to
-                  again on each approved re-baseline (see
-                  decide_baseline_request) -- the Revision Summary panel
-                  above (latestRevisionChanges) and the dedicated Audit
-                  Trail page below are the current source of history. */}
-              <button
-                className="btn-secondary"
-                style={{ width: "100%", marginTop: 12 }}
-                onClick={() => navigate(`/projects/${project.id}/audit-trail`)}
-              >
-                View Full Audit Trail
-              </button>
-            </div>
-          </div>
-        )}
-          </div>
-
-          {/* 2026-09-21 (Sandra: "when a project is closed, instead of
-              having a separate page, can we all be routed to the WBS
-              page ... [Baseline/Final/Variance + Automated Insight]
-              followed by [Lessons Learned + Tasks added/grown]") --
-              BaselineReport.tsx's core content, lifted into a shared
-              component (ClosedProjectReportPanel) and rendered right
-              here instead of on its own /baseline route. */}
-          {project.wbs_status === "closed" && (
-            <ClosedProjectReportPanel
-              projectId={project.id}
-              actualCloseDate={project.actual_close_date}
-              lessonsLearnedWorked={project.lessons_learned_worked}
-              lessonsLearnedNotWorked={project.lessons_learned_not_worked}
-            />
+                        </div>
+              
+                        {/* 2026-09-21 (Sandra: "when a project is closed, instead of
+                            having a separate page, can we all be routed to the WBS
+                            page ... [Baseline/Final/Variance + Automated Insight]
+                            followed by [Lessons Learned + Tasks added/grown]") --
+                            BaselineReport.tsx's core content, lifted into a shared
+                            component (ClosedProjectReportPanel) and rendered right
+                            here instead of on its own /baseline route. */}
+                        {project.wbs_status === "closed" && (
+                          <ClosedProjectReportPanel
+                            projectId={project.id}
+                            actualCloseDate={project.actual_close_date}
+                            lessonsLearnedWorked={project.lessons_learned_worked}
+                            lessonsLearnedNotWorked={project.lessons_learned_not_worked}
+                          />
+                        )}
+              
+              
+            </>
           )}
 
           {/* Phase 10 (2026-08-21): redesigned per Sandra's spec -- all 4
@@ -5314,19 +5349,6 @@ export default function WbsPlanning() {
               lines of nested scenario rows/tables below) is riskier than
               this one-line style change; behavior is identical either
               way for a closed project. */}
-          {project.wbs_status !== "closed" && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: showAvailableBandwidth ? 8 : 12 }}>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 11.5, fontWeight: 600, color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}>
-                <input
-                  type="checkbox"
-                  checked={showAvailableBandwidth}
-                  onChange={(e) => setShowAvailableBandwidth(e.target.checked)}
-                  style={{ width: 14, height: 14, accentColor: "var(--accent)", cursor: "pointer" }}
-                />
-                Show available bandwidth snapshot
-              </label>
-            </div>
-          )}
           <div className="card" style={{ padding: 14, marginBottom: 12, display: project.wbs_status === "closed" || !showAvailableBandwidth ? "none" : undefined }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
               <strong style={{ fontSize: 12.5, color: "var(--navy)" }}>Available bandwidth</strong>
@@ -5814,6 +5836,33 @@ export default function WbsPlanning() {
           )}
           <div style={{ display: project.wbs_status === "closed" && !wbsDetailsExpanded ? "none" : undefined }}>
 
+          <div className="card" style={{ padding: 0, marginBottom: 10, overflow: "hidden" }}>
+            <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #e5edf6", flexWrap: "wrap" }}>
+              <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>2</span>
+              <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Work Breakdown Structure</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Break the project into tasks and define the effort, assignee, and schedule.</div>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={refreshDates}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                >
+                  <RefreshCw size={13} /> Refresh Dates
+                </button>
+                <label className="btn-secondary" style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}>
+                  <input type="checkbox" checked={showAvailableBandwidth} onChange={(e) => setShowAvailableBandwidth(e.target.checked)} style={{ display: "none" }} />
+                  View {showAvailableBandwidth ? "✓" : "⌄"}
+                </label>
+                {canEditWbs && (
+                  <button type="button" className="btn-primary" onClick={addTopLevelTask} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Plus size={13} /> Add Task
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Sandra, 2026-07-29: "move the refresh dates button a bit
               lower, aligned with the legends" -- was its own right-
               aligned row above the legend; now shares one row with the
@@ -5841,25 +5890,7 @@ export default function WbsPlanning() {
             ) : (
               <span />
             )}
-            <button
-              onClick={refreshDates}
-              title="Recompute Start dates for tasks that are still on auto-pilot (no dependency set, not manually overridden) based on the current row order -- useful after dragging a task into a new position."
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 12,
-                padding: "5px 10px",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm, 6px)",
-                background: "var(--surface)",
-                color: "var(--text)",
-                cursor: "pointer",
-                flexShrink: 0,
-              }}
-            >
-              <RefreshCw size={13} /> Refresh dates
-            </button>
+            <span />
           </div>
           <div className="card" style={{ padding: 0, overflowX: "auto", overflowY: "visible" }}>
             <table
@@ -5927,8 +5958,29 @@ export default function WbsPlanning() {
               <tbody>
                 {orderedTasks.length === 0 && (
                   <tr>
-                    <td colSpan={17} style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>
-                      No tasks in this project yet.
+                    <td colSpan={17} style={{ padding: "32px 20px 34px", background: "#fff" }}>
+                      <div style={{ maxWidth: 720, margin: "0 auto", display: "grid", gridTemplateColumns: "110px minmax(0,1fr)", gap: 22, alignItems: "center" }}>
+                        <div style={{ width: 96, height: 96, borderRadius: "50%", background: "#eef6ff", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+                          <div style={{ width: 54, height: 62, border: "1px solid #c8daf0", borderRadius: 8, background: "#fff", padding: "11px 9px", display: "grid", gap: 7 }}>
+                            {[0,1,2].map((n) => <div key={n} style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#d8e9fb" }} /><span style={{ height: 5, flex: 1, borderRadius: 3, background: "#dce6f2" }} /></div>)}
+                          </div>
+                          <span style={{ position: "absolute", right: 8, bottom: 8, width: 30, height: 30, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={17} /></span>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: "#17324f" }}>Start building your work plan</div>
+                          <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5, marginTop: 5 }}>
+                            Create the first task and define who owns it, how much effort is expected, and when it starts. Once you add tasks, the schedule and project insights will appear here.
+                          </div>
+                          {canEditWbs && (
+                            <button type="button" className="btn-primary" onClick={addTopLevelTask} style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <Plus size={13} /> Add first task
+                            </button>
+                          )}
+                          <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 7, background: "#eef7ff", color: "#53708e", fontSize: 10.5 }}>
+                            <strong style={{ color: "#234f7d" }}>Tip:</strong> Add scoped hours and a start date to generate the project timeline and effort forecast.
+                          </div>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -6326,6 +6378,39 @@ export default function WbsPlanning() {
             </table>
           </div>
 
+          {orderedTasks.length === 0 && (
+            <>
+              <section className="card" style={{ padding: 14, marginTop: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>3</span>
+                  <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Schedule (Timeline)</div>
+                  <div style={{ fontSize: 10.5, color: "var(--muted)" }}>The project timeline will appear here once tasks have been added with dates and effort.</div>
+                </div>
+                <div style={{ border: "1px solid #dce7f3", borderRadius: 8, padding: "16px 18px", display: "flex", alignItems: "center", gap: 12, background: "#fbfdff" }}>
+                  <Calendar size={22} style={{ color: "#7892ad" }} />
+                  <div><div style={{ fontSize: 11.5, fontWeight: 700, color: "#17324f" }}>No schedule yet</div><div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Add at least one task with a start date and scoped hours to see the project timeline.</div></div>
+                </div>
+              </section>
+              <section className="card" style={{ padding: 14, marginTop: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>4</span>
+                  <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Project Insights</div>
+                  <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Effort comparison, variance, and capacity insights will appear once the project has tasks and schedules.</div>
+                </div>
+                <div style={{ border: "1px solid #dce7f3", borderRadius: 8, padding: "16px 18px", background: "#fbfdff" }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: "#17324f" }}>No data yet</div>
+                  <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Add tasks with scoped hours to see effort comparison, variance, and capacity insights.</div>
+                </div>
+              </section>
+              <section className="card" style={{ padding: "10px 14px", marginTop: 14, display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#9fb5cf", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>5</span>
+                <div style={{ fontSize: 13, fontWeight: 750, color: "#17324f" }}>Project Closure</div>
+                <span style={{ padding: "3px 8px", borderRadius: 999, background: "#edf3fa", color: "#607892", fontSize: 10, fontWeight: 700 }}>Hidden until closing</span>
+                <div style={{ fontSize: 10.5, color: "var(--muted)" }}>This section appears when you initiate a Project Closure request.</div>
+              </section>
+            </>
+          )}
+
           {/* Timeline (Gantt) -- all 3 scenarios stacked (2026-07-28:
               previously just whichever mode was toggled active; Sandra
               asked for all side by side since the scoping table above
@@ -6341,7 +6426,7 @@ export default function WbsPlanning() {
           {MODES.filter((mode) => visibleScenarios.has(MODE_TO_SCENARIO[mode])).map((mode) => {
             const { startDate: ganttStartDate, days: ganttDays, widthPx: ganttWidthPx } = ganttMetricsFor(chainByMode[mode]);
             return (
-              <div key={mode} className="card" style={{ padding: 14, marginTop: 12 }}>
+              <div key={mode} className="card" style={{ padding: 14, marginTop: 12, display: orderedTasks.length === 0 ? "none" : undefined }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                   <strong style={{ fontSize: 12.5, color: "var(--navy)" }}>Timeline (Gantt) — {MODE_LABEL[mode]}</strong>
                 </div>
