@@ -1059,7 +1059,7 @@ export default function Projects() {
   const wantsMyProjectsView = searchParams.get("owner") === "me";
   const wantsMyTasksView = searchParams.get("assignee") === "me";
   const [pageSection, setPageSection] = useState<"projects" | "tasks">(wantsMyTasksView ? "tasks" : "projects");
-  const [projectSystemView, setProjectSystemView] = useState<"all" | "active" | "attention" | "mine" | "team">("all");
+  const [projectSystemView, setProjectSystemView] = useState<"all" | "active" | "attention" | "owned" | "mine" | "team">("all");
   const [usingSystemProjectView, setUsingSystemProjectView] = useState(true);
   const [renamingProjectView, setRenamingProjectView] = useState(false);
   const [projectViewNameDraft, setProjectViewNameDraft] = useState("");
@@ -1722,10 +1722,10 @@ export default function Projects() {
   useEffect(() => {
     if (initialProjectScopeApplied.current || !me?.id || chainPeople.length === 0) return;
     initialProjectScopeApplied.current = true;
-    if (previewAsIndividual) setProjectSystemView("mine");
+    if (previewAsIndividual) setProjectSystemView("owned");
     else if (me.access_level === "full") setProjectSystemView("all");
     else if (directReportIds.size > 0) setProjectSystemView("team");
-    else setProjectSystemView("mine");
+    else setProjectSystemView("owned");
   }, [me?.id, me?.access_level, chainPeople.length, directReportIds.size, previewAsIndividual]);
 
   const canCreateProject = true;
@@ -2377,7 +2377,8 @@ export default function Projects() {
   const projectDisplaySorts = usingSystemProjectView ? SYSTEM_PROJECT_SORTS : projectViews.activeView.sorts;
 
   function systemViewLabel(): string {
-    if (projectSystemView === "mine") return "My Projects";
+    if (projectSystemView === "owned") return "My Owned Projects";
+    if (projectSystemView === "mine") return "My Projects & Contributions";
     if (projectSystemView === "team") return "My Team Projects";
     if (projectSystemView === "active") return "Active Projects";
     if (projectSystemView === "attention") return "Needs Attention";
@@ -2476,6 +2477,7 @@ export default function Projects() {
 
   const systemFilteredProjects = useMemo(() => {
     if (projectSystemView === "all") return filteredProjects;
+    if (projectSystemView === "owned") return filteredProjects.filter((p) => myProjectRole(p) === "Owner");
     if (projectSystemView === "mine") return filteredProjects.filter((p) => myProjectRole(p) !== null);
     if (projectSystemView === "team") return filteredProjects.filter((p) => teamProjectRole(p) !== null);
     if (projectSystemView === "active") {
@@ -5481,7 +5483,7 @@ export default function Projects() {
                 onChange={(e) => {
                   const value = e.target.value;
                   if (value.startsWith("system:")) {
-                    const scope = value.slice(7) as "all" | "active" | "attention" | "mine" | "team";
+                    const scope = value.slice(7) as "all" | "active" | "attention" | "owned" | "mine" | "team";
                     setUsingSystemProjectView(true);
                     setProjectSystemView(scope);
                     if (projectViews.views.some((v) => v.id === "default")) projectViews.setActiveViewId("default");
@@ -5498,7 +5500,8 @@ export default function Projects() {
                   <option value="system:all">All Projects</option>
                   <option value="system:active">Active Projects</option>
                   <option value="system:attention">Needs Attention</option>
-                  <option value="system:mine">My Projects</option>
+                  <option value="system:owned">My Owned Projects</option>
+                  <option value="system:mine">My Projects & Contributions</option>
                   {showTeamProjectScope && <option value="system:team">My Team Projects</option>}
                 </optgroup>
                 {projectViews.views.filter((v) => v.id !== "default").length > 0 && (
