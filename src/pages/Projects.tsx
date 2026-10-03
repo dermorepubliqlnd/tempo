@@ -28,7 +28,7 @@ import ProgressCell, { ProgressDisplayToggle } from "../components/ProgressCell"
 import SymbolTextBadge, { SymbolTextDisplayToggle } from "../components/SymbolTextBadge";
 import { CancelTaskDialog } from "../components/CancelTaskDialog";
 import { PROJECT_PRIORITY_SYMBOLS, PROJECT_EFFORT_LEVEL_SYMBOLS } from "../lib/notionOptions";
-import type { ColumnDef, GroupOption, SortOption } from "../lib/tableTypes";
+import type { ColumnDef, GroupOption, SortOption, TableView } from "../lib/tableTypes";
 import { sortRows, sortRowsHierarchical, visibleOrderedColumns, resolveFilterPersonIds, GROUP_EXCLUDE } from "../lib/tableTypes";
 import { formatDate } from "../lib/formatDate";
 import { WBS_STATUS_META, wbsStatusMetaFor, type WbsStatus } from "../lib/wbsStatus";
@@ -2218,7 +2218,7 @@ export default function Projects() {
         confirmLabel: "Clear sort & reorder",
       });
       if (!ok) return;
-      projectViews.updateActiveView({ sorts: [] });
+      updateProjectView({ sorts: [] });
     }
     const newVal = reorderedSortValue(projects.map((p) => ({ id: p.id, sort_order: p.sort_order })), draggedId, targetId);
     if (newVal == null) return;
@@ -2356,6 +2356,62 @@ export default function Projects() {
     progressDisplay: "bar",
   });
 
+  const SYSTEM_PROJECT_SORTS = [{ key: "project_number", direction: "asc" as const }];
+  const projectDisplayView: TableView = usingSystemProjectView
+    ? {
+        ...projectViews.activeView,
+        viewType: "table",
+        groupBy: null,
+        groupBy2: null,
+        hiddenGroups: [],
+        filterPersonIds: [],
+        filterStatuses: [],
+        sorts: SYSTEM_PROJECT_SORTS,
+        columnOrder: PROJECT_COLUMN_ORDER,
+      }
+    : projectViews.activeView;
+
+  const projectDisplaySorts = usingSystemProjectView ? SYSTEM_PROJECT_SORTS : projectViews.activeView.sorts;
+
+  function systemViewLabel(): string {
+    if (projectSystemView === "mine") return "My Projects";
+    if (projectSystemView === "team") return "My Team Projects";
+    if (projectSystemView === "active") return "Active Projects";
+    if (projectSystemView === "attention") return "Needs Attention";
+    return "All Projects";
+  }
+
+  async function updateProjectView(patch: Partial<TableView>) {
+    if (!usingSystemProjectView) {
+      projectViews.updateActiveView(patch);
+      return;
+    }
+    const ok = await confirm({
+      title: "Save this as a personal view?",
+      message: `${systemViewLabel()} is a system-defined view. To keep system defaults consistent for everyone, customizations such as layout, filters, sorting, grouping, columns, or view type are saved as your own personal view instead.`,
+      confirmLabel: "Create personal view",
+    });
+    if (!ok) return;
+    const baseName = `${systemViewLabel()} - My View`;
+    const existing = projectViews.views.filter((v) => v.name === baseName || v.name.startsWith(baseName + " ")).length;
+    const nextName = existing ? `${baseName} ${existing + 1}` : baseName;
+    projectViews.createView(
+      nextName,
+      (patch.viewType ?? projectDisplayView.viewType) as "table" | "board" | "timeline" | "calendar",
+      patch.groupBy ?? projectDisplayView.groupBy ?? undefined,
+      patch.hiddenColumns ?? projectDisplayView.hiddenColumns,
+      {
+        ...projectDisplayView,
+        ...patch,
+        id: undefined as never,
+        name: undefined as never,
+      } as Partial<TableView>
+    );
+    setUsingSystemProjectView(false);
+    setProjectViewNameDraft(nextName);
+    setRenamingProjectView(true);
+  }
+
   // Row-level Filter applied upstream of sort/group/render so it covers
   // Table, Board, and Timeline alike -- the person filter reuses the same
   // owner_id identity check as canEditProject/isProjectOwner above, just
@@ -2367,8 +2423,9 @@ export default function Projects() {
   // "no filter", matching hiddenColumns/hiddenGroups' own empty-means-
   // nothing-hidden convention.
   const filteredProjects = useMemo(() => {
-    const view = projectViews.activeView;
     let out = projects;
+    if (usingSystemProjectView) return out;
+    const view = projectViews.activeView;
     const personIds = resolveFilterPersonIds(view);
     if (personIds.length > 0) {
       out = out.filter((p) => personIds.some((id) => (id === "me" ? p.owner_id === me?.id : p.owner_id === id)));
@@ -2378,7 +2435,7 @@ export default function Projects() {
       out = out.filter((p) => statuses.includes(projectStatusOf(p) ?? ""));
     }
     return out;
-  }, [projects, projectViews.activeView, me?.id]);
+  }, [projects, projectViews.activeView, me?.id, usingSystemProjectView]);
 
   const projectPortfolioMeta = useMemo(() => {
     const meta = projects.map((p) => {
@@ -2443,6 +2500,21 @@ export default function Projects() {
     const owned = involved.filter((p) => myProjectRole(p) === "Owner").length;
     return { total: involved.length, owned, contributing: involved.length - owned };
   }, [filteredProjects, projectPerspectivePersonId, tasks]);
+
+  const personalActiveProjectMeta = useMemo(() => {
+    const involved = projects.filter((p) => myProjectRole(p) !== null);
+    const active = involved.filter((p) => {
+      const status = projectStatusOf(p);
+      return status !== "Completed" && status !== "Cancelled";
+    });
+    const owned = active.filter((p) => myProjectRole(p) === "Owner").length;
+    const contributing = active.filter((p) => myProjectRole(p) === "Contributor").length;
+    const needsAttention = active.filter((p) => {
+      const health = healthOf(p, tasks, holidayDates);
+      return health.tone === "danger" || health.tone === "warning" || health.label === "Schedule review";
+    }).length;
+    return { owned, contributing, total: active.length, needsAttention };
+  }, [projects, projectPerspectivePersonId, tasks, holidayDates]);
 
   const teamProjectScopeCounts = useMemo(() => {
     const involved = filteredProjects.filter((p) => teamProjectRole(p) !== null);
@@ -2614,7 +2686,7 @@ export default function Projects() {
             Priority
             <SymbolTextDisplayToggle
               value={projectViews.activeView.priorityDisplay ?? "symbolText"}
-              onChange={(v) => projectViews.updateActiveView({ priorityDisplay: v })}
+              onChange={(v) => updateProjectView({ priorityDisplay: v })}
             />
           </span>
         ),
@@ -2747,7 +2819,7 @@ export default function Projects() {
             Actual Progress
             <ProgressDisplayToggle
               value={projectViews.activeView.progressDisplay ?? "bar"}
-              onChange={(v) => projectViews.updateActiveView({ progressDisplay: v })}
+              onChange={(v) => updateProjectView({ progressDisplay: v })}
             />
           </span>
         ),
@@ -2939,7 +3011,7 @@ export default function Projects() {
             Complexity
             <SymbolTextDisplayToggle
               value={projectViews.activeView.complexityDisplay ?? "symbolText"}
-              onChange={(v) => projectViews.updateActiveView({ complexityDisplay: v })}
+              onChange={(v) => updateProjectView({ complexityDisplay: v })}
             />
           </span>
         ),
@@ -5420,7 +5492,7 @@ export default function Projects() {
                 value={projectViews.activeView.viewType}
                 onChange={(e) => {
                   const viewType = e.target.value as "table" | "board" | "timeline" | "calendar";
-                  projectViews.updateActiveView({
+                  updateProjectView({
                     viewType,
                     ...(viewType === "board" && !projectViews.activeView.groupBy ? { groupBy: "phase" } : {}),
                     ...(viewType === "timeline" ? { hiddenColumns: PROJECT_TIMELINE_DEFAULT_HIDDEN_COLUMNS } : {}),
@@ -5531,37 +5603,37 @@ export default function Projects() {
               rows={systemFilteredProjects}
               columns={projectColumns}
               hiddenColumns={projectViews.activeView.hiddenColumns}
-              onHiddenColumnsChange={(hiddenColumns) => projectViews.updateActiveView({ hiddenColumns })}
+              onHiddenColumnsChange={(hiddenColumns) => updateProjectView({ hiddenColumns })}
               columnOrder={projectViews.activeView.columnOrder}
-              onColumnOrderChange={(columnOrder) => projectViews.updateActiveView({ columnOrder })}
+              onColumnOrderChange={(columnOrder) => updateProjectView({ columnOrder })}
               groupOptions={projectGroupModeOptions}
               groupBy={projectResolvedGroupBy}
               groupBy2={projectResolvedGroupBy2}
               hiddenGroups={projectViews.activeView.hiddenGroups}
-              onGroupByChange={(groupBy) => projectViews.updateActiveView({ groupBy, hiddenGroups: [] })}
-              onGroupBy2Change={(groupBy2) => projectViews.updateActiveView({ groupBy2 })}
-              onHiddenGroupsChange={(hiddenGroups) => projectViews.updateActiveView({ hiddenGroups })}
+              onGroupByChange={(groupBy) => updateProjectView({ groupBy, hiddenGroups: [] })}
+              onGroupBy2Change={(groupBy2) => updateProjectView({ groupBy2 })}
+              onHiddenGroupsChange={(hiddenGroups) => updateProjectView({ hiddenGroups })}
               hideEmptyGroups={projectViews.activeView.hideEmptyGroups}
-              onHideEmptyGroupsChange={(hideEmptyGroups) => projectViews.updateActiveView({ hideEmptyGroups })}
+              onHideEmptyGroupsChange={(hideEmptyGroups) => updateProjectView({ hideEmptyGroups })}
               showCount={projectViews.activeView.showCount}
-              onShowCountChange={(showCount) => projectViews.updateActiveView({ showCount })}
+              onShowCountChange={(showCount) => updateProjectView({ showCount })}
               sortOptions={projectSortOptions}
               sorts={projectViews.activeView.sorts}
-              onSortsChange={(sorts) => projectViews.updateActiveView({ sorts })}
+              onSortsChange={(sorts) => updateProjectView({ sorts })}
               groupMode={projectGroupMode}
               people={people}
               filterPersonIds={resolveFilterPersonIds(projectViews.activeView)}
-              onFilterPersonIdsChange={(filterPersonIds) => projectViews.updateActiveView({ filterPersonIds })}
+              onFilterPersonIdsChange={(filterPersonIds) => updateProjectView({ filterPersonIds })}
               statusOptions={PROJECT_STATUS_OPTIONS}
               filterStatuses={projectViews.activeView.filterStatuses ?? []}
-              onFilterStatusesChange={(filterStatuses) => projectViews.updateActiveView({ filterStatuses })}
+              onFilterStatusesChange={(filterStatuses) => updateProjectView({ filterStatuses })}
               propertyLockInfo={projectTimelinePropertyLockInfo}
               hideGroupBy={projectViews.activeView.viewType === "calendar"}
               boardLabelToggle={
                 projectViews.activeView.viewType === "board"
                   ? {
                       checked: projectViews.activeView.boardShowPropertyLabels ?? true,
-                      onChange: (boardShowPropertyLabels) => projectViews.updateActiveView({ boardShowPropertyLabels }),
+                      onChange: (boardShowPropertyLabels) => updateProjectView({ boardShowPropertyLabels }),
                     }
                   : undefined
               }
@@ -5591,9 +5663,9 @@ export default function Projects() {
           <div className="timeline-controls-row">
             <TimelineControls
               scale={projectViews.activeView.timelineScale ?? "month"}
-              onScaleChange={(timelineScale) => projectViews.updateActiveView({ timelineScale })}
+              onScaleChange={(timelineScale) => updateProjectView({ timelineScale })}
               dateMode={projectViews.activeView.timelineDateMode ?? "range"}
-              onDateModeChange={(timelineDateMode) => projectViews.updateActiveView({ timelineDateMode })}
+              onDateModeChange={(timelineDateMode) => updateProjectView({ timelineDateMode })}
             />
           </div>
         )}
@@ -5601,18 +5673,18 @@ export default function Projects() {
           groupOptions={projectGroupModeOptions}
           groupBy={projectResolvedGroupBy}
           groupBy2={projectResolvedGroupBy2}
-          onGroupBy2Change={(groupBy2) => projectViews.updateActiveView({ groupBy2 })}
+          onGroupBy2Change={(groupBy2) => updateProjectView({ groupBy2 })}
           hiddenGroups={projectViews.activeView.hiddenGroups}
-          onGroupByChange={(groupBy) => projectViews.updateActiveView({ groupBy, hiddenGroups: [] })}
-          onHiddenGroupsChange={(hiddenGroups) => projectViews.updateActiveView({ hiddenGroups })}
+          onGroupByChange={(groupBy) => updateProjectView({ groupBy, hiddenGroups: [] })}
+          onHiddenGroupsChange={(hiddenGroups) => updateProjectView({ hiddenGroups })}
           sortOptions={projectSortOptions}
           sorts={projectViews.activeView.sorts}
-          onSortsChange={(sorts) => projectViews.updateActiveView({ sorts })}
+          onSortsChange={(sorts) => updateProjectView({ sorts })}
           groupMode={projectGroupMode}
           people={people}
           filterPersonIds={resolveFilterPersonIds(projectViews.activeView)}
           filterStatuses={projectViews.activeView.filterStatuses ?? []}
-          onClearFilter={() => projectViews.updateActiveView({ filterPersonIds: [], filterStatuses: [] })}
+          onClearFilter={() => updateProjectView({ filterPersonIds: [], filterStatuses: [] })}
           containerRef={setProjectPillsRowEl}
         />
         {projectViews.activeView.viewType !== "board" && projectViews.activeView.viewType !== "timeline" && selectedProjectIds.length > 0 && (
@@ -5747,7 +5819,7 @@ export default function Projects() {
               getGroupTone={projectTimelineGroupOption?.getTone}
               hiddenGroups={projectViews.activeView.hiddenGroups}
               labelWidth={projectViews.activeView.timelineLabelWidth ?? 460}
-              onLabelWidthChange={(timelineLabelWidth) => projectViews.updateActiveView({ timelineLabelWidth })}
+              onLabelWidthChange={(timelineLabelWidth) => updateProjectView({ timelineLabelWidth })}
             />
             {canCreateProject && (
               <div className="add-row-trigger" style={{ margin: "0 12px 12px" }} onClick={createBlankProject}>
@@ -5768,7 +5840,7 @@ export default function Projects() {
               getTooltip={(p) => `${p.name} · ${formatDate(p.start_date)} → ${formatDate(p.end_date)}`}
               emptyLabel="No projects yet. Add one below."
               dateMode={projectViews.activeView.timelineDateMode ?? "range"}
-              onDateModeChange={(timelineDateMode) => projectViews.updateActiveView({ timelineDateMode })}
+              onDateModeChange={(timelineDateMode) => updateProjectView({ timelineDateMode })}
               propertyColumns={projectCalendarPropertyColumns}
               titleBadge={(p) => (
                 <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
