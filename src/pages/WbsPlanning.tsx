@@ -6714,7 +6714,7 @@ export default function WbsPlanning() {
                                 editable={rowEditable}
                             searchable
                                 allowEmpty
-                                emptyLabel="Pick work type"
+                                emptyLabel="—"
                                 options={pickable.map((w) => w.name)}
                                 onCommit={(v) => {
                                   const match = pickable.find((w) => w.name === v);
@@ -6761,9 +6761,28 @@ export default function WbsPlanning() {
                           const needsWorkTypeFirst = !t.work_type_id;
                           if (needsWorkTypeFirst) {
                             return (
-                              <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="Pick a Work Type first -- Output Type options depend on it.">
-                                Pick Work Type first
-                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (rowEditable) {
+                                    void alert("Select a Work Type first. Output Type options depend on the selected Work Type.");
+                                  }
+                                }}
+                                disabled={!rowEditable}
+                                title={rowEditable ? "Select a Work Type first to choose an Output Type." : undefined}
+                                style={{
+                                  width: "100%",
+                                  padding: "3px 4px",
+                                  border: "none",
+                                  background: "transparent",
+                                  color: "var(--muted)",
+                                  textAlign: "left",
+                                  fontSize: 11.5,
+                                  cursor: rowEditable ? "pointer" : "default",
+                                }}
+                              >
+                                —
+                              </button>
                             );
                           }
                           return (
@@ -6772,7 +6791,7 @@ export default function WbsPlanning() {
                               editable={rowEditable}
                             searchable
                               allowEmpty
-                              emptyLabel="Pick output type"
+                              emptyLabel="—"
                               options={pickableOt.map((o) => o.name)}
                               onCommit={(v) => {
                                 const match = pickableOt.find((o) => o.name === v);
