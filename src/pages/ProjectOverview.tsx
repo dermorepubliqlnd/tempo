@@ -188,10 +188,14 @@ export default function ProjectOverview() {
         capacity += cap;
         peak = Math.max(peak, cap > 0 ? (hours / cap) * 100 : 0);
       });
+      const projectScopedHours = leafTasks
+        .filter((t) => t.assignee_id === person.id)
+        .reduce((sum, t) => sum + Number(t.estimated_hours ?? 0), 0);
       return {
         person,
         planned,
         capacity,
+        projectScopedHours,
         avgPct: capacity > 0 ? (planned / capacity) * 100 : 0,
         peakPct: peak,
       };
@@ -279,19 +283,34 @@ export default function ProjectOverview() {
           </div>
         </div>
         <div style={{ padding: 16, borderLeft: "1px solid var(--border)" }}>
-          <div style={{ fontSize: 11.5, fontWeight: 700 }}>Overall Progress</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
-            <div style={{ flex: 1, height: 10, borderRadius: 999, background: "var(--hover-bg)", overflow: "hidden" }}>
-              <div style={{ width: `${Math.max(0, Math.min(progress, 100))}%`, height: "100%", background: "#12b76a" }} />
+          <div style={{ fontSize: 11.5, fontWeight: 700 }}>Task Progress</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 10 }}>
+            <div style={{ width: 82, height: 82, borderRadius: "50%", background: `conic-gradient(#12b76a 0 ${Math.max(0, Math.min(progress, 100))}%, var(--hover-bg) ${Math.max(0, Math.min(progress, 100))}% 100%)`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+              <div style={{ width: 58, height: 58, borderRadius: "50%", background: "var(--surface)", display: "grid", placeItems: "center", fontSize: 16, fontWeight: 800 }}>
+                {Math.round(progress)}%
+              </div>
             </div>
-            <strong style={{ fontSize: 17 }}>{Math.round(progress)}%</strong>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {[
+                ["Completed", completedCount, "#12b76a"],
+                ["In Progress", inProgressCount, "#2e90fa"],
+                ["Not Started", notStartedCount, "#98a2b3"],
+                ["Cancelled", cancelledCount, "#d0d5dd"],
+              ].map(([label, n, color]) => (
+                <div key={label as string} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 10.5, padding: "2px 0", gap: 8 }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--text-secondary)" }}>
+                    <span style={{ width: 7, height: 7, borderRadius: 2, background: color as string }} />{label}
+                  </span>
+                  <strong>{n}</strong>
+                </div>
+              ))}
+            </div>
           </div>
-          <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 7 }}>{completedCount} of {leafTasks.length} leaf tasks completed</div>
         </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gap: 12 }}>
-        <section style={{ ...cardStyle(), gridColumn: "span 4" }}>
+        <section style={{ ...cardStyle(), gridColumn: "span 6" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700 }}>Schedule Snapshot</div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10.5, color: "var(--muted)" }}>
@@ -368,29 +387,7 @@ export default function ProjectOverview() {
           )}
         </section>
 
-        <section style={{ ...cardStyle(), gridColumn: "span 4" }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>Task Progress</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ width: 88, height: 88, borderRadius: "50%", background: `conic-gradient(#12b76a 0 ${progress}%, var(--hover-bg) ${progress}% 100%)`, display: "grid", placeItems: "center" }}>
-              <div style={{ width: 62, height: 62, borderRadius: "50%", background: "var(--surface)", display: "grid", placeItems: "center", fontSize: 16, fontWeight: 800 }}>{Math.round(progress)}%</div>
-            </div>
-            <div style={{ flex: 1 }}>
-              {[
-                ["Completed", completedCount, "#12b76a"],
-                ["In Progress", inProgressCount, "#2e90fa"],
-                ["Not Started", notStartedCount, "#98a2b3"],
-                ["Cancelled", cancelledCount, "#d0d5dd"],
-              ].map(([label, n, color]) => (
-                <div key={label as string} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, padding: "4px 0" }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><span style={{ width: 8, height: 8, borderRadius: 3, background: color as string }} />{label}</span>
-                  <strong>{n}</strong>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section style={{ ...cardStyle(), gridColumn: "span 4" }}>
+        <section style={{ ...cardStyle(), gridColumn: "span 6" }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>Project Risks & Attention</div>
           {[
             { Icon: AlertTriangle, label: "Overdue tasks", count: overdueTasks },
@@ -436,6 +433,46 @@ export default function ProjectOverview() {
               <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Logged Hours</div>
             </div>
           </div>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 7 }}>
+              <div>
+                <div style={{ fontSize: 11.5, fontWeight: 700 }}>Scoped Hours by Contributor</div>
+                <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 1 }}>Share of this project's scoped effort</div>
+              </div>
+              <div style={{ fontSize: 10, color: "var(--muted)" }}>{Math.round(scopedHours * 10) / 10}h total</div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 7 }}>
+              {resourceRows.map((r) => {
+                const pct = scopedHours > 0 ? Math.round((r.projectScopedHours / scopedHours) * 100) : 0;
+                return (
+                  <div key={r.person.id + "-scope"} style={{ border: "1px solid var(--border)", borderRadius: 7, padding: "8px 9px", background: "var(--surface)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                      <span style={{ fontSize: 10.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.person.name}</span>
+                      <strong style={{ fontSize: 10.5, whiteSpace: "nowrap" }}>{Math.round(r.projectScopedHours * 10) / 10}h</strong>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 6 }}>
+                      <div style={{ flex: 1, height: 6, borderRadius: 999, background: "var(--hover-bg)", overflow: "hidden" }}>
+                        <div style={{ width: `${Math.max(0, Math.min(100, pct))}%`, height: "100%", background: "var(--accent)", borderRadius: 999 }} />
+                      </div>
+                      <span style={{ fontSize: 9.5, color: "var(--muted)", minWidth: 28, textAlign: "right" }}>{pct}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+              {unassignedScopedHours > 0 && (
+                <div style={{ border: "1px dashed var(--border)", borderRadius: 7, padding: "8px 9px", background: "var(--hover-bg)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                    <span style={{ fontSize: 10.5, color: "var(--muted)", fontWeight: 600 }}>Unassigned</span>
+                    <strong style={{ fontSize: 10.5, color: "var(--muted)" }}>{Math.round(unassignedScopedHours * 10) / 10}h</strong>
+                  </div>
+                  <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 6 }}>
+                    {scopedHours > 0 ? Math.round((unassignedScopedHours / scopedHours) * 100) : 0}% of scope not yet allocated
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
           <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
             <div
               style={{
