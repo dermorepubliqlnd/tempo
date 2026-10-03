@@ -176,47 +176,54 @@ export default function ResourcePlan() {
   function beginDrag(e: React.PointerEvent<HTMLElement>, task: TaskRow, mode: DragState["mode"]) {
     e.preventDefault();
     e.stopPropagation();
+
     const effective = effectiveTask(task);
     const start = effective.start_date?.slice(0, 10) ?? effective.current_due_date?.slice(0, 10);
     const due = effective.current_due_date?.slice(0, 10);
     if (!start || !due) return;
-    const timeline = (e.currentTarget as HTMLElement).closest("[data-task-timeline]") as HTMLElement | null;
+
+    const handle = e.currentTarget as HTMLElement;
+    const timeline = handle.closest("[data-task-timeline]") as HTMLElement | null;
     if (!timeline) return;
+
     const rect = timeline.getBoundingClientRect();
-    const visibleStart = start < timelineStart ? timelineStart : start;
-    const visibleEnd = due > timelineEnd ? timelineEnd : due;
-    setDragState({
+    const drag: DragState = {
       taskId: task.id,
       mode,
       startX: e.clientX,
       width: rect.width,
       originalStart: start,
       originalDue: due,
-      visibleStart,
-      visibleEnd,
-    });
-  }
+      visibleStart: start < timelineStart ? timelineStart : start,
+      visibleEnd: due > timelineEnd ? timelineEnd : due,
+    };
 
-  useEffect(() => {
-    if (!dragState) return;
-    const onMove = (e: PointerEvent) => {
-      const pxPerDay = dragState.width / Math.max(days.length, 1);
-      const delta = Math.round((e.clientX - dragState.startX) / Math.max(pxPerDay, 1));
-      const originalStart = parseLocalDate(dragState.originalStart);
-      const originalDue = parseLocalDate(dragState.originalDue);
-      let nextStart = dragState.originalStart;
-      let nextDue = dragState.originalDue;
+    setDragState(drag);
 
-      if (dragState.mode === "move") {
-        // Dragging should move the VISIBLE bar, not stretch a clipped bar.
-        // If a task begins before the selected planning window, the rendered
-        // bar starts at timelineStart. Use that visible edge as the drag
-        // anchor, then preserve the task's full calendar-day duration.
+    // Attach listeners immediately on pointer-down rather than waiting for a
+    // React effect/render cycle. This keeps drag/resize responsive even when
+    // the scenario recalculation re-renders the planner on every movement.
+    try {
+      handle.setPointerCapture(e.pointerId);
+    } catch {
+      // Pointer capture is an enhancement; window listeners below are enough.
+    }
+
+    const onMove = (ev: PointerEvent) => {
+      ev.preventDefault();
+      const pxPerDay = drag.width / Math.max(days.length, 1);
+      const delta = Math.round((ev.clientX - drag.startX) / Math.max(pxPerDay, 1));
+      const originalStart = parseLocalDate(drag.originalStart);
+      const originalDue = parseLocalDate(drag.originalDue);
+      let nextStart = drag.originalStart;
+      let nextDue = drag.originalDue;
+
+      if (drag.mode === "move") {
         const durationDays = Math.max(
           0,
           Math.round((originalDue.getTime() - originalStart.getTime()) / 86400000)
         );
-        const visibleAnchor = parseLocalDate(dragState.visibleStart);
+        const visibleAnchor = parseLocalDate(drag.visibleStart);
         nextStart = toISO(addDays(visibleAnchor, delta));
         nextDue = toISO(addDays(parseLocalDate(nextStart), durationDays));
 
@@ -230,23 +237,41 @@ export default function ResourcePlan() {
           nextDue = projectMax;
           nextStart = toISO(addDays(parseLocalDate(nextDue), -durationDays));
         }
-      } else if (dragState.mode === "resize-start") {
-        const anchor = parseLocalDate(dragState.visibleStart);
-        nextStart = clampDate(toISO(addDays(anchor, delta)), project?.start_date?.slice(0, 10) ?? null, dragState.originalDue);
+      } else if (drag.mode === "resize-start") {
+        const anchor = parseLocalDate(drag.visibleStart);
+        nextStart = clampDate(
+          toISO(addDays(anchor, delta)),
+          project?.start_date?.slice(0, 10) ?? null,
+          drag.originalDue
+        );
       } else {
-        const anchor = parseLocalDate(dragState.visibleEnd);
-        nextDue = clampDate(toISO(addDays(anchor, delta)), dragState.originalStart, project?.end_date?.slice(0, 10) ?? null);
+        const anchor = parseLocalDate(drag.visibleEnd);
+        nextDue = clampDate(
+          toISO(addDays(anchor, delta)),
+          drag.originalStart,
+          project?.end_date?.slice(0, 10) ?? null
+        );
       }
-      setTaskChange(dragState.taskId, { start_date: nextStart, current_due_date: nextDue });
+
+      setTaskChange(drag.taskId, { start_date: nextStart, current_due_date: nextDue });
     };
-    const onUp = () => setDragState(null);
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp, { once: true });
-    return () => {
+
+    const onUp = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      try {
+        handle.releasePointerCapture(ev.pointerId);
+      } catch {
+        // no-op
+      }
+      setDragState(null);
     };
-  }, [dragState, days.length, project?.start_date, project?.end_date]);
+
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }
 
   const pendingCount = Object.keys(changes).length;
 
@@ -748,14 +773,15 @@ export default function ResourcePlan() {
                             background: "var(--accent)",
                             opacity: 0.88,
                             boxShadow: changes[task.id] ? "0 0 0 2px rgba(59,130,246,.18)" : bar.startsBefore || bar.endsAfter ? "inset 0 0 0 1px rgba(255,255,255,.55)" : "none",
-                            cursor: "grab",
+                            cursor: dragState?.taskId === task.id ? "grabbing" : "grab",
+                            touchAction: "none",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
                             minWidth: 14,
                           }}
                         >
-                          <span onPointerDown={(e) => beginDrag(e, task, "resize-start")} title="Resize start" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 7, borderRadius: "6px 0 0 6px", cursor: "ew-resize", background: "rgba(255,255,255,.22)" }} />
+                          <span onPointerDown={(e) => beginDrag(e, task, "resize-start")} title="Resize start" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 7, borderRadius: "6px 0 0 6px", cursor: "ew-resize", touchAction: "none", background: "rgba(255,255,255,.22)" }} />
                           <GripVertical size={12} color="#fff" style={{ pointerEvents: "none", opacity: .9 }} />
                           <span onPointerDown={(e) => beginDrag(e, task, "resize-end")} title="Resize end" style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 7, borderRadius: "0 6px 6px 0", cursor: "ew-resize", background: "rgba(255,255,255,.22)" }} />
                         </div>
