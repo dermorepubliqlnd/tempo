@@ -6836,8 +6836,6 @@ function CompareWithBaselinePanel({ projectId, liveTasks }: { projectId: string;
               per-task detail directly. */}
         </>
       )}
-            </>
-          )}
     </div>
   );
 }
