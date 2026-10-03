@@ -442,6 +442,7 @@ export default function ResourcePlan() {
     let capacity = 0;
     let projectHours = 0;
     let peak = 0;
+    let workingDays = 0;
     const cells = days.map((d) => {
       const date = toISO(d);
       const weekend = d.getDay() === 0 || d.getDay() === 6;
@@ -451,6 +452,7 @@ export default function ResourcePlan() {
         return { date, pct: null as number | null, baselinePct: null as number | null, deltaPct: 0, bandwidthPct: null as number | null, baselineBandwidthPct: null as number | null, deltaBandwidthPct: 0, availableHours: 0, totalHours: 0, baselineTotalHours: 0, projectHours: 0, capacity: 0, label: weekend ? "Weekend" : holiday ? "Holiday" : "Off" };
       }
       const cap = dailyCapacityHours(person, av?.status === "half_day");
+      workingDays += 1;
       const total = orgEngine.totalFor(person.id, date);
       const baselineTotal = baselineOrgEngine.totalFor(person.id, date);
       const own = projectEngine.totalFor(person.id, date);
@@ -492,6 +494,7 @@ export default function ResourcePlan() {
       peak,
       avg: capacity > 0 ? (periodHours / capacity) * 100 : 0,
       avgBandwidth: capacity > 0 ? 100 - (periodHours / capacity) * 100 : 0,
+      avgAvailableHours: workingDays > 0 ? (capacity - periodHours) / workingDays : 0,
       projectScoped,
     };
   });
@@ -540,6 +543,7 @@ export default function ResourcePlan() {
       proposedStart?: string;
       proposedDue?: string;
       projectedBandwidth?: number;
+      projectedAvailableHours?: number;
       kind: "move" | "review";
       reason: string;
     }> = [];
@@ -623,6 +627,7 @@ export default function ResourcePlan() {
         proposedStart,
         proposedDue,
         projectedBandwidth,
+        projectedAvailableHours,
         kind: "move",
         reason: `This task contributes ${Math.round(candidate.hours * 10) / 10}h on the overloaded date. Moving it after the conflict removes that contribution from this day without changing scoped hours.`,
       });
@@ -789,11 +794,75 @@ export default function ResourcePlan() {
       </section>
 
       <section style={{ ...cardStyle(), marginBottom: 12, overflow: "hidden" }}>
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>Planning Recommendations</div>
+            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
+              Focuses on overloaded dates and suggests low-risk moves from this project first. Recommendations only stage a scenario; they never auto-apply.
+            </div>
+          </div>
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: recommendations.length ? "var(--danger-text)" : "var(--success-text)" }}>
+            {recommendations.length ? `${recommendations.length} item${recommendations.length === 1 ? "" : "s"} to review` : "No overload recommendations"}
+          </span>
+        </div>
+
+        {recommendations.length === 0 ? (
+          <div style={{ padding: "14px", fontSize: 11, color: "var(--muted)" }}>
+            No negative bandwidth detected in the selected planning period.
+          </div>
+        ) : (
+          <div>
+            {recommendations.map((rec) => (
+              <div key={rec.key} style={{ display: "grid", gridTemplateColumns: "170px minmax(220px,1fr) 175px 130px", gap: 10, alignItems: "center", padding: "10px 14px", borderTop: "1px solid var(--border)" }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700 }}>{rec.personName}</div>
+                  <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>
+                    {formatDate(rec.date)} · {rec.availableHours < 0 ? `${Math.round(Math.abs(rec.availableHours) * 10) / 10}h over` : `${Math.round(rec.availableHours * 10) / 10}h free`}
+                  </div>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: rec.kind === "move" ? "var(--navy)" : "var(--warning-text)" }}>
+                    {rec.kind === "move" ? `Suggested move: ${rec.taskName}` : rec.taskName ? `Review: ${rec.taskName}` : "Review workload mix"}
+                  </div>
+                  <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.35 }}>{rec.reason}</div>
+                </div>
+                <div style={{ fontSize: 9.5, color: "var(--text-secondary)" }}>
+                  {rec.kind === "move" && rec.proposedStart && rec.proposedDue ? (
+                    <>
+                      <div style={{ fontWeight: 700 }}>{formatDate(rec.proposedStart)} → {formatDate(rec.proposedDue)}</div>
+                      <div style={{ marginTop: 2, color: "var(--muted)" }}>
+                        Projected: {Math.round((rec.projectedAvailableHours ?? 0) * 10) / 10}h free on conflict date
+                      </div>
+                    </>
+                  ) : (
+                    <span style={{ color: "var(--muted)" }}>No low-risk schedule move</span>
+                  )}
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  {rec.kind === "move" && rec.taskId && rec.proposedStart && rec.proposedDue ? (
+                    <button
+                      type="button"
+                      onClick={() => setTaskChange(rec.taskId!, { start_date: rec.proposedStart!, current_due_date: rec.proposedDue! })}
+                      style={{ border: "1px solid var(--accent)", background: "var(--surface)", color: "var(--accent)", borderRadius: 7, padding: "6px 9px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}
+                    >
+                      Apply to Scenario
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 9.5, fontWeight: 700, color: "var(--warning-text)" }}>Review Required</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section style={{ ...cardStyle(), marginBottom: 12, overflow: "hidden" }}>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div>
             <div style={{ fontSize: 12.5, fontWeight: 700 }}>Available Bandwidth</div>
             <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
-              Remaining capacity after all committed workload. Values update live as you move, resize, or reassign tasks; negative bandwidth means the person is overloaded.
+              Remaining working hours after all committed workload. Values update live as you move, resize, or reassign tasks; negative hours mean the person is overloaded.
             </div>
           </div>
           <Link to="/utilization" style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -831,13 +900,14 @@ export default function ResourcePlan() {
                 {r.cells.map((cell) => {
                   const bandwidth = cell.bandwidthPct == null ? null : Math.round(cell.bandwidthPct * 10) / 10;
                   const tone = bandwidthTone(bandwidth);
-                  const changed = bandwidth != null && Math.abs(cell.deltaBandwidthPct) >= 0.05;
-                  const deltaRounded = Math.round(cell.deltaBandwidthPct * 10) / 10;
                   const availableHours = Math.round(cell.availableHours * 10) / 10;
+                  const baselineAvailableHours = Math.round((cell.capacity - cell.baselineTotalHours) * 10) / 10;
+                  const deltaHours = Math.round((availableHours - baselineAvailableHours) * 10) / 10;
+                  const changed = bandwidth != null && Math.abs(deltaHours) >= 0.05;
                   return (
                     <div
                       key={cell.date}
-                      title={bandwidth == null ? cell.label : `${bandwidth}% available bandwidth · ${availableHours}h remaining · ${Math.round(cell.totalHours * 10) / 10}h planned / ${Math.round(cell.capacity * 10) / 10}h capacity · ${Math.round(cell.projectHours * 10) / 10}h from this project${changed ? ` · was ${Math.round((cell.baselineBandwidthPct ?? 0) * 10) / 10}% free` : ""}`}
+                      title={bandwidth == null ? cell.label : `${availableHours}h available · ${Math.round(cell.totalHours * 10) / 10}h planned / ${Math.round(cell.capacity * 10) / 10}h capacity · ${Math.round(cell.projectHours * 10) / 10}h from this project${changed ? ` · was ${baselineAvailableHours}h available` : ""}`}
                       style={{
                         padding: "5px 3px",
                         borderTop: "1px solid var(--border)",
@@ -849,89 +919,29 @@ export default function ResourcePlan() {
                         boxShadow: changed ? "inset 0 0 0 1px rgba(59,130,246,.35)" : "none",
                       }}
                     >
-                      <div style={{ fontWeight: 800 }}>{bandwidth == null ? "—" : `${bandwidth}%`}</div>
+                      <div style={{ fontWeight: 800 }}>
+                        {bandwidth == null ? "—" : availableHours < 0 ? `-${Math.abs(availableHours)}h` : `${availableHours}h`}
+                      </div>
                       {bandwidth != null && (
                         <div style={{ fontSize: 8.5, marginTop: 1, opacity: .88 }}>
-                          {availableHours < 0 ? `${Math.abs(availableHours)}h over` : `${availableHours}h free`}
+                          {availableHours < 0 ? "over" : "free"}
                         </div>
                       )}
                       {changed && (
-                        <div style={{ fontSize: 8.5, marginTop: 1, fontWeight: 700, color: deltaRounded >= 0 ? "var(--success-text)" : "var(--danger-text)" }}>
-                          {deltaRounded > 0 ? "+" : ""}{deltaRounded} pts
+                        <div style={{ fontSize: 8.5, marginTop: 1, fontWeight: 700, color: deltaHours >= 0 ? "var(--success-text)" : "var(--danger-text)" }}>
+                          {deltaHours > 0 ? "+" : ""}{deltaHours}h
                         </div>
                       )}
                     </div>
                   );
                 })}
                 <div style={{ padding: "8px 3px", borderTop: "1px solid var(--border)", borderLeft: "1px solid var(--border)", textAlign: "center", fontWeight: 800, color: bandwidthTone(Math.round(r.avgBandwidth * 10) / 10).fg }}>
-                  {Math.round(r.avgBandwidth * 10) / 10}%
+                  {Math.round(r.avgAvailableHours * 10) / 10}h
                 </div>
               </Fragment>
             ))}
           </div>
         </div>
-      </section>
-
-      <section style={{ ...cardStyle(), marginBottom: 12, overflow: "hidden" }}>
-        <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 700 }}>Planning Recommendations</div>
-            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
-              Focuses on overloaded dates and suggests low-risk moves from this project first. Recommendations only stage a scenario; they never auto-apply.
-            </div>
-          </div>
-          <span style={{ fontSize: 10.5, fontWeight: 700, color: recommendations.length ? "var(--danger-text)" : "var(--success-text)" }}>
-            {recommendations.length ? `${recommendations.length} item${recommendations.length === 1 ? "" : "s"} to review` : "No overload recommendations"}
-          </span>
-        </div>
-
-        {recommendations.length === 0 ? (
-          <div style={{ padding: "14px", fontSize: 11, color: "var(--muted)" }}>
-            No negative bandwidth detected in the selected planning period.
-          </div>
-        ) : (
-          <div>
-            {recommendations.map((rec) => (
-              <div key={rec.key} style={{ display: "grid", gridTemplateColumns: "170px minmax(220px,1fr) 175px 130px", gap: 10, alignItems: "center", padding: "10px 14px", borderTop: "1px solid var(--border)" }}>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700 }}>{rec.personName}</div>
-                  <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>{formatDate(rec.date)} · {Math.round(rec.bandwidthPct * 10) / 10}% free</div>
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 10.5, fontWeight: 700, color: rec.kind === "move" ? "var(--navy)" : "var(--warning-text)" }}>
-                    {rec.kind === "move" ? `Suggested move: ${rec.taskName}` : rec.taskName ? `Review: ${rec.taskName}` : "Review workload mix"}
-                  </div>
-                  <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3, lineHeight: 1.35 }}>{rec.reason}</div>
-                </div>
-                <div style={{ fontSize: 9.5, color: "var(--text-secondary)" }}>
-                  {rec.kind === "move" && rec.proposedStart && rec.proposedDue ? (
-                    <>
-                      <div style={{ fontWeight: 700 }}>{formatDate(rec.proposedStart)} → {formatDate(rec.proposedDue)}</div>
-                      <div style={{ marginTop: 2, color: "var(--muted)" }}>
-                        Projected: {Math.round((rec.projectedBandwidth ?? 0) * 10) / 10}% free on conflict date
-                      </div>
-                    </>
-                  ) : (
-                    <span style={{ color: "var(--muted)" }}>No low-risk schedule move</span>
-                  )}
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  {rec.kind === "move" && rec.taskId && rec.proposedStart && rec.proposedDue ? (
-                    <button
-                      type="button"
-                      onClick={() => setTaskChange(rec.taskId!, { start_date: rec.proposedStart!, current_due_date: rec.proposedDue! })}
-                      style={{ border: "1px solid var(--accent)", background: "var(--surface)", color: "var(--accent)", borderRadius: 7, padding: "6px 9px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}
-                    >
-                      Apply to Scenario
-                    </button>
-                  ) : (
-                    <span style={{ fontSize: 9.5, fontWeight: 700, color: "var(--warning-text)" }}>Review Required</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </section>
 
       <section style={{ ...cardStyle(), overflow: "hidden" }}>
