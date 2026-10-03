@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { createPortal } from "react-dom";
 import type { OptionGroup } from "../lib/notionOptions";
 import { formatDate } from "../lib/formatDate";
 
@@ -70,8 +71,10 @@ function isGrouped(options: string[] | OptionGroup[]): options is OptionGroup[] 
 export function InlineSelect({ value, onCommit, options, editable, allowEmpty, emptyLabel = "—", renderReadOnly, alwaysSelect = false, searchable = false, labelFor }: InlineSelectProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [searchDraft, setSearchDraft] = useState(value);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
   const selectRef = useRef<HTMLSelectElement>(null);
-  const listId = useId();
 
   useEffect(() => {
     setSearchDraft(value);
@@ -106,60 +109,192 @@ export function InlineSelect({ value, onCommit, options, editable, allowEmpty, e
   const flatOptions = grouped ? (options as OptionGroup[]).flatMap((g) => g.options) : (options as string[]);
 
   if (searchable) {
+    const query = searchDraft.trim().toLowerCase();
+    const filteredOptions = flatOptions.filter((o) => !query || o.toLowerCase().includes(query));
+    const visibleOptions = filteredOptions.slice(0, 80);
+    const rect = searchRef.current?.getBoundingClientRect();
+    const selectSearchOption = (next: string) => {
+      setSearchDraft(next);
+      setSearchOpen(false);
+      setActiveIndex(0);
+      if (next !== value) onCommit(next);
+    };
+
     return (
-      <>
-        <input
-          className="inline-cell"
-          list={listId}
-          value={searchDraft}
-          placeholder={emptyLabel}
-          autoComplete="off"
-          onFocus={(e) => {
-            setSearchDraft(value);
-            e.currentTarget.select();
+      <div style={{ position: "relative", width: "100%", minWidth: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            width: "100%",
+            minWidth: 0,
+            borderRadius: 5,
           }}
-          onChange={(e) => {
-            const next = e.target.value;
-            setSearchDraft(next);
-            if (flatOptions.includes(next) && next !== value) onCommit(next);
-            if (allowEmpty && next === "" && value !== "") onCommit("");
-          }}
-          onBlur={() => {
-            if (searchDraft === "" && allowEmpty) {
-              if (value !== "") onCommit("");
-              return;
-            }
-            if (flatOptions.includes(searchDraft)) {
-              if (searchDraft !== value) onCommit(searchDraft);
-              return;
-            }
-            setSearchDraft(value);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
+        >
+          <input
+            ref={searchRef}
+            className="inline-cell"
+            value={searchDraft}
+            placeholder={emptyLabel}
+            autoComplete="off"
+            role="combobox"
+            aria-expanded={searchOpen}
+            aria-autocomplete="list"
+            onFocus={(e) => {
               setSearchDraft(value);
-              (e.target as HTMLInputElement).blur();
-            }
-            if (e.key === "Enter") {
-              const exact = flatOptions.find((o) => o.toLowerCase() === searchDraft.trim().toLowerCase());
-              if (exact) {
-                if (exact !== value) onCommit(exact);
-                setSearchDraft(exact);
-                (e.target as HTMLInputElement).blur();
+              setSearchOpen(true);
+              setActiveIndex(0);
+              e.currentTarget.select();
+            }}
+            onChange={(e) => {
+              setSearchDraft(e.target.value);
+              setSearchOpen(true);
+              setActiveIndex(0);
+            }}
+            onBlur={() => {
+              window.setTimeout(() => {
+                setSearchOpen(false);
+                if (searchDraft === "" && allowEmpty) {
+                  if (value !== "") onCommit("");
+                  return;
+                }
+                const exact = flatOptions.find((o) => o.toLowerCase() === searchDraft.trim().toLowerCase());
+                if (exact) {
+                  if (exact !== value) onCommit(exact);
+                  setSearchDraft(exact);
+                } else {
+                  setSearchDraft(value);
+                }
+              }, 120);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSearchOpen(true);
+                setActiveIndex((i) => Math.min(i + 1, Math.max(visibleOptions.length - 1, 0)));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActiveIndex((i) => Math.max(i - 1, 0));
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setSearchDraft(value);
+                setSearchOpen(false);
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                const exact = flatOptions.find((o) => o.toLowerCase() === searchDraft.trim().toLowerCase());
+                const selected = exact ?? visibleOptions[activeIndex];
+                if (selected) selectSearchOption(selected);
               }
-            }
-          }}
-          onClick={(e) => e.stopPropagation()}
-          style={{ width: "100%" }}
-        />
-        <datalist id={listId}>
-          {flatOptions.map((o) => (
-            <option key={o} value={o}>
-              {labelFor ? labelFor(o) : o}
-            </option>
-          ))}
-        </datalist>
-      </>
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setSearchOpen(true);
+            }}
+            style={{ width: "100%", minWidth: 0, paddingRight: 22 }}
+          />
+          <span
+            aria-hidden
+            style={{
+              marginLeft: -18,
+              marginRight: 6,
+              pointerEvents: "none",
+              color: "var(--muted)",
+              fontSize: 10,
+              transform: searchOpen ? "rotate(180deg)" : undefined,
+              transition: "transform .12s ease",
+            }}
+          >
+            ▼
+          </span>
+        </div>
+        {searchOpen &&
+          rect &&
+          createPortal(
+            <div
+              role="listbox"
+              style={{
+                position: "fixed",
+                left: Math.min(rect.left, window.innerWidth - Math.max(rect.width, 220) - 8),
+                top: Math.min(rect.bottom + 4, window.innerHeight - 280),
+                width: Math.max(rect.width, 220),
+                maxWidth: 320,
+                maxHeight: 260,
+                overflowY: "auto",
+                zIndex: 1600,
+                padding: 4,
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                boxShadow: "0 8px 24px rgba(15,41,66,.16)",
+              }}
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              {allowEmpty && !query && (
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setSearchDraft("");
+                    setSearchOpen(false);
+                    if (value !== "") onCommit("");
+                  }}
+                  style={{
+                    display: "flex",
+                    width: "100%",
+                    padding: "7px 9px",
+                    border: "none",
+                    borderRadius: 5,
+                    background: !value ? "#eef6ff" : "transparent",
+                    color: "var(--muted)",
+                    fontSize: 12,
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  {emptyLabel}
+                </button>
+              )}
+              {visibleOptions.length === 0 ? (
+                <div style={{ padding: "8px 9px", fontSize: 11.5, color: "var(--muted)" }}>No matching options</div>
+              ) : (
+                visibleOptions.map((o, i) => (
+                  <button
+                    key={o}
+                    type="button"
+                    role="option"
+                    aria-selected={o === value}
+                    onMouseEnter={() => setActiveIndex(i)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      selectSearchOption(o);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      width: "100%",
+                      padding: "7px 9px",
+                      border: "none",
+                      borderRadius: 5,
+                      background: i === activeIndex ? "#eef6ff" : o === value ? "#f5f9ff" : "transparent",
+                      color: "var(--text)",
+                      fontSize: 12,
+                      textAlign: "left",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {labelFor ? labelFor(o) : o}
+                    </span>
+                    {o === value && <span style={{ color: "var(--accent)", fontWeight: 800 }}>✓</span>}
+                  </button>
+                ))
+              )}
+            </div>,
+            document.body
+          )}
+      </div>
     );
   }
 
