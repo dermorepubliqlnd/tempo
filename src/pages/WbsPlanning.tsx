@@ -1001,6 +1001,14 @@ export default function WbsPlanning() {
   // conditions as before -- placement/consolidation only, not a
   // behavior change.
   const [wbsActionsMenuOpen, setWbsActionsMenuOpen] = useState(false);
+  const [rowActionsMenu, setRowActionsMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
+  const [moveParentTaskId, setMoveParentTaskId] = useState<string | null>(null);
+  const [lastDeletedTask, setLastDeletedTask] = useState<{ id: string; name: string } | null>(null);
+  useEffect(() => {
+    if (!lastDeletedTask) return;
+    const timer = window.setTimeout(() => setLastDeletedTask(null), 7000);
+    return () => window.clearTimeout(timer);
+  }, [lastDeletedTask]);
   // 2026-09-21 (Sandra: on the closed-project merged view, "[the WBS
   // table + Gantt] should be expandable if ever we just want to see
   // details" -- collapsed by default for closed projects (the Baseline
@@ -2929,6 +2937,113 @@ export default function WbsPlanning() {
     await loadAll(true);
   }
 
+  async function addTaskBelow(anchor: TaskRow & { depth: number }) {
+    if (!project) return;
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    const ensuredStart = await startDatePrompt.ensure(project);
+    if (!ensuredStart) return;
+    const siblings = anchor.depth === 0
+      ? orderedTasks.filter((x) => x.depth === 0)
+      : orderedTasks.filter((x) => x.depth === 1 && x.parent_task_id === anchor.parent_task_id);
+    const at = siblings.findIndex((x) => x.id === anchor.id);
+    const next = siblings[at + 1];
+    const sortOrder = next && anchor.sort_order != null && next.sort_order != null
+      ? (anchor.sort_order + next.sort_order) / 2
+      : (anchor.sort_order ?? Date.now()) + 500;
+
+    let newAssignee: string | null = null;
+    if (project.wbs_status !== "draft") {
+      newAssignee = await assigneePicker.pick("Assign the new task");
+      if (!newAssignee) return;
+    }
+    const start = anchor.depth === 1
+      ? (anchor.start_date_standard ?? ensuredStart).slice(0, 10)
+      : ensuredStart;
+    const { data: newTask, error } = await supabase.from("tasks").insert({
+      project_id: project.id,
+      parent_task_id: anchor.parent_task_id,
+      assignee_id: newAssignee,
+      name: anchor.depth === 0 ? "Untitled task" : "Untitled sub-task",
+      status: "Not Started",
+      start_date: start,
+      start_date_full: start,
+      start_date_standard: start,
+      start_full_auto: true,
+      start_standard_auto: true,
+      original_due_date: anchor.current_due_date ?? project.end_date ?? toISO(new Date()),
+      current_due_date: anchor.current_due_date ?? project.end_date ?? toISO(new Date()),
+      sort_order: sortOrder,
+    }).select("id").single();
+    if (error) {
+      await alert(`Couldn't add task: ${error.message}`);
+      return;
+    }
+    if (newTask?.id) setFocusTaskNameId(newTask.id as string);
+    await loadAll(true);
+  }
+
+  async function duplicateTask(t: TaskRow & { depth: number }) {
+    if (!project) return;
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    const siblings = siblingsFor(t);
+    const at = siblings.findIndex((x) => x.id === t.id);
+    const next = siblings[at + 1];
+    const sortOrder = next && t.sort_order != null && next.sort_order != null
+      ? (t.sort_order + next.sort_order) / 2
+      : (t.sort_order ?? Date.now()) + 500;
+    const { data: newTask, error } = await supabase.from("tasks").insert({
+      project_id: t.project_id,
+      parent_task_id: t.parent_task_id,
+      assignee_id: t.assignee_id,
+      name: `${t.name || "Untitled task"} copy`,
+      status: "Not Started",
+      start_date: t.start_date,
+      start_date_full: t.start_date_full,
+      start_date_standard: t.start_date_standard,
+      start_full_auto: t.start_full_auto,
+      start_standard_auto: t.start_standard_auto,
+      manual_end_date: t.manual_end_date,
+      original_due_date: t.current_due_date,
+      current_due_date: t.current_due_date,
+      estimated_hours: t.estimated_hours,
+      work_type_id: t.work_type_id,
+      output_type_id: t.output_type_id,
+      output_count: t.output_count,
+      sort_order: sortOrder,
+    }).select("id").single();
+    if (error) {
+      await alert(`Couldn't duplicate task: ${error.message}`);
+      return;
+    }
+    if (newTask?.id) setFocusTaskNameId(newTask.id as string);
+    await loadAll(true);
+  }
+
+  async function moveTaskDirection(t: TaskRow & { depth: number }, direction: -1 | 1) {
+    const siblings = siblingsFor(t);
+    const at = siblings.findIndex((x) => x.id === t.id);
+    const target = siblings[at + direction];
+    if (!target) return;
+    await reorderTask(t.id, target.id);
+  }
+
+  async function moveTaskToParent(t: TaskRow & { depth: number }, parentId: string | null) {
+    if (hasChildren(t.id)) {
+      await alert("A task with sub-tasks can't be moved under another parent. Move or remove its sub-tasks first.");
+      return;
+    }
+    const nextOrder = Math.max(0, ...orderedTasks.filter((x) => x.parent_task_id === parentId).map((x) => x.sort_order ?? 0)) + 1000;
+    const { error } = await supabase.from("tasks").update({ parent_task_id: parentId, sort_order: nextOrder }).eq("id", t.id);
+    if (error) {
+      await alert(`Couldn't move task: ${error.message}`);
+      return;
+    }
+    setMoveParentTaskId(null);
+    await loadAll(true);
+  }
+
   // Sandra, 2026-07-24: "Allow deleting of tasks in WBS. Right now we can
   // add but no option to delete." Mirrors Projects.tsx's own bulk-delete
   // convention exactly -- same `delete_tasks_and_dependents` RPC (already
@@ -2979,7 +3094,8 @@ export default function WbsPlanning() {
       await alert(`Couldn't delete: ${error.message}`);
       return;
     }
-    loadAll(true);
+    setLastDeletedTask({ id: t.id, name: t.name });
+    await loadAll(true);
   }
 
   // 2026-09-10 (Cancelled task status revived): a non-destructive
