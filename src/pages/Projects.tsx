@@ -349,6 +349,8 @@ function CategoryIcon({ iconName, tone, size = 13 }: { iconName?: string; tone?:
 }
 
 const PROJECT_COLUMN_ORDER = ["name", "owner", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "category", "source", "planning_type", "project_type", "project_number", "created_at", "closed_at", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at"];
+const IC_OWNED_PROJECT_COLUMN_ORDER = ["name", "status", "health", "priority", "end_date", "actual_progress", "phase", "start_date", "category", "planning_type", "project_type", "wbs_status", "estimated_hours", "time_spent_hours", "source", "effort_level", "project_number", "created_at", "closed_at", "hours_variance", "hours_variance_pct", "days_extended", "baseline_approved_by", "baseline_approved_at", "owner"];
+const IC_INVOLVED_PROJECT_COLUMN_ORDER = ["name", "owner", "status", "health", "priority", "end_date", "actual_progress", "phase", "start_date", "category", "planning_type", "project_type", "wbs_status", "estimated_hours", "time_spent_hours", "source", "effort_level", "project_number", "created_at", "closed_at", "hours_variance", "hours_variance_pct", "days_extended", "baseline_approved_by", "baseline_approved_at"];
 
 // Default hidden-columns set for a brand-new Projects Timeline view (see
 // timelineDefaultHiddenColumns on ViewTabs / initialHiddenColumns on
@@ -2369,7 +2371,12 @@ export default function Projects() {
         filterPersonIds: [],
         filterStatuses: [],
         sorts: SYSTEM_PROJECT_SORTS,
-        columnOrder: PROJECT_COLUMN_ORDER,
+        columnOrder:
+          projectSystemView === "owned"
+            ? IC_OWNED_PROJECT_COLUMN_ORDER
+            : projectSystemView === "mine"
+            ? IC_INVOLVED_PROJECT_COLUMN_ORDER
+            : PROJECT_COLUMN_ORDER,
         progressDisplay: "bar",
       }
     : projectViews.activeView;
@@ -2504,19 +2511,17 @@ export default function Projects() {
     return { total: involved.length, owned, contributing: involved.length - owned };
   }, [filteredProjects, projectPerspectivePersonId, tasks]);
 
-  const personalActiveProjectMeta = useMemo(() => {
+  const personalProjectMeta = useMemo(() => {
     const involved = projects.filter((p) => myProjectRole(p) !== null);
-    const active = involved.filter((p) => {
+    const owned = involved.filter((p) => myProjectRole(p) === "Owner").length;
+    const contributing = involved.filter((p) => myProjectRole(p) === "Contributor").length;
+    const needsAttention = involved.filter((p) => {
       const status = projectStatusOf(p);
-      return status !== "Completed" && status !== "Cancelled";
-    });
-    const owned = active.filter((p) => myProjectRole(p) === "Owner").length;
-    const contributing = active.filter((p) => myProjectRole(p) === "Contributor").length;
-    const needsAttention = active.filter((p) => {
+      if (status === "Completed" || status === "Cancelled") return false;
       const health = healthOf(p, tasks, holidayDates);
       return health.tone === "danger" || health.tone === "warning" || health.label === "Schedule review";
     }).length;
-    return { owned, contributing, total: active.length, needsAttention };
+    return { owned, contributing, total: involved.length, needsAttention };
   }, [projects, projectPerspectivePersonId, tasks, holidayDates]);
 
   const teamProjectScopeCounts = useMemo(() => {
