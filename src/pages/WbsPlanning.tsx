@@ -3910,14 +3910,19 @@ export default function WbsPlanning() {
     return (
       <th
         rowSpan={2}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setWbsFreezePoint(wbsFreezeColKey === colKey ? null : colKey);
+        }}
         style={{
           width: w,
           minWidth: WBS_MIN_COL_WIDTH,
           maxWidth: w,
           position: sticky ? "sticky" : "relative",
           ...(sticky ?? {}),
+          cursor: "context-menu",
         }}
-        title={title}
+        title={[title, wbsFreezeColKey === colKey ? "Right-click to unfreeze columns" : "Right-click to freeze through this column"].filter(Boolean).join(" · ")}
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           {children}
@@ -4729,11 +4734,11 @@ export default function WbsPlanning() {
           </div>
         </div>
       )}
-      <Link to={`/projects/${projectId}`} className="back-link" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
+      <Link to={`/projects/${projectId}`} className="back-link" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 4, fontSize: 12.5 }}>
         <ArrowLeft size={13} /> Back to {project.name}
       </Link>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 2 }}>
-        <div>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 18, marginBottom: 4 }}>
+        <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
             <h1>WBS Planning — {project.name}</h1>
             <span style={{
@@ -4752,12 +4757,113 @@ export default function WbsPlanning() {
               {wbsMeta.label}
             </span>
           </div>
-          <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
-            Define the project, add tasks, and review the forecast. Lock the baseline when the plan is ready.
+          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginTop: 4, fontSize: 11, color: "var(--muted)", lineHeight: 1.35 }}>
+            <span>{wbsMeta.hint}</span>
+            <span aria-hidden="true">·</span>
+            <span>
+              {project.wbs_status === "draft"
+                ? "Build the WBS, save your draft, then request project start to lock the baseline."
+                : project.wbs_status === "closed"
+                  ? "This project is closed and the approved plan is read-only."
+                  : "Update the WBS as work changes, then request closure when delivery is complete."}
+            </span>
+            {activeBaseline && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>Baseline V{activeBaseline.version_number} · {formatDate(activeBaseline.captured_at.slice(0, 10))}</span>
+              </>
+            )}
+            {project.wbs_status === "closed" && closeoutClosedAt && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>Signed off {formatDate(closeoutClosedAt.slice(0, 10))}</span>
+              </>
+            )}
+            {project.reopened_at && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>Reopened {formatDate(project.reopened_at.slice(0, 10))}</span>
+              </>
+            )}
           </div>
+          {project.wbs_status === "draft" && !pendingBaselineRequest && declinedBaselineRequest && (
+            <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--warning-text, #b45309)" }}>
+              Start request declined by {people.find((p) => p.id === declinedBaselineRequest.decided_by)?.name ?? "someone"}
+              {declinedBaselineRequest.decided_at ? ` on ${formatDate(declinedBaselineRequest.decided_at.slice(0, 10))}` : ""}
+              {declinedBaselineRequest.decision_reason ? ` — ${declinedBaselineRequest.decision_reason}` : ""}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+          {(() => {
+            const isDraft = project.wbs_status === "draft";
+            const isActivePlan = project.wbs_status === "baseline_locked" || project.wbs_status === "changed_after_baseline";
+            const canRequestStart = canManageWbs && isDraft && !pendingBaselineRequest;
+            const canRequestClosure = canManageWbs && isActivePlan && !pendingClosure;
+            const canReopenProject = isFullAccess && project.wbs_status === "closed";
+            const saveLabel = isDraft ? "Save Draft" : "Save Changes";
+
+            return (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {canEditWbs && project.wbs_status !== "closed" && (
+                    <button className="btn-secondary" disabled={saving} onClick={saveDraft}>
+                      {saving ? "Saving…" : saveLabel}
+                    </button>
+                  )}
+                  {canRequestStart && (
+                    <button
+                      className="btn-primary"
+                      disabled={workflowBusy || saving || hasUnsavedChanges}
+                      title={hasUnsavedChanges ? "Save your latest changes before requesting project start." : "Request approval to lock the baseline and start the project."}
+                      onClick={handleRequestBaseline}
+                    >
+                      Request Start Project
+                    </button>
+                  )}
+                  {isDraft && !!pendingBaselineRequest && (
+                    <span style={{ display: "inline-flex", alignItems: "center", minHeight: 32, padding: "0 10px", borderRadius: 999, background: "var(--warning-bg, #fff7ed)", color: "var(--warning-text, #b45309)", fontSize: 11, fontWeight: 700, border: "1px solid var(--warning-border, #fed7aa)" }}>
+                      Start Project Requested · Awaiting Approval
+                    </span>
+                  )}
+                  {canRequestClosure && (
+                    <button
+                      className="btn-primary"
+                      disabled={workflowBusy || saving || hasUnsavedChanges}
+                      title={hasUnsavedChanges ? "Save your latest changes before requesting project closure." : "Prepare and submit a Project Closure request."}
+                      onClick={() => {
+                        setClosureFormOpen(true);
+                        window.setTimeout(() => document.getElementById("project-closure-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+                      }}
+                    >
+                      Request Project Closure
+                    </button>
+                  )}
+                  {isActivePlan && !!pendingClosure && (
+                    <span style={{ display: "inline-flex", alignItems: "center", minHeight: 32, padding: "0 10px", borderRadius: 999, background: "var(--warning-bg, #fff7ed)", color: "var(--warning-text, #b45309)", fontSize: 11, fontWeight: 700, border: "1px solid var(--warning-border, #fed7aa)" }}>
+                      Closure Requested · Awaiting Approval
+                    </span>
+                  )}
+                  {canReopenProject && (
+                    <button className="btn-secondary" disabled={workflowBusy} onClick={handleReopenProject}>
+                      Reopen Project
+                    </button>
+                  )}
+                </div>
+                {hasUnsavedChanges && project.wbs_status !== "closed" ? (
+                  <span style={{ fontSize: 10, color: "var(--warning-text, #b45309)" }}>Save latest changes before sending a workflow request.</span>
+                ) : project.wbs_status === "draft" && !project.scoping_effort_mode ? (
+                  <span style={{ fontSize: 10, color: "var(--muted)" }}>Draft not saved yet.</span>
+                ) : project.wbs_status !== "closed" ? (
+                  <span style={{ fontSize: 10, color: "var(--muted)" }}>All changes saved.</span>
+                ) : null}
+              </>
+            );
+          })()}
         </div>
       </div>
-      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 10, marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 6, marginBottom: 10 }}>
         <Link
           to={`/projects/${projectId}`}
           style={{ padding: "9px 2px", color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}
@@ -4777,163 +4883,6 @@ export default function WbsPlanning() {
         canResolve={isFullAccess || project.owner_id === me?.id}
         onResolved={() => loadAll(true)}
       />
-
-      {/* Phase 3 (2026-07-28): status banner for the Draft/Baseline/
-          Revision/Final-Scope workflow -- see [[project_capaciq_wbs_planning]].
-          Colors/labels mirror WBS_STATUS_META below. */}
-      <div
-        className="card"
-        style={{
-          padding: "8px 10px",
-          marginBottom: 12,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          flexWrap: "wrap",
-          background: "transparent",
-          borderColor: "transparent",
-          boxShadow: "none",
-        }}
-      >
-        <span style={{ fontSize: 11, color: "var(--muted)" }}>{wbsMeta.hint}</span>
-        {activeBaseline && (
-          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
-            Baseline V{activeBaseline.version_number} (locked {formatDate(activeBaseline.captured_at.slice(0, 10))})
-          </span>
-        )}
-        {project.wbs_status === "draft" && !pendingBaselineRequest && declinedBaselineRequest && (
-          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
-            Declined by {people.find((p) => p.id === declinedBaselineRequest.decided_by)?.name ?? "someone"} on{" "}
-            {declinedBaselineRequest.decided_at ? formatDate(declinedBaselineRequest.decided_at.slice(0, 10)) : "—"}
-            {declinedBaselineRequest.decision_reason ? ` -- "${declinedBaselineRequest.decision_reason}"` : ""}
-          </span>
-        )}
-        {/* 2026-09-07 (Sandra: "capture sign off date -- that's when the
-            project was tagged as closed"): closeoutClosedAt is
-            project_closeouts.closed_at, stamped by decide_wbs_closure at
-            the moment of approval -- this is the official Sign Off date,
-            distinct from project.actual_close_date (when the work itself
-            actually wrapped, shown down in Project Details -- can be
-            earlier, e.g. work finished yesterday but only got signed off
-            today). */}
-        {project.wbs_status === "closed" && closeoutClosedAt && (
-          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Signed Off Date: {formatDate(closeoutClosedAt.slice(0, 10))}</span>
-        )}
-        {project.reopened_at && (
-          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
-            Reopened by {people.find((p) => p.id === project.reopened_by)?.name ?? "someone"} on {formatDate(project.reopened_at.slice(0, 10))}
-          </span>
-        )}
-        <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-          {(() => {
-            const isDraft = project.wbs_status === "draft";
-            const isActivePlan = project.wbs_status === "baseline_locked" || project.wbs_status === "changed_after_baseline";
-            const canRequestStart = canManageWbs && isDraft && !pendingBaselineRequest;
-            const canRequestClosure = canManageWbs && isActivePlan && !pendingClosure;
-            const canReopenProject = isFullAccess && project.wbs_status === "closed";
-            const saveLabel = isDraft ? "Save Draft" : "Save Changes";
-
-            return (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  {canEditWbs && project.wbs_status !== "closed" && (
-                    <button
-                      className="btn-secondary"
-                      disabled={saving}
-                      onClick={saveDraft}
-                    >
-                      {saving ? "Saving…" : saveLabel}
-                    </button>
-                  )}
-
-                  {canRequestStart && (
-                    <button
-                      className="btn-primary"
-                      disabled={workflowBusy || saving || hasUnsavedChanges}
-                      title={hasUnsavedChanges ? "Save your latest changes before requesting project start." : "Request approval to lock the baseline and start the project."}
-                      onClick={handleRequestBaseline}
-                    >
-                      Request Start Project
-                    </button>
-                  )}
-
-                  {isDraft && !!pendingBaselineRequest && (
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        minHeight: 32,
-                        padding: "0 10px",
-                        borderRadius: 999,
-                        background: "var(--warning-bg, #fff7ed)",
-                        color: "var(--warning-text, #b45309)",
-                        fontSize: 11.5,
-                        fontWeight: 700,
-                        border: "1px solid var(--warning-border, #fed7aa)",
-                      }}
-                    >
-                      Start Project Requested · Awaiting Approval
-                    </span>
-                  )}
-
-                  {canRequestClosure && (
-                    <button
-                      className="btn-primary"
-                      disabled={workflowBusy || saving || hasUnsavedChanges}
-                      title={hasUnsavedChanges ? "Save your latest changes before requesting project closure." : "Prepare and submit a Project Closure request."}
-                      onClick={() => {
-                        setClosureFormOpen(true);
-                        window.setTimeout(() => document.getElementById("project-closure-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
-                      }}
-                    >
-                      Request Project Closure
-                    </button>
-                  )}
-
-                  {isActivePlan && !!pendingClosure && (
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        minHeight: 32,
-                        padding: "0 10px",
-                        borderRadius: 999,
-                        background: "var(--warning-bg, #fff7ed)",
-                        color: "var(--warning-text, #b45309)",
-                        fontSize: 11.5,
-                        fontWeight: 700,
-                        border: "1px solid var(--warning-border, #fed7aa)",
-                      }}
-                    >
-                      Closure Requested · Awaiting Approval
-                    </span>
-                  )}
-
-                  {canReopenProject && (
-                    <button className="btn-secondary" disabled={workflowBusy} onClick={handleReopenProject}>
-                      Reopen Project
-                    </button>
-                  )}
-                </div>
-
-                {hasUnsavedChanges && project.wbs_status !== "closed" ? (
-                  <span style={{ fontSize: 10.5, color: "var(--warning-text, #b45309)" }}>
-                    Save your latest changes before sending a workflow request.
-                  </span>
-                ) : project.scoping_effort_mode ? (
-                  <span style={{ fontSize: 10.5, color: "var(--muted)" }}>
-                    All changes saved.
-                  </span>
-                ) : project.wbs_status === "draft" ? (
-                  <span style={{ fontSize: 10.5, color: "var(--muted)" }}>
-                    Draft not saved yet.
-                  </span>
-                ) : null}
-              </>
-            );
-          })()}
-        </div>
-      </div>
 
       {pendingBaselineRequest && (
         <div
@@ -5883,42 +5832,6 @@ export default function WbsPlanning() {
                 >
                   <RefreshCw size={13} /> Refresh Dates
                 </button>
-
-                <label
-                  className="btn-secondary"
-                  title="Keep the selected column and every column to its left visible while you scroll horizontally."
-                  style={{ display: "inline-flex", alignItems: "center", gap: 7, paddingRight: 10, cursor: "pointer" }}
-                >
-                  <span style={{ fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }}>Freeze columns</span>
-                  <select
-                    value={wbsFreezeColKey ?? ""}
-                    onChange={(e) => setWbsFreezePoint(e.target.value || null)}
-                    aria-label="Freeze columns through"
-                    style={{
-                      border: "none",
-                      outline: "none",
-                      background: "transparent",
-                      color: "var(--text)",
-                      fontSize: 11.5,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      padding: 0,
-                      maxWidth: 120,
-                    }}
-                  >
-                    <option value="">None</option>
-                    <option value="task">Task</option>
-                    <option value="depends_on">Through Depends On</option>
-                    <option value="assignee">Through Assignee</option>
-                    <option value="work_type">Through Work Type</option>
-                    <option value="output_type">Through Output Type</option>
-                    <option value="output_count">Through Output Count</option>
-                    <option value="effort_hours">Through Scoped Hours</option>
-                    <option value="spent_hrs">Through Logged Hours</option>
-                    <option value="effort">Through Effort</option>
-                    <option value="changes">Through Changes</option>
-                  </select>
-                </label>
 
                 {canEditWbs && (
                   <button type="button" className="btn-primary" onClick={addTopLevelTask} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
