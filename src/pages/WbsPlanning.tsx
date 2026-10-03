@@ -5147,6 +5147,94 @@ export default function WbsPlanning() {
             document.body
           );
         })()}
+      {bulkMoveOpen &&
+        createPortal(
+          <div
+            style={{ position: "fixed", inset: 0, zIndex: 1220, background: "rgba(15,41,66,.28)", display: "flex", alignItems: "center", justifyContent: "center" }}
+            onClick={() => setBulkMoveOpen(false)}
+          >
+            <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 380, maxWidth: "calc(100vw - 32px)", padding: 16 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
+                Move {selectedTaskIds.size} selected task{selectedTaskIds.size === 1 ? "" : "s"}
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 12 }}>
+                Choose a new parent. Tasks that already contain sub-tasks or are locked will be skipped.
+              </div>
+              <div style={{ display: "grid", gap: 6, maxHeight: 280, overflowY: "auto" }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => void bulkMoveSelected(null)}
+                  style={{ justifyContent: "flex-start", textAlign: "left" }}
+                >
+                  Move to top level
+                </button>
+                {orderedTasks
+                  .filter((p) => p.depth === 0 && !selectedTaskIds.has(p.id))
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => void bulkMoveSelected(p.id)}
+                      style={{ justifyContent: "flex-start", textAlign: "left" }}
+                    >
+                      Move under {p.name}
+                    </button>
+                  ))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                <button type="button" className="btn-secondary" onClick={() => setBulkMoveOpen(false)}>Cancel</button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      {bulkCancelOpen &&
+        createPortal(
+          <div
+            style={{ position: "fixed", inset: 0, zIndex: 1220, background: "rgba(15,41,66,.28)", display: "flex", alignItems: "center", justifyContent: "center" }}
+            onClick={() => setBulkCancelOpen(false)}
+          >
+            <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 390, maxWidth: "calc(100vw - 32px)", padding: 16 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
+                Cancel selected tasks
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45, marginBottom: 12 }}>
+                Cancelling keeps the task and its logged hours, but removes it from active scheduling. Parent and locked tasks will be skipped.
+              </div>
+              <div style={{ fontSize: 11.5, fontWeight: 650, color: "#304963", marginBottom: 5 }}>Reason</div>
+              {cancellationReasonOptions.length > 0 ? (
+                <div className="wbs-field-box" style={{ width: "100%" }}>
+                  <InlineSelect
+                    value={bulkCancelReason}
+                    editable
+                    alwaysSelect
+                    searchable
+                    allowEmpty
+                    emptyLabel="Select a reason"
+                    options={cancellationReasonOptions}
+                    onCommit={setBulkCancelReason}
+                  />
+                </div>
+              ) : (
+                <input
+                  value={bulkCancelReason}
+                  onChange={(e) => setBulkCancelReason(e.target.value)}
+                  placeholder="Enter cancellation reason"
+                  style={{ width: "100%", padding: "8px 9px", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12.5 }}
+                />
+              )}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+                <button type="button" className="btn-secondary" onClick={() => setBulkCancelOpen(false)}>Keep tasks</button>
+                <button type="button" className="btn-primary" disabled={!bulkCancelReason.trim()} onClick={() => void bulkCancelSelected()}>
+                  Cancel tasks
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
       {lastDeletedTask &&
         createPortal(
           <div
