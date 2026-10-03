@@ -1057,6 +1057,7 @@ export default function Projects() {
   const wantsMyTasksView = searchParams.get("assignee") === "me";
   const [pageSection, setPageSection] = useState<"projects" | "tasks">(wantsMyTasksView ? "tasks" : "projects");
   const [projectSystemView, setProjectSystemView] = useState<"all" | "active" | "attention" | "mine">("all");
+  const [usingSystemProjectView, setUsingSystemProjectView] = useState(true);
 
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
@@ -5225,94 +5226,137 @@ export default function Projects() {
         </div>
 
         {pageSection === "projects" && (
-          <>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 18,
-                padding: "10px 2px 8px",
-                fontSize: 11.5,
-                color: "var(--muted)",
-                flexWrap: "wrap",
-              }}
-            >
-              <button type="button" onClick={() => setProjectSystemView("active")} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
-                <strong style={{ color: "#17324f", fontSize: 13 }}>{projectPortfolioMeta.active}</strong> Active
-              </button>
-              <span style={{ color: "#cbd5e1" }}>·</span>
-              <button type="button" onClick={() => setProjectSystemView("attention")} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
-                <strong style={{ color: projectPortfolioMeta.needsAttention ? "var(--danger-text)" : "#17324f", fontSize: 13 }}>{projectPortfolioMeta.needsAttention}</strong> Need attention
-              </button>
-              <span style={{ color: "#cbd5e1" }}>·</span>
-              <button type="button" onClick={() => setProjectSystemView("all")} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
-                <strong style={{ color: "#17324f", fontSize: 13 }}>{projectPortfolioMeta.awaitingStart}</strong> Awaiting start
-              </button>
-              <span style={{ color: "#cbd5e1" }}>·</span>
-              <button type="button" onClick={() => setProjectSystemView("attention")} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
-                <strong style={{ color: projectPortfolioMeta.closePending ? "var(--warning-text)" : "#17324f", fontSize: 13 }}>{projectPortfolioMeta.closePending}</strong> Close pending
-              </button>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 2, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)", marginRight: 2 }}>System views</span>
-              {([
-                ["all", "All Projects"],
-                ["active", "Active Projects"],
-                ["attention", "Needs Attention"],
-                ["mine", "My Projects"],
-              ] as const).map(([key, label]) => {
-                const active = projectSystemView === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setProjectSystemView(key)}
-                    style={{
-                      border: active ? "1px solid #bdd5f2" : "1px solid var(--border)",
-                      background: active ? "#eef6ff" : "#fff",
-                      color: active ? "var(--accent)" : "var(--text-secondary)",
-                      borderRadius: 999,
-                      padding: "5px 10px",
-                      fontSize: 11,
-                      fontWeight: active ? 700 : 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-              <span style={{ marginLeft: 4, fontSize: 10.5, color: "var(--muted)" }}>
-                System views define scope; your saved views below control layout, grouping and additional filters.
-              </span>
-            </div>
-          </>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 18,
+              padding: "10px 2px 0",
+              fontSize: 11.5,
+              color: "var(--muted)",
+              flexWrap: "wrap",
+            }}
+          >
+            <button type="button" onClick={() => { setUsingSystemProjectView(true); setProjectSystemView("active"); }} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
+              <strong style={{ color: "#17324f", fontSize: 13 }}>{projectPortfolioMeta.active}</strong> Active
+            </button>
+            <span style={{ color: "#cbd5e1" }}>·</span>
+            <button type="button" onClick={() => { setUsingSystemProjectView(true); setProjectSystemView("attention"); }} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
+              <strong style={{ color: projectPortfolioMeta.needsAttention ? "var(--danger-text)" : "#17324f", fontSize: 13 }}>{projectPortfolioMeta.needsAttention}</strong> Need attention
+            </button>
+            <span style={{ color: "#cbd5e1" }}>·</span>
+            <button type="button" onClick={() => { setUsingSystemProjectView(true); setProjectSystemView("all"); }} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
+              <strong style={{ color: "#17324f", fontSize: 13 }}>{projectPortfolioMeta.awaitingStart}</strong> Awaiting start
+            </button>
+            <span style={{ color: "#cbd5e1" }}>·</span>
+            <button type="button" onClick={() => { setUsingSystemProjectView(true); setProjectSystemView("attention"); }} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
+              <strong style={{ color: projectPortfolioMeta.closePending ? "var(--warning-text)" : "#17324f", fontSize: 13 }}>{projectPortfolioMeta.closePending}</strong> Close pending
+            </button>
+          </div>
         )}
       </div>
 
       <div className="card" style={{ padding: 0, marginBottom: 20, display: pageSection === "projects" ? undefined : "none" }}>
         <div className="sticky-toolbar-cluster" ref={projectClusterRef}>
-        <div className="table-toolbar">
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
-            <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: "var(--muted)", marginLeft: 4 }}>My views</span>
-          <ViewTabs
-            views={projectViews.views}
-            activeViewId={projectViews.activeViewId}
-            rows={projects}
-            groupOptions={projectGroupOptions}
-            onSelect={projectViews.setActiveViewId}
-            onCreate={projectViews.createView}
-            boardDefaultGroupBy="phase"
-            timelineDefaultHiddenColumns={PROJECT_TIMELINE_DEFAULT_HIDDEN_COLUMNS}
-            calendarDefaultHiddenColumns={PROJECT_TIMELINE_DEFAULT_HIDDEN_COLUMNS}
-            onRename={projectViews.renameView}
-            onDelete={projectViews.deleteView}
-            onColorChange={projectViews.setViewColor}
-            onIconChange={projectViews.setViewIcon}
-            onDuplicate={projectViews.duplicateView}
-            onReorder={projectViews.reorderViews}
-            confirm={confirm}
-          />
+        <div className="table-toolbar" style={{ gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", minWidth: 0, flex: 1 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 9.5, fontWeight: 700, color: "var(--muted)", letterSpacing: ".03em" }}>
+              VIEW
+              <select
+                value={usingSystemProjectView ? `system:${projectSystemView}` : `personal:${projectViews.activeViewId}`}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value.startsWith("system:")) {
+                    const scope = value.slice(7) as "all" | "active" | "attention" | "mine";
+                    setUsingSystemProjectView(true);
+                    setProjectSystemView(scope);
+                    if (projectViews.views.some((v) => v.id === "default")) projectViews.setActiveViewId("default");
+                  } else {
+                    const id = value.slice(9);
+                    setUsingSystemProjectView(false);
+                    setProjectSystemView("all");
+                    projectViews.setActiveViewId(id);
+                  }
+                }}
+                style={{ minWidth: 190, height: 32, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 8, padding: "0 9px", background: "var(--surface)" }}
+              >
+                <optgroup label="System views">
+                  <option value="system:all">All Projects</option>
+                  <option value="system:active">Active Projects</option>
+                  <option value="system:attention">Needs Attention</option>
+                  <option value="system:mine">My Projects</option>
+                </optgroup>
+                {projectViews.views.filter((v) => v.id !== "default").length > 0 && (
+                  <optgroup label="My saved views">
+                    {projectViews.views.filter((v) => v.id !== "default").map((v) => (
+                      <option key={v.id} value={`personal:${v.id}`}>{v.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </label>
+
+            <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 9.5, fontWeight: 700, color: "var(--muted)", letterSpacing: ".03em" }}>
+              VIEW TYPE
+              <select
+                value={projectViews.activeView.viewType}
+                onChange={(e) => {
+                  const viewType = e.target.value as "table" | "board" | "timeline" | "calendar";
+                  projectViews.updateActiveView({
+                    viewType,
+                    ...(viewType === "board" && !projectViews.activeView.groupBy ? { groupBy: "phase" } : {}),
+                    ...(viewType === "timeline" ? { hiddenColumns: PROJECT_TIMELINE_DEFAULT_HIDDEN_COLUMNS } : {}),
+                    ...(viewType === "calendar" ? { hiddenColumns: PROJECT_TIMELINE_DEFAULT_HIDDEN_COLUMNS } : {}),
+                  });
+                }}
+                style={{ minWidth: 125, height: 32, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 8, padding: "0 9px", background: "var(--surface)" }}
+              >
+                <option value="table">Table</option>
+                <option value="board">Board</option>
+                <option value="timeline">Timeline</option>
+                <option value="calendar">Calendar</option>
+              </select>
+            </label>
+
+            <button
+              type="button"
+              onClick={() => {
+                const type = projectViews.activeView.viewType;
+                const base = type === "board" ? "New board" : type === "timeline" ? "New timeline" : type === "calendar" ? "New calendar" : "New view";
+                const existing = projectViews.views.filter((v) => v.name === base || v.name.startsWith(base + " ")).length;
+                projectViews.createView(existing ? `${base} ${existing + 1}` : base, type, type === "board" ? "phase" : undefined, type === "timeline" || type === "calendar" ? PROJECT_TIMELINE_DEFAULT_HIDDEN_COLUMNS : undefined);
+                setUsingSystemProjectView(false);
+                setProjectSystemView("all");
+              }}
+              style={{ height: 32, border: "none", background: "transparent", color: "var(--accent)", fontSize: 10.5, fontWeight: 700, cursor: "pointer", padding: "0 3px" }}
+            >
+              + New view
+            </button>
+
+            {!usingSystemProjectView && projectViews.activeViewId !== "default" && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => projectViews.duplicateView(projectViews.activeViewId)}
+                  style={{ height: 32, border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--text-secondary)", fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: "0 9px" }}
+                >
+                  Duplicate
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const ok = await confirm({ title: "Delete saved view", message: `Delete "${projectViews.activeView.name}"? This only removes your saved view; project data is not affected.`, confirmLabel: "Delete", danger: true });
+                    if (!ok) return;
+                    projectViews.deleteView(projectViews.activeViewId);
+                    setUsingSystemProjectView(true);
+                    setProjectSystemView("all");
+                  }}
+                  style={{ height: 32, border: "none", background: "transparent", color: "var(--danger-text)", fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: "0 3px" }}
+                >
+                  Delete view
+                </button>
+              </>
+            )}
           </div>
           <div className="toolbar-actions">
             <ViewSettingsMenu
