@@ -4649,7 +4649,12 @@ export default function WbsPlanning() {
         .wbs-modern-page .btn-primary {
           box-shadow: 0 1px 2px rgba(37, 99, 235, .12);
         }
-        @media (max-width: 1100px) {
+        @media (max-width: 1250px) {
+          .wbs-modern-page .wbs-project-setup-layout { grid-template-columns: 1fr !important; }
+          .wbs-modern-page .wbs-project-info-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+          .wbs-modern-page .wbs-project-setup-layout > div:last-child { min-height: 96px; }
+        }
+        @media (max-width: 900px) {
           .wbs-modern-page .wbs-project-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
         }
         @media (max-width: 650px) {
@@ -5019,7 +5024,8 @@ export default function WbsPlanning() {
               <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Start by providing the basic details for this project.</div>
             </div>
 
-            <div className="wbs-project-info-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "12px 16px" }}>
+            <div className="wbs-project-setup-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(300px, 1fr)", gap: 18, alignItems: "stretch" }}>
+              <div className="wbs-project-info-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "12px 16px", alignContent: "start" }}>
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project ID</span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(true, undefined, true), width: "100%" }}>
@@ -5049,7 +5055,7 @@ export default function WbsPlanning() {
                                           saveProjectField({ owner_id: p?.id ?? null });
                                         }}
                                       />
-                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginRight: 4, pointerEvents: "none" }} />
+                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
                   </div>
                 </div>
               </label>
@@ -5072,7 +5078,7 @@ export default function WbsPlanning() {
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.category, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect value={project.category ?? ""} editable={canEditWbs} allowEmpty emptyLabel="No category" options={categoryPickerOptions} onCommit={(v) => saveProjectField({ category: v || null })} />
-                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginRight: 4, pointerEvents: "none" }} />
+                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
                   </div>
                 </div>
               </label>
@@ -5092,7 +5098,7 @@ export default function WbsPlanning() {
                                           saveProjectField({ source_id: src?.id ?? null });
                                         }}
                                       />
-                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginRight: 4, pointerEvents: "none" }} />
+                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
                   </div>
                 </div>
               </label>
@@ -5112,7 +5118,7 @@ export default function WbsPlanning() {
                                           saveProjectField({ project_type_id: type?.id ?? null });
                                         }}
                                       />
-                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginRight: 4, pointerEvents: "none" }} />
+                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
                   </div>
                 </div>
               </label>
@@ -5132,7 +5138,7 @@ export default function WbsPlanning() {
                                           saveProjectField({ effort_level: lvl ?? null });
                                         }}
                                       />
-                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginRight: 4, pointerEvents: "none" }} />
+                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
                   </div>
                 </div>
               </label>
@@ -5147,15 +5153,16 @@ export default function WbsPlanning() {
               )}
             </div>
 
-            <div style={{ marginTop: 13 }}>
-              <div style={{ fontSize: 10.5, fontWeight: 700, color: "#304963", marginBottom: 5 }}>Description</div>
-              <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.description, undefined, !canEditWbs), width: "100%", minHeight: 66, alignItems: "stretch" }}>
-                <InlineTextArea
-                  value={project.description ?? ""}
-                  editable={canEditWbs}
-                  placeholder="What is this project about? (optional)"
-                  onCommit={(v) => saveProjectField({ description: v })}
-                />
+              <div style={{ display: "grid", gridTemplateRows: "auto 1fr", minWidth: 0 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#304963", marginBottom: 5 }}>Description</div>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.description, undefined, !canEditWbs), width: "100%", minHeight: 0, height: "100%", alignItems: "stretch" }}>
+                  <InlineTextArea
+                    value={project.description ?? ""}
+                    editable={canEditWbs}
+                    placeholder="What is this project about? (optional)"
+                    onCommit={(v) => saveProjectField({ description: v })}
+                  />
+                </div>
               </div>
             </div>
           </section>
