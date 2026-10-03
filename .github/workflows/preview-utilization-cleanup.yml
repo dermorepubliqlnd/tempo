@@ -2,14 +2,14 @@ name: Build Utilization Cleanup Preview
 
 on:
   push:
-    branches: [preview-utilization-cleanup, preview-utilization-lifecycle-guardrails]
+    branches: [preview/wbs-project-info-v2-20261003]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: utilization-cleanup-preview
+  group: wbs-project-info-v2-preview
   cancel-in-progress: true
 
 jobs:
@@ -43,8 +43,8 @@ jobs:
           git init
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b preview-utilization-integration
+          git checkout -b preview-wbs-project-info-v2-integration
           git add -A
-          git commit -m "Build Utilization cleanup preview"
+          git commit -m "Build WBS project info v2 preview"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force origin preview-utilization-integration
+          git push --force origin preview-wbs-project-info-v2-integration

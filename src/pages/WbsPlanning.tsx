@@ -5,9 +5,9 @@ import { useState, useEffect, useCallback, useRef, Fragment, type CSSProperties 
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { PauseReviewBanner } from "../components/PauseProjectModals";
-import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin } from "lucide-react";
+import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin, MoreHorizontal, Copy, ArrowUp, ArrowDown, CornerDownRight, Undo2 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import { archiveItem, ARCHIVE_MOVE_NOTE, splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, loggedTimeDeleteWarning } from "../lib/archive";
+import { archiveItem, restoreItem, ARCHIVE_MOVE_NOTE, splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, loggedTimeDeleteWarning } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { InlineText, InlineNumber, InlineSelect, InlineDate, InlineTextArea } from "../components/InlineCell";
@@ -18,7 +18,7 @@ import { rollupHoursFor, formatHours, type TimeEntryRow } from "../lib/timeTrack
 import { addDays, buildHolidaySet, isWorkingDay, parseLocalDate, toISO, workingDaysBetween, type HolidaySet } from "../lib/workingDays";
 import { fullCapacityScenario, capacityBasedScenario, packFullCapacityQueue, FULL_CAPACITY_DAILY_HOURS, type FullCapacityQueueTask } from "../lib/taskScheduling";
 import { buildForwardSchedule, type SchedTaskRow, type SchedProjectRow, type SchedAvailabilityRow } from "../lib/capacityScheduler";
-import { TASK_EFFORT_OPTIONS, TASK_EFFORT_DEFAULT_TONES, TASK_STATUS_GROUPED, statusGroupOf, PROJECT_EFFORT_LEVEL_OPTIONS, effortLevelLabel } from "../lib/notionOptions";
+import { TASK_EFFORT_OPTIONS, TASK_EFFORT_DEFAULT_TONES, TASK_STATUS_GROUPED, statusGroupOf, PROJECT_EFFORT_LEVEL_OPTIONS, PROJECT_PRIORITY_OPTIONS, effortLevelLabel } from "../lib/notionOptions";
 // One shared allocation engine for all three utilization surfaces -- this
 // snapshot, the Utilization page, and Scoped vs Logged. See
 // src/lib/dailyAllocation.ts. Replaces the old utilizationCalc.ts, which
@@ -74,6 +74,8 @@ interface ProjectRow {
   // page.
   category: string | null;
   source_id: string | null;
+  planning_type_id: string | null;
+  project_type_id: string | null;
   priority: string | null;
   effort_level: string | null;
   description: string | null;
@@ -200,11 +202,12 @@ const WBS_TASK_COLUMN_DEFAULTS: Record<string, number> = {
   changes: 190,
 };
 const WBS_TASK_COLUMN_ORDER = ["task", "depends_on", "assignee", "work_type", "output_type", "output_count", "effort_hours", "spent_hrs", "effort", "changes"];
-const WBS_DATE_COLUMN_WIDTHS = [110, 100, 90, 110, 100, 90, 110, 100, 90]; // Start/End/Duration x3 modes, fixed
+const WBS_DATE_COLUMN_WIDTHS = [110, 100, 90, 110, 100, 90]; // Start/End/Duration x Forecasted + Theoretical, fixed
 const WBS_COL_WIDTHS_STORAGE_KEY = "capaciq_wbs_task_col_widths";
 const WBS_FREEZE_STORAGE_KEY = "capaciq_wbs_freeze_task_col"; // legacy -- read once as a migration fallback
 const WBS_FREEZE_COL_STORAGE_KEY = "capaciq_wbs_freeze_col_key";
 const WBS_MIN_COL_WIDTH = 50;
+const WBS_GUTTER_WIDTH = 42;
 interface PersonRow {
   id: string;
   name: string;
@@ -575,6 +578,8 @@ export default function WbsPlanning() {
   // builds its own Category/Source pickers.
   const [projectCategoryOptions, setProjectCategoryOptions] = useState<{ name: string; is_active: boolean }[]>([]);
   const [projectSourceOptions, setProjectSourceOptions] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
+  const [projectPlanningTypeOptions, setProjectPlanningTypeOptions] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
+  const [projectTypeOptions, setProjectTypeOptions] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
   // Task Type <-> Output Type conditional mapping (Phase 23, 2026-08-25) --
   // Sandra: "I want the output be conditional based on task type." Filters
   // the Output Type picker below to only what's allowed for the task's
@@ -617,18 +622,28 @@ export default function WbsPlanning() {
       return "task";
     }
   });
-  function toggleWbsFreezeCol(colKey: string) {
-    setWbsFreezeColKey((prev) => {
-      const next = prev === colKey ? null : colKey;
-      try {
-        localStorage.setItem(WBS_FREEZE_COL_STORAGE_KEY, next ?? "");
-      } catch {
-        // ignore -- private browsing / storage full, toggle still works
-        // for the rest of this session, it just won't persist
-      }
-      return next;
-    });
+  function setWbsFreezePoint(colKey: string | null) {
+    setWbsFreezeColKey(colKey);
+    try {
+      localStorage.setItem(WBS_FREEZE_COL_STORAGE_KEY, colKey ?? "");
+    } catch {
+      // ignore -- private browsing / storage full; preference still works
+      // for the rest of the session.
+    }
   }
+  const [wbsHeaderMenu, setWbsHeaderMenu] = useState<{ x: number; y: number; colKey: string } | null>(null);
+  const [focusTaskNameId, setFocusTaskNameId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusTaskNameId) return;
+    const timer = window.setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>(`[data-wbs-nav-id="task-name-${focusTaskNameId}"]`);
+      if (!input) return;
+      input.focus();
+      input.select();
+      setFocusTaskNameId(null);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [focusTaskNameId, tasks]);
   // Gutter is a fixed 22px; the Task column's own width is whatever
   // wbsColWidth("task") currently resolves to (resizable) -- the frozen
   // Task column's sticky offset must track that live, not a constant.
@@ -857,6 +872,10 @@ export default function WbsPlanning() {
   // Phase 10: no longer a single selected preview -- all 4 scenarios
   // render simultaneously as rows now, see effectiveForMode below.
   const [saving, setSaving] = useState(false);
+  // Most WBS users do not need the bandwidth diagnostic by default.
+  // Keep it opt-in while preserving the existing calculation and controls
+  // when someone explicitly opens it.
+  const [showAvailableBandwidth, setShowAvailableBandwidth] = useState(false);
   const [utilWindowOffset, setUtilWindowOffset] = useState(0); // in units of UTIL_WINDOW_DAYS blocks
   // Auto-scroll-to-today (2026-08-25): Sandra reported losing sight of a
   // date column in this panel between two browser zoom levels. The date
@@ -910,6 +929,7 @@ export default function WbsPlanning() {
   // Phase 2/3 workflow state.
   const [activeRevision, setActiveRevision] = useState<RevisionRow | null>(null);
   const [pendingClosure, setPendingClosure] = useState<ClosureRequestRow | null>(null);
+  const [closureFormOpen, setClosureFormOpen] = useState(false);
   // 2026-09-07 (Sandra: Sign Off Date) -- project_closeouts.closed_at,
   // fetched in loadAll above. null until wbs_status is actually 'closed'.
   const [closeoutClosedAt, setCloseoutClosedAt] = useState<string | null>(null);
@@ -982,6 +1002,29 @@ export default function WbsPlanning() {
   // conditions as before -- placement/consolidation only, not a
   // behavior change.
   const [wbsActionsMenuOpen, setWbsActionsMenuOpen] = useState(false);
+  const [rowActionsMenu, setRowActionsMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
+  const [moveParentTaskId, setMoveParentTaskId] = useState<string | null>(null);
+  const [lastDeletedTask, setLastDeletedTask] = useState<{ id: string; name: string } | null>(null);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [bulkCancelOpen, setBulkCancelOpen] = useState(false);
+  const [bulkCancelReason, setBulkCancelReason] = useState("");
+  function toggleTaskSelected(taskId: string) {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }
+  function clearTaskSelection() {
+    setSelectedTaskIds(new Set());
+  }
+  useEffect(() => {
+    if (!lastDeletedTask) return;
+    const timer = window.setTimeout(() => setLastDeletedTask(null), 7000);
+    return () => window.clearTimeout(timer);
+  }, [lastDeletedTask]);
   // 2026-09-21 (Sandra: on the closed-project merged view, "[the WBS
   // table + Gantt] should be expandable if ever we just want to see
   // details" -- collapsed by default for closed projects (the Baseline
@@ -1033,8 +1076,8 @@ export default function WbsPlanning() {
     // pass silent=true to skip that full-page loading flash entirely --
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
-    const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required").eq("id", projectId).single(),
+    const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }, { data: planningTypes }, { data: ptypes }] = await Promise.all([
+      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,planning_type_id,project_type_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -1062,12 +1105,18 @@ export default function WbsPlanning() {
       supabase.from("work_type_output_types").select("work_type_id,output_type_id"),
       supabase.from("project_categories").select("name,is_active").order("sort_order"),
       supabase.from("project_sources").select("id,name,is_active").order("sort_order"),
+      supabase.from("project_planning_types").select("id,name,is_active").order("sort_order"),
+      supabase.from("project_types").select("id,name,is_active").order("sort_order"),
     ]);
     setProject((proj as ProjectRow) ?? null);
     // Phase 21 (2026-08-24): activeMode is now a fixed constant
     // ("manual"/Forecasted, always), not state -- no more seeding needed
     // here. See the activeMode declaration above for why.
     setTasks((tks as TaskRow[]) ?? []);
+    setSelectedTaskIds((prev) => {
+      const valid = new Set(((tks as TaskRow[]) ?? []).map((t) => t.id));
+      return new Set(Array.from(prev).filter((id) => valid.has(id)));
+    });
     setPeople((ppl as PersonRow[]) ?? []);
     setAvailability(avail);
     setHolidays(hols);
@@ -1078,6 +1127,8 @@ export default function WbsPlanning() {
     setWorkTypeOutputTypes((wtots as { work_type_id: string; output_type_id: string }[]) ?? []);
     setProjectCategoryOptions((cats as { name: string; is_active: boolean }[]) ?? []);
     setProjectSourceOptions((srcs as { id: string; name: string; is_active: boolean }[]) ?? []);
+    setProjectPlanningTypeOptions((planningTypes as { id: string; name: string; is_active: boolean }[]) ?? []);
+    setProjectTypeOptions((ptypes as { id: string; name: string; is_active: boolean }[]) ?? []);
 
     // Dependencies are same-project only (v1), so fetched as a follow-up
     // query scoped to this project's own task ids, once they're known --
@@ -2262,6 +2313,9 @@ export default function WbsPlanning() {
     // Project. No Full Access override (same as the Output Type gate
     // right below) -- these are meant to always be set by this point.
     const missingSetupFields: string[] = [];
+    if (!project.planning_type_id) missingSetupFields.push("Planning Type");
+    if (!project.project_type_id) missingSetupFields.push("Project Type");
+    if (!project.priority) missingSetupFields.push("Priority");
     if (!project.category) missingSetupFields.push("Category");
     if (!project.source_id) missingSetupFields.push("Source");
     if (!project.effort_level) missingSetupFields.push("Complexity");
@@ -2551,6 +2605,7 @@ export default function WbsPlanning() {
       await alert(`Couldn't request closure: ${error.message}`);
       return;
     }
+    setClosureFormOpen(false);
     await loadAll();
   }
 
@@ -2830,7 +2885,7 @@ export default function WbsPlanning() {
       newAssignee = await assigneePicker.pick("Assign the new task");
       if (!newAssignee) return;
     }
-    const { error } = await supabase.from("tasks").insert({
+    const { data: newTask, error } = await supabase.from("tasks").insert({
       project_id: project.id,
       assignee_id: newAssignee,
       name: "Untitled task",
@@ -2843,12 +2898,13 @@ export default function WbsPlanning() {
       original_due_date: defaultDue,
       current_due_date: defaultDue,
       sort_order: Date.now(),
-    });
+    }).select("id").single();
     if (error) {
       await alert(`Couldn't create task: ${error.message}`);
       return;
     }
-    loadAll(true);
+    if (newTask?.id) setFocusTaskNameId(newTask.id as string);
+    await loadAll(true);
   }
 
   async function addSubtask(parent: TaskRow & { depth: number }) {
@@ -2878,7 +2934,7 @@ export default function WbsPlanning() {
       newAssignee = await assigneePicker.pick("Assign the new sub-task", parent.assignee_id);
       if (!newAssignee) return;
     }
-    const { error } = await supabase.from("tasks").insert({
+    const { data: newTask, error } = await supabase.from("tasks").insert({
       project_id: parent.project_id,
       parent_task_id: parent.id,
       assignee_id: newAssignee,
@@ -2892,12 +2948,279 @@ export default function WbsPlanning() {
       original_due_date: parent.current_due_date,
       current_due_date: parent.current_due_date,
       sort_order: Date.now(),
-    });
+    }).select("id").single();
     if (error) {
       await alert(`Couldn't add subtask: ${error.message}`);
       return;
     }
-    loadAll(true);
+    if (newTask?.id) setFocusTaskNameId(newTask.id as string);
+    await loadAll(true);
+  }
+
+  async function addTaskBelow(anchor: TaskRow & { depth: number }) {
+    if (!project) return;
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    const ensuredStart = await startDatePrompt.ensure(project);
+    if (!ensuredStart) return;
+    const siblings = anchor.depth === 0
+      ? orderedTasks.filter((x) => x.depth === 0)
+      : orderedTasks.filter((x) => x.depth === 1 && x.parent_task_id === anchor.parent_task_id);
+    const at = siblings.findIndex((x) => x.id === anchor.id);
+    const next = siblings[at + 1];
+    const sortOrder = next && anchor.sort_order != null && next.sort_order != null
+      ? (anchor.sort_order + next.sort_order) / 2
+      : (anchor.sort_order ?? Date.now()) + 500;
+
+    let newAssignee: string | null = null;
+    if (project.wbs_status !== "draft") {
+      newAssignee = await assigneePicker.pick("Assign the new task");
+      if (!newAssignee) return;
+    }
+    const start = anchor.depth === 1
+      ? (anchor.start_date_standard ?? ensuredStart).slice(0, 10)
+      : ensuredStart;
+    const { data: newTask, error } = await supabase.from("tasks").insert({
+      project_id: project.id,
+      parent_task_id: anchor.parent_task_id,
+      assignee_id: newAssignee,
+      name: anchor.depth === 0 ? "Untitled task" : "Untitled sub-task",
+      status: "Not Started",
+      start_date: start,
+      start_date_full: start,
+      start_date_standard: start,
+      start_full_auto: true,
+      start_standard_auto: true,
+      original_due_date: anchor.current_due_date ?? project.end_date ?? toISO(new Date()),
+      current_due_date: anchor.current_due_date ?? project.end_date ?? toISO(new Date()),
+      sort_order: sortOrder,
+    }).select("id").single();
+    if (error) {
+      await alert(`Couldn't add task: ${error.message}`);
+      return;
+    }
+    if (newTask?.id) setFocusTaskNameId(newTask.id as string);
+    await loadAll(true);
+  }
+
+  async function duplicateTask(t: TaskRow & { depth: number }) {
+    if (!project) return;
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    const siblings = siblingsFor(t);
+    const at = siblings.findIndex((x) => x.id === t.id);
+    const next = siblings[at + 1];
+    const sortOrder = next && t.sort_order != null && next.sort_order != null
+      ? (t.sort_order + next.sort_order) / 2
+      : (t.sort_order ?? Date.now()) + 500;
+    const { data: newTask, error } = await supabase.from("tasks").insert({
+      project_id: t.project_id,
+      parent_task_id: t.parent_task_id,
+      assignee_id: t.assignee_id,
+      name: `${t.name || "Untitled task"} copy`,
+      status: "Not Started",
+      start_date: t.start_date,
+      start_date_full: t.start_date_full,
+      start_date_standard: t.start_date_standard,
+      start_full_auto: t.start_full_auto,
+      start_standard_auto: t.start_standard_auto,
+      manual_end_date: t.manual_end_date,
+      original_due_date: t.current_due_date,
+      current_due_date: t.current_due_date,
+      estimated_hours: t.estimated_hours,
+      work_type_id: t.work_type_id,
+      output_type_id: t.output_type_id,
+      output_count: t.output_count,
+      sort_order: sortOrder,
+    }).select("id").single();
+    if (error) {
+      await alert(`Couldn't duplicate task: ${error.message}`);
+      return;
+    }
+    if (newTask?.id) setFocusTaskNameId(newTask.id as string);
+    await loadAll(true);
+  }
+
+  async function moveTaskDirection(t: TaskRow & { depth: number }, direction: -1 | 1) {
+    const siblings = siblingsFor(t);
+    const at = siblings.findIndex((x) => x.id === t.id);
+    const target = siblings[at + direction];
+    if (!target) return;
+    await reorderTask(t.id, target.id);
+  }
+
+  async function moveTaskToParent(t: TaskRow & { depth: number }, parentId: string | null) {
+    if (hasChildren(t.id)) {
+      await alert("A task with sub-tasks can't be moved under another parent. Move or remove its sub-tasks first.");
+      return;
+    }
+    const nextOrder = Math.max(0, ...orderedTasks.filter((x) => x.parent_task_id === parentId).map((x) => x.sort_order ?? 0)) + 1000;
+    const { error } = await supabase.from("tasks").update({ parent_task_id: parentId, sort_order: nextOrder }).eq("id", t.id);
+    if (error) {
+      await alert(`Couldn't move task: ${error.message}`);
+      return;
+    }
+    setMoveParentTaskId(null);
+    await loadAll(true);
+  }
+
+  function selectedTasks(): (TaskRow & { depth: number })[] {
+    return orderedTasks.filter((t) => selectedTaskIds.has(t.id));
+  }
+
+  async function bulkAssignSelected() {
+    const eligible = selectedTasks().filter((t) => !hasChildren(t.id) && !isLockedStatus(t.status) && t.status !== "Cancelled");
+    if (!eligible.length) {
+      await alert("Select at least one editable leaf task to assign.");
+      return;
+    }
+    const personId = await assigneePicker.pick(`Assign ${eligible.length} selected task${eligible.length === 1 ? "" : "s"}`);
+    if (!personId) return;
+    for (const t of eligible) {
+      const { error } = await supabase.from("tasks").update({ assignee_id: personId }).eq("id", t.id);
+      if (error) {
+        await alert(`Couldn't assign "${t.name}": ${error.message}`);
+        return;
+      }
+    }
+    clearTaskSelection();
+    await loadAll(true);
+  }
+
+  async function bulkDuplicateSelected() {
+    const chosen = selectedTasks();
+    const eligible = chosen.filter((t) => !hasChildren(t.id));
+    if (!eligible.length) {
+      await alert("Select at least one task without sub-tasks to duplicate.");
+      return;
+    }
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    for (const t of eligible) {
+      const siblings = siblingsFor(t);
+      const at = siblings.findIndex((x) => x.id === t.id);
+      const next = siblings[at + 1];
+      const sortOrder = next && t.sort_order != null && next.sort_order != null
+        ? (t.sort_order + next.sort_order) / 2
+        : (t.sort_order ?? Date.now()) + 500;
+      const { error } = await supabase.from("tasks").insert({
+        project_id: t.project_id,
+        parent_task_id: t.parent_task_id,
+        assignee_id: t.assignee_id,
+        name: `${t.name || "Untitled task"} copy`,
+        status: "Not Started",
+        start_date: t.start_date,
+        start_date_full: t.start_date_full,
+        start_date_standard: t.start_date_standard,
+        start_full_auto: t.start_full_auto,
+        start_standard_auto: t.start_standard_auto,
+        manual_end_date: t.manual_end_date,
+        original_due_date: t.current_due_date,
+        current_due_date: t.current_due_date,
+        estimated_hours: t.estimated_hours,
+        work_type_id: t.work_type_id,
+        output_type_id: t.output_type_id,
+        output_count: t.output_count,
+        sort_order: sortOrder,
+      });
+      if (error) {
+        await alert(`Couldn't duplicate "${t.name}": ${error.message}`);
+        return;
+      }
+    }
+    clearTaskSelection();
+    await loadAll(true);
+    if (eligible.length < chosen.length) {
+      await alert(`${chosen.length - eligible.length} parent task(s) with sub-tasks were skipped. Duplicate those individually if needed.`);
+    }
+  }
+
+  async function bulkDeleteSelected() {
+    if (project?.wbs_status !== "draft") return;
+    const chosen = selectedTasks();
+    if (!chosen.length) return;
+    const chosenIds = new Set(chosen.map((t) => t.id));
+    const roots = chosen.filter((t) => !t.parent_task_id || !chosenIds.has(t.parent_task_id));
+    const { blocked } = await splitByArchivePermission("task", roots.map((t) => t.id));
+    if (blocked.length) {
+      await alert({ title: "Some tasks can't be deleted", message: blockedDeleteMessage("task", roots.map((t) => t.name), roots.length - blocked.length) });
+      return;
+    }
+    const allAffectedIds = Array.from(new Set(roots.flatMap((t) => [t.id, ...tasks.filter((x) => x.parent_task_id === t.id).map((x) => x.id)])));
+    const logged = await loggedHoursOnTasks(allAffectedIds);
+    const ok = await confirm({
+      title: `Delete ${roots.length} selected task${roots.length === 1 ? "" : "s"}`,
+      message: logged.entries > 0
+        ? `${loggedTimeDeleteWarning("The selected tasks", logged.hours, logged.entries)}\n\nThey will be moved to Archive and can be restored.`
+        : `Move ${roots.length} selected task${roots.length === 1 ? "" : "s"} to Archive? Parent tasks include their sub-tasks.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    for (const t of roots) {
+      const { error } = await archiveItem("task", t.id);
+      if (error) {
+        await alert(`Couldn't delete "${t.name}": ${error.message}`);
+        return;
+      }
+    }
+    setLastDeletedTask(roots.length === 1 ? { id: roots[0].id, name: roots[0].name } : null);
+    clearTaskSelection();
+    await loadAll(true);
+  }
+
+  async function bulkMoveSelected(parentId: string | null) {
+    const chosen = selectedTasks();
+    const eligible = chosen.filter((t) => !hasChildren(t.id) && !isLockedStatus(t.status));
+    if (!eligible.length) {
+      await alert("Select at least one movable task without sub-tasks.");
+      return;
+    }
+    let nextOrder = Math.max(0, ...orderedTasks.filter((x) => x.parent_task_id === parentId).map((x) => x.sort_order ?? 0)) + 1000;
+    for (const t of eligible) {
+      if (parentId === t.id) continue;
+      const { error } = await supabase.from("tasks").update({ parent_task_id: parentId, sort_order: nextOrder }).eq("id", t.id);
+      if (error) {
+        await alert(`Couldn't move "${t.name}": ${error.message}`);
+        return;
+      }
+      nextOrder += 1000;
+    }
+    setBulkMoveOpen(false);
+    clearTaskSelection();
+    await loadAll(true);
+    if (eligible.length < chosen.length) {
+      await alert(`${chosen.length - eligible.length} task(s) were skipped because they are locked or already contain sub-tasks.`);
+    }
+  }
+
+  async function bulkCancelSelected() {
+    const reason = bulkCancelReason.trim();
+    if (!reason) return;
+    const chosen = selectedTasks();
+    const eligible = chosen.filter((t) => !hasChildren(t.id) && !isLockedStatus(t.status) && t.status !== "Cancelled");
+    if (!eligible.length) {
+      await alert("Select at least one active leaf task to cancel.");
+      return;
+    }
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    for (const t of eligible) {
+      const { error } = await supabase
+        .from("tasks")
+        .update({ status: "Cancelled", cancellation_reason: reason, submitted_on: null, submitted_by: null, actual_completion_date: null })
+        .eq("id", t.id);
+      if (error) {
+        await alert(`Couldn't cancel "${t.name}": ${error.message}`);
+        return;
+      }
+    }
+    setBulkCancelOpen(false);
+    setBulkCancelReason("");
+    clearTaskSelection();
+    await loadAll(true);
   }
 
   // Sandra, 2026-07-24: "Allow deleting of tasks in WBS. Right now we can
@@ -2950,7 +3273,8 @@ export default function WbsPlanning() {
       await alert(`Couldn't delete: ${error.message}`);
       return;
     }
-    loadAll(true);
+    setLastDeletedTask({ id: t.id, name: t.name });
+    await loadAll(true);
   }
 
   // 2026-09-10 (Cancelled task status revived): a non-destructive
@@ -3348,6 +3672,21 @@ export default function WbsPlanning() {
   async function saveDraft() {
     if (!project || !projectId) return;
 
+    const wasInitialProjectInfoSave = project.is_unsaved;
+
+    if (project.is_unsaved) {
+      const missing = [
+        !project.name?.trim() ? "Project Name" : null,
+        !project.owner_id ? "Owner" : null,
+        !project.start_date ? "Start Date" : null,
+      ].filter((x): x is string => !!x);
+
+      if (missing.length) {
+        await alert(`Complete the required Project Information before continuing: ${missing.join(", ")}.`);
+        return;
+      }
+    }
+
     const chosenChain = chainByMode[activeMode];
     const unresolved = orderedTasks.filter((t) => !chosenChain.get(t.id));
     if (unresolved.length) {
@@ -3373,7 +3712,9 @@ export default function WbsPlanning() {
     // extra click), Save is what actually records that an edit happened
     // and flips status to Changed After Baseline (record_wbs_edit below).
     const wasBaselineLocked = project.wbs_status === "baseline_locked";
-    const confirmMsg = wasBaselineLocked
+    const confirmMsg = project.is_unsaved
+      ? "Save Project Information?\n\nThis saves the project details and opens the WBS planning sections. You can still update the information while the project is in Draft."
+      : wasBaselineLocked
       ? `Save this project's timelines using ${verb}?\n\nThis writes every task's computed End date, records both modes for reporting, and marks the project Changed After Baseline since this is an edit made after the Baseline was locked.`
       : `Save this project's timelines using ${verb}?\n\nThis writes every task's computed End date (Start dates are already saved per-task) and records both modes for reporting.${
           project.wbs_status === "draft" ? " Nothing is locked yet -- use Start Project from the actions above when you're ready." : ""
@@ -3532,16 +3873,21 @@ export default function WbsPlanning() {
       // silent=true so state still refreshes underneath without the
       // full unmount/remount.
       await loadAll(true);
-      await alert(
-        project.wbs_status === "draft"
-          ? "Timelines have been saved. Start the project to lock the timelines."
-          : keptDue.length
-          ? `Timelines have been saved. Due dates on a started project only change through an approved extension, so these kept their current due date:\n\n${keptDue
-              .slice(0, 12)
-              .map((k) => `• ${k.name}: plan says ${formatDate(k.plan)}, kept ${formatDate(k.kept)}`)
-              .join("\n")}${keptDue.length > 12 ? `\n…and ${keptDue.length - 12} more` : ""}\n\nIf a task needs more time, request an extension.`
-          : "Timelines have been saved. This project is already started, so the change is tracked as variance against its Baseline (see the Audit Trail)."
-      );
+      // First save only establishes Project Information and unlocks WBS planning.
+      // The page transition itself is enough feedback; do not show the legacy
+      // "Timelines have been saved" modal before the user has even built a WBS.
+      if (!wasInitialProjectInfoSave) {
+        await alert(
+          project.wbs_status === "draft"
+            ? "Draft saved."
+            : keptDue.length
+            ? `Timelines have been saved. Due dates on a started project only change through an approved extension, so these kept their current due date:\n\n${keptDue
+                .slice(0, 12)
+                .map((k) => `• ${k.name}: plan says ${formatDate(k.plan)}, kept ${formatDate(k.kept)}`)
+                .join("\n")}${keptDue.length > 12 ? `\n…and ${keptDue.length - 12} more` : ""}\n\nIf a task needs more time, request an extension.`
+            : "Changes saved. This project is already started, so the update is tracked as variance against its Baseline."
+        );
+      }
     } finally {
       setSaving(false);
     }
@@ -3879,7 +4225,7 @@ export default function WbsPlanning() {
       position: "sticky",
       left,
       zIndex: isTd ? 2 : 3,
-      background: rowLocked ? "var(--hover-bg)" : "var(--surface)",
+      background: rowLocked ? "var(--hover-bg)" : isTd ? "var(--surface)" : "#f8fbff",
       ...(idx === frozenIdx ? { boxShadow: "1px 0 0 0 var(--border)" } : {}),
     };
   }
@@ -3900,10 +4246,14 @@ export default function WbsPlanning() {
     // combine with sticky -- sticky elements can be positioning contexts
     // too).
     const sticky = wbsColStickyStyle(colKey, false);
-    const isPinned = wbsFreezeColKey === colKey;
     return (
       <th
         rowSpan={2}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setWbsHeaderMenu({ x: e.clientX, y: e.clientY, colKey });
+        }}
         style={{
           width: w,
           minWidth: WBS_MIN_COL_WIDTH,
@@ -3915,28 +4265,7 @@ export default function WbsPlanning() {
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           {children}
-          {/* Freeze panes (2026-08-26, Sandra: "I want the freeze task
-              pin to be in the column headers in the table"; generalized
-              2026-08-27, Sandra: "can we pin any column, not just Task")
-              -- every resizable column gets its own pin, mutually
-              exclusive with every other column's. stopPropagation so it
-              doesn't also trigger the resize-handle span, its sibling in
-              this same <th>. */}
-          <span
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleWbsFreezeCol(colKey);
-            }}
-            title={isPinned ? "Unfreeze this column" : "Freeze this column (and every column to its left) so it stays visible while scrolling"}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              cursor: "pointer",
-              color: isPinned ? "var(--accent, #4f46e5)" : "var(--muted)",
-            }}
-          >
-            <Pin size={12} />
-          </span>
+
         </span>
         <span
           onMouseDown={(e) => startWbsColResize(colKey, e)}
@@ -3966,11 +4295,12 @@ export default function WbsPlanning() {
       };
     }
     return {
-      border: `1px ${isFilled ? "solid" : "dashed"} ${isFilled ? "var(--border)" : "var(--warning-text, #b45309)"}`,
-      borderRadius: 6,
+      border: "1px solid var(--border)",
+      borderRadius: 8,
       padding: "1px 4px",
       minWidth,
       background: "var(--surface)",
+      boxShadow: isFilled ? "none" : "inset 0 0 0 1px rgba(148,163,184,.06)",
     };
   }
 
@@ -4012,7 +4342,7 @@ export default function WbsPlanning() {
               looked like "icon overlapping the End date". `overflow:
               hidden` on the `<td>` itself (not just an inner span) is
               what actually stops that bleed. */}
-          <td style={{ ...style, overflow: "hidden", ...(conflict ? { background: "var(--danger-bg)", boxShadow: "inset 3px 0 0 var(--danger-text)" } : {}) }} title={conflict ? `Starts on or before "${conflict.name}" finishes (${formatDate(conflict.end)}) -- move this Start after that date, or click Refresh dates.` : undefined}>
+          <td className="wbs-readonly-cell" style={{ ...style, overflow: "hidden", ...(conflict ? { background: "var(--danger-bg)", boxShadow: "inset 3px 0 0 var(--danger-text)" } : {}) }} title={conflict ? `Starts on or before "${conflict.name}" finishes (${formatDate(conflict.end)}) -- move this Start after that date, or click Refresh dates.` : undefined}>
             <span
               title={
                 isParent
@@ -4036,8 +4366,8 @@ export default function WbsPlanning() {
               {/* phase127m: conflict shown as a red cell fill + hover note, no icon */}
             </span>
           </td>
-          <td style={entry ? style : { ...style, color: "var(--muted)" }}>{entry ? formatDate(entry.end) : "—"}</td>
-          <td style={entry ? style : { ...style, color: "var(--muted)" }}>{entry ? entry.durationDays : "—"}</td>
+          <td className="wbs-readonly-cell" style={entry ? style : { ...style, color: "var(--muted)" }}>{entry ? formatDate(entry.end) : "—"}</td>
+          <td className="wbs-readonly-cell" style={entry ? style : { ...style, color: "var(--muted)" }}>{entry ? entry.durationDays : "—"}</td>
         </>
       );
     }
@@ -4046,7 +4376,7 @@ export default function WbsPlanning() {
     const autoField = "start_standard_auto";
     return (
       <>
-        <td style={{ ...style, overflow: "hidden", ...(conflict ? { background: "var(--danger-bg)", boxShadow: "inset 3px 0 0 var(--danger-text)" } : {}) /* phase127m: red fill on dependency conflict */ }} title={conflict ? `Starts on or before "${conflict.name}" finishes (${formatDate(conflict.end)}) -- move this Start after that date, or click Refresh dates.` : undefined}>
+        <td className={canEditWbs && !isParent && !project!.timelines_locked ? "wbs-editable-cell" : "wbs-readonly-cell"} style={{ ...style, overflow: "hidden", ...(conflict ? { background: "var(--danger-bg)", boxShadow: "inset 3px 0 0 var(--danger-text)" } : {}) /* phase127m: red fill on dependency conflict */ }} title={conflict ? `Starts on or before "${conflict.name}" finishes (${formatDate(conflict.end)}) -- move this Start after that date, or click Refresh dates.` : undefined}>
           <span
             title={
               isParent
@@ -4124,7 +4454,7 @@ export default function WbsPlanning() {
             )}
           </span>
         </td>
-        <td style={entry ? style : { ...style, color: "var(--muted)" }}>
+        <td className={canEditWbs && !isParent && !project!.timelines_locked ? "wbs-editable-cell" : "wbs-readonly-cell"} style={entry ? style : { ...style, color: "var(--muted)" }}>
           {/* Phase 19 (2026-08-24): End is freely typable, and typing one
               here is what turns on the even-hours-per-day spread (see
               computeEntry's "manual" branch); clearing it (native
@@ -4185,7 +4515,7 @@ export default function WbsPlanning() {
             <span>—</span>
           )}
         </td>
-        <td style={entry ? style : { ...style, color: "var(--muted)" }}>
+        <td className="wbs-readonly-cell" style={entry ? style : { ...style, color: "var(--muted)" }}>
           {entry ? entry.durationDays : "—"}
           {entry?.avgHoursPerDay != null && (
             <span style={{ color: "var(--muted)", marginLeft: 4, fontSize: 11 }}>({entry.avgHoursPerDay}h/day)</span>
@@ -4449,6 +4779,18 @@ export default function WbsPlanning() {
       ...(project.source_id ? [projectSourceOptions.find((s) => s.id === project.source_id)?.name].filter((n): n is string => !!n) : []),
     ])
   );
+  const planningTypePickerOptions = Array.from(
+    new Set([
+      ...projectPlanningTypeOptions.filter((t) => t.is_active).map((t) => t.name),
+      ...(project.planning_type_id ? [projectPlanningTypeOptions.find((t) => t.id === project.planning_type_id)?.name].filter((n): n is string => !!n) : []),
+    ])
+  );
+  const projectTypePickerOptions = Array.from(
+    new Set([
+      ...projectTypeOptions.filter((t) => t.is_active).map((t) => t.name),
+      ...(project.project_type_id ? [projectTypeOptions.find((t) => t.id === project.project_type_id)?.name].filter((n): n is string => !!n) : []),
+    ])
+  );
 
   // Gantt chart (Sandra, 2026-07-24): a visual timeline below the task
   // table, built LAST and deliberately after every scheduling-logic
@@ -4577,10 +4919,393 @@ export default function WbsPlanning() {
   }
 
   return (
-    <div>
+    <div className="wbs-modern-page">
+      <style>{`
+        .wbs-modern-page {
+          background: var(--bg);
+          margin: -16px;
+          padding: 18px 22px 40px;
+          min-height: 100vh;
+          color: var(--text);
+        }
+        .wbs-modern-page .card {
+          background: #ffffff;
+          border: 1px solid #dce7f3;
+          border-radius: 10px;
+          box-shadow: 0 1px 2px rgba(31, 71, 117, 0.035);
+        }
+        .wbs-modern-page h1 {
+          margin: 0;
+          font-size: 21px;
+          line-height: 1.25;
+          letter-spacing: -0.015em;
+          color: #17324f;
+        }
+        .wbs-modern-page .back-link {
+          color: #2563eb;
+          font-weight: 600;
+          text-decoration: none;
+        }
+        .wbs-modern-page .data-table thead th {
+          background: #f8fbff;
+          color: #71839a;
+          font-size: 10.5px;
+          letter-spacing: .015em;
+        }
+        .wbs-modern-page .data-table td {
+          background: #fff;
+        }
+        .wbs-modern-page .wbs-field-box {
+          min-height: 34px;
+          display: flex;
+          align-items: center;
+        }
+        .wbs-modern-page td.wbs-editable-cell {
+          background: #fff !important;
+        }
+        .wbs-modern-page tr:hover td.wbs-editable-cell {
+          background: #f8fbff !important;
+        }
+        .wbs-modern-page td.wbs-readonly-cell {
+          background: #f3f5f7 !important;
+          color: #718096;
+        }
+        .wbs-modern-page .wbs-required-start {
+          color: #d97706;
+          font-size: 9px;
+          font-weight: 900;
+          margin-left: 3px;
+        }
+        .wbs-modern-page .wbs-row-gutter-controls {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 2px;
+          width: 100%;
+          min-height: 24px;
+        }
+        .wbs-modern-page .wbs-row-select,
+        .wbs-modern-page .wbs-row-grip,
+        .wbs-modern-page .wbs-row-actions {
+          opacity: 0;
+          transition: opacity .12s ease;
+        }
+        .wbs-modern-page tr.wbs-task-row:hover .wbs-row-select,
+        .wbs-modern-page tr.wbs-task-row:hover .wbs-row-grip,
+        .wbs-modern-page tr.wbs-task-row:hover .wbs-row-actions,
+        .wbs-modern-page tr.wbs-task-row.wbs-selected .wbs-row-select {
+          opacity: 1;
+        }
+        .wbs-modern-page tr.wbs-task-row.wbs-selected {
+          box-shadow: inset 3px 0 0 #1976ed;
+        }
+        .wbs-modern-page tr.wbs-task-row.wbs-selected td {
+          background-image: linear-gradient(rgba(25,118,237,.035), rgba(25,118,237,.035));
+        }
+        .wbs-modern-page .wbs-row-select {
+          width: 14px;
+          height: 14px;
+          margin: 0;
+          accent-color: #1976ed;
+          cursor: pointer;
+        }
+        .wbs-modern-page .wbs-row-grip {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .wbs-modern-page .wbs-row-actions {
+          display: inline-flex;
+          align-items: center;
+          gap: 1px;
+        }
+        .wbs-modern-page .wbs-project-info-grid .wbs-field-box {
+          width: 100%;
+          min-width: 0 !important;
+          box-sizing: border-box;
+        }
+        .wbs-modern-page .btn-primary,
+        .wbs-modern-page .btn-secondary {
+          border-radius: 999px;
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+        .wbs-modern-page .btn-primary {
+          box-shadow: 0 1px 2px rgba(37, 99, 235, .12);
+        }
+        @media (max-width: 1250px) {
+          .wbs-modern-page .wbs-project-setup-layout { grid-template-columns: 1fr !important; }
+          .wbs-modern-page .wbs-project-info-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+          .wbs-modern-page .wbs-project-setup-layout > div:last-child { min-height: 96px; }
+        }
+        @media (max-width: 900px) {
+          .wbs-modern-page .wbs-project-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+        }
+        @media (max-width: 650px) {
+          .wbs-modern-page { margin: -10px; padding: 14px 12px 32px; }
+          .wbs-modern-page .wbs-project-info-grid { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
       {dialog}
       {assigneePicker.element}
       {startDatePrompt.element}
+      {rowActionsMenu &&
+        (() => {
+          const task = orderedTasks.find((x) => x.id === rowActionsMenu.taskId);
+          if (!task) return null;
+          const siblings = siblingsFor(task);
+          const at = siblings.findIndex((x) => x.id === task.id);
+          const canMoveUp = at > 0;
+          const canMoveDown = at >= 0 && at < siblings.length - 1;
+          const isDraft = project?.wbs_status === "draft";
+          const hasKids = hasChildren(task.id);
+          const closeMenu = () => setRowActionsMenu(null);
+          const menuItem = (label: string, icon: React.ReactNode, onClick: () => void, opts?: { danger?: boolean; disabled?: boolean }) => (
+            <button
+              type="button"
+              disabled={opts?.disabled}
+              onClick={() => { closeMenu(); onClick(); }}
+              style={{
+                display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 9px",
+                border: "none", background: "transparent", textAlign: "left", fontSize: 12,
+                color: opts?.danger ? "var(--danger-text)" : "var(--text)", cursor: opts?.disabled ? "default" : "pointer",
+                opacity: opts?.disabled ? 0.4 : 1,
+              }}
+            >
+              {icon}<span>{label}</span>
+            </button>
+          );
+          return createPortal(
+            <>
+              <div style={{ position: "fixed", inset: 0, zIndex: 1180 }} onClick={closeMenu} />
+              <div
+                className="card"
+                style={{
+                  position: "fixed",
+                  left: Math.min(rowActionsMenu.x - 220, window.innerWidth - 228),
+                  top: Math.min(rowActionsMenu.y, window.innerHeight - 330),
+                  zIndex: 1181,
+                  width: 220,
+                  padding: 5,
+                  boxShadow: "0 8px 24px rgba(15,41,66,.18)",
+                }}
+              >
+                {task.depth === 0 && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
+                {menuItem("Add task below", <CornerDownRight size={13} />, () => void addTaskBelow(task))}
+                {menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
+                <div style={{ height: 1, background: "var(--border)", margin: "4px 2px" }} />
+                {menuItem("Move up", <ArrowUp size={13} />, () => void moveTaskDirection(task, -1), { disabled: !canMoveUp })}
+                {menuItem("Move down", <ArrowDown size={13} />, () => void moveTaskDirection(task, 1), { disabled: !canMoveDown })}
+                {!hasKids && menuItem("Move to parent…", <CornerDownRight size={13} />, () => setMoveParentTaskId(task.id))}
+                {task.depth === 1 && menuItem("Move to top level", <ArrowLeft size={13} />, () => void moveTaskToParent(task, null))}
+                <div style={{ height: 1, background: "var(--border)", margin: "4px 2px" }} />
+                {isDraft && menuItem(
+                  hasKids ? `Delete task and ${tasks.filter((x) => x.parent_task_id === task.id).length} sub-task(s)` : "Delete task",
+                  <Trash2 size={13} />,
+                  () => void deleteTask(task),
+                  { danger: true }
+                )}
+                {!isDraft && task.status !== "Cancelled" && task.depth > 0 && menuItem("Cancel task", <XCircle size={13} />, () => setCancelTaskDialogOpen({ taskId: task.id, label: `"${task.name}"` }))}
+                {task.status === "Cancelled" && menuItem("Uncancel task", <RefreshCw size={13} />, () => void uncancelTask(task.id))}
+              </div>
+            </>,
+            document.body
+          );
+        })()}
+      {moveParentTaskId &&
+        (() => {
+          const task = orderedTasks.find((x) => x.id === moveParentTaskId);
+          if (!task) return null;
+          const parents = orderedTasks.filter((x) => x.depth === 0 && x.id !== task.id && x.id !== task.parent_task_id);
+          return createPortal(
+            <div
+              style={{ position: "fixed", inset: 0, zIndex: 1200, background: "rgba(15,41,66,.28)", display: "flex", alignItems: "center", justifyContent: "center" }}
+              onClick={() => setMoveParentTaskId(null)}
+            >
+              <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 360, maxWidth: "calc(100vw - 32px)", padding: 16 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>Move task to parent</div>
+                <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 10 }}>Choose the parent task for “{task.name}”.</div>
+                <div style={{ display: "grid", gap: 5, maxHeight: 260, overflowY: "auto" }}>
+                  {parents.length === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", padding: 8 }}>No other parent tasks available.</div>}
+                  {parents.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => void moveTaskToParent(task, p.id)}
+                      style={{ textAlign: "left", justifyContent: "flex-start" }}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                  <button type="button" className="btn-secondary" onClick={() => setMoveParentTaskId(null)}>Cancel</button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          );
+        })()}
+      {bulkMoveOpen &&
+        createPortal(
+          <div
+            style={{ position: "fixed", inset: 0, zIndex: 1220, background: "rgba(15,41,66,.28)", display: "flex", alignItems: "center", justifyContent: "center" }}
+            onClick={() => setBulkMoveOpen(false)}
+          >
+            <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 380, maxWidth: "calc(100vw - 32px)", padding: 16 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
+                Move {selectedTaskIds.size} selected task{selectedTaskIds.size === 1 ? "" : "s"}
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 12 }}>
+                Choose a new parent. Tasks that already contain sub-tasks or are locked will be skipped.
+              </div>
+              <div style={{ display: "grid", gap: 6, maxHeight: 280, overflowY: "auto" }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => void bulkMoveSelected(null)}
+                  style={{ justifyContent: "flex-start", textAlign: "left" }}
+                >
+                  Move to top level
+                </button>
+                {orderedTasks
+                  .filter((p) => p.depth === 0 && !selectedTaskIds.has(p.id))
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => void bulkMoveSelected(p.id)}
+                      style={{ justifyContent: "flex-start", textAlign: "left" }}
+                    >
+                      Move under {p.name}
+                    </button>
+                  ))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                <button type="button" className="btn-secondary" onClick={() => setBulkMoveOpen(false)}>Cancel</button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      {bulkCancelOpen &&
+        createPortal(
+          <div
+            style={{ position: "fixed", inset: 0, zIndex: 1220, background: "rgba(15,41,66,.28)", display: "flex", alignItems: "center", justifyContent: "center" }}
+            onClick={() => setBulkCancelOpen(false)}
+          >
+            <div className="card" onClick={(e) => e.stopPropagation()} style={{ width: 390, maxWidth: "calc(100vw - 32px)", padding: 16 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
+                Cancel selected tasks
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45, marginBottom: 12 }}>
+                Cancelling keeps the task and its logged hours, but removes it from active scheduling. Parent and locked tasks will be skipped.
+              </div>
+              <div style={{ fontSize: 11.5, fontWeight: 650, color: "#304963", marginBottom: 5 }}>Reason</div>
+              {cancellationReasonOptions.length > 0 ? (
+                <div className="wbs-field-box" style={{ width: "100%" }}>
+                  <InlineSelect
+                    value={bulkCancelReason}
+                    editable
+                    alwaysSelect
+                    searchable
+                    allowEmpty
+                    emptyLabel="Select a reason"
+                    options={cancellationReasonOptions}
+                    onCommit={setBulkCancelReason}
+                  />
+                </div>
+              ) : (
+                <input
+                  value={bulkCancelReason}
+                  onChange={(e) => setBulkCancelReason(e.target.value)}
+                  placeholder="Enter cancellation reason"
+                  style={{ width: "100%", padding: "8px 9px", border: "1px solid var(--border)", borderRadius: 6, fontSize: 12.5 }}
+                />
+              )}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+                <button type="button" className="btn-secondary" onClick={() => setBulkCancelOpen(false)}>Keep tasks</button>
+                <button type="button" className="btn-primary" disabled={!bulkCancelReason.trim()} onClick={() => void bulkCancelSelected()}>
+                  Cancel tasks
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      {lastDeletedTask &&
+        createPortal(
+          <div
+            style={{
+              position: "fixed", right: 22, bottom: 22, zIndex: 1250, display: "flex", alignItems: "center", gap: 12,
+              background: "#17324f", color: "#fff", borderRadius: 9, padding: "10px 12px 10px 14px", boxShadow: "0 8px 24px rgba(15,41,66,.24)",
+              fontSize: 12,
+            }}
+          >
+            <span>“{lastDeletedTask.name}” moved to Archive.</span>
+            <button
+              type="button"
+              onClick={async () => {
+                const target = lastDeletedTask;
+                setLastDeletedTask(null);
+                const { error } = await restoreItem("task", target.id);
+                if (error) {
+                  await alert(`Couldn't undo delete: ${error.message}`);
+                  return;
+                }
+                await loadAll(true);
+              }}
+              style={{ border: "none", background: "transparent", color: "#fff", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}
+            >
+              <Undo2 size={13} /> Undo
+            </button>
+          </div>,
+          document.body
+        )}
+      {wbsHeaderMenu &&
+        createPortal(
+          <>
+            <div style={{ position: "fixed", inset: 0, zIndex: 190 }} onClick={() => setWbsHeaderMenu(null)} onContextMenu={(e) => { e.preventDefault(); setWbsHeaderMenu(null); }} />
+            <div
+              className="card"
+              style={{
+                position: "fixed",
+                left: Math.min(wbsHeaderMenu.x, window.innerWidth - 220),
+                top: Math.min(wbsHeaderMenu.y, window.innerHeight - 100),
+                zIndex: 191,
+                width: 210,
+                padding: 5,
+                boxShadow: "0 6px 18px rgba(15,41,66,0.18)",
+              }}
+            >
+              <button
+                type="button"
+                className="row-menu-item"
+                onClick={() => {
+                  setWbsFreezePoint(wbsFreezeColKey === wbsHeaderMenu.colKey ? null : wbsHeaderMenu.colKey);
+                  setWbsHeaderMenu(null);
+                }}
+                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 9px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12.5, textAlign: "left" }}
+              >
+                <Pin size={13} />
+                {wbsFreezeColKey === wbsHeaderMenu.colKey ? "Unfreeze columns" : "Freeze up to this column"}
+              </button>
+              {wbsFreezeColKey && wbsFreezeColKey !== wbsHeaderMenu.colKey && (
+                <button
+                  type="button"
+                  className="row-menu-item"
+                  onClick={() => { setWbsFreezePoint(null); setWbsHeaderMenu(null); }}
+                  style={{ display: "flex", width: "100%", padding: "7px 9px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12.5, textAlign: "left", color: "var(--text-secondary)" }}
+                >
+                  Unfreeze all columns
+                </button>
+              )}
+            </div>
+          </>,
+          document.body
+        )}
       {leaveTarget && (
         <Modal title="This project hasn't been saved" onClose={() => (leaveBusy ? undefined : setLeaveTarget(null))} width={440}>
           <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: "0 0 14px", lineHeight: 1.5 }}>
@@ -4673,8 +5398,32 @@ export default function WbsPlanning() {
       <Link to={`/projects/${projectId}`} className="back-link" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
         <ArrowLeft size={13} /> Back to {project.name}
       </Link>
-      <h1>WBS Planning — {project.name}</h1>
-      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 10, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 2 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+            <h1>WBS Planning — {project.name}</h1>
+            <span style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              padding: "3px 9px",
+              borderRadius: 999,
+              fontSize: 10.5,
+              fontWeight: 700,
+              background: wbsMeta.bg,
+              color: wbsMeta.color,
+              border: `1px solid ${wbsMeta.border}`,
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: wbsMeta.color }} />
+              {wbsMeta.label}
+            </span>
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
+            Define the project, add tasks, and review the forecast. Lock the baseline when the plan is ready.
+          </div>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 6, marginBottom: 8 }}>
         <Link
           to={`/projects/${projectId}`}
           style={{ padding: "9px 2px", color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}
@@ -4701,18 +5450,22 @@ export default function WbsPlanning() {
       <div
         className="card"
         style={{
-          padding: "8px 14px",
-          marginBottom: 10,
+          padding: "4px 2px",
+          marginBottom: 8,
           display: "flex",
           alignItems: "center",
           gap: 10,
           flexWrap: "wrap",
-          background: wbsMeta.bg,
-          borderColor: wbsMeta.border,
+          background: "transparent",
+          borderColor: "transparent",
+          boxShadow: "none",
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 700, color: wbsMeta.color }}>{wbsMeta.label}</span>
-        <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{wbsMeta.hint}</span>
+        <span style={{ fontSize: 11, color: "var(--muted)" }}>
+          {project.is_unsaved
+            ? "Planning mode — complete Project Information and save to unlock WBS planning."
+            : wbsMeta.hint}
+        </span>
         {activeBaseline && (
           <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
             Baseline V{activeBaseline.version_number} (locked {formatDate(activeBaseline.captured_at.slice(0, 10))})
@@ -4741,106 +5494,111 @@ export default function WbsPlanning() {
             Reopened by {people.find((p) => p.id === project.reopened_by)?.name ?? "someone"} on {formatDate(project.reopened_at.slice(0, 10))}
           </span>
         )}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
-          {/* 2026-08-27 (Sandra: "can we just add an action button
-              instead and from there pick Re-Baseline and Close project")
-              -- single Actions menu replaces the separate Request Baseline
-              Approval button that used to render here AND the Close
-              Project button that used to render in its own button down in
-              the bottom status bar. Later the same day (Sandra: rename to
-              "Start Project" and remove Re-baseline entirely) -- the
-              request/approve RPCs (request_baseline_approval/
-              decide_baseline_request) and can_approve_rebaseline flag stay
-              as-is under the hood (still gate approving the first-ever
-              Start Project request via canDecideBaselineRequest below),
-              but canRequestBaseline is now draft-only so there is no UI
-              path left to invoke them a second time. */}
+        <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
           {(() => {
-            // 2026-08-27 (Sandra: re-baseline removed) -- Start Project (the
-            // renamed first-ever "Request Baseline Approval") is only
-            // reachable from Draft now; baseline_locked/changed_after_baseline
-            // projects no longer get a way to re-trigger this RPC.
-            const canRequestBaseline = canManageWbs && project.wbs_status === "draft" && !pendingBaselineRequest;
-            const canRequestClosure =
-              canManageWbs && (project.wbs_status === "baseline_locked" || project.wbs_status === "changed_after_baseline") && !pendingClosure;
-            // 2026-09-21 (Sandra: "allow admin permission to re-open
-            // projects") -- Full Access only, closed projects only.
+            const isDraft = project.wbs_status === "draft";
+            const isActivePlan = project.wbs_status === "baseline_locked" || project.wbs_status === "changed_after_baseline";
+            const canRequestStart = canManageWbs && isDraft && !pendingBaselineRequest;
+            const canRequestClosure = canManageWbs && isActivePlan && !pendingClosure;
             const canReopenProject = isFullAccess && project.wbs_status === "closed";
-            if (!canRequestBaseline && !canRequestClosure && !canReopenProject) return null;
+            const saveLabel = isDraft ? (project.is_unsaved ? "Save & Continue" : "Save Draft") : "Save Changes";
+
             return (
               <>
-                <button
-                  className="btn-secondary"
-                  disabled={workflowBusy}
-                  onClick={() => setWbsActionsMenuOpen((v) => !v)}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
-                >
-                  Actions <ChevronDown size={13} />
-                </button>
-                {wbsActionsMenuOpen && (
-                  <>
-                    {/* Transparent click-outside-to-close backdrop, same
-                        trick used elsewhere for lightweight popovers in
-                        this app (see DependsOnPicker below) rather than a
-                        document-level event listener. */}
-                    <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={() => setWbsActionsMenuOpen(false)} />
-                    <div
-                      className="card"
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {canEditWbs && project.wbs_status !== "closed" && (
+                    <button
+                      className="btn-secondary"
+                      disabled={saving}
+                      onClick={saveDraft}
+                    >
+                      {saving ? "Saving…" : saveLabel}
+                    </button>
+                  )}
+
+                  {canRequestStart && (
+                    <button
+                      className="btn-primary"
+                      disabled={workflowBusy || saving || hasUnsavedChanges}
+                      title={hasUnsavedChanges ? "Save your latest changes before requesting project start." : "Request approval to lock the baseline and start the project."}
+                      onClick={handleRequestBaseline}
+                    >
+                      Request Start Project
+                    </button>
+                  )}
+
+                  {isDraft && !!pendingBaselineRequest && (
+                    <span
                       style={{
-                        position: "absolute",
-                        top: "calc(100% + 4px)",
-                        right: 0,
-                        zIndex: 41,
-                        minWidth: 220,
-                        padding: 4,
-                        boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 2,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        minHeight: 32,
+                        padding: "0 10px",
+                        borderRadius: 999,
+                        background: "var(--warning-bg, #fff7ed)",
+                        color: "var(--warning-text, #b45309)",
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        border: "1px solid var(--warning-border, #fed7aa)",
                       }}
                     >
-                      {canRequestBaseline && (
-                        <button
-                          className="row-menu-item"
-                          disabled={workflowBusy}
-                          onClick={() => {
-                            setWbsActionsMenuOpen(false);
-                            handleRequestBaseline();
-                          }}
-                          style={{ display: "flex", width: "100%", textAlign: "left", background: "none", border: "none", borderRadius: 4, padding: "6px 8px", fontSize: 12.5, cursor: "pointer", color: "var(--text)" }}
-                        >
-                          Start Project
-                        </button>
-                      )}
-                      {canRequestClosure && (
-                        <button
-                          className="row-menu-item"
-                          disabled={workflowBusy}
-                          onClick={() => {
-                            setWbsActionsMenuOpen(false);
-                            handleRequestClosure();
-                          }}
-                          style={{ display: "flex", width: "100%", textAlign: "left", background: "none", border: "none", borderRadius: 4, padding: "6px 8px", fontSize: 12.5, cursor: "pointer", color: "var(--text)" }}
-                        >
-                          Close Project
-                        </button>
-                      )}
-                      {canReopenProject && (
-                        <button
-                          className="row-menu-item"
-                          disabled={workflowBusy}
-                          onClick={() => {
-                            setWbsActionsMenuOpen(false);
-                            handleReopenProject();
-                          }}
-                          style={{ display: "flex", width: "100%", textAlign: "left", background: "none", border: "none", borderRadius: 4, padding: "6px 8px", fontSize: 12.5, cursor: "pointer", color: "var(--text)" }}
-                        >
-                          Reopen Project
-                        </button>
-                      )}
-                    </div>
-                  </>
-                )}
+                      Start Project Requested · Awaiting Approval
+                    </span>
+                  )}
+
+                  {canRequestClosure && (
+                    <button
+                      className="btn-primary"
+                      disabled={workflowBusy || saving || hasUnsavedChanges}
+                      title={hasUnsavedChanges ? "Save your latest changes before requesting project closure." : "Prepare and submit a Project Closure request."}
+                      onClick={() => {
+                        setClosureFormOpen(true);
+                        window.setTimeout(() => document.getElementById("project-closure-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+                      }}
+                    >
+                      Request Project Closure
+                    </button>
+                  )}
+
+                  {isActivePlan && !!pendingClosure && (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        minHeight: 32,
+                        padding: "0 10px",
+                        borderRadius: 999,
+                        background: "var(--warning-bg, #fff7ed)",
+                        color: "var(--warning-text, #b45309)",
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        border: "1px solid var(--warning-border, #fed7aa)",
+                      }}
+                    >
+                      Closure Requested · Awaiting Approval
+                    </span>
+                  )}
+
+                  {canReopenProject && (
+                    <button className="btn-secondary" disabled={workflowBusy} onClick={handleReopenProject}>
+                      Reopen Project
+                    </button>
+                  )}
+                </div>
+
+                {hasUnsavedChanges && project.wbs_status !== "closed" ? (
+                  <span style={{ fontSize: 10.5, color: "var(--warning-text, #b45309)" }}>
+                    Save your latest changes before sending a workflow request.
+                  </span>
+                ) : project.scoping_effort_mode ? (
+                  <span style={{ fontSize: 10.5, color: "var(--muted)" }}>
+                    All changes saved.
+                  </span>
+                ) : project.wbs_status === "draft" ? (
+                  <span style={{ fontSize: 10.5, color: "var(--muted)" }}>
+                    Draft not saved yet.
+                  </span>
+                ) : null}
               </>
             );
           })()}
@@ -4904,190 +5662,224 @@ export default function WbsPlanning() {
           alongside the main content (not a full-width toggle panel like
           before), matching her reference mockup. Main content is the
           flex:1 left column; the rail is a fixed-width sibling. */}
-          <div className="card" style={{ padding: 14, marginBottom: 12, display: "flex", alignItems: "center", gap: 16, flexWrap: "nowrap", overflowX: "auto" }}>
-            {/* Project ID -- added 2026-09-07 (Sandra: "add a project ID,
-                automated sequence number based on the date the project
-                was added/created"). Always read-only, same treatment as
-                Baseline below -- there's no direct-edit path, it's
-                assigned once by the DB (see project_number in
-                phase41_migration.sql) and never changes. */}
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Project ID:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 80, true)}>
-                <span style={{ fontSize: 12.5 }}>P-{String(project.project_number).padStart(4, "0")}</span>
+          <section className="card" style={{ padding: 16, marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800, flexShrink: 0 }}>1</span>
+              <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Project Information</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)" }}>
+                {project.is_unsaved ? "Complete the basic details, then save to continue planning." : "Basic project details."}
+              </div>
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12, fontSize: 10.5, color: "var(--muted)" }}>
+                <span><span style={{ color: "#d92d20", fontWeight: 800 }}>*</span> Required to save draft</span>
+                <span><span style={{ color: "#d97706", fontWeight: 900 }}>●</span> Required before Start Project</span>
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Project:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(!!project.name, 170, !canEditWbs)}>
-                <InlineText value={project.name} editable={canEditWbs} onCommit={(v) => saveProjectField({ name: v })} />
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Owner:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 110, !canEditWbs)}>
-                <InlineSelect
-                  value={owner?.name ?? ""}
-                  editable={canEditWbs}
-                  allowEmpty
-                  emptyLabel="No owner"
-                  options={people.map((p) => p.name)}
-                  onCommit={(name) => {
-                    const p = people.find((pp) => pp.name === name);
-                    saveProjectField({ owner_id: p?.id ?? null });
-                  }}
-                />
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Start date:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 110, !canEditWbs || anyTaskDone)}>
-                <InlineDate
-                  value={project.start_date}
-                  editable={canEditWbs && !anyTaskDone}
-                  onCommit={(v) => saveProjectField({ start_date: v })}
-                />
-              </div>
-              <span
-                title={
-                  anyTaskDone
-                    ? "Locked -- at least one task is already Done, so the project has genuinely started and this date is now historical."
-                    : "Your own plotted anchor -- used as the default Start for the very first task in each mode when there's nothing earlier to chain from. No longer auto-pulled from tasks."
-                }
-                style={{ display: "inline-flex", cursor: "help", flexShrink: 0 }}
-              >
-                <Info size={13} style={{ color: "var(--muted)" }} />
-              </span>
-            </div>
-            {/* 2026-09-03 (Sandra: "add these 3 new fields in the WBS UI
-                along with name/owner/start date... push that these are
-                filled in before starting project or locking baseline")
-                -- Category/Source/Complexity move here alongside the
-                fields that already lived on this page, staying editable
-                at any wbs_status short of Closed (canEditWbs), same as
-                Name/Owner above. Required (see handleRequestBaseline/
-                handleDecideBaselineRequest's gate) before Start Project,
-                not before Save -- same "gate the milestone, not every
-                keystroke" philosophy as the rest of this page's soft
-                checks. */}
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Category:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 130, !canEditWbs)}>
-                <InlineSelect
-                  value={project.category ?? ""}
-                  editable={canEditWbs}
-                  allowEmpty
-                  emptyLabel="No category"
-                  options={categoryPickerOptions}
-                  onCommit={(v) => saveProjectField({ category: v || null })}
-                />
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Source:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 120, !canEditWbs)}>
-                <InlineSelect
-                  value={projectSourceOptions.find((s) => s.id === project.source_id)?.name ?? ""}
-                  editable={canEditWbs}
-                  allowEmpty
-                  emptyLabel="No source"
-                  options={sourcePickerOptions}
-                  onCommit={(name) => {
-                    const src = projectSourceOptions.find((s) => s.name === name);
-                    saveProjectField({ source_id: src?.id ?? null });
-                  }}
-                />
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Complexity:</span>
-              <div className="wbs-field-box" style={fieldBoxStyle(true, 100, !canEditWbs)}>
-                <InlineSelect
-                  value={project.effort_level ? effortLevelLabel(project.effort_level) : ""}
-                  editable={canEditWbs}
-                  allowEmpty
-                  emptyLabel="Not set"
-                  options={PROJECT_EFFORT_LEVEL_OPTIONS.map((lvl) => effortLevelLabel(lvl))}
-                  onCommit={(label) => {
-                    const lvl = PROJECT_EFFORT_LEVEL_OPTIONS.find((l) => effortLevelLabel(l) === label);
-                    saveProjectField({ effort_level: lvl ?? null });
-                  }}
-                />
-              </div>
-            </div>
-            {activeBaseline && (
-              // Design spec item 2 (Sandra, 2026-07-29): Baseline version
-              // shown in the Project Details strip, but READ-ONLY --
-              // unlike Project/Owner/Start date/Scoping Effort, there's no
-              // direct-edit path for this (it only changes via Start
-              // Project in the Actions menu -- Re-baseline removed
-              // 2026-08-27, so this stays V1 for the life of the project),
-              // so it renders as plain text in a muted box rather than an
-              // InlineX field.
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Baseline:</span>
-                <div className="wbs-field-box" style={fieldBoxStyle(true, 90, true)}>
-                  <span style={{ fontSize: 12.5 }}>
-                    V{activeBaseline.version_number} ({formatDate(activeBaseline.captured_at.slice(0, 10))})
-                  </span>
+
+            <div className="wbs-project-setup-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(300px, 1fr)", gap: 18, alignItems: "stretch" }}>
+              <div className="wbs-project-info-grid" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: "12px 16px", alignContent: "start" }}>
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project ID</span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(true, undefined, true), width: "100%" }}>
+                  <span style={{ fontSize: 12.5 }}>P-{String(project.project_number).padStart(4, "0")}</span>
                 </div>
-              </div>
-            )}
-            <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
-              {/* Phase 21 (2026-08-24): Sandra -- "there should no longer
-                  be an option to choose which effort will be used, it
-                  will always capture the planned one." Save always
-                  operates on Forecasted (activeMode is now a fixed
-                  constant, see its declaration above).
-                  2026-09-03 (Sandra: "remove scoping effort field, there
-                  is really no other option but to save") -- the
-                  Scoping Effort label/box/tooltip that used to sit next
-                  to Save is gone; Save itself is unchanged (still always
-                  saves the Forecasted schedule). */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                {canEditWbs && (
-                  <button className="btn-primary" disabled={saving} onClick={saveDraft} style={{ flexShrink: 0 }}>
-                    {saving ? "Saving…" : "Save"}
-                  </button>
-                )}
-              </div>
-              {project.scoping_effort_mode && project.scoping_effort_mode !== activeMode ? (
-                <span style={{ fontSize: 11, color: "var(--warning-text)", fontWeight: 600 }}>
-                  Unsaved -- currently saved as {MODE_LABEL[project.scoping_effort_mode as Mode] ?? project.scoping_effort_mode}
-                </span>
-              ) : project.scoping_effort_mode ? (
-                <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                  Saved as {MODE_LABEL[project.scoping_effort_mode as Mode] ?? project.scoping_effort_mode}
-                </span>
-              ) : (
-                <span style={{ fontSize: 11, color: "var(--muted)" }}>Not saved yet</span>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Name <span style={{ color: "#d92d20" }}>*</span></span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.name, undefined, !canEditWbs), width: "100%" }}>
+                  <InlineText value={project.name} editable={canEditWbs} onCommit={(v) => saveProjectField({ name: v })} />
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Owner <span style={{ color: "#d92d20" }}>*</span></span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!owner, undefined, !canEditWbs), width: "100%" }}>
+<div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
+                                      <InlineSelect
+                                        value={owner?.name ?? ""}
+                                        editable={canEditWbs}
+                                        alwaysSelect
+                                        searchable
+                                        allowEmpty
+                                        emptyLabel="No owner"
+                                        options={people.map((p) => p.name)}
+                                        onCommit={(name) => {
+                                          const p = people.find((pp) => pp.name === name);
+                                          saveProjectField({ owner_id: p?.id ?? null });
+                                        }}
+                                      />
+                  </div>
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Start Date <span style={{ color: "#d92d20" }}>*</span></span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.start_date, undefined, !canEditWbs || anyTaskDone), width: "100%" }}>
+<div style={{ display: "flex", alignItems: "center", width: "100%" }}>
+                    <InlineDate value={project.start_date} editable={canEditWbs && !anyTaskDone} onCommit={(v) => saveProjectField({ start_date: v })} />
+                      <Calendar size={14} style={{ color: "var(--muted)", marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
+                    </div>
+                  </div>
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Priority <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.priority, undefined, !canEditWbs), width: "100%" }}>
+                  <InlineSelect
+                    value={project.priority ?? ""}
+                    editable={canEditWbs}
+                    alwaysSelect
+                    searchable
+                    allowEmpty
+                    emptyLabel="No priority"
+                    options={PROJECT_PRIORITY_OPTIONS}
+                    onCommit={(value) => saveProjectField({ priority: value || null })}
+                  />
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Category <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.category, undefined, !canEditWbs), width: "100%" }}>
+<div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
+                                      <InlineSelect value={project.category ?? ""} editable={canEditWbs}
+                                        alwaysSelect
+                                        searchable allowEmpty emptyLabel="No category" options={categoryPickerOptions} onCommit={(v) => saveProjectField({ category: v || null })} />
+                  </div>
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Source <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.source_id, undefined, !canEditWbs), width: "100%" }}>
+<div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
+                                      <InlineSelect
+                                        value={projectSourceOptions.find((s) => s.id === project.source_id)?.name ?? ""}
+                                        editable={canEditWbs}
+                                        alwaysSelect
+                                        searchable
+                                        allowEmpty
+                                        emptyLabel="No source"
+                                        options={sourcePickerOptions}
+                                        onCommit={(name) => {
+                                          const src = projectSourceOptions.find((s) => s.name === name);
+                                          saveProjectField({ source_id: src?.id ?? null });
+                                        }}
+                                      />
+                  </div>
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Planning Type <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.planning_type_id, undefined, !canEditWbs), width: "100%" }}>
+                  <InlineSelect
+                    value={projectPlanningTypeOptions.find((t) => t.id === project.planning_type_id)?.name ?? ""}
+                    editable={canEditWbs}
+                    alwaysSelect
+                    searchable
+                    allowEmpty
+                    emptyLabel="No planning type"
+                    options={planningTypePickerOptions}
+                    onCommit={(name) => {
+                      const type = projectPlanningTypeOptions.find((t) => t.name === name);
+                      saveProjectField({ planning_type_id: type?.id ?? null });
+                    }}
+                  />
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Type <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.project_type_id, undefined, !canEditWbs), width: "100%" }}>
+<div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
+                                      <InlineSelect
+                                        value={projectTypeOptions.find((t) => t.id === project.project_type_id)?.name ?? ""}
+                                        editable={canEditWbs}
+                                        alwaysSelect
+                                        searchable
+                                        allowEmpty
+                                        emptyLabel="No type"
+                                        options={projectTypePickerOptions}
+                                        onCommit={(name) => {
+                                          const type = projectTypeOptions.find((t) => t.name === name);
+                                          saveProjectField({ project_type_id: type?.id ?? null });
+                                        }}
+                                      />
+                  </div>
+                </div>
+              </label>
+
+              <label style={{ display: "grid", gap: 5 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Complexity <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.effort_level, undefined, !canEditWbs), width: "100%" }}>
+<div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
+                                      <InlineSelect
+                                        value={project.effort_level ? effortLevelLabel(project.effort_level) : ""}
+                                        editable={canEditWbs}
+                                        alwaysSelect
+                                        searchable
+                                        allowEmpty
+                                        emptyLabel="Not set"
+                                        options={PROJECT_EFFORT_LEVEL_OPTIONS.map((lvl) => effortLevelLabel(lvl))}
+                                        onCommit={(label) => {
+                                          const lvl = PROJECT_EFFORT_LEVEL_OPTIONS.find((l) => effortLevelLabel(l) === label);
+                                          saveProjectField({ effort_level: lvl ?? null });
+                                        }}
+                                      />
+                  </div>
+                </div>
+              </label>
+
+              {activeBaseline && (
+                <label style={{ display: "grid", gap: 5 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Baseline</span>
+                  <div className="wbs-field-box" style={{ ...fieldBoxStyle(true, undefined, true), width: "100%" }}>
+                    <span style={{ fontSize: 12.5 }}>V{activeBaseline.version_number} · {formatDate(activeBaseline.captured_at.slice(0, 10))}</span>
+                  </div>
+                </label>
               )}
             </div>
-          </div>
 
-          {/* Project Description -- added 2026-09-07 (Sandra: "add project
-              description in the WBS please, just below the project
-              information. And have this been required before starting a
-              project or locking baseline" + follow-up: "for those baseline
-              that are already locked make it mandatory before closing a
-              project"). Sits in its own full-width card right below the
-              Project Details strip above. Same canEditWbs gate as the rest
-              of this header -- required at Start Project (see
-              handleRequestBaseline/handleDecideBaselineRequest) and, for
-              projects that were already baselined before this field
-              existed, at Closure instead (handleRequestClosure/
-              handleDecideClosure). */}
-          <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>Description:</div>
-            <div className="wbs-field-box" style={fieldBoxStyle(!!project.description, undefined, !canEditWbs)}>
-              <InlineTextArea
-                value={project.description ?? ""}
-                editable={canEditWbs}
-                placeholder="What is this project about?"
-                onCommit={(v) => saveProjectField({ description: v })}
-              />
+              <div style={{ display: "grid", gridTemplateRows: "auto 1fr", minWidth: 0 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#304963", marginBottom: 5 }}>Description <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></div>
+                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.description, undefined, !canEditWbs), width: "100%", minHeight: 0, height: "100%", alignItems: "stretch" }}>
+                  <InlineTextArea
+                    value={project.description ?? ""}
+                    editable={canEditWbs}
+                    placeholder="What is this project about?"
+                    onCommit={(v) => saveProjectField({ description: v })}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
+          </section>
+
+          {project.is_unsaved && (
+            <div style={{ margin: "-2px 2px 12px", fontSize: 11.5, color: "var(--muted)" }}>
+              WBS, resource planning, timeline and forecast sections will appear after Project Information is saved.
+            </div>
+          )}
+
+          <div style={{ display: project.is_unsaved ? "none" : "contents" }}>
+          {project.wbs_status !== "closed" && (
+            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", margin: "-2px 2px 12px" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 9, fontSize: 11.5, fontWeight: 600, color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}>
+                <span>Show available bandwidth snapshot</span>
+                <span style={{ position: "relative", width: 36, height: 20, borderRadius: 999, background: showAvailableBandwidth ? "var(--accent)" : "#cbd5e1", transition: "background .15s ease" }}>
+                  <input
+                    type="checkbox"
+                    checked={showAvailableBandwidth}
+                    onChange={(e) => setShowAvailableBandwidth(e.target.checked)}
+                    style={{ position: "absolute", opacity: 0, inset: 0, width: "100%", height: "100%", cursor: "pointer", margin: 0 }}
+                  />
+                  <span style={{ position: "absolute", top: 3, left: showAvailableBandwidth ? 19 : 3, width: 14, height: 14, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,.18)", transition: "left .15s ease", pointerEvents: "none" }} />
+                </span>
+              </label>
+            </div>
+          )}
 
           {/* Project-level summary: fixed total effort (left) + a
               duration comparison bar per mode (right) -- redesigned per
@@ -5104,191 +5896,197 @@ export default function WbsPlanning() {
               the RIGHT, once there's a baseline to compare against. Draft
               projects (no baseline yet) keep the single full-width card
               as before -- there's nothing to show variance against. */}
-          <div
-            style={{
-              display: "grid",
-              // Phase 13 (2026-08-21): Sandra -- "once the baseline is
-              // locked... the width... decreases because there is a
-              // place order for version history in the second column...
-              // lock the version history size to match the first row...
-              // keep the width at full window view." Revision
-              // Summary/History used to be a page-spanning flex sibling
-              // (shrinking the ENTIRE main content -- table, both
-              // Gantts, Utilization snapshot -- for the whole page
-              // height once a baseline existed). Moved into THIS grid
-              // row only, as a 3rd fixed-width column, so everything
-              // below reclaims full page width unconditionally.
-              gridTemplateColumns: project.wbs_status === "draft" ? "1fr" : "1fr 1fr 260px",
-              gap: 12,
-              marginBottom: 12,
-              // Sandra, 2026-07-29: "align the overall variance box
-              // height with the timelines" -- was "start" (each card
-              // sized to its own content, so Overall Variance's shorter
-              // table left visible extra whitespace/mismatch next to
-              // the taller Effort Comparison card). "stretch" makes
-              // both grid cells -- and therefore both .card children --
-              // the same height as whichever is tallest.
-              alignItems: "stretch",
-            }}
-          >
-          <div className="card" style={{ padding: 16, display: "flex", gap: 28, flexWrap: "wrap" }}>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-                gap: 6,
-                minWidth: 150,
-                paddingRight: 28,
-                borderRight: "1px solid var(--border)",
-              }}
-            >
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>
-                Total Effort Needed
-              </div>
-              <div style={{ fontSize: 30, fontWeight: 700, color: "var(--navy)", lineHeight: 1.1 }}>
-                {totalEffortHours}
-                <span style={{ fontSize: 15, fontWeight: 600, marginLeft: 3 }}>h</span>
-              </div>
-              <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
-                across {orderedTasks.filter((t) => t.depth === 0).length} task(s)
-              </div>
-            </div>
-
-            <div style={{ flex: 1, minWidth: 340 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 12 }}>Effort Comparison (by Duration)</div>
-              {MODES.map((m, i) => {
-                const s = summaries[m];
-                // Phase 12 (2026-08-21): 3rd mode added -- reuse the same
-                // blue/green/yellow identity everywhere else on the page.
-                const color =
-                  m === "full_capacity" ? UTIL_PREVIEW_COLOR.full_capacity : m === "standard" ? UTIL_PREVIEW_COLOR.standard_suggested : UTIL_PREVIEW_COLOR.standard_committed;
-                const rate = m === "full_capacity" ? "7.5 h/day" : null;
-                const maxDuration = Math.max(summaries.full_capacity.durationDays, summaries.manual.durationDays, 1);
-                const widthPct = s.durationDays ? Math.max(18, Math.round((s.durationDays / maxDuration) * 100)) : 0;
-                // Sandra, 2026-07-29 follow-up: label moved ABOVE the bar
-                // (was to its left) per her reference mockup -- same
-                // colors, just the layout direction changed.
-                return (
-                  <div key={m} style={{ marginBottom: i === MODES.length - 1 ? 0 : 14 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color, marginBottom: 6 }}>
-                      {MODE_LABEL[m]}{rate ? ` (${rate})` : ""}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                      <div style={{ flex: 1, minWidth: 100 }}>
-                        {s.durationDays ? (
+          {orderedTasks.length > 0 && (
+            <>
+                        <div
+                          style={{
+                            display: "grid",
+                            // Phase 13 (2026-08-21): Sandra -- "once the baseline is
+                            // locked... the width... decreases because there is a
+                            // place order for version history in the second column...
+                            // lock the version history size to match the first row...
+                            // keep the width at full window view." Revision
+                            // Summary/History used to be a page-spanning flex sibling
+                            // (shrinking the ENTIRE main content -- table, both
+                            // Gantts, Utilization snapshot -- for the whole page
+                            // height once a baseline existed). Moved into THIS grid
+                            // row only, as a 3rd fixed-width column, so everything
+                            // below reclaims full page width unconditionally.
+                            gridTemplateColumns: project.wbs_status === "draft" ? "1fr" : "1fr 1fr 260px",
+                            gap: 12,
+                            marginBottom: 12,
+                            // Sandra, 2026-07-29: "align the overall variance box
+                            // height with the timelines" -- was "start" (each card
+                            // sized to its own content, so Overall Variance's shorter
+                            // table left visible extra whitespace/mismatch next to
+                            // the taller Effort Comparison card). "stretch" makes
+                            // both grid cells -- and therefore both .card children --
+                            // the same height as whichever is tallest.
+                            alignItems: "stretch",
+                          }}
+                        >
+                        <div className="card" style={{ padding: 16, display: "flex", gap: 28, flexWrap: "wrap" }}>
                           <div
                             style={{
-                              width: `${widthPct}%`,
-                              minWidth: 90,
-                              background: color,
-                              color: "#fff",
-                              fontSize: 11,
-                              fontWeight: 600,
-                              textAlign: "center",
-                              padding: "6px 8px",
-                              borderRadius: 4,
-                              whiteSpace: "nowrap",
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "flex-start",
+                              gap: 6,
+                              minWidth: 150,
+                              paddingRight: 28,
+                              borderRight: "1px solid var(--border)",
                             }}
                           >
-                            {s.durationDays} working day{s.durationDays === 1 ? "" : "s"}
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>
+                              Total Effort Needed
+                            </div>
+                            <div style={{ fontSize: 30, fontWeight: 700, color: "var(--navy)", lineHeight: 1.1 }}>
+                              {totalEffortHours}
+                              <span style={{ fontSize: 15, fontWeight: 600, marginLeft: 3 }}>h</span>
+                            </div>
+                            <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                              across {orderedTasks.filter((t) => t.depth === 0).length} task(s)
+                            </div>
                           </div>
-                        ) : (
-                          <span style={{ fontSize: 11.5, color: "var(--muted)" }}>no schedule yet</span>
+              
+                          <div style={{ flex: 1, minWidth: 340 }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 12 }}>Effort Comparison (by Duration)</div>
+                            {MODES.map((m, i) => {
+                              const s = summaries[m];
+                              // Phase 12 (2026-08-21): 3rd mode added -- reuse the same
+                              // blue/green/yellow identity everywhere else on the page.
+                              const color =
+                                m === "full_capacity" ? UTIL_PREVIEW_COLOR.full_capacity : m === "standard" ? UTIL_PREVIEW_COLOR.standard_suggested : UTIL_PREVIEW_COLOR.standard_committed;
+                              const rate = m === "full_capacity" ? "7.5 h/day" : null;
+                              const maxDuration = Math.max(summaries.full_capacity.durationDays, summaries.manual.durationDays, 1);
+                              const widthPct = s.durationDays ? Math.max(18, Math.round((s.durationDays / maxDuration) * 100)) : 0;
+                              // Sandra, 2026-07-29 follow-up: label moved ABOVE the bar
+                              // (was to its left) per her reference mockup -- same
+                              // colors, just the layout direction changed.
+                              return (
+                                <div key={m} style={{ marginBottom: i === MODES.length - 1 ? 0 : 14 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color, marginBottom: 6 }}>
+                                    {MODE_LABEL[m]}{rate ? ` (${rate})` : ""}
+                                  </div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                                    <div style={{ flex: 1, minWidth: 100 }}>
+                                      {s.durationDays ? (
+                                        <div
+                                          style={{
+                                            width: `${widthPct}%`,
+                                            minWidth: 90,
+                                            background: color,
+                                            color: "#fff",
+                                            fontSize: 11,
+                                            fontWeight: 600,
+                                            textAlign: "center",
+                                            padding: "6px 8px",
+                                            borderRadius: 4,
+                                            whiteSpace: "nowrap",
+                                          }}
+                                        >
+                                          {s.durationDays} working day{s.durationDays === 1 ? "" : "s"}
+                                        </div>
+                                      ) : (
+                                        <span style={{ fontSize: 11.5, color: "var(--muted)" }}>no schedule yet</span>
+                                      )}
+                                    </div>
+                                    <div style={{ width: 85, fontSize: 11.5, flexShrink: 0 }}>
+                                      <div style={{ fontWeight: 600, color: "var(--muted)", fontSize: 10 }}>Start</div>
+                                      <div>{formatDate(s.start)}</div>
+                                    </div>
+                                    <div style={{ width: 85, fontSize: 11.5, flexShrink: 0 }}>
+                                      <div style={{ fontWeight: 600, color: "var(--muted)", fontSize: 10 }}>End</div>
+                                      <div>{formatDate(s.end)}</div>
+                                    </div>
+                                    {!s.complete && s.end && (
+                                      <div style={{ fontSize: 11.5, color: "var(--muted)", flexShrink: 0 }}>incomplete</div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {/* Sandra, 2026-07-29 follow-up: removed the "Total Effort
+                                reflects the current plan..." helper line entirely. */}
+                          </div>
+                        </div>
+                        {project.wbs_status !== "draft" && (
+                          <CompareWithBaselinePanel projectId={project.id} liveTasks={buildTaskSnapshotPayload()} />
                         )}
-                      </div>
-                      <div style={{ width: 85, fontSize: 11.5, flexShrink: 0 }}>
-                        <div style={{ fontWeight: 600, color: "var(--muted)", fontSize: 10 }}>Start</div>
-                        <div>{formatDate(s.start)}</div>
-                      </div>
-                      <div style={{ width: 85, fontSize: 11.5, flexShrink: 0 }}>
-                        <div style={{ fontWeight: 600, color: "var(--muted)", fontSize: 10 }}>End</div>
-                        <div>{formatDate(s.end)}</div>
-                      </div>
-                      {!s.complete && s.end && (
-                        <div style={{ fontSize: 11.5, color: "var(--muted)", flexShrink: 0 }}>incomplete</div>
+                      {project.wbs_status !== "draft" && (
+                        <div style={{ width: 260, flexShrink: 0 }}>
+                          <div className="card" style={{ padding: 14 }}>
+                            {/* Sandra, 2026-07-29 follow-up: plain icon+label+value rows,
+                                no per-row card/box (per her reference mockup). */}
+                            {latestRevisionChanges.length > 0 && (
+                              <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
+                                <strong style={{ fontSize: 12.5, color: "var(--navy)" }}>Revision Summary</strong>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8, fontSize: 11.5 }}>
+                                  {[
+                                    { icon: <Clock size={13} />, label: "Total effort change", value: `${revisionSummary.totalAddedHours > 0 ? "+" : ""}${revisionSummary.totalAddedHours}h` },
+                                    { icon: <ListPlus size={13} />, label: "Total tasks added", value: revisionSummary.tasksAdded },
+                                    { icon: <Trash2 size={13} />, label: "Total tasks removed", value: revisionSummary.tasksRemoved },
+                                    { icon: <TrendingUp size={13} />, label: "Estimates increased", value: revisionSummary.hoursIncreased },
+                                    { icon: <TrendingDown size={13} />, label: "Estimates decreased", value: revisionSummary.hoursDecreased },
+                                    { icon: <Calendar size={13} />, label: "Dates changed", value: revisionSummary.datesChanged },
+                                    { icon: <Link2 size={13} />, label: "Dependencies changed", value: revisionSummary.dependenciesChanged },
+                                    { icon: <User size={13} />, label: "Assignees changed", value: revisionSummary.assigneesChanged },
+                                  ].map((row) => (
+                                    <div key={row.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                      <span style={{ color: "var(--muted)", flexShrink: 0, display: "inline-flex" }}>{row.icon}</span>
+                                      <span style={{ flex: 1, color: "var(--text-secondary)" }}>{row.label}</span>
+                                      <strong>{row.value}</strong>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {/* Round (2026-08-26): the old "Revision History" panel here
+                                read from project_revisions/project_revision_changes --
+                                the Phase 6 Start Revision/Apply Revision flow, which had
+                                gone dead when re-baselining was disabled (see
+                                project_capaciq_rebaseline_disabled memory) and always
+                                showed "No changes made yet" even on projects with real,
+                                visible changes. It was replaced with a "Start Date
+                                Change Requests" log; that per-task request/approval
+                                feature was itself removed 2026-08-27 (Sandra: start
+                                dates only change via Re-baseline now), so this whole
+                                panel is gone too. Phase 24 (2026-08-26) revived
+                                re-baselining, so project_revision_changes is written to
+                                again on each approved re-baseline (see
+                                decide_baseline_request) -- the Revision Summary panel
+                                above (latestRevisionChanges) and the dedicated Audit
+                                Trail page below are the current source of history. */}
+                            <button
+                              className="btn-secondary"
+                              style={{ width: "100%", marginTop: 12 }}
+                              onClick={() => navigate(`/projects/${project.id}/audit-trail`)}
+                            >
+                              View Full Audit Trail
+                            </button>
+                          </div>
+                        </div>
                       )}
-                    </div>
-                  </div>
-                );
-              })}
-              {/* Sandra, 2026-07-29 follow-up: removed the "Total Effort
-                  reflects the current plan..." helper line entirely. */}
-            </div>
-          </div>
-          {project.wbs_status !== "draft" && (
-            <CompareWithBaselinePanel projectId={project.id} liveTasks={buildTaskSnapshotPayload()} />
-          )}
-        {project.wbs_status !== "draft" && (
-          <div style={{ width: 260, flexShrink: 0 }}>
-            <div className="card" style={{ padding: 14 }}>
-              {/* Sandra, 2026-07-29 follow-up: plain icon+label+value rows,
-                  no per-row card/box (per her reference mockup). */}
-              {latestRevisionChanges.length > 0 && (
-                <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
-                  <strong style={{ fontSize: 12.5, color: "var(--navy)" }}>Revision Summary</strong>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8, fontSize: 11.5 }}>
-                    {[
-                      { icon: <Clock size={13} />, label: "Total effort change", value: `${revisionSummary.totalAddedHours > 0 ? "+" : ""}${revisionSummary.totalAddedHours}h` },
-                      { icon: <ListPlus size={13} />, label: "Total tasks added", value: revisionSummary.tasksAdded },
-                      { icon: <Trash2 size={13} />, label: "Total tasks removed", value: revisionSummary.tasksRemoved },
-                      { icon: <TrendingUp size={13} />, label: "Estimates increased", value: revisionSummary.hoursIncreased },
-                      { icon: <TrendingDown size={13} />, label: "Estimates decreased", value: revisionSummary.hoursDecreased },
-                      { icon: <Calendar size={13} />, label: "Dates changed", value: revisionSummary.datesChanged },
-                      { icon: <Link2 size={13} />, label: "Dependencies changed", value: revisionSummary.dependenciesChanged },
-                      { icon: <User size={13} />, label: "Assignees changed", value: revisionSummary.assigneesChanged },
-                    ].map((row) => (
-                      <div key={row.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ color: "var(--muted)", flexShrink: 0, display: "inline-flex" }}>{row.icon}</span>
-                        <span style={{ flex: 1, color: "var(--text-secondary)" }}>{row.label}</span>
-                        <strong>{row.value}</strong>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {/* Round (2026-08-26): the old "Revision History" panel here
-                  read from project_revisions/project_revision_changes --
-                  the Phase 6 Start Revision/Apply Revision flow, which had
-                  gone dead when re-baselining was disabled (see
-                  project_capaciq_rebaseline_disabled memory) and always
-                  showed "No changes made yet" even on projects with real,
-                  visible changes. It was replaced with a "Start Date
-                  Change Requests" log; that per-task request/approval
-                  feature was itself removed 2026-08-27 (Sandra: start
-                  dates only change via Re-baseline now), so this whole
-                  panel is gone too. Phase 24 (2026-08-26) revived
-                  re-baselining, so project_revision_changes is written to
-                  again on each approved re-baseline (see
-                  decide_baseline_request) -- the Revision Summary panel
-                  above (latestRevisionChanges) and the dedicated Audit
-                  Trail page below are the current source of history. */}
-              <button
-                className="btn-secondary"
-                style={{ width: "100%", marginTop: 12 }}
-                onClick={() => navigate(`/projects/${project.id}/audit-trail`)}
-              >
-                View Full Audit Trail
-              </button>
-            </div>
-          </div>
-        )}
-          </div>
-
-          {/* 2026-09-21 (Sandra: "when a project is closed, instead of
-              having a separate page, can we all be routed to the WBS
-              page ... [Baseline/Final/Variance + Automated Insight]
-              followed by [Lessons Learned + Tasks added/grown]") --
-              BaselineReport.tsx's core content, lifted into a shared
-              component (ClosedProjectReportPanel) and rendered right
-              here instead of on its own /baseline route. */}
-          {project.wbs_status === "closed" && (
-            <ClosedProjectReportPanel
-              projectId={project.id}
-              actualCloseDate={project.actual_close_date}
-              lessonsLearnedWorked={project.lessons_learned_worked}
-              lessonsLearnedNotWorked={project.lessons_learned_not_worked}
-            />
+                        </div>
+              
+                        {/* 2026-09-21 (Sandra: "when a project is closed, instead of
+                            having a separate page, can we all be routed to the WBS
+                            page ... [Baseline/Final/Variance + Automated Insight]
+                            followed by [Lessons Learned + Tasks added/grown]") --
+                            BaselineReport.tsx's core content, lifted into a shared
+                            component (ClosedProjectReportPanel) and rendered right
+                            here instead of on its own /baseline route. */}
+                        {project.wbs_status === "closed" && (
+                          <ClosedProjectReportPanel
+                            projectId={project.id}
+                            actualCloseDate={project.actual_close_date}
+                            lessonsLearnedWorked={project.lessons_learned_worked}
+                            lessonsLearnedNotWorked={project.lessons_learned_not_worked}
+                          />
+                        )}
+              
+              
+            </>
           )}
 
           {/* Phase 10 (2026-08-21): redesigned per Sandra's spec -- all 4
@@ -5306,7 +6104,7 @@ export default function WbsPlanning() {
               lines of nested scenario rows/tables below) is riskier than
               this one-line style change; behavior is identical either
               way for a closed project. */}
-          <div className="card" style={{ padding: 14, marginBottom: 12, display: project.wbs_status === "closed" ? "none" : undefined }}>
+          <div className="card" style={{ padding: 14, marginBottom: 12, display: project.wbs_status === "closed" || !showAvailableBandwidth ? "none" : undefined }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
               <strong style={{ fontSize: 12.5, color: "var(--navy)" }}>Available bandwidth</strong>
               <span
@@ -5793,6 +6591,30 @@ export default function WbsPlanning() {
           )}
           <div style={{ display: project.wbs_status === "closed" && !wbsDetailsExpanded ? "none" : undefined }}>
 
+          <div className="card" style={{ padding: 0, marginBottom: 10, overflow: "hidden" }}>
+            <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #e5edf6", flexWrap: "wrap" }}>
+              <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>2</span>
+              <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Work Breakdown Structure</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Break the project into tasks and define the effort, assignee, and schedule.</div>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={refreshDates}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                >
+                  <RefreshCw size={13} /> Refresh Dates
+                </button>
+
+                {canEditWbs && (
+                  <button type="button" className="btn-primary" onClick={addTopLevelTask} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Plus size={13} /> Add Task
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Sandra, 2026-07-29: "move the refresh dates button a bit
               lower, aligned with the legends" -- was its own right-
               aligned row above the legend; now shares one row with the
@@ -5820,32 +6642,62 @@ export default function WbsPlanning() {
             ) : (
               <span />
             )}
-            <button
-              onClick={refreshDates}
-              title="Recompute Start dates for tasks that are still on auto-pilot (no dependency set, not manually overridden) based on the current row order -- useful after dragging a task into a new position."
+            <span />
+          </div>
+          {selectedTaskIds.size > 0 && (
+            <div
+              className="card"
               style={{
-                display: "inline-flex",
+                display: "flex",
                 alignItems: "center",
-                gap: 6,
-                fontSize: 12,
-                padding: "5px 10px",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-sm, 6px)",
-                background: "var(--surface)",
-                color: "var(--text)",
-                cursor: "pointer",
-                flexShrink: 0,
+                gap: 8,
+                margin: "0 0 8px",
+                padding: "7px 10px",
+                borderColor: "#cfe0f3",
+                background: "#f8fbff",
+                position: "sticky",
+                left: 0,
+                zIndex: 6,
               }}
             >
-              <RefreshCw size={13} /> Refresh dates
-            </button>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: "#17324f", marginRight: 4 }}>
+                {selectedTaskIds.size} task{selectedTaskIds.size === 1 ? "" : "s"} selected
+              </span>
+              <button type="button" className="btn-secondary" onClick={() => setBulkMoveOpen(true)} style={{ padding: "5px 10px" }}>
+                Move
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => void bulkAssignSelected()} style={{ padding: "5px 10px" }}>
+                Assign
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => void bulkDuplicateSelected()} style={{ padding: "5px 10px" }}>
+                Duplicate
+              </button>
+              {project?.wbs_status === "draft" ? (
+                <button type="button" className="btn-secondary" onClick={() => void bulkDeleteSelected()} style={{ padding: "5px 10px", color: "var(--danger-text)" }}>
+                  Delete
+                </button>
+              ) : (
+                <button type="button" className="btn-secondary" onClick={() => setBulkCancelOpen(true)} style={{ padding: "5px 10px", color: "var(--danger-text)" }}>
+                  Cancel
+                </button>
+              )}
+              <button type="button" onClick={clearTaskSelection} style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 11.5 }}>
+                Clear selection
+              </button>
+            </div>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "0 2px 7px", fontSize: 10.5, color: "var(--muted)" }}>
+            <span><span className="wbs-required-start">●</span> Required before Start Project</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#fff", border: "1px solid #cfd8e3" }} /> Editable</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#f3f5f7", border: "1px solid #dfe4ea" }} /> Auto-calculated / read-only</span>
+            <span style={{ marginLeft: "auto" }}>Keyboard: Enter adds the next row · Tab moves across fields · Shift+Tab moves back</span>
           </div>
           <div className="card" style={{ padding: 0, overflowX: "auto", overflowY: "visible" }}>
             <table
               className="data-table"
               style={{
                 width:
-                  22 +
+                  WBS_GUTTER_WIDTH +
                   WBS_TASK_COLUMN_ORDER.reduce((sum, k) => sum + wbsColWidth(k), 0) +
                   WBS_DATE_COLUMN_WIDTHS.reduce((sum, w) => sum + w, 0),
                 tableLayout: "fixed",
@@ -5857,7 +6709,7 @@ export default function WbsPlanning() {
                   mixed), where browsers can be inconsistent about which
                   row's widths "win". */}
               <colgroup>
-                <col style={{ width: 22 }} />
+                <col style={{ width: WBS_GUTTER_WIDTH }} />
                 {WBS_TASK_COLUMN_ORDER.map((k) => (
                   <col key={k} style={{ width: wbsColWidth(k) }} />
                 ))}
@@ -5870,15 +6722,15 @@ export default function WbsPlanning() {
                   <th
                     rowSpan={2}
                     className="row-gutter-cell"
-                    style={{ width: 22, minWidth: 22, ...(wbsGutterStickyStyle(false) ?? {}) }}
+                    style={{ width: WBS_GUTTER_WIDTH, minWidth: WBS_GUTTER_WIDTH, ...(wbsGutterStickyStyle(false) ?? {}) }}
                   />
-                  <ResizableTh colKey="task">Task</ResizableTh>
+                  <ResizableTh colKey="task">Task <span className="wbs-required-start" title="Required before Start Project">●</span></ResizableTh>
                   <ResizableTh colKey="depends_on">Depends on</ResizableTh>
-                  <ResizableTh colKey="assignee">Assignee</ResizableTh>
+                  <ResizableTh colKey="assignee">Assignee <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
                   <ResizableTh colKey="work_type">Work Type</ResizableTh>
-                  <ResizableTh colKey="output_type">Output Type</ResizableTh>
+                  <ResizableTh colKey="output_type">Output Type <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
                   <ResizableTh colKey="output_count">Output Count</ResizableTh>
-                  <ResizableTh colKey="effort_hours">Scoped Hours</ResizableTh>
+                  <ResizableTh colKey="effort_hours">Scoped Hours <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
                   <ResizableTh colKey="spent_hrs">Logged Hours</ResizableTh>
                   <ResizableTh colKey="effort">Effort</ResizableTh>
                   <ResizableTh colKey="changes" title="vs the active Baseline">
@@ -5906,8 +6758,50 @@ export default function WbsPlanning() {
               <tbody>
                 {orderedTasks.length === 0 && (
                   <tr>
-                    <td colSpan={17} style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>
-                      No tasks in this project yet.
+                    <td colSpan={17} style={{ padding: "32px 0 34px", background: "#fff", position: "relative" }}>
+                      <div
+                        style={{
+                          position: "sticky",
+                          left: 0,
+                          width: "min(100%, calc(100vw - 250px))",
+                          margin: 0,
+                          display: "flex",
+                          justifyContent: "center",
+                          padding: "0 20px",
+                          boxSizing: "border-box",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: "min(720px, 100%)",
+                            display: "grid",
+                            gridTemplateColumns: "110px minmax(0,1fr)",
+                            gap: 22,
+                            alignItems: "center",
+                          }}
+                        >
+                        <div style={{ width: 96, height: 96, borderRadius: "50%", background: "#eef6ff", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+                          <div style={{ width: 54, height: 62, border: "1px solid #c8daf0", borderRadius: 8, background: "#fff", padding: "11px 9px", display: "grid", gap: 7 }}>
+                            {[0,1,2].map((n) => <div key={n} style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#d8e9fb" }} /><span style={{ height: 5, flex: 1, borderRadius: 3, background: "#dce6f2" }} /></div>)}
+                          </div>
+                          <span style={{ position: "absolute", right: 8, bottom: 8, width: 30, height: 30, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={17} /></span>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: "#17324f" }}>Start building your work plan</div>
+                          <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5, marginTop: 5 }}>
+                            Create the first task and define who owns it, how much effort is expected, and when it starts. Once you add tasks, the schedule and project insights will appear here.
+                          </div>
+                          {canEditWbs && (
+                            <button type="button" className="btn-primary" onClick={addTopLevelTask} style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <Plus size={13} /> Add first task
+                            </button>
+                          )}
+                          <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 7, background: "#eef7ff", color: "#53708e", fontSize: 10.5 }}>
+                            <strong style={{ color: "#234f7d" }}>Tip:</strong> Add scoped hours and a start date to generate the project timeline and effort forecast.
+                          </div>
+                        </div>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -5932,7 +6826,11 @@ export default function WbsPlanning() {
                   return (
                     <tr
                       key={t.id}
-                      className={dragOverTaskId === t.id && validDropTarget ? "row-drop-target" : undefined}
+                      className={[
+                        "wbs-task-row",
+                        selectedTaskIds.has(t.id) ? "wbs-selected" : "",
+                        dragOverTaskId === t.id && validDropTarget ? "row-drop-target" : "",
+                      ].filter(Boolean).join(" ")}
                       style={rowLocked ? { background: "var(--hover-bg)" } : undefined}
                       onDragOver={(e) => {
                         e.preventDefault();
@@ -5965,66 +6863,87 @@ export default function WbsPlanning() {
                         onClick={(e) => e.stopPropagation()}
                         style={wbsGutterStickyStyle(true, rowLocked)}
                       >
-                        <div className="row-gutter-inner" style={{ opacity: 1, paddingLeft: 4 }}>
-                          <span
-                            className="row-grip-btn"
-                            draggable={rowEditable}
-                            onDragStart={() => rowEditable && setDraggedTaskId(t.id)}
-                            onDragEnd={() => {
-                              setDraggedTaskId(null);
-                              setDragOverTaskId(null);
-                            }}
-                            title={rowEditable ? "Drag to reorder (among its own siblings)" : rowLocked ? "Done -- locked" : undefined}
-                            style={rowEditable ? undefined : { opacity: 0.35, cursor: "default" }}
-                          >
-                            <GripVertical size={13} />
-                          </span>
+                        <div className="wbs-row-gutter-controls">
+                          {(rowEditable || t.status === "Cancelled") && (
+                            <input
+                              type="checkbox"
+                              className="wbs-row-select"
+                              checked={selectedTaskIds.has(t.id)}
+                              onChange={() => toggleTaskSelected(t.id)}
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label={`Select ${t.name}`}
+                              title="Select task"
+                            />
+                          )}
+                          {rowEditable && selectedTaskIds.size === 0 && (
+                            <span
+                              className="row-grip-btn wbs-row-grip"
+                              draggable
+                              onDragStart={() => setDraggedTaskId(t.id)}
+                              onDragEnd={() => {
+                                setDraggedTaskId(null);
+                                setDragOverTaskId(null);
+                              }}
+                              title="Drag to reorder among sibling tasks"
+                            >
+                              <GripVertical size={13} />
+                            </span>
+                          )}
                         </div>
                       </td>
-                      <td style={{ overflow: "hidden", ...(wbsColStickyStyle("task", true, rowLocked) ?? {}) }}>
+                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={{ overflow: "hidden", ...(wbsColStickyStyle("task", true, rowLocked) ?? {}) }}>
                         <div style={{ paddingLeft: t.depth * 16, fontWeight: t.depth === 0 ? 600 : 400, display: "flex", alignItems: "center", gap: 4 }}>
                           <span title={glyph.title} style={{ display: "inline-flex", flexShrink: 0 }}>
                             <glyph.Icon size={13} color={glyph.color} />
                           </span>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <InlineText value={t.name} editable={rowEditable} bold={t.depth === 0} onCommit={(v) => saveTaskField(t.id, { name: v })} />
+                            <InlineText
+                              value={t.name}
+                              editable={rowEditable}
+                              bold={t.depth === 0}
+                              dataNavId={`task-name-${t.id}`}
+                              onCommit={(v) => saveTaskField(t.id, { name: v })}
+                              onEnter={() => {
+                                if (!rowEditable) return;
+                                if (t.depth === 0) {
+                                  void addTopLevelTask();
+                                } else {
+                                  const parent = orderedTasks.find((x) => x.id === t.parent_task_id && x.depth === 0);
+                                  if (parent) void addSubtask(parent);
+                                }
+                              }}
+                            />
                           </div>
+                          <span className="wbs-row-actions">
                           {rowEditable && t.depth === 0 && (
-                            <button className="add-subtask-btn" onClick={() => addSubtask(t)} title="Add sub-task">
+                            <button
+                              className="add-subtask-btn"
+                              tabIndex={-1}
+                              onClick={() => addSubtask(t)}
+                              title="Add sub-task"
+                              aria-label="Add sub-task"
+                            >
                               <Plus size={14} />
                             </button>
                           )}
-                          {rowEditable && (
-                            <button className="add-subtask-btn" onClick={() => deleteTask(t)} title={isParent ? "Delete task (and its sub-tasks)" : "Delete task"}>
-                              <Trash2 size={14} />
-                            </button>
-                          )}
-                          {/* 2026-09-10: Cancel/Uncancel reachable from WBS
-                              too, per spec ("do NOT restrict Cancel to WBS
-                              only" -- the reverse also holds: WBS needs it
-                              as well, not just the Tasks page). Not a full
-                              Status dropdown -- WBS deliberately doesn't
-                              have one (see the Phase 24/governance-
-                              lockdown note elsewhere: Status editing lives
-                              on the Tasks page) -- just this one action,
-                              same "button next to Delete" affordance. */}
-                          {rowEditable && !isParent && (
+                          {(rowEditable || t.status === "Cancelled") && (
                             <button
                               className="add-subtask-btn"
-                              onClick={() => setCancelTaskDialogOpen({ taskId: t.id, label: `"${t.name}"` })}
-                              title="Cancel task"
+                              tabIndex={-1}
+                              onClick={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setRowActionsMenu({ taskId: t.id, x: rect.right, y: rect.bottom + 4 });
+                              }}
+                              title="More actions"
+                              aria-label="More task actions"
                             >
-                              <XCircle size={14} />
+                              <MoreHorizontal size={14} />
                             </button>
                           )}
-                          {canEditWbs && t.status === "Cancelled" && (
-                            <button className="add-subtask-btn" onClick={() => uncancelTask(t.id)} title="Uncancel -- restore to In Progress">
-                              <RefreshCw size={14} />
-                            </button>
-                          )}
+                          </span>
                         </div>
                       </td>
-                      <td style={{ position: "relative", ...(wbsColStickyStyle("depends_on", true, rowLocked) ?? {}) }}>
+                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={{ position: "relative", ...(wbsColStickyStyle("depends_on", true, rowLocked) ?? {}) }}>
                         <DependsOnPicker
                           task={t}
                           allTasks={orderedTasks}
@@ -6053,7 +6972,7 @@ export default function WbsPlanning() {
                           </span>
                         )}
                       </td>
-                      <td style={wbsColStickyStyle("assignee", true, rowLocked)}>
+                      <td className={rowEditable && !isParent ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("assignee", true, rowLocked)}>
                         {isParent ? (
                           (() => {
                             const { multiple } = parentAssigneeState(t.id);
@@ -6080,6 +6999,7 @@ export default function WbsPlanning() {
                           <InlineSelect
                             value={assignee?.name ?? ""}
                             editable={rowEditable}
+                            searchable
                             // phase126k: after Start Project an assignee can be changed, never removed.
                             allowEmpty={project?.wbs_status === "draft" || !t.assignee_id}
                             emptyLabel="Unassigned"
@@ -6109,7 +7029,7 @@ export default function WbsPlanning() {
                           />
                         )}
                       </td>
-                      <td style={wbsColStickyStyle("work_type", true, rowLocked)}>
+                      <td className={rowEditable && !isParent ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("work_type", true, rowLocked)}>
                         {isParent ? (
                           <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="Not applicable -- a parent task's own Work Type is already represented by its sub-tasks.">
                             N/A
@@ -6126,8 +7046,9 @@ export default function WbsPlanning() {
                               <InlineSelect
                                 value={currentWt?.name ?? ""}
                                 editable={rowEditable}
+                            searchable
                                 allowEmpty
-                                emptyLabel="Pick work type"
+                                emptyLabel="—"
                                 options={pickable.map((w) => w.name)}
                                 onCommit={(v) => {
                                   const match = pickable.find((w) => w.name === v);
@@ -6138,7 +7059,7 @@ export default function WbsPlanning() {
                           })()
                         )}
                       </td>
-                      <td style={wbsColStickyStyle("output_type", true, rowLocked)}>
+                      <td className={rowEditable && !isParent && !!t.work_type_id ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("output_type", true, rowLocked)}>
                         {/* 2026-09-24 (Sandra): parent rows are N/A for Output Type too,
                             same as Work Type / Output Count -- outputs belong to the
                             sub-tasks that produce them. */}
@@ -6174,17 +7095,37 @@ export default function WbsPlanning() {
                           const needsWorkTypeFirst = !t.work_type_id;
                           if (needsWorkTypeFirst) {
                             return (
-                              <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="Pick a Work Type first -- Output Type options depend on it.">
-                                Pick Work Type first
-                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (rowEditable) {
+                                    void alert("Select a Work Type first. Output Type options depend on the selected Work Type.");
+                                  }
+                                }}
+                                disabled={!rowEditable}
+                                title={rowEditable ? "Select a Work Type first to choose an Output Type." : undefined}
+                                style={{
+                                  width: "100%",
+                                  padding: "3px 4px",
+                                  border: "none",
+                                  background: "transparent",
+                                  color: "var(--muted)",
+                                  textAlign: "left",
+                                  fontSize: 11.5,
+                                  cursor: rowEditable ? "pointer" : "default",
+                                }}
+                              >
+                                —
+                              </button>
                             );
                           }
                           return (
                             <InlineSelect
                               value={currentOt?.name ?? ""}
                               editable={rowEditable}
+                            searchable
                               allowEmpty
-                              emptyLabel="Pick output type"
+                              emptyLabel="—"
                               options={pickableOt.map((o) => o.name)}
                               onCommit={(v) => {
                                 const match = pickableOt.find((o) => o.name === v);
@@ -6194,7 +7135,7 @@ export default function WbsPlanning() {
                           );
                         })()}
                       </td>
-                      <td style={wbsColStickyStyle("output_count", true, rowLocked)}>
+                      <td className={canEditWbs && !isParent && t.status !== "Done" ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("output_count", true, rowLocked)}>
                         <InlineNumber
                           value={t.output_count}
                           // Sandra, 2026-08-26: "I can't edit output count.
@@ -6220,7 +7161,7 @@ export default function WbsPlanning() {
                           onCommit={(v) => saveTaskField(t.id, { output_count: v })}
                         />
                       </td>
-                      <td style={wbsColStickyStyle("effort_hours", true, rowLocked)}>
+                      <td className={rowEditable && !isParent ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("effort_hours", true, rowLocked)}>
                         <span title={isParent ? "Computed from this task's own sub-tasks (sum of their Scoped Hours)" : undefined}>
                           <InlineNumber
                             value={t.estimated_hours}
@@ -6229,8 +7170,8 @@ export default function WbsPlanning() {
                           />
                         </span>
                       </td>
-                      <td style={{ fontVariantNumeric: "tabular-nums", ...(wbsColStickyStyle("spent_hrs", true, rowLocked) ?? {}) }}>{formatHours(spentHoursFor(t.id))}</td>
-                      <td style={wbsColStickyStyle("effort", true, rowLocked)}>
+                      <td className="wbs-readonly-cell" style={{ fontVariantNumeric: "tabular-nums", ...(wbsColStickyStyle("spent_hrs", true, rowLocked) ?? {}) }}>{formatHours(spentHoursFor(t.id))}</td>
+                      <td className="wbs-readonly-cell" style={wbsColStickyStyle("effort", true, rowLocked)}>
                         {isParent ? (
                           <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="Not applicable -- a parent task's own effort is already represented by its sub-tasks' own Effort/points, so it doesn't carry a separate value.">
                             N/A
@@ -6258,7 +7199,7 @@ export default function WbsPlanning() {
                           </span>
                         )}
                       </td>
-                      <td style={wbsColStickyStyle("changes", true, rowLocked)}>
+                      <td className="wbs-readonly-cell" style={wbsColStickyStyle("changes", true, rowLocked)}>
                         {(() => {
                           // Sandra, 2026-07-29: "omit the notes column and
                           // just put the values in the changes vs baseline,
@@ -6305,6 +7246,39 @@ export default function WbsPlanning() {
             </table>
           </div>
 
+          {orderedTasks.length === 0 && (
+            <>
+              <section className="card" style={{ padding: 14, marginTop: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>3</span>
+                  <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Schedule (Timeline)</div>
+                  <div style={{ fontSize: 10.5, color: "var(--muted)" }}>The project timeline will appear here once tasks have been added with dates and effort.</div>
+                </div>
+                <div style={{ border: "1px solid #dce7f3", borderRadius: 8, padding: "16px 18px", display: "flex", alignItems: "center", gap: 12, background: "#fbfdff" }}>
+                  <Calendar size={22} style={{ color: "#7892ad" }} />
+                  <div><div style={{ fontSize: 11.5, fontWeight: 700, color: "#17324f" }}>No schedule yet</div><div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Add at least one task with a start date and scoped hours to see the project timeline.</div></div>
+                </div>
+              </section>
+              <section className="card" style={{ padding: 14, marginTop: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>4</span>
+                  <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Project Insights</div>
+                  <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Effort comparison, variance, and capacity insights will appear once the project has tasks and schedules.</div>
+                </div>
+                <div style={{ border: "1px solid #dce7f3", borderRadius: 8, padding: "16px 18px", background: "#fbfdff" }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: "#17324f" }}>No data yet</div>
+                  <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Add tasks with scoped hours to see effort comparison, variance, and capacity insights.</div>
+                </div>
+              </section>
+              <section className="card" style={{ padding: "10px 14px", marginTop: 14, display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#9fb5cf", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>5</span>
+                <div style={{ fontSize: 13, fontWeight: 750, color: "#17324f" }}>Project Closure</div>
+                <span style={{ padding: "3px 8px", borderRadius: 999, background: "#edf3fa", color: "#607892", fontSize: 10, fontWeight: 700 }}>Hidden until closing</span>
+                <div style={{ fontSize: 10.5, color: "var(--muted)" }}>This section appears when you initiate a Project Closure request.</div>
+              </section>
+            </>
+          )}
+
           {/* Timeline (Gantt) -- all 3 scenarios stacked (2026-07-28:
               previously just whichever mode was toggled active; Sandra
               asked for all side by side since the scoping table above
@@ -6320,7 +7294,7 @@ export default function WbsPlanning() {
           {MODES.filter((mode) => visibleScenarios.has(MODE_TO_SCENARIO[mode])).map((mode) => {
             const { startDate: ganttStartDate, days: ganttDays, widthPx: ganttWidthPx } = ganttMetricsFor(chainByMode[mode]);
             return (
-              <div key={mode} className="card" style={{ padding: 14, marginTop: 12 }}>
+              <div key={mode} className="card" style={{ padding: 14, marginTop: 12, display: orderedTasks.length === 0 ? "none" : undefined }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                   <strong style={{ fontSize: 12.5, color: "var(--navy)" }}>Timeline (Gantt) — {MODE_LABEL[mode]}</strong>
                 </div>
@@ -6503,59 +7477,89 @@ export default function WbsPlanning() {
           -- these are end-of-project reflection fields, filled in once
           work is basically done, so they read better as the last thing on
           the page rather than competing with Name/Owner/Start date up top. */}
-      <div className="card" style={{ padding: 14, marginTop: 12, marginBottom: 12, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Actual Project Close Date:</span>
-        <div className="wbs-field-box" style={fieldBoxStyle(!!project.actual_close_date, 110, !canEditWbs)}>
-          <InlineDate
-            value={project.actual_close_date ?? defaultActualCloseDate()}
-            editable={canEditWbs}
-            onCommit={(v) => saveProjectField({ actual_close_date: v })}
-          />
-        </div>
-        {!project.actual_close_date && defaultActualCloseDate() && (
-          <span style={{ fontSize: 11, color: "var(--muted)" }}>Default: latest task completion date -- change it if the work wrapped on a different day</span>
-        )}
-        <span
-          title="When the work on this project actually wrapped -- may be earlier than the Signed Off Date above if approval happens later. Required before requesting closure."
-          style={{ display: "inline-flex", cursor: "help", flexShrink: 0 }}
-        >
-          <Info size={13} style={{ color: "var(--muted)" }} />
-        </span>
-      </div>
-
-      {/* Lessons Learned -- added 2026-09-07 (Sandra: "ask for lesson
-          learned, what worked and what did not work"). Two separate
-          fields (her explicit call over one combined free-text box) so
-          closed projects can be scanned for recurring themes later. Same
-          canEditWbs gate as the rest of this page, required before
-          Closure (see handleRequestClosure/handleDecideClosure's
-          missingProjectFields gate above) -- NOT at Start Project, since
-          there's nothing to reflect on yet that early. Also surfaced on
-          the Report page (BaselineReport.tsx) once a project is closed. */}
-      <div className="card" style={{ padding: 14, marginBottom: 12, display: "flex", gap: 14, flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 300px", minWidth: 260 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Worked:</div>
-          <div className="wbs-field-box" style={fieldBoxStyle(!!project.lessons_learned_worked, undefined, !canEditWbs)}>
-            <InlineTextArea
-              value={project.lessons_learned_worked ?? ""}
-              editable={canEditWbs}
-              placeholder="What went well on this project?"
-              onCommit={(v) => saveProjectField({ lessons_learned_worked: v })}
-            />
+      {(closureFormOpen || !!pendingClosure || project.wbs_status === "closed") && (
+        <section id="project-closure-section" className="card" style={{ padding: 14, marginTop: 12, marginBottom: 12, borderColor: pendingClosure ? "var(--warning-border, #fed7aa)" : "var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>Project Closure</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 3 }}>
+                {project.wbs_status === "closed"
+                  ? "Closure details captured for this completed project."
+                  : pendingClosure
+                    ? "Closure request submitted. These details are now part of the approval request."
+                    : "Confirm the actual end date and capture wins / lessons learned, then submit the Project Closure request."}
+              </div>
+            </div>
+            {!pendingClosure && project.wbs_status !== "closed" && (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="btn-secondary" onClick={() => setClosureFormOpen(false)} disabled={workflowBusy}>
+                  Cancel
+                </button>
+                <button type="button" className="btn-primary" onClick={handleRequestClosure} disabled={workflowBusy}>
+                  {workflowBusy ? "Submitting…" : "Submit Project Closure Request"}
+                </button>
+              </div>
+            )}
           </div>
-        </div>
-        <div style={{ flex: "1 1 300px", minWidth: 260 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Didn't Work:</div>
-          <div className="wbs-field-box" style={fieldBoxStyle(!!project.lessons_learned_not_worked, undefined, !canEditWbs)}>
-            <InlineTextArea
-              value={project.lessons_learned_not_worked ?? ""}
-              editable={canEditWbs}
-              placeholder="What would you do differently next time?"
-              onCommit={(v) => saveProjectField({ lessons_learned_not_worked: v })}
-            />
+          <div style={{ display: "grid", gap: 12 }}>
+                  <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 8, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", background: "var(--surface)" }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Actual Project End Date:</span>
+                    <div className="wbs-field-box" style={fieldBoxStyle(!!project.actual_close_date, 110, !canEditWbs)}>
+                      <InlineDate
+                        value={project.actual_close_date ?? defaultActualCloseDate()}
+                        editable={canEditWbs && !pendingClosure}
+                        onCommit={(v) => saveProjectField({ actual_close_date: v })}
+                      />
+                    </div>
+                    {!project.actual_close_date && defaultActualCloseDate() && (
+                      <span style={{ fontSize: 11, color: "var(--muted)" }}>Default: latest task completion date -- change it if the work wrapped on a different day</span>
+                    )}
+                    <span
+                      title="When the work on this project actually wrapped -- may be earlier than the Signed Off Date above if approval happens later. Required before requesting closure."
+                      style={{ display: "inline-flex", cursor: "help", flexShrink: 0 }}
+                    >
+                      <Info size={13} style={{ color: "var(--muted)" }} />
+                    </span>
+                  </div>
+            
+                  {/* Lessons Learned -- added 2026-09-07 (Sandra: "ask for lesson
+                      learned, what worked and what did not work"). Two separate
+                      fields (her explicit call over one combined free-text box) so
+                      closed projects can be scanned for recurring themes later. Same
+                      canEditWbs gate as the rest of this page, required before
+                      Closure (see handleRequestClosure/handleDecideClosure's
+                      missingProjectFields gate above) -- NOT at Start Project, since
+                      there's nothing to reflect on yet that early. Also surfaced on
+                      the Report page (BaselineReport.tsx) once a project is closed. */}
+                  <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 8, display: "flex", gap: 14, flexWrap: "wrap", background: "var(--surface)" }}>
+                    <div style={{ flex: "1 1 300px", minWidth: 260 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Worked / Wins:</div>
+                      <div className="wbs-field-box" style={fieldBoxStyle(!!project.lessons_learned_worked, undefined, !canEditWbs)}>
+                        <InlineTextArea
+                          value={project.lessons_learned_worked ?? ""}
+                          editable={canEditWbs && !pendingClosure}
+                          placeholder="What went well on this project?"
+                          onCommit={(v) => saveProjectField({ lessons_learned_worked: v })}
+                        />
+                      </div>
+                    </div>
+                    <div style={{ flex: "1 1 300px", minWidth: 260 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Didn’t Work / Lessons Learned:</div>
+                      <div className="wbs-field-box" style={fieldBoxStyle(!!project.lessons_learned_not_worked, undefined, !canEditWbs)}>
+                        <InlineTextArea
+                          value={project.lessons_learned_not_worked ?? ""}
+                          editable={canEditWbs && !pendingClosure}
+                          placeholder="What would you do differently next time?"
+                          onCommit={(v) => saveProjectField({ lessons_learned_not_worked: v })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+            
+            
           </div>
-        </div>
-      </div>
+        </section>
+      )}
 
       {/* Design spec item 8 (Sandra, 2026-07-29): bottom status bar --
           mirrors the top banner's status chip but adds forward-looking
@@ -6601,6 +7605,7 @@ export default function WbsPlanning() {
               just no longer duplicated as its own button down here. */}
         </div>
       </div>
+          </div>
     </div>
   );
 }
@@ -6896,6 +7901,7 @@ function DependsOnPicker({
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number; openUp: boolean } | null>(null);
+  const [query, setQuery] = useState("");
   // Scheduling-engine audit (2026-08-31), Fix 2: never offer a task's own
   // parent or its own sub-tasks as dependency candidates. A parent's dates
   // are DERIVED from its children (the rollup effect owns those columns),
@@ -6905,6 +7911,7 @@ function DependsOnPicker({
   // (addDependency refuses the same pair server-side of the UI, in case
   // one already exists in the data.)
   const candidates = allTasks.filter((t) => t.id !== task.id && t.id !== task.parent_task_id && t.parent_task_id !== task.id);
+  const visibleCandidates = candidates.filter((t) => !query.trim() || t.name.toLowerCase().includes(query.trim().toLowerCase()));
   const selectedNames = dependsOnIds
     .map((id) => allTasks.find((t) => t.id === id)?.name)
     .filter((n): n is string => !!n);
@@ -6923,6 +7930,7 @@ function DependsOnPicker({
         openUp,
       });
     }
+    if (!isOpen) setQuery("");
     onToggle();
   }
 
@@ -6979,8 +7987,18 @@ function DependsOnPicker({
                 boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
               }}
             >
+              <div style={{ padding: "2px 2px 6px" }}>
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search tasks..."
+                  style={{ width: "100%", padding: "6px 8px", fontSize: 11.5, border: "1px solid var(--border)", borderRadius: 5, outline: "none" }}
+                />
+              </div>
               {candidates.length === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", padding: 4 }}>No other tasks yet.</div>}
-              {candidates.map((c) => {
+              {candidates.length > 0 && visibleCandidates.length === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", padding: 4 }}>No matching tasks.</div>}
+              {visibleCandidates.map((c) => {
                 const checked = dependsOnIds.includes(c.id);
                 return (
                   <label

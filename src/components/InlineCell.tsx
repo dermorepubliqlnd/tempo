@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { createPortal } from "react-dom";
 import type { OptionGroup } from "../lib/notionOptions";
 import { formatDate } from "../lib/formatDate";
 
@@ -11,14 +12,17 @@ interface InlineTextProps extends BaseProps {
   value: string;
   onCommit: (value: string) => void;
   bold?: boolean;
+  onEnter?: () => void;
+  dataNavId?: string;
 }
 
-export function InlineText({ value, onCommit, editable, bold, emptyLabel = "—" }: InlineTextProps) {
+export function InlineText({ value, onCommit, editable, bold, onEnter, dataNavId, emptyLabel = "—" }: InlineTextProps) {
   const [draft, setDraft] = useState(value);
   if (!editable) return <span style={bold ? { fontWeight: 600, color: "var(--navy)" } : undefined}>{value || emptyLabel}</span>;
   return (
     <input
       className="inline-cell"
+      data-wbs-nav-id={dataNavId}
       spellCheck={false}
       autoComplete="off"
       style={bold ? { fontWeight: 600, color: "var(--navy)" } : undefined}
@@ -30,7 +34,11 @@ export function InlineText({ value, onCommit, editable, bold, emptyLabel = "—"
         else setDraft(value);
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+          if (onEnter) window.setTimeout(onEnter, 0);
+        }
         if (e.key === "Escape") {
           setDraft(value);
           (e.target as HTMLInputElement).blur();
@@ -47,6 +55,8 @@ interface InlineSelectProps extends BaseProps {
   options: string[] | OptionGroup[];
   allowEmpty?: boolean;
   renderReadOnly?: (value: string) => React.ReactNode;
+  alwaysSelect?: boolean;
+  searchable?: boolean;
   // Optional display-text mapper for each <option> in the edit dropdown
   // (e.g. Priority prefixing "Low" -> "↓ Low") -- the underlying stored
   // value/onCommit argument is always the raw option string, only the
@@ -58,9 +68,17 @@ function isGrouped(options: string[] | OptionGroup[]): options is OptionGroup[] 
   return options.length > 0 && typeof options[0] !== "string";
 }
 
-export function InlineSelect({ value, onCommit, options, editable, allowEmpty, emptyLabel = "—", renderReadOnly, labelFor }: InlineSelectProps) {
+export function InlineSelect({ value, onCommit, options, editable, allowEmpty, emptyLabel = "—", renderReadOnly, alwaysSelect = false, searchable = false, labelFor }: InlineSelectProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [searchDraft, setSearchDraft] = useState(value);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
   const selectRef = useRef<HTMLSelectElement>(null);
+
+  useEffect(() => {
+    setSearchDraft(value);
+  }, [value]);
 
   useEffect(() => {
     if (isEditing && selectRef.current) {
@@ -79,7 +97,7 @@ export function InlineSelect({ value, onCommit, options, editable, allowEmpty, e
 
   if (!editable) return <>{renderReadOnly ? renderReadOnly(value) : value || emptyLabel}</>;
 
-  if (!isEditing) {
+  if (!alwaysSelect && !isEditing) {
     return (
       <span className="inline-select-trigger" onClick={() => setIsEditing(true)}>
         {renderReadOnly ? renderReadOnly(value) : value || emptyLabel}
@@ -88,16 +106,196 @@ export function InlineSelect({ value, onCommit, options, editable, allowEmpty, e
   }
 
   const grouped = isGrouped(options);
+  const flatOptions = grouped ? (options as OptionGroup[]).flatMap((g) => g.options) : (options as string[]);
+
+  if (searchable) {
+    const query = searchDraft.trim().toLowerCase();
+    const filteredOptions = flatOptions.filter((o) => !query || o.toLowerCase().includes(query));
+    const visibleOptions = filteredOptions.slice(0, 80);
+    const rect = searchRef.current?.getBoundingClientRect();
+    const selectSearchOption = (next: string) => {
+      setSearchDraft(next);
+      setSearchOpen(false);
+      setActiveIndex(0);
+      if (next !== value) onCommit(next);
+    };
+
+    return (
+      <div style={{ position: "relative", width: "100%", minWidth: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            width: "100%",
+            minWidth: 0,
+            borderRadius: 5,
+          }}
+        >
+          <input
+            ref={searchRef}
+            className="inline-cell"
+            value={searchDraft}
+            placeholder={emptyLabel}
+            autoComplete="off"
+            role="combobox"
+            aria-expanded={searchOpen}
+            aria-autocomplete="list"
+            onFocus={(e) => {
+              setSearchDraft(value);
+              setSearchOpen(true);
+              setActiveIndex(0);
+              e.currentTarget.select();
+            }}
+            onChange={(e) => {
+              setSearchDraft(e.target.value);
+              setSearchOpen(true);
+              setActiveIndex(0);
+            }}
+            onBlur={() => {
+              window.setTimeout(() => {
+                setSearchOpen(false);
+                if (searchDraft === "" && allowEmpty) {
+                  if (value !== "") onCommit("");
+                  return;
+                }
+                const exact = flatOptions.find((o) => o.toLowerCase() === searchDraft.trim().toLowerCase());
+                if (exact) {
+                  if (exact !== value) onCommit(exact);
+                  setSearchDraft(exact);
+                } else {
+                  setSearchDraft(value);
+                }
+              }, 120);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSearchOpen(true);
+                setActiveIndex((i) => Math.min(i + 1, Math.max(visibleOptions.length - 1, 0)));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActiveIndex((i) => Math.max(i - 1, 0));
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setSearchDraft(value);
+                setSearchOpen(false);
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                const exact = flatOptions.find((o) => o.toLowerCase() === searchDraft.trim().toLowerCase());
+                const selected = exact ?? visibleOptions[activeIndex];
+                if (selected) selectSearchOption(selected);
+              }
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setSearchOpen(true);
+            }}
+            style={{ width: "100%", minWidth: 0 }}
+          />
+        </div>
+        {searchOpen &&
+          rect &&
+          createPortal(
+            <div
+              role="listbox"
+              style={{
+                position: "fixed",
+                left: Math.min(rect.left, window.innerWidth - Math.max(rect.width, 220) - 8),
+                top: Math.min(rect.bottom + 4, window.innerHeight - 280),
+                width: Math.max(rect.width, 220),
+                maxWidth: 320,
+                maxHeight: 260,
+                overflowY: "auto",
+                zIndex: 1600,
+                padding: 4,
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                boxShadow: "0 8px 24px rgba(15,41,66,.16)",
+              }}
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              {allowEmpty && !query && (
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setSearchDraft("");
+                    setSearchOpen(false);
+                    if (value !== "") onCommit("");
+                  }}
+                  style={{
+                    display: "flex",
+                    width: "100%",
+                    padding: "7px 9px",
+                    border: "none",
+                    borderRadius: 5,
+                    background: !value ? "#eef6ff" : "transparent",
+                    color: "var(--muted)",
+                    fontSize: 12,
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  {emptyLabel}
+                </button>
+              )}
+              {visibleOptions.length === 0 ? (
+                <div style={{ padding: "8px 9px", fontSize: 11.5, color: "var(--muted)" }}>No matching options</div>
+              ) : (
+                visibleOptions.map((o, i) => (
+                  <button
+                    key={o}
+                    type="button"
+                    role="option"
+                    aria-selected={o === value}
+                    onMouseEnter={() => setActiveIndex(i)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      selectSearchOption(o);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      width: "100%",
+                      padding: "7px 9px",
+                      border: "none",
+                      borderRadius: 5,
+                      background: i === activeIndex ? "#eef6ff" : o === value ? "#f5f9ff" : "transparent",
+                      color: "var(--text)",
+                      fontSize: 12,
+                      textAlign: "left",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {labelFor ? labelFor(o) : o}
+                    </span>
+                    {o === value && <span style={{ color: "var(--accent)", fontWeight: 800 }}>✓</span>}
+                  </button>
+                ))
+              )}
+            </div>,
+            document.body
+          )}
+      </div>
+    );
+  }
+
   return (
     <select
-      ref={selectRef}
+      ref={alwaysSelect ? undefined : selectRef}
       className="inline-cell"
       value={value}
       onChange={(e: ChangeEvent<HTMLSelectElement>) => {
         onCommit(e.target.value);
-        setIsEditing(false);
+        if (!alwaysSelect) setIsEditing(false);
       }}
-      onBlur={() => setIsEditing(false)}
+      onBlur={() => {
+        if (!alwaysSelect) setIsEditing(false);
+      }}
       onClick={(e) => e.stopPropagation()}
     >
       {allowEmpty && <option value="">{emptyLabel}</option>}
