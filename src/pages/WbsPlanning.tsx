@@ -3356,6 +3356,8 @@ export default function WbsPlanning() {
   async function saveDraft() {
     if (!project || !projectId) return;
 
+    const wasInitialProjectInfoSave = project.is_unsaved;
+
     if (project.is_unsaved) {
       const missing = [
         !project.name?.trim() ? "Project Name" : null,
@@ -3560,16 +3562,21 @@ export default function WbsPlanning() {
       // silent=true so state still refreshes underneath without the
       // full unmount/remount.
       await loadAll(true);
-      await alert(
-        project.wbs_status === "draft"
-          ? "Timelines have been saved. Start the project to lock the timelines."
-          : keptDue.length
-          ? `Timelines have been saved. Due dates on a started project only change through an approved extension, so these kept their current due date:\n\n${keptDue
-              .slice(0, 12)
-              .map((k) => `• ${k.name}: plan says ${formatDate(k.plan)}, kept ${formatDate(k.kept)}`)
-              .join("\n")}${keptDue.length > 12 ? `\n…and ${keptDue.length - 12} more` : ""}\n\nIf a task needs more time, request an extension.`
-          : "Timelines have been saved. This project is already started, so the change is tracked as variance against its Baseline (see the Audit Trail)."
-      );
+      // First save only establishes Project Information and unlocks WBS planning.
+      // The page transition itself is enough feedback; do not show the legacy
+      // "Timelines have been saved" modal before the user has even built a WBS.
+      if (!wasInitialProjectInfoSave) {
+        await alert(
+          project.wbs_status === "draft"
+            ? "Draft saved."
+            : keptDue.length
+            ? `Timelines have been saved. Due dates on a started project only change through an approved extension, so these kept their current due date:\n\n${keptDue
+                .slice(0, 12)
+                .map((k) => `• ${k.name}: plan says ${formatDate(k.plan)}, kept ${formatDate(k.kept)}`)
+                .join("\n")}${keptDue.length > 12 ? `\n…and ${keptDue.length - 12} more` : ""}\n\nIf a task needs more time, request an extension.`
+            : "Changes saved. This project is already started, so the update is tracked as variance against its Baseline."
+        );
+      }
     } finally {
       setSaving(false);
     }
@@ -6109,20 +6116,28 @@ export default function WbsPlanning() {
               <tbody>
                 {orderedTasks.length === 0 && (
                   <tr>
-                    <td colSpan={17} style={{ padding: "32px 20px 34px", background: "#fff", position: "relative" }}>
+                    <td colSpan={17} style={{ padding: "32px 0 34px", background: "#fff", position: "relative" }}>
                       <div
                         style={{
                           position: "sticky",
                           left: 0,
-                          width: "min(720px, calc(100vw - 140px))",
-                          maxWidth: "calc(100vw - 48px)",
-                          margin: "0 auto",
-                          display: "grid",
-                          gridTemplateColumns: "110px minmax(0,1fr)",
-                          gap: 22,
-                          alignItems: "center",
+                          width: "min(100%, calc(100vw - 250px))",
+                          margin: 0,
+                          display: "flex",
+                          justifyContent: "center",
+                          padding: "0 20px",
+                          boxSizing: "border-box",
                         }}
                       >
+                        <div
+                          style={{
+                            width: "min(720px, 100%)",
+                            display: "grid",
+                            gridTemplateColumns: "110px minmax(0,1fr)",
+                            gap: 22,
+                            alignItems: "center",
+                          }}
+                        >
                         <div style={{ width: 96, height: 96, borderRadius: "50%", background: "#eef6ff", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
                           <div style={{ width: 54, height: 62, border: "1px solid #c8daf0", borderRadius: 8, background: "#fff", padding: "11px 9px", display: "grid", gap: 7 }}>
                             {[0,1,2].map((n) => <div key={n} style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#d8e9fb" }} /><span style={{ height: 5, flex: 1, borderRadius: 3, background: "#dce6f2" }} /></div>)}
@@ -6142,6 +6157,7 @@ export default function WbsPlanning() {
                           <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 7, background: "#eef7ff", color: "#53708e", fontSize: 10.5 }}>
                             <strong style={{ color: "#234f7d" }}>Tip:</strong> Add scoped hours and a start date to generate the project timeline and effort forecast.
                           </div>
+                        </div>
                         </div>
                       </div>
                     </td>
