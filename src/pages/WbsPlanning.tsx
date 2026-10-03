@@ -207,6 +207,7 @@ const WBS_COL_WIDTHS_STORAGE_KEY = "capaciq_wbs_task_col_widths";
 const WBS_FREEZE_STORAGE_KEY = "capaciq_wbs_freeze_task_col"; // legacy -- read once as a migration fallback
 const WBS_FREEZE_COL_STORAGE_KEY = "capaciq_wbs_freeze_col_key";
 const WBS_MIN_COL_WIDTH = 50;
+const WBS_GUTTER_WIDTH = 42;
 interface PersonRow {
   id: string;
   name: string;
@@ -4975,6 +4976,49 @@ export default function WbsPlanning() {
           font-weight: 900;
           margin-left: 3px;
         }
+        .wbs-modern-page .wbs-row-gutter-controls {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 2px;
+          width: 100%;
+          min-height: 24px;
+        }
+        .wbs-modern-page .wbs-row-select,
+        .wbs-modern-page .wbs-row-grip,
+        .wbs-modern-page .wbs-row-actions {
+          opacity: 0;
+          transition: opacity .12s ease;
+        }
+        .wbs-modern-page tr.wbs-task-row:hover .wbs-row-select,
+        .wbs-modern-page tr.wbs-task-row:hover .wbs-row-grip,
+        .wbs-modern-page tr.wbs-task-row:hover .wbs-row-actions,
+        .wbs-modern-page tr.wbs-task-row.wbs-selected .wbs-row-select {
+          opacity: 1;
+        }
+        .wbs-modern-page tr.wbs-task-row.wbs-selected {
+          box-shadow: inset 3px 0 0 #1976ed;
+        }
+        .wbs-modern-page tr.wbs-task-row.wbs-selected td {
+          background-image: linear-gradient(rgba(25,118,237,.035), rgba(25,118,237,.035));
+        }
+        .wbs-modern-page .wbs-row-select {
+          width: 14px;
+          height: 14px;
+          margin: 0;
+          accent-color: #1976ed;
+          cursor: pointer;
+        }
+        .wbs-modern-page .wbs-row-grip {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .wbs-modern-page .wbs-row-actions {
+          display: inline-flex;
+          align-items: center;
+          gap: 1px;
+        }
         .wbs-modern-page .wbs-project-info-grid .wbs-field-box {
           width: 100%;
           min-width: 0 !important;
@@ -6548,6 +6592,48 @@ export default function WbsPlanning() {
             )}
             <span />
           </div>
+          {selectedTaskIds.size > 0 && (
+            <div
+              className="card"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                margin: "0 0 8px",
+                padding: "7px 10px",
+                borderColor: "#cfe0f3",
+                background: "#f8fbff",
+                position: "sticky",
+                left: 0,
+                zIndex: 6,
+              }}
+            >
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: "#17324f", marginRight: 4 }}>
+                {selectedTaskIds.size} task{selectedTaskIds.size === 1 ? "" : "s"} selected
+              </span>
+              <button type="button" className="btn-secondary" onClick={() => setBulkMoveOpen(true)} style={{ padding: "5px 10px" }}>
+                Move
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => void bulkAssignSelected()} style={{ padding: "5px 10px" }}>
+                Assign
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => void bulkDuplicateSelected()} style={{ padding: "5px 10px" }}>
+                Duplicate
+              </button>
+              {project?.wbs_status === "draft" ? (
+                <button type="button" className="btn-secondary" onClick={() => void bulkDeleteSelected()} style={{ padding: "5px 10px", color: "var(--danger-text)" }}>
+                  Delete
+                </button>
+              ) : (
+                <button type="button" className="btn-secondary" onClick={() => setBulkCancelOpen(true)} style={{ padding: "5px 10px", color: "var(--danger-text)" }}>
+                  Cancel
+                </button>
+              )}
+              <button type="button" onClick={clearTaskSelection} style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 11.5 }}>
+                Clear selection
+              </button>
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "0 2px 7px", fontSize: 10.5, color: "var(--muted)" }}>
             <span><span className="wbs-required-start">●</span> Required before Start Project</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#fff", border: "1px solid #cfd8e3" }} /> Editable</span>
@@ -6559,7 +6645,7 @@ export default function WbsPlanning() {
               className="data-table"
               style={{
                 width:
-                  22 +
+                  WBS_GUTTER_WIDTH +
                   WBS_TASK_COLUMN_ORDER.reduce((sum, k) => sum + wbsColWidth(k), 0) +
                   WBS_DATE_COLUMN_WIDTHS.reduce((sum, w) => sum + w, 0),
                 tableLayout: "fixed",
@@ -6571,7 +6657,7 @@ export default function WbsPlanning() {
                   mixed), where browsers can be inconsistent about which
                   row's widths "win". */}
               <colgroup>
-                <col style={{ width: 22 }} />
+                <col style={{ width: WBS_GUTTER_WIDTH }} />
                 {WBS_TASK_COLUMN_ORDER.map((k) => (
                   <col key={k} style={{ width: wbsColWidth(k) }} />
                 ))}
@@ -6584,7 +6670,7 @@ export default function WbsPlanning() {
                   <th
                     rowSpan={2}
                     className="row-gutter-cell"
-                    style={{ width: 22, minWidth: 22, ...(wbsGutterStickyStyle(false) ?? {}) }}
+                    style={{ width: WBS_GUTTER_WIDTH, minWidth: WBS_GUTTER_WIDTH, ...(wbsGutterStickyStyle(false) ?? {}) }}
                   />
                   <ResizableTh colKey="task">Task <span className="wbs-required-start" title="Required before Start Project">●</span></ResizableTh>
                   <ResizableTh colKey="depends_on">Depends on</ResizableTh>
@@ -6688,7 +6774,11 @@ export default function WbsPlanning() {
                   return (
                     <tr
                       key={t.id}
-                      className={dragOverTaskId === t.id && validDropTarget ? "row-drop-target" : undefined}
+                      className={[
+                        "wbs-task-row",
+                        selectedTaskIds.has(t.id) ? "wbs-selected" : "",
+                        dragOverTaskId === t.id && validDropTarget ? "row-drop-target" : "",
+                      ].filter(Boolean).join(" ")}
                       style={rowLocked ? { background: "var(--hover-bg)" } : undefined}
                       onDragOver={(e) => {
                         e.preventDefault();
@@ -6721,20 +6811,32 @@ export default function WbsPlanning() {
                         onClick={(e) => e.stopPropagation()}
                         style={wbsGutterStickyStyle(true, rowLocked)}
                       >
-                        <div className="row-gutter-inner" style={{ opacity: 1, paddingLeft: 4 }}>
-                          <span
-                            className="row-grip-btn"
-                            draggable={rowEditable}
-                            onDragStart={() => rowEditable && setDraggedTaskId(t.id)}
-                            onDragEnd={() => {
-                              setDraggedTaskId(null);
-                              setDragOverTaskId(null);
-                            }}
-                            title={rowEditable ? "Drag to reorder (among its own siblings)" : rowLocked ? "Done -- locked" : undefined}
-                            style={rowEditable ? undefined : { opacity: 0.35, cursor: "default" }}
-                          >
-                            <GripVertical size={13} />
-                          </span>
+                        <div className="wbs-row-gutter-controls">
+                          {(rowEditable || t.status === "Cancelled") && (
+                            <input
+                              type="checkbox"
+                              className="wbs-row-select"
+                              checked={selectedTaskIds.has(t.id)}
+                              onChange={() => toggleTaskSelected(t.id)}
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label={`Select ${t.name}`}
+                              title="Select task"
+                            />
+                          )}
+                          {rowEditable && selectedTaskIds.size === 0 && (
+                            <span
+                              className="row-grip-btn wbs-row-grip"
+                              draggable
+                              onDragStart={() => setDraggedTaskId(t.id)}
+                              onDragEnd={() => {
+                                setDraggedTaskId(null);
+                                setDragOverTaskId(null);
+                              }}
+                              title="Drag to reorder among sibling tasks"
+                            >
+                              <GripVertical size={13} />
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={{ overflow: "hidden", ...(wbsColStickyStyle("task", true, rowLocked) ?? {}) }}>
@@ -6760,6 +6862,7 @@ export default function WbsPlanning() {
                               }}
                             />
                           </div>
+                          <span className="wbs-row-actions">
                           {rowEditable && t.depth === 0 && (
                             <button
                               className="add-subtask-btn"
@@ -6785,6 +6888,7 @@ export default function WbsPlanning() {
                               <MoreHorizontal size={14} />
                             </button>
                           )}
+                          </span>
                         </div>
                       </td>
                       <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={{ position: "relative", ...(wbsColStickyStyle("depends_on", true, rowLocked) ?? {}) }}>
