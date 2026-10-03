@@ -6549,59 +6549,89 @@ export default function WbsPlanning() {
           -- these are end-of-project reflection fields, filled in once
           work is basically done, so they read better as the last thing on
           the page rather than competing with Name/Owner/Start date up top. */}
-      <div className="card" style={{ padding: 14, marginTop: 12, marginBottom: 12, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Actual Project Close Date:</span>
-        <div className="wbs-field-box" style={fieldBoxStyle(!!project.actual_close_date, 110, !canEditWbs)}>
-          <InlineDate
-            value={project.actual_close_date ?? defaultActualCloseDate()}
-            editable={canEditWbs}
-            onCommit={(v) => saveProjectField({ actual_close_date: v })}
-          />
-        </div>
-        {!project.actual_close_date && defaultActualCloseDate() && (
-          <span style={{ fontSize: 11, color: "var(--muted)" }}>Default: latest task completion date -- change it if the work wrapped on a different day</span>
-        )}
-        <span
-          title="When the work on this project actually wrapped -- may be earlier than the Signed Off Date above if approval happens later. Required before requesting closure."
-          style={{ display: "inline-flex", cursor: "help", flexShrink: 0 }}
-        >
-          <Info size={13} style={{ color: "var(--muted)" }} />
-        </span>
-      </div>
-
-      {/* Lessons Learned -- added 2026-09-07 (Sandra: "ask for lesson
-          learned, what worked and what did not work"). Two separate
-          fields (her explicit call over one combined free-text box) so
-          closed projects can be scanned for recurring themes later. Same
-          canEditWbs gate as the rest of this page, required before
-          Closure (see handleRequestClosure/handleDecideClosure's
-          missingProjectFields gate above) -- NOT at Start Project, since
-          there's nothing to reflect on yet that early. Also surfaced on
-          the Report page (BaselineReport.tsx) once a project is closed. */}
-      <div className="card" style={{ padding: 14, marginBottom: 12, display: "flex", gap: 14, flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 300px", minWidth: 260 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Worked:</div>
-          <div className="wbs-field-box" style={fieldBoxStyle(!!project.lessons_learned_worked, undefined, !canEditWbs)}>
-            <InlineTextArea
-              value={project.lessons_learned_worked ?? ""}
-              editable={canEditWbs}
-              placeholder="What went well on this project?"
-              onCommit={(v) => saveProjectField({ lessons_learned_worked: v })}
-            />
+      {(closureFormOpen || !!pendingClosure || project.wbs_status === "closed") && (
+        <section id="project-closure-section" className="card" style={{ padding: 14, marginTop: 12, marginBottom: 12, borderColor: pendingClosure ? "var(--warning-border, #fed7aa)" : "var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>Project Closure</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 3 }}>
+                {project.wbs_status === "closed"
+                  ? "Closure details captured for this completed project."
+                  : pendingClosure
+                    ? "Closure request submitted. These details are now part of the approval request."
+                    : "Complete the close date and lessons learned, then submit the Project Closure request."}
+              </div>
+            </div>
+            {!pendingClosure && project.wbs_status !== "closed" && (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="btn-secondary" onClick={() => setClosureFormOpen(false)} disabled={workflowBusy}>
+                  Cancel
+                </button>
+                <button type="button" className="btn-primary" onClick={handleRequestClosure} disabled={workflowBusy}>
+                  {workflowBusy ? "Submitting…" : "Submit Closure Request"}
+                </button>
+              </div>
+            )}
           </div>
-        </div>
-        <div style={{ flex: "1 1 300px", minWidth: 260 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Didn't Work:</div>
-          <div className="wbs-field-box" style={fieldBoxStyle(!!project.lessons_learned_not_worked, undefined, !canEditWbs)}>
-            <InlineTextArea
-              value={project.lessons_learned_not_worked ?? ""}
-              editable={canEditWbs}
-              placeholder="What would you do differently next time?"
-              onCommit={(v) => saveProjectField({ lessons_learned_not_worked: v })}
-            />
+          <div style={{ display: "grid", gap: 12 }}>
+                  <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 8, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", background: "var(--surface)" }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Actual Project Close Date:</span>
+                    <div className="wbs-field-box" style={fieldBoxStyle(!!project.actual_close_date, 110, !canEditWbs)}>
+                      <InlineDate
+                        value={project.actual_close_date ?? defaultActualCloseDate()}
+                        editable={canEditWbs && !pendingClosure}
+                        onCommit={(v) => saveProjectField({ actual_close_date: v })}
+                      />
+                    </div>
+                    {!project.actual_close_date && defaultActualCloseDate() && (
+                      <span style={{ fontSize: 11, color: "var(--muted)" }}>Default: latest task completion date -- change it if the work wrapped on a different day</span>
+                    )}
+                    <span
+                      title="When the work on this project actually wrapped -- may be earlier than the Signed Off Date above if approval happens later. Required before requesting closure."
+                      style={{ display: "inline-flex", cursor: "help", flexShrink: 0 }}
+                    >
+                      <Info size={13} style={{ color: "var(--muted)" }} />
+                    </span>
+                  </div>
+            
+                  {/* Lessons Learned -- added 2026-09-07 (Sandra: "ask for lesson
+                      learned, what worked and what did not work"). Two separate
+                      fields (her explicit call over one combined free-text box) so
+                      closed projects can be scanned for recurring themes later. Same
+                      canEditWbs gate as the rest of this page, required before
+                      Closure (see handleRequestClosure/handleDecideClosure's
+                      missingProjectFields gate above) -- NOT at Start Project, since
+                      there's nothing to reflect on yet that early. Also surfaced on
+                      the Report page (BaselineReport.tsx) once a project is closed. */}
+                  <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 8, display: "flex", gap: 14, flexWrap: "wrap", background: "var(--surface)" }}>
+                    <div style={{ flex: "1 1 300px", minWidth: 260 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Worked:</div>
+                      <div className="wbs-field-box" style={fieldBoxStyle(!!project.lessons_learned_worked, undefined, !canEditWbs)}>
+                        <InlineTextArea
+                          value={project.lessons_learned_worked ?? ""}
+                          editable={canEditWbs && !pendingClosure}
+                          placeholder="What went well on this project?"
+                          onCommit={(v) => saveProjectField({ lessons_learned_worked: v })}
+                        />
+                      </div>
+                    </div>
+                    <div style={{ flex: "1 1 300px", minWidth: 260 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Didn't Work:</div>
+                      <div className="wbs-field-box" style={fieldBoxStyle(!!project.lessons_learned_not_worked, undefined, !canEditWbs)}>
+                        <InlineTextArea
+                          value={project.lessons_learned_not_worked ?? ""}
+                          editable={canEditWbs && !pendingClosure}
+                          placeholder="What would you do differently next time?"
+                          onCommit={(v) => saveProjectField({ lessons_learned_not_worked: v })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+            
+            
           </div>
-        </div>
-      </div>
+        </section>
+      )}
 
       {/* Design spec item 8 (Sandra, 2026-07-29): bottom status bar --
           mirrors the top banner's status chip but adds forward-looking
