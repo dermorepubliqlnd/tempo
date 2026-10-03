@@ -4674,6 +4674,20 @@ export default function WbsPlanning() {
         <ArrowLeft size={13} /> Back to {project.name}
       </Link>
       <h1>WBS Planning — {project.name}</h1>
+      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 10, marginBottom: 14 }}>
+        <Link
+          to={`/projects/${projectId}`}
+          style={{ padding: "9px 2px", color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}
+        >
+          Overview
+        </Link>
+        <Link
+          to={`/projects/${projectId}/wbs`}
+          style={{ padding: "9px 2px", borderBottom: "2px solid var(--accent)", color: "var(--accent)", fontSize: 12.5, fontWeight: 700, textDecoration: "none" }}
+        >
+          WBS
+        </Link>
+      </div>
       {/* phase118: Paused details / Schedule Review Required banner. */}
       <PauseReviewBanner
         project={project}
