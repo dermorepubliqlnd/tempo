@@ -628,6 +628,7 @@ export default function WbsPlanning() {
       // for the rest of the session.
     }
   }
+  const [wbsHeaderMenu, setWbsHeaderMenu] = useState<{ x: number; y: number; colKey: string } | null>(null);
   // Gutter is a fixed 22px; the Task column's own width is whatever
   // wbsColWidth("task") currently resolves to (resizable) -- the frozen
   // Task column's sticky offset must track that live, not a constant.
@@ -3910,6 +3911,11 @@ export default function WbsPlanning() {
     return (
       <th
         rowSpan={2}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setWbsHeaderMenu({ x: e.clientX, y: e.clientY, colKey });
+        }}
         style={{
           width: w,
           minWidth: WBS_MIN_COL_WIDTH,
@@ -4640,6 +4646,48 @@ export default function WbsPlanning() {
       {dialog}
       {assigneePicker.element}
       {startDatePrompt.element}
+      {wbsHeaderMenu &&
+        createPortal(
+          <>
+            <div style={{ position: "fixed", inset: 0, zIndex: 190 }} onClick={() => setWbsHeaderMenu(null)} onContextMenu={(e) => { e.preventDefault(); setWbsHeaderMenu(null); }} />
+            <div
+              className="card"
+              style={{
+                position: "fixed",
+                left: Math.min(wbsHeaderMenu.x, window.innerWidth - 220),
+                top: Math.min(wbsHeaderMenu.y, window.innerHeight - 100),
+                zIndex: 191,
+                width: 210,
+                padding: 5,
+                boxShadow: "0 6px 18px rgba(15,41,66,0.18)",
+              }}
+            >
+              <button
+                type="button"
+                className="row-menu-item"
+                onClick={() => {
+                  setWbsFreezePoint(wbsFreezeColKey === wbsHeaderMenu.colKey ? null : wbsHeaderMenu.colKey);
+                  setWbsHeaderMenu(null);
+                }}
+                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 9px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12.5, textAlign: "left" }}
+              >
+                <Pin size={13} />
+                {wbsFreezeColKey === wbsHeaderMenu.colKey ? "Unfreeze columns" : "Freeze up to this column"}
+              </button>
+              {wbsFreezeColKey && wbsFreezeColKey !== wbsHeaderMenu.colKey && (
+                <button
+                  type="button"
+                  className="row-menu-item"
+                  onClick={() => { setWbsFreezePoint(null); setWbsHeaderMenu(null); }}
+                  style={{ display: "flex", width: "100%", padding: "7px 9px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12.5, textAlign: "left", color: "var(--text-secondary)" }}
+                >
+                  Unfreeze all columns
+                </button>
+              )}
+            </div>
+          </>,
+          document.body
+        )}
       {leaveTarget && (
         <Modal title="This project hasn't been saved" onClose={() => (leaveBusy ? undefined : setLeaveTarget(null))} width={440}>
           <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: "0 0 14px", lineHeight: 1.5 }}>
@@ -4757,7 +4805,7 @@ export default function WbsPlanning() {
           </div>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 10, marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 6, marginBottom: 8 }}>
         <Link
           to={`/projects/${projectId}`}
           style={{ padding: "9px 2px", color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}
@@ -4784,8 +4832,8 @@ export default function WbsPlanning() {
       <div
         className="card"
         style={{
-          padding: "8px 10px",
-          marginBottom: 12,
+          padding: "4px 2px",
+          marginBottom: 8,
           display: "flex",
           alignItems: "center",
           gap: 10,
@@ -4795,7 +4843,11 @@ export default function WbsPlanning() {
           boxShadow: "none",
         }}
       >
-        <span style={{ fontSize: 11, color: "var(--muted)" }}>{wbsMeta.hint}</span>
+        <span style={{ fontSize: 11, color: "var(--muted)" }}>
+          {project.is_unsaved
+            ? "Planning mode — complete Project Information and save to unlock WBS planning."
+            : wbsMeta.hint}
+        </span>
         {activeBaseline && (
           <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
             Baseline V{activeBaseline.version_number} (locked {formatDate(activeBaseline.captured_at.slice(0, 10))})
@@ -4831,7 +4883,7 @@ export default function WbsPlanning() {
             const canRequestStart = canManageWbs && isDraft && !pendingBaselineRequest;
             const canRequestClosure = canManageWbs && isActivePlan && !pendingClosure;
             const canReopenProject = isFullAccess && project.wbs_status === "closed";
-            const saveLabel = isDraft ? "Save Draft" : "Save Changes";
+            const saveLabel = isDraft ? (project.is_unsaved ? "Save & Continue" : "Save Draft") : "Save Changes";
 
             return (
               <>
@@ -4995,8 +5047,10 @@ export default function WbsPlanning() {
           <section className="card" style={{ padding: 16, marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
               <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800, flexShrink: 0 }}>1</span>
-              <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Project Setup</div>
-              <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Start by providing the basic details for this project.</div>
+              <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Project Information</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)" }}>
+                {project.is_unsaved ? "Complete the basic details, then save to continue planning." : "Basic project details."}
+              </div>
             </div>
 
             <div className="wbs-project-setup-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(300px, 1fr)", gap: 18, alignItems: "stretch" }}>
@@ -5022,6 +5076,7 @@ export default function WbsPlanning() {
                                       <InlineSelect
                                         value={owner?.name ?? ""}
                                         editable={canEditWbs}
+                                        alwaysSelect
                                         allowEmpty
                                         emptyLabel="No owner"
                                         options={people.map((p) => p.name)}
@@ -5030,7 +5085,6 @@ export default function WbsPlanning() {
                                           saveProjectField({ owner_id: p?.id ?? null });
                                         }}
                                       />
-                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
                   </div>
                 </div>
               </label>
@@ -5044,7 +5098,6 @@ export default function WbsPlanning() {
                       <Calendar size={14} style={{ color: "var(--muted)", marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
                     </div>
                   </div>
-                  <span title={anyTaskDone ? "Locked once work has started." : "Project scheduling anchor."} style={{ display: "inline-flex", color: "var(--muted)" }}><Info size={13} /></span>
                 </div>
               </label>
 
@@ -5052,8 +5105,8 @@ export default function WbsPlanning() {
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Category</span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.category, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
-                                      <InlineSelect value={project.category ?? ""} editable={canEditWbs} allowEmpty emptyLabel="No category" options={categoryPickerOptions} onCommit={(v) => saveProjectField({ category: v || null })} />
-                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
+                                      <InlineSelect value={project.category ?? ""} editable={canEditWbs}
+                                        alwaysSelect allowEmpty emptyLabel="No category" options={categoryPickerOptions} onCommit={(v) => saveProjectField({ category: v || null })} />
                   </div>
                 </div>
               </label>
@@ -5065,6 +5118,7 @@ export default function WbsPlanning() {
                                       <InlineSelect
                                         value={projectSourceOptions.find((s) => s.id === project.source_id)?.name ?? ""}
                                         editable={canEditWbs}
+                                        alwaysSelect
                                         allowEmpty
                                         emptyLabel="No source"
                                         options={sourcePickerOptions}
@@ -5073,7 +5127,6 @@ export default function WbsPlanning() {
                                           saveProjectField({ source_id: src?.id ?? null });
                                         }}
                                       />
-                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
                   </div>
                 </div>
               </label>
@@ -5085,6 +5138,7 @@ export default function WbsPlanning() {
                                       <InlineSelect
                                         value={projectTypeOptions.find((t) => t.id === project.project_type_id)?.name ?? ""}
                                         editable={canEditWbs}
+                                        alwaysSelect
                                         allowEmpty
                                         emptyLabel="No type"
                                         options={projectTypePickerOptions}
@@ -5093,7 +5147,6 @@ export default function WbsPlanning() {
                                           saveProjectField({ project_type_id: type?.id ?? null });
                                         }}
                                       />
-                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
                   </div>
                 </div>
               </label>
@@ -5105,6 +5158,7 @@ export default function WbsPlanning() {
                                       <InlineSelect
                                         value={project.effort_level ? effortLevelLabel(project.effort_level) : ""}
                                         editable={canEditWbs}
+                                        alwaysSelect
                                         allowEmpty
                                         emptyLabel="Not set"
                                         options={PROJECT_EFFORT_LEVEL_OPTIONS.map((lvl) => effortLevelLabel(lvl))}
@@ -5113,7 +5167,6 @@ export default function WbsPlanning() {
                                           saveProjectField({ effort_level: lvl ?? null });
                                         }}
                                       />
-                    <ChevronDown size={14} style={{ color: "var(--muted)", flexShrink: 0, marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
                   </div>
                 </div>
               </label>
@@ -5142,6 +5195,13 @@ export default function WbsPlanning() {
             </div>
           </section>
 
+          {project.is_unsaved && (
+            <div style={{ margin: "-2px 2px 12px", fontSize: 11.5, color: "var(--muted)" }}>
+              WBS, resource planning, timeline and forecast sections will appear after Project Information is saved.
+            </div>
+          )}
+
+          <div style={{ display: project.is_unsaved ? "none" : "contents" }}>
           {project.wbs_status !== "closed" && (
             <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", margin: "-2px 2px 12px" }}>
               <label style={{ display: "inline-flex", alignItems: "center", gap: 9, fontSize: 11.5, fontWeight: 600, color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}>
@@ -6815,6 +6875,7 @@ export default function WbsPlanning() {
               just no longer duplicated as its own button down here. */}
         </div>
       </div>
+          </div>
     </div>
   );
 }
