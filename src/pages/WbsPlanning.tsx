@@ -6834,6 +6834,8 @@ function CompareWithBaselinePanel({ projectId, liveTasks }: { projectId: string;
               per-task detail directly. */}
         </>
       )}
+            </>
+          )}
     </div>
   );
 }
@@ -6919,8 +6921,6 @@ function ActionsMenu({ items }: { items: { label: string; onClick: () => void; d
           </>,
           document.body
         )}
-            </>
-          )}
     </div>
   );
 }
