@@ -1055,6 +1055,7 @@ export default function Projects() {
   const [searchParams] = useSearchParams();
   const wantsMyProjectsView = searchParams.get("owner") === "me";
   const wantsMyTasksView = searchParams.get("assignee") === "me";
+  const [pageSection, setPageSection] = useState<"projects" | "tasks">(wantsMyTasksView ? "tasks" : "projects");
 
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
@@ -4806,6 +4807,7 @@ export default function Projects() {
     // reverted the instant the fetch lands (see useTableViews' `loaded`
     // doc comment).
     if (!wantsMyProjectsView || !projectViews.loaded) return;
+    setPageSection("projects");
     const existing = projectViews.views.find((v) => v.name === "My Projects");
     if (existing) {
       if (projectViews.activeViewId !== existing.id) projectViews.setActiveViewId(existing.id);
@@ -4818,6 +4820,7 @@ export default function Projects() {
 
   useEffect(() => {
     if (!wantsMyTasksView || !taskViews.loaded) return;
+    setPageSection("tasks");
     const existing = taskViews.views.find((v) => v.name === "My Tasks");
     if (existing) {
       if (taskViews.activeViewId !== existing.id) taskViews.setActiveViewId(existing.id);
@@ -4833,7 +4836,6 @@ export default function Projects() {
         sorts: [{ key: "current_due_date", direction: "asc" }],
       });
     }
-    document.getElementById("tasks-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
     navigate("/projects", { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantsMyTasksView, taskViews.loaded]);
@@ -5120,38 +5122,77 @@ export default function Projects() {
         onClose={() => setCancelTaskDialog(null)}
         onConfirm={(reason) => confirmCancelTasks(reason)}
       />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <div>
-          <h1 style={{ margin: 0 }}>Projects</h1>
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 22 }}>Projects &amp; Tasks</h1>
+            <div style={{ marginTop: 4, color: "var(--muted)", fontSize: 11.5 }}>
+              Manage portfolio-level projects separately from day-to-day task execution.
+            </div>
+          </div>
+          {pageSection === "projects" && canCreateProject && (
+            <button
+              onClick={async () => {
+                if (creatingProject) return;
+                setCreatingProject(true);
+                try {
+                  await createBlankProject();
+                } finally {
+                  setCreatingProject(false);
+                }
+              }}
+              disabled={creatingProject}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                fontSize: 12.5, fontWeight: 600, color: "#fff", background: "var(--accent)",
+                border: "none", borderRadius: 999, padding: "9px 16px",
+                cursor: creatingProject ? "default" : "pointer", opacity: creatingProject ? 0.7 : 1, whiteSpace: "nowrap",
+              }}
+            >
+              <Plus size={14} /> {creatingProject ? "Creating…" : "Add New Project"}
+            </button>
+          )}
         </div>
-        {/* phase127g (Sandra 2026-10-01): header "Add New Project" button,
-            styled like Time Tracking's Add Time pill. Same createBlankProject
-            as the in-table "New project" rows, which stay. */}
-        {canCreateProject && (
-          <button
-            onClick={async () => {
-              if (creatingProject) return;
-              setCreatingProject(true);
-              try {
-                await createBlankProject();
-              } finally {
-                setCreatingProject(false);
-              }
-            }}
-            disabled={creatingProject}
-            style={{
-              display: "inline-flex", alignItems: "center", gap: 6,
-              fontSize: 12.5, fontWeight: 600, color: "#fff", background: "var(--accent)",
-              border: "none", borderRadius: 999, padding: "9px 16px",
-              cursor: creatingProject ? "default" : "pointer", opacity: creatingProject ? 0.7 : 1, whiteSpace: "nowrap",
-            }}
-          >
-            <Plus size={14} /> {creatingProject ? "Creating…" : "Add New Project"}
-          </button>
-        )}
+
+        <div
+          style={{
+            display: "flex",
+            gap: 4,
+            marginTop: 14,
+            padding: 4,
+            width: "fit-content",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            background: "#f7f9fc",
+          }}
+        >
+          {(["projects", "tasks"] as const).map((section) => {
+            const active = pageSection === section;
+            return (
+              <button
+                key={section}
+                type="button"
+                onClick={() => setPageSection(section)}
+                style={{
+                  border: active ? "1px solid #d7e2ef" : "1px solid transparent",
+                  background: active ? "#fff" : "transparent",
+                  color: active ? "#17324f" : "var(--muted)",
+                  borderRadius: 7,
+                  padding: "7px 16px",
+                  fontSize: 12.5,
+                  fontWeight: active ? 700 : 600,
+                  cursor: "pointer",
+                  boxShadow: active ? "0 1px 2px rgba(15,41,66,.08)" : "none",
+                }}
+              >
+                {section === "projects" ? "Projects" : "Tasks"}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="card" style={{ padding: 0, marginBottom: 20 }}>
+      <div className="card" style={{ padding: 0, marginBottom: 20, display: pageSection === "projects" ? undefined : "none" }}>
         <div className="sticky-toolbar-cluster" ref={projectClusterRef}>
         <div className="table-toolbar">
           <ViewTabs
@@ -5457,9 +5498,7 @@ export default function Projects() {
         )}
       </div>
 
-      <h2 id="tasks-section" style={{ marginTop: 0 }}>Tasks</h2>
-
-      <div className="card" style={{ padding: 0 }}>
+      <div id="tasks-section" className="card" style={{ padding: 0, display: pageSection === "tasks" ? undefined : "none" }}>
         <div className="sticky-toolbar-cluster" ref={taskClusterRef}>
         <div className="table-toolbar">
           <ViewTabs
