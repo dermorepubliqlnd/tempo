@@ -9,6 +9,7 @@ import MyDashboard from "./pages/MyDashboard";
 import TeamDashboard from "./pages/TeamDashboard";
 import Projects from "./pages/Projects";
 import ProjectOverview from "./pages/ProjectOverview";
+import ResourcePlan from "./pages/ResourcePlan";
 import { useApprovalAuthority } from "./lib/useApprovalAuthority";
 import ApprovalCenter from "./pages/ApprovalCenter";
 import TimeTracking from "./pages/TimeTracking";
@@ -91,6 +92,7 @@ export default function App() {
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:projectId" element={<ProjectOverview />} />
           <Route path="/projects/:projectId/wbs" element={<WbsPlanning />} />
+          <Route path="/projects/:projectId/resource-plan" element={<ResourcePlan />} />
           {/* 2026-09-21 (Sandra: "instead of having a separate page, can
               we all be routed to the WBS page") -- BaselineReport.tsx is
               retired as a standalone destination; the WBS page now shows
