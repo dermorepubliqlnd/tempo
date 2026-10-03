@@ -6606,42 +6606,6 @@ export default function WbsPlanning() {
                   <RefreshCw size={13} /> Refresh Dates
                 </button>
 
-                <label
-                  className="btn-secondary"
-                  title="Keep the selected column and every column to its left visible while you scroll horizontally."
-                  style={{ display: "inline-flex", alignItems: "center", gap: 7, paddingRight: 10, cursor: "pointer" }}
-                >
-                  <span style={{ fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }}>Freeze columns</span>
-                  <select
-                    value={wbsFreezeColKey ?? ""}
-                    onChange={(e) => setWbsFreezePoint(e.target.value || null)}
-                    aria-label="Freeze columns through"
-                    style={{
-                      border: "none",
-                      outline: "none",
-                      background: "transparent",
-                      color: "var(--text)",
-                      fontSize: 11.5,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      padding: 0,
-                      maxWidth: 120,
-                    }}
-                  >
-                    <option value="">None</option>
-                    <option value="task">Task</option>
-                    <option value="depends_on">Through Depends On</option>
-                    <option value="assignee">Through Assignee</option>
-                    <option value="work_type">Through Work Type</option>
-                    <option value="output_type">Through Output Type</option>
-                    <option value="output_count">Through Output Count</option>
-                    <option value="effort_hours">Through Scoped Hours</option>
-                    <option value="spent_hrs">Through Logged Hours</option>
-                    <option value="effort">Through Effort</option>
-                    <option value="changes">Through Changes</option>
-                  </select>
-                </label>
-
                 {canEditWbs && (
                   <button type="button" className="btn-primary" onClick={addTopLevelTask} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                     <Plus size={13} /> Add Task
