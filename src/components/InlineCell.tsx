@@ -190,22 +190,8 @@ export function InlineSelect({ value, onCommit, options, editable, allowEmpty, e
               e.stopPropagation();
               setSearchOpen(true);
             }}
-            style={{ width: "100%", minWidth: 0, paddingRight: 22 }}
+            style={{ width: "100%", minWidth: 0 }}
           />
-          <span
-            aria-hidden
-            style={{
-              marginLeft: -18,
-              marginRight: 6,
-              pointerEvents: "none",
-              color: "var(--muted)",
-              fontSize: 10,
-              transform: searchOpen ? "rotate(180deg)" : undefined,
-              transition: "transform .12s ease",
-            }}
-          >
-            ▼
-          </span>
         </div>
         {searchOpen &&
           rect &&
