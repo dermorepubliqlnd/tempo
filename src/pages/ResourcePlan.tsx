@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink, GripVertical, RotateCcw, Save } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { useSession } from "../lib/useSession";
 import { type ProjectRow, type TaskRow } from "./Projects";
 import { formatDate } from "../lib/formatDate";
 import { TASK_STATUS_GROUPED, statusGroupOf } from "../lib/notionOptions";
@@ -27,6 +28,21 @@ interface AvailabilityRow {
 }
 
 type PeriodKey = "this_week" | "next_week" | "next_2_weeks" | "this_month";
+
+interface PendingChange {
+  start_date?: string | null;
+  current_due_date?: string | null;
+  assignee_id?: string | null;
+}
+
+interface DragState {
+  taskId: string;
+  mode: "move" | "resize-start" | "resize-end";
+  startX: number;
+  width: number;
+  originalStart: string;
+  originalDue: string;
+}
 
 function cardStyle(): React.CSSProperties {
   return {
@@ -72,6 +88,7 @@ function pctTone(pct: number | null) {
 
 export default function ResourcePlan() {
   const { projectId } = useParams<{ projectId: string }>();
+  const { person: me } = useSession();
   const [project, setProject] = useState<ProjectRow | null>(null);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [allTasks, setAllTasks] = useState<TaskRow[]>([]);
@@ -80,6 +97,10 @@ export default function ResourcePlan() {
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
   const [holidayDates, setHolidayDates] = useState<string[]>([]);
   const [period, setPeriod] = useState<PeriodKey>("next_2_weeks");
+  const [changes, setChanges] = useState<Record<string, PendingChange>>({});
+  const [dragState, setDragState] = useState<DragState | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [applyMessage, setApplyMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -114,11 +135,154 @@ export default function ResourcePlan() {
   const days = useMemo(() => periodDates(period), [period]);
   const holidaySet = useMemo(() => buildHolidaySet(holidayDates), [holidayDates]);
 
+  function effectiveTask(task: TaskRow): TaskRow {
+    const ch = changes[task.id];
+    if (!ch) return task;
+    return {
+      ...task,
+      start_date: ch.start_date !== undefined ? ch.start_date : task.start_date,
+      current_due_date: ch.current_due_date !== undefined && ch.current_due_date !== null ? ch.current_due_date : task.current_due_date,
+      assignee_id: ch.assignee_id !== undefined ? ch.assignee_id : task.assignee_id,
+    };
+  }
+
+  function setTaskChange(taskId: string, patch: PendingChange) {
+    setChanges((prev) => ({ ...prev, [taskId]: { ...(prev[taskId] ?? {}), ...patch } }));
+    setApplyMessage(null);
+  }
+
+  function clampDate(iso: string, minIso: string | null, maxIso: string | null) {
+    if (minIso && iso < minIso) return minIso;
+    if (maxIso && iso > maxIso) return maxIso;
+    return iso;
+  }
+
+  function beginDrag(e: React.PointerEvent<HTMLElement>, task: TaskRow, mode: DragState["mode"]) {
+    e.preventDefault();
+    e.stopPropagation();
+    const effective = effectiveTask(task);
+    const start = effective.start_date?.slice(0, 10) ?? effective.current_due_date?.slice(0, 10);
+    const due = effective.current_due_date?.slice(0, 10);
+    if (!start || !due) return;
+    const timeline = (e.currentTarget as HTMLElement).closest("[data-task-timeline]") as HTMLElement | null;
+    if (!timeline) return;
+    const rect = timeline.getBoundingClientRect();
+    setDragState({ taskId: task.id, mode, startX: e.clientX, width: rect.width, originalStart: start, originalDue: due });
+  }
+
+  useEffect(() => {
+    if (!dragState) return;
+    const onMove = (e: PointerEvent) => {
+      const pxPerDay = dragState.width / Math.max(days.length, 1);
+      const delta = Math.round((e.clientX - dragState.startX) / Math.max(pxPerDay, 1));
+      const originalStart = parseLocalDate(dragState.originalStart);
+      const originalDue = parseLocalDate(dragState.originalDue);
+      let nextStart = dragState.originalStart;
+      let nextDue = dragState.originalDue;
+
+      if (dragState.mode === "move") {
+        nextStart = toISO(addDays(originalStart, delta));
+        nextDue = toISO(addDays(originalDue, delta));
+        const projectMin = project?.start_date?.slice(0, 10) ?? null;
+        const projectMax = project?.end_date?.slice(0, 10) ?? null;
+        if (projectMin && nextStart < projectMin) {
+          const correction = Math.round((parseLocalDate(projectMin).getTime() - parseLocalDate(nextStart).getTime()) / 86400000);
+          nextStart = projectMin;
+          nextDue = toISO(addDays(parseLocalDate(nextDue), correction));
+        }
+        if (projectMax && nextDue > projectMax) {
+          const correction = Math.round((parseLocalDate(nextDue).getTime() - parseLocalDate(projectMax).getTime()) / 86400000);
+          nextDue = projectMax;
+          nextStart = toISO(addDays(parseLocalDate(nextStart), -correction));
+        }
+      } else if (dragState.mode === "resize-start") {
+        nextStart = clampDate(toISO(addDays(originalStart, delta)), project?.start_date?.slice(0, 10) ?? null, dragState.originalDue);
+      } else {
+        nextDue = clampDate(toISO(addDays(originalDue, delta)), dragState.originalStart, project?.end_date?.slice(0, 10) ?? null);
+      }
+      setTaskChange(dragState.taskId, { start_date: nextStart, current_due_date: nextDue });
+    };
+    const onUp = () => setDragState(null);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [dragState, days.length, project?.start_date, project?.end_date]);
+
+  const pendingCount = Object.keys(changes).length;
+
+  async function applyChanges() {
+    if (!project || !me || pendingCount === 0) return;
+    setApplying(true);
+    setApplyMessage(null);
+    try {
+      const dueLockedConflicts: string[] = [];
+      for (const task of tasks) {
+        const ch = changes[task.id];
+        if (!ch) continue;
+        const dueLocked = Boolean((task as TaskRow & { due_locked?: boolean }).due_locked);
+        const nextDue = ch.current_due_date ?? task.current_due_date;
+        if (dueLocked && nextDue !== task.current_due_date) dueLockedConflicts.push(task.name);
+      }
+      if (dueLockedConflicts.length) {
+        throw new Error(
+          `${dueLockedConflicts.length} task${dueLockedConflicts.length === 1 ? "" : "s"} have locked due dates. Their proposed move/resize changes the Due Date and must go through the existing extension approval workflow first.`
+        );
+      }
+
+      for (const task of tasks) {
+        const ch = changes[task.id];
+        if (!ch) continue;
+        const nextStart = ch.start_date !== undefined ? ch.start_date : task.start_date;
+        const nextDue = ch.current_due_date !== undefined && ch.current_due_date !== null ? ch.current_due_date : task.current_due_date;
+        const scheduleChanged = nextStart !== task.start_date || nextDue !== task.current_due_date;
+        const assigneeChanged = ch.assignee_id !== undefined && ch.assignee_id !== task.assignee_id;
+
+        if (scheduleChanged) {
+          const { error } = await supabase.rpc("wbs_save_task_schedule", {
+            p_task_id: task.id,
+            p_start: nextStart,
+            p_due: nextDue,
+          });
+          if (error) throw error;
+        }
+        if (assigneeChanged) {
+          const { error } = await supabase.from("tasks").update({ assignee_id: ch.assignee_id ?? null }).eq("id", task.id);
+          if (error) throw error;
+        }
+      }
+
+      if (project.wbs_status === "baseline_locked" || project.wbs_status === "changed_after_baseline") {
+        const { error } = await supabase.rpc("record_wbs_edit", { p_project_id: project.id });
+        if (error) throw error;
+      }
+
+      const nextTasks = tasks.map(effectiveTask);
+      setTasks(nextTasks);
+      setAllTasks((prev) => prev.map((t) => {
+        const local = nextTasks.find((x) => x.id === t.id);
+        return local ?? t;
+      }));
+      setProject((prev) => prev && prev.wbs_status === "baseline_locked" ? { ...prev, wbs_status: "changed_after_baseline" } : prev);
+      setChanges({});
+      setApplyMessage("Resource plan changes applied.");
+    } catch (err) {
+      setApplyMessage(err instanceof Error ? err.message : "Unable to apply resource plan changes.");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  const scenarioTasks = useMemo(() => tasks.map(effectiveTask), [tasks, changes]);
+  const scenarioAllTasks = useMemo(() => allTasks.map((t) => changes[t.id] ? effectiveTask(t) : t), [allTasks, changes]);
+
   const parentIds = useMemo(
-    () => new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string)),
-    [tasks]
+    () => new Set(scenarioTasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string)),
+    [scenarioTasks]
   );
-  const leafTasks = useMemo(() => tasks.filter((t) => !parentIds.has(t.id)), [tasks, parentIds]);
+  const leafTasks = useMemo(() => scenarioTasks.filter((t) => !parentIds.has(t.id)), [scenarioTasks, parentIds]);
   const activeTasks = useMemo(
     () =>
       leafTasks.filter((t) => {
@@ -152,25 +316,25 @@ export default function ResourcePlan() {
   const orgEngine = useMemo(
     () =>
       createAllocationEngine({
-        tasks: allTasks as UtilTaskRow[],
+        tasks: scenarioAllTasks as UtilTaskRow[],
         projects: committedProjects as UtilProjectRow[],
         holidays: holidaySet,
         availability,
         todayStr: toISO(new Date()),
       }),
-    [allTasks, committedProjects, holidaySet, availability]
+    [scenarioAllTasks, committedProjects, holidaySet, availability]
   );
 
   const projectEngine = useMemo(
     () =>
       createAllocationEngine({
-        tasks: tasks as UtilTaskRow[],
+        tasks: scenarioTasks as UtilTaskRow[],
         projects: project ? ([project] as UtilProjectRow[]) : [],
         holidays: holidaySet,
         availability,
         todayStr: toISO(new Date()),
       }),
-    [tasks, project, holidaySet, availability]
+    [scenarioTasks, project, holidaySet, availability]
   );
 
   const scopedHours = leafTasks.reduce((sum, t) => sum + Number(t.estimated_hours ?? 0), 0);
@@ -276,6 +440,26 @@ export default function ResourcePlan() {
           Resource Plan
         </Link>
       </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 10.5, color: "var(--muted)" }}>
+          Drag a task bar to move it · drag either edge to resize · change the assignee from the task row. Changes remain proposed until Apply.
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          {pendingCount > 0 && <span style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 600 }}>{pendingCount} pending change{pendingCount === 1 ? "" : "s"}</span>}
+          <button type="button" onClick={() => { setChanges({}); setApplyMessage(null); }} disabled={pendingCount === 0 || applying} style={{ display: "inline-flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 7, padding: "6px 9px", fontSize: 10.5, fontWeight: 600, cursor: pendingCount ? "pointer" : "default", opacity: pendingCount ? 1 : .55 }}>
+            <RotateCcw size={12} /> Discard
+          </button>
+          <button type="button" onClick={applyChanges} disabled={pendingCount === 0 || applying} style={{ display: "inline-flex", alignItems: "center", gap: 5, border: "1px solid var(--accent)", background: "var(--accent)", color: "#fff", borderRadius: 7, padding: "6px 10px", fontSize: 10.5, fontWeight: 700, cursor: pendingCount && !applying ? "pointer" : "default", opacity: pendingCount && !applying ? 1 : .55 }}>
+            <Save size={12} /> {applying ? "Applying…" : "Apply Changes"}
+          </button>
+        </div>
+      </div>
+      {applyMessage && (
+        <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 7, fontSize: 10.5, background: applyMessage.includes("applied") ? "#ecfdf3" : "#fff7e8", color: applyMessage.includes("applied") ? "#067647" : "#b54708", border: "1px solid var(--border)" }}>
+          {applyMessage}
+        </div>
+      )}
 
       <section style={{ ...cardStyle(), padding: 14, marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
@@ -437,28 +621,45 @@ export default function ResourcePlan() {
                         {task.start_date ? formatDate(task.start_date) : "No start"} → {task.current_due_date ? formatDate(task.current_due_date) : "No due date"}
                       </div>
                     </div>
-                    <div style={{ padding: "8px", borderLeft: "1px solid var(--border)", color: person ? "var(--text-secondary)" : "var(--muted)" }}>
-                      {person?.name ?? "Unassigned"}
+                    <div style={{ padding: "6px", borderLeft: "1px solid var(--border)" }}>
+                      <select
+                        value={task.assignee_id ?? ""}
+                        onChange={(e) => setTaskChange(task.id, { assignee_id: e.target.value || null })}
+                        style={{ width: "100%", border: changes[task.id]?.assignee_id !== undefined ? "1px solid var(--accent)" : "1px solid var(--border)", borderRadius: 6, background: "var(--surface)", color: "var(--text-secondary)", padding: "5px 6px", fontSize: 10 }}
+                      >
+                        <option value="">Unassigned</option>
+                        {people.filter((p) => p.is_active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
                     </div>
                     <div style={{ padding: "8px", borderLeft: "1px solid var(--border)", textAlign: "right", fontWeight: 700 }}>
                       {task.estimated_hours != null ? `${Math.round(Number(task.estimated_hours) * 10) / 10}h` : "—"}
                     </div>
-                    <div style={{ position: "relative", borderLeft: "1px solid var(--border)", background: "repeating-linear-gradient(to right, transparent 0 calc((100% / " + days.length + ") - 1px), var(--border) calc((100% / " + days.length + ") - 1px) calc(100% / " + days.length + "))" }}>
+                    <div data-task-timeline style={{ position: "relative", borderLeft: "1px solid var(--border)", background: "repeating-linear-gradient(to right, transparent 0 calc((100% / " + days.length + ") - 1px), var(--border) calc((100% / " + days.length + ") - 1px) calc(100% / " + days.length + "))", userSelect: "none" }}>
                       {bar ? (
                         <div
-                          title={`${task.start_date ? formatDate(task.start_date) : "No start"} → ${task.current_due_date ? formatDate(task.current_due_date) : "No due date"}`}
+                          title={`${task.start_date ? formatDate(task.start_date) : "No start"} → ${task.current_due_date ? formatDate(task.current_due_date) : "No due date"} · drag to move`}
+                          onPointerDown={(e) => beginDrag(e, task, "move")}
                           style={{
                             position: "absolute",
                             left: `${bar.left}%`,
                             width: `${bar.width}%`,
-                            top: 12,
-                            height: 18,
-                            borderRadius: 5,
+                            top: 10,
+                            height: 22,
+                            borderRadius: 6,
                             background: "var(--accent)",
-                            opacity: 0.82,
-                            boxShadow: bar.startsBefore || bar.endsAfter ? "inset 0 0 0 1px rgba(255,255,255,.55)" : "none",
+                            opacity: 0.88,
+                            boxShadow: changes[task.id] ? "0 0 0 2px rgba(59,130,246,.18)" : bar.startsBefore || bar.endsAfter ? "inset 0 0 0 1px rgba(255,255,255,.55)" : "none",
+                            cursor: "grab",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            minWidth: 14,
                           }}
-                        />
+                        >
+                          <span onPointerDown={(e) => beginDrag(e, task, "resize-start")} title="Resize start" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 7, borderRadius: "6px 0 0 6px", cursor: "ew-resize", background: "rgba(255,255,255,.22)" }} />
+                          <GripVertical size={12} color="#fff" style={{ pointerEvents: "none", opacity: .9 }} />
+                          <span onPointerDown={(e) => beginDrag(e, task, "resize-end")} title="Resize end" style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 7, borderRadius: "0 6px 6px 0", cursor: "ew-resize", background: "rgba(255,255,255,.22)" }} />
+                        </div>
                       ) : (
                         <div style={{ padding: "13px 8px", fontSize: 9.5, color: "var(--muted)", textAlign: "center" }}>Outside period</div>
                       )}
