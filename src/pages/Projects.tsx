@@ -2365,7 +2365,7 @@ export default function Projects() {
     if (initialProjectScopeApplied.current || !me?.id || chainPeople.length === 0 || !projectViews.loaded) return;
     initialProjectScopeApplied.current = true;
 
-    const savedDefault = localStorage.getItem(projectDefaultViewStorageKey());
+    const savedDefault = previewAsIndividual ? null : localStorage.getItem(projectDefaultViewStorageKey());
     setProjectDefaultViewId(savedDefault);
 
     if (savedDefault?.startsWith("personal:")) {
@@ -5547,32 +5547,72 @@ export default function Projects() {
                 <optgroup label="System views">
                   {isIndividualProjectPerspective ? (
                     <>
-                      <option value="system:owned">My Owned Projects</option>
-                      <option value="system:mine">My Projects & Contributions</option>
-                      <option value="system:attention">Needs My Attention</option>
-                      <option value="system:active">Active Projects</option>
-                      <option value="system:all">All Projects</option>
+                      <option value="system:owned">My Owned Projects{projectDefaultViewId === "system:owned" ? " · Default" : ""}</option>
+                      <option value="system:mine">My Projects & Contributions{projectDefaultViewId === "system:mine" ? " · Default" : ""}</option>
+                      <option value="system:attention">Needs My Attention{projectDefaultViewId === "system:attention" ? " · Default" : ""}</option>
+                      <option value="system:active">Active Projects{projectDefaultViewId === "system:active" ? " · Default" : ""}</option>
+                      <option value="system:all">All Projects{projectDefaultViewId === "system:all" ? " · Default" : ""}</option>
                     </>
                   ) : (
                     <>
-                      <option value="system:all">All Projects</option>
-                      {showTeamProjectScope && <option value="system:team">My Team Projects</option>}
-                      <option value="system:attention">Needs Attention</option>
-                      <option value="system:active">Active Projects</option>
-                      <option value="system:owned">My Owned Projects</option>
-                      <option value="system:mine">My Projects & Contributions</option>
+                      <option value="system:all">All Projects{projectDefaultViewId === "system:all" ? " · Default" : ""}</option>
+                      {showTeamProjectScope && <option value="system:team">My Team Projects{projectDefaultViewId === "system:team" ? " · Default" : ""}</option>}
+                      <option value="system:attention">Needs Attention{projectDefaultViewId === "system:attention" ? " · Default" : ""}</option>
+                      <option value="system:active">Active Projects{projectDefaultViewId === "system:active" ? " · Default" : ""}</option>
+                      <option value="system:owned">My Owned Projects{projectDefaultViewId === "system:owned" ? " · Default" : ""}</option>
+                      <option value="system:mine">My Projects & Contributions{projectDefaultViewId === "system:mine" ? " · Default" : ""}</option>
                     </>
                   )}
                 </optgroup>
                 {projectViews.views.filter((v) => v.id !== "default").length > 0 && (
                   <optgroup label="My saved views">
                     {projectViews.views.filter((v) => v.id !== "default").map((v) => (
-                      <option key={v.id} value={`personal:${v.id}`}>{v.name}</option>
+                      <option key={v.id} value={`personal:${v.id}`}>{v.name}{projectDefaultViewId === `personal:${v.id}` ? " · Default" : ""}</option>
                     ))}
                   </optgroup>
                 )}
               </select>
             </label>
+
+            {projectDefaultViewId === (usingSystemProjectView ? `system:${projectSystemView}` : `personal:${projectViews.activeViewId}`) ? (
+              <div style={{ height: 32, display: "flex", alignItems: "center", paddingBottom: 1 }}>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    height: 24,
+                    padding: "0 8px",
+                    borderRadius: 999,
+                    background: "#eef6ff",
+                    border: "1px solid #cfe1f7",
+                    color: "var(--accent)",
+                    fontSize: 9.5,
+                    fontWeight: 700,
+                  }}
+                >
+                  Default view
+                </span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={setCurrentProjectViewAsDefault}
+                style={{
+                  height: 32,
+                  alignSelf: "flex-end",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  background: "var(--surface)",
+                  color: "var(--accent)",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: "0 9px",
+                  cursor: "pointer",
+                }}
+              >
+                Set as default
+              </button>
+            )}
 
             <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 9.5, fontWeight: 700, color: "var(--muted)", letterSpacing: ".03em" }}>
               VIEW TYPE
