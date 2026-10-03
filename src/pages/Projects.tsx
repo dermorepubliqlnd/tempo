@@ -1053,6 +1053,7 @@ export default function Projects() {
   // not a persistent filter of its own. Every later visit, whether via the
   // dashboard link or the tab itself, just reuses that same saved view.
   const [searchParams] = useSearchParams();
+  const previewAsIndividual = searchParams.get("previewPersona") === "individual";
   const wantsMyProjectsView = searchParams.get("owner") === "me";
   const wantsMyTasksView = searchParams.get("assignee") === "me";
   const [pageSection, setPageSection] = useState<"projects" | "tasks">(wantsMyTasksView ? "tasks" : "projects");
@@ -1219,6 +1220,7 @@ export default function Projects() {
     return result;
   }, [chainPeople, me?.id]);
   const hasTeam = directReportIds.size > 0;
+  const showTeamProjectScope = hasTeam && !previewAsIndividual;
   // Project Notes (2026-08-14): per-project note count for the list/board
   // bubble, and which project (if any) currently has the Notes sidebar
   // open. Counts are fetched once in loadAll() and kept in sync afterward
@@ -1716,10 +1718,11 @@ export default function Projects() {
   useEffect(() => {
     if (initialProjectScopeApplied.current || !me?.id || chainPeople.length === 0) return;
     initialProjectScopeApplied.current = true;
-    if (me.access_level === "full") setProjectSystemView("all");
+    if (previewAsIndividual) setProjectSystemView("mine");
+    else if (me.access_level === "full") setProjectSystemView("all");
     else if (directReportIds.size > 0) setProjectSystemView("team");
     else setProjectSystemView("mine");
-  }, [me?.id, me?.access_level, chainPeople.length, directReportIds.size]);
+  }, [me?.id, me?.access_level, chainPeople.length, directReportIds.size, previewAsIndividual]);
 
   const canCreateProject = true;
   const [creatingProject, setCreatingProject] = useState(false);
@@ -5303,33 +5306,64 @@ export default function Projects() {
         </div>
 
         {pageSection === "projects" && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 18,
-              padding: "10px 2px 0",
-              fontSize: 11.5,
-              color: "var(--muted)",
-              flexWrap: "wrap",
-            }}
-          >
-            <button type="button" onClick={() => { setUsingSystemProjectView(true); setProjectSystemView("active"); }} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
-              <strong style={{ color: "#17324f", fontSize: 13 }}>{projectPortfolioMeta.active}</strong> Active
-            </button>
-            <span style={{ color: "#cbd5e1" }}>·</span>
-            <button type="button" onClick={() => { setUsingSystemProjectView(true); setProjectSystemView("attention"); }} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
-              <strong style={{ color: projectPortfolioMeta.needsAttention ? "var(--danger-text)" : "#17324f", fontSize: 13 }}>{projectPortfolioMeta.needsAttention}</strong> Need attention
-            </button>
-            <span style={{ color: "#cbd5e1" }}>·</span>
-            <button type="button" onClick={() => { setUsingSystemProjectView(true); setProjectSystemView("all"); }} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
-              <strong style={{ color: "#17324f", fontSize: 13 }}>{projectPortfolioMeta.awaitingStart}</strong> Awaiting start
-            </button>
-            <span style={{ color: "#cbd5e1" }}>·</span>
-            <button type="button" onClick={() => { setUsingSystemProjectView(true); setProjectSystemView("attention"); }} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "inherit" }}>
-              <strong style={{ color: projectPortfolioMeta.closePending ? "var(--warning-text)" : "#17324f", fontSize: 13 }}>{projectPortfolioMeta.closePending}</strong> Close pending
-            </button>
-          </div>
+          <>
+            {previewAsIndividual && (
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginTop: 10,
+                  padding: "5px 9px",
+                  borderRadius: 999,
+                  background: "#fff8e6",
+                  border: "1px solid #f1d796",
+                  color: "#8a6508",
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                }}
+              >
+                Testing perspective: Individual Contributor
+              </div>
+            )}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4, minmax(130px, 1fr))",
+                gap: 8,
+                marginTop: 10,
+              }}
+            >
+              {[
+                { key: "active", label: "Active Projects", value: projectPortfolioMeta.active, target: "active" as const, tone: "#1976ed", hint: "Portfolio-wide" },
+                { key: "attention", label: "Need Attention", value: projectPortfolioMeta.needsAttention, target: "attention" as const, tone: projectPortfolioMeta.needsAttention ? "var(--danger-text)" : "#17324f", hint: "At risk / off track" },
+                { key: "awaiting", label: "Awaiting Start", value: projectPortfolioMeta.awaitingStart, target: "all" as const, tone: "#17324f", hint: "Draft / not started" },
+                { key: "close", label: "Close Pending", value: projectPortfolioMeta.closePending, target: "attention" as const, tone: projectPortfolioMeta.closePending ? "var(--warning-text)" : "#17324f", hint: "Work complete" },
+              ].map((card) => (
+                <button
+                  key={card.key}
+                  type="button"
+                  onClick={() => {
+                    setUsingSystemProjectView(true);
+                    setProjectSystemView(card.target);
+                  }}
+                  style={{
+                    textAlign: "left",
+                    padding: "10px 12px",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    background: "var(--surface)",
+                    cursor: "pointer",
+                    boxShadow: "0 1px 2px rgba(15,41,66,.04)",
+                  }}
+                >
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", letterSpacing: ".025em", textTransform: "uppercase" }}>{card.label}</div>
+                  <div style={{ marginTop: 4, fontSize: 21, lineHeight: 1, fontWeight: 750, color: card.tone }}>{card.value}</div>
+                  <div style={{ marginTop: 5, fontSize: 9.5, color: "var(--muted)" }}>{card.hint}</div>
+                </button>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -5362,7 +5396,7 @@ export default function Projects() {
                   <option value="system:active">Active Projects</option>
                   <option value="system:attention">Needs Attention</option>
                   <option value="system:mine">My Projects</option>
-                  {hasTeam && <option value="system:team">My Team Projects</option>}
+                  {showTeamProjectScope && <option value="system:team">My Team Projects</option>}
                 </optgroup>
                 {projectViews.views.filter((v) => v.id !== "default").length > 0 && (
                   <optgroup label="My saved views">
