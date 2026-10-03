@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, CalendarDays, ExternalLink, Users } from "lucide-react";
+import { ArrowLeft, ExternalLink } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { type ProjectRow, type TaskRow } from "./Projects";
 import { formatDate } from "../lib/formatDate";
