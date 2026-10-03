@@ -2485,6 +2485,23 @@ export default function Projects() {
               >
                 {p.name || "Untitled project"}
               </button>
+              {usingSystemProjectView && projectSystemView === "mine" && myProjectRole(p) && (
+                <span
+                  title={myProjectRole(p) === "Owner" ? "You own this project" : "You are assigned to work in this project"}
+                  style={{
+                    flexShrink: 0,
+                    borderRadius: 999,
+                    padding: "2px 6px",
+                    fontSize: 9,
+                    fontWeight: 700,
+                    color: myProjectRole(p) === "Owner" ? "#176b46" : "#52657a",
+                    background: myProjectRole(p) === "Owner" ? "#eaf8f1" : "#f0f3f6",
+                    border: myProjectRole(p) === "Owner" ? "1px solid #ccebdc" : "1px solid #dfe5eb",
+                  }}
+                >
+                  {myProjectRole(p)}
+                </span>
+              )}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -5327,7 +5344,7 @@ export default function Projects() {
                 onChange={(e) => {
                   const value = e.target.value;
                   if (value.startsWith("system:")) {
-                    const scope = value.slice(7) as "all" | "active" | "attention" | "mine";
+                    const scope = value.slice(7) as "all" | "active" | "attention" | "mine" | "team";
                     setUsingSystemProjectView(true);
                     setProjectSystemView(scope);
                     if (projectViews.views.some((v) => v.id === "default")) projectViews.setActiveViewId("default");
@@ -5345,6 +5362,7 @@ export default function Projects() {
                   <option value="system:active">Active Projects</option>
                   <option value="system:attention">Needs Attention</option>
                   <option value="system:mine">My Projects</option>
+                  {hasTeam && <option value="system:team">My Team Projects</option>}
                 </optgroup>
                 {projectViews.views.filter((v) => v.id !== "default").length > 0 && (
                   <optgroup label="My saved views">
