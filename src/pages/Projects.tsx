@@ -2360,7 +2360,7 @@ export default function Projects() {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigate(`/projects/${p.id}/wbs`);
+                  navigate(`/projects/${p.id}`);
                 }}
                 title={p.description || "Open this project's WBS page (name and owner are edited there)"}
                 style={{
