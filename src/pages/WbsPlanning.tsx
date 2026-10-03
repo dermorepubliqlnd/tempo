@@ -6651,6 +6651,8 @@ export default function WbsPlanning() {
               just no longer duplicated as its own button down here. */}
         </div>
       </div>
+            </>
+          )}
     </div>
   );
 }
