@@ -2393,9 +2393,24 @@ export default function Projects() {
     return { active, awaitingStart, needsAttention, closePending };
   }, [projects, tasks, holidayDates]);
 
+  function myProjectRole(p: ProjectRow): "Owner" | "Contributor" | null {
+    if (!me?.id) return null;
+    if (p.owner_id === me.id) return "Owner";
+    if (tasks.some((t) => !t.is_archived && t.project_id === p.id && t.assignee_id === me.id)) return "Contributor";
+    return null;
+  }
+
+  function teamProjectRole(p: ProjectRow): "Team owner" | "Team contributor" | null {
+    if (!teamMemberIds.size) return null;
+    if (p.owner_id && teamMemberIds.has(p.owner_id)) return "Team owner";
+    if (tasks.some((t) => !t.is_archived && t.project_id === p.id && !!t.assignee_id && teamMemberIds.has(t.assignee_id))) return "Team contributor";
+    return null;
+  }
+
   const systemFilteredProjects = useMemo(() => {
     if (projectSystemView === "all") return filteredProjects;
-    if (projectSystemView === "mine") return filteredProjects.filter((p) => p.owner_id === me?.id);
+    if (projectSystemView === "mine") return filteredProjects.filter((p) => myProjectRole(p) !== null);
+    if (projectSystemView === "team") return filteredProjects.filter((p) => teamProjectRole(p) !== null);
     if (projectSystemView === "active") {
       return filteredProjects.filter((p) => {
         const status = projectStatusOf(p);
@@ -2412,7 +2427,19 @@ export default function Projects() {
         health.label === "Completed – open tasks"
       );
     });
-  }, [filteredProjects, projectSystemView, me?.id, tasks, holidayDates]);
+  }, [filteredProjects, projectSystemView, me?.id, tasks, holidayDates, teamMemberIds]);
+
+  const personalProjectScopeCounts = useMemo(() => {
+    const involved = filteredProjects.filter((p) => myProjectRole(p) !== null);
+    const owned = involved.filter((p) => myProjectRole(p) === "Owner").length;
+    return { total: involved.length, owned, contributing: involved.length - owned };
+  }, [filteredProjects, me?.id, tasks]);
+
+  const teamProjectScopeCounts = useMemo(() => {
+    const involved = filteredProjects.filter((p) => teamProjectRole(p) !== null);
+    const owned = involved.filter((p) => teamProjectRole(p) === "Team owner").length;
+    return { total: involved.length, owned, contributing: involved.length - owned };
+  }, [filteredProjects, teamMemberIds, tasks]);
 
   const projectColumns: ColumnDef<ProjectRow>[] = useMemo(
     () => [
