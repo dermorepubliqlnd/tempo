@@ -4782,26 +4782,14 @@ export default function WbsPlanning() {
           align-items: center;
         }
         .wbs-modern-page td.wbs-editable-cell {
-          background: #fbfdff !important;
+          background: #fff !important;
         }
         .wbs-modern-page tr:hover td.wbs-editable-cell {
-          background: #f2f7fd !important;
+          background: #f8fbff !important;
         }
         .wbs-modern-page td.wbs-readonly-cell {
-          background: #f6f8fa !important;
+          background: #f3f5f7 !important;
           color: #718096;
-        }
-        .wbs-modern-page .wbs-auto-badge {
-          display: inline-flex;
-          align-items: center;
-          padding: 1px 5px;
-          border-radius: 999px;
-          background: #eef1f4;
-          color: #7a8796;
-          font-size: 8.5px;
-          font-weight: 700;
-          letter-spacing: .02em;
-          text-transform: none;
         }
         .wbs-modern-page .wbs-required-start {
           color: #d97706;
@@ -6384,8 +6372,8 @@ export default function WbsPlanning() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "0 2px 7px", fontSize: 10.5, color: "var(--muted)" }}>
             <span><span className="wbs-required-start">●</span> Required before Start Project</span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#fbfdff", border: "1px solid #cfe0f3" }} /> Editable</span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#f6f8fa", border: "1px solid #e1e6eb" }} /> Auto-calculated / read-only</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#fff", border: "1px solid #cfd8e3" }} /> Editable</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#f3f5f7", border: "1px solid #dfe4ea" }} /> Auto-calculated / read-only</span>
             <span style={{ marginLeft: "auto" }}>Keyboard: Enter adds the next row · Tab moves across fields · Shift+Tab moves back</span>
           </div>
           <div className="card" style={{ padding: 0, overflowX: "auto", overflowY: "visible" }}>
@@ -6427,10 +6415,10 @@ export default function WbsPlanning() {
                   <ResizableTh colKey="output_type">Output Type <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
                   <ResizableTh colKey="output_count">Output Count</ResizableTh>
                   <ResizableTh colKey="effort_hours">Scoped Hours <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
-                  <ResizableTh colKey="spent_hrs">Logged Hours <span className="wbs-auto-badge">Auto</span></ResizableTh>
-                  <ResizableTh colKey="effort">Effort <span className="wbs-auto-badge">Auto</span></ResizableTh>
+                  <ResizableTh colKey="spent_hrs">Logged Hours</ResizableTh>
+                  <ResizableTh colKey="effort">Effort</ResizableTh>
                   <ResizableTh colKey="changes" title="vs the active Baseline">
-                    Changes vs Baseline <span className="wbs-auto-badge">Auto</span>
+                    Changes vs Baseline
                   </ResizableTh>
                   {/* Phase 21 (2026-08-24): column order now Forecasted,
                       Capacity-Based, Full everywhere (was Full,
@@ -6445,10 +6433,10 @@ export default function WbsPlanning() {
                 <tr>
                   <th style={{ width: 110, ...modeColStyle("manual") }}>Start</th>
                   <th style={{ width: 100, ...modeColStyle("manual") }}>End Date</th>
-                  <th style={{ width: 90, ...modeColStyle("manual") }}>Duration (days) <span className="wbs-auto-badge">Auto</span></th>
-                  <th style={{ width: 110, ...modeColStyle("full_capacity") }}>Start <span className="wbs-auto-badge">Auto</span></th>
-                  <th style={{ width: 100, ...modeColStyle("full_capacity") }}>End Date <span className="wbs-auto-badge">Auto</span></th>
-                  <th style={{ width: 90, ...modeColStyle("full_capacity") }}>Duration (days) <span className="wbs-auto-badge">Auto</span></th>
+                  <th style={{ width: 90, ...modeColStyle("manual") }}>Duration (days)</th>
+                  <th style={{ width: 110, ...modeColStyle("full_capacity") }}>Start</th>
+                  <th style={{ width: 100, ...modeColStyle("full_capacity") }}>End Date</th>
+                  <th style={{ width: 90, ...modeColStyle("full_capacity") }}>Duration (days)</th>
                 </tr>
               </thead>
               <tbody>
@@ -6650,7 +6638,7 @@ export default function WbsPlanning() {
                           </span>
                         )}
                       </td>
-                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("assignee", true, rowLocked)}>
+                      <td className={rowEditable && !isParent ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("assignee", true, rowLocked)}>
                         {isParent ? (
                           (() => {
                             const { multiple } = parentAssigneeState(t.id);
@@ -6707,7 +6695,7 @@ export default function WbsPlanning() {
                           />
                         )}
                       </td>
-                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("work_type", true, rowLocked)}>
+                      <td className={rowEditable && !isParent ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("work_type", true, rowLocked)}>
                         {isParent ? (
                           <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="Not applicable -- a parent task's own Work Type is already represented by its sub-tasks.">
                             N/A
@@ -6737,7 +6725,7 @@ export default function WbsPlanning() {
                           })()
                         )}
                       </td>
-                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("output_type", true, rowLocked)}>
+                      <td className={rowEditable && !isParent && !!t.work_type_id ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("output_type", true, rowLocked)}>
                         {/* 2026-09-24 (Sandra): parent rows are N/A for Output Type too,
                             same as Work Type / Output Count -- outputs belong to the
                             sub-tasks that produce them. */}
@@ -6794,7 +6782,7 @@ export default function WbsPlanning() {
                           );
                         })()}
                       </td>
-                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("output_count", true, rowLocked)}>
+                      <td className={canEditWbs && !isParent && t.status !== "Done" ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("output_count", true, rowLocked)}>
                         <InlineNumber
                           value={t.output_count}
                           // Sandra, 2026-08-26: "I can't edit output count.
@@ -6820,7 +6808,7 @@ export default function WbsPlanning() {
                           onCommit={(v) => saveTaskField(t.id, { output_count: v })}
                         />
                       </td>
-                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("effort_hours", true, rowLocked)}>
+                      <td className={rowEditable && !isParent ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("effort_hours", true, rowLocked)}>
                         <span title={isParent ? "Computed from this task's own sub-tasks (sum of their Scoped Hours)" : undefined}>
                           <InlineNumber
                             value={t.estimated_hours}
@@ -6829,7 +6817,7 @@ export default function WbsPlanning() {
                           />
                         </span>
                       </td>
-                      <td style={{ fontVariantNumeric: "tabular-nums", ...(wbsColStickyStyle("spent_hrs", true, rowLocked) ?? {}) }}>{formatHours(spentHoursFor(t.id))}</td>
+                      <td className="wbs-readonly-cell" style={{ fontVariantNumeric: "tabular-nums", ...(wbsColStickyStyle("spent_hrs", true, rowLocked) ?? {}) }}>{formatHours(spentHoursFor(t.id))}</td>
                       <td className="wbs-readonly-cell" style={wbsColStickyStyle("effort", true, rowLocked)}>
                         {isParent ? (
                           <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="Not applicable -- a parent task's own effort is already represented by its sub-tasks' own Effort/points, so it doesn't carry a separate value.">
