@@ -42,6 +42,8 @@ interface DragState {
   width: number;
   originalStart: string;
   originalDue: string;
+  visibleStart: string;
+  visibleEnd: string;
 }
 
 function cardStyle(): React.CSSProperties {
@@ -174,7 +176,18 @@ export default function ResourcePlan() {
     const timeline = (e.currentTarget as HTMLElement).closest("[data-task-timeline]") as HTMLElement | null;
     if (!timeline) return;
     const rect = timeline.getBoundingClientRect();
-    setDragState({ taskId: task.id, mode, startX: e.clientX, width: rect.width, originalStart: start, originalDue: due });
+    const visibleStart = start < timelineStart ? timelineStart : start;
+    const visibleEnd = due > timelineEnd ? timelineEnd : due;
+    setDragState({
+      taskId: task.id,
+      mode,
+      startX: e.clientX,
+      width: rect.width,
+      originalStart: start,
+      originalDue: due,
+      visibleStart,
+      visibleEnd,
+    });
   }
 
   useEffect(() => {
@@ -188,24 +201,34 @@ export default function ResourcePlan() {
       let nextDue = dragState.originalDue;
 
       if (dragState.mode === "move") {
-        nextStart = toISO(addDays(originalStart, delta));
-        nextDue = toISO(addDays(originalDue, delta));
+        // Dragging should move the VISIBLE bar, not stretch a clipped bar.
+        // If a task begins before the selected planning window, the rendered
+        // bar starts at timelineStart. Use that visible edge as the drag
+        // anchor, then preserve the task's full calendar-day duration.
+        const durationDays = Math.max(
+          0,
+          Math.round((originalDue.getTime() - originalStart.getTime()) / 86400000)
+        );
+        const visibleAnchor = parseLocalDate(dragState.visibleStart);
+        nextStart = toISO(addDays(visibleAnchor, delta));
+        nextDue = toISO(addDays(parseLocalDate(nextStart), durationDays));
+
         const projectMin = project?.start_date?.slice(0, 10) ?? null;
         const projectMax = project?.end_date?.slice(0, 10) ?? null;
         if (projectMin && nextStart < projectMin) {
-          const correction = Math.round((parseLocalDate(projectMin).getTime() - parseLocalDate(nextStart).getTime()) / 86400000);
           nextStart = projectMin;
-          nextDue = toISO(addDays(parseLocalDate(nextDue), correction));
+          nextDue = toISO(addDays(parseLocalDate(nextStart), durationDays));
         }
         if (projectMax && nextDue > projectMax) {
-          const correction = Math.round((parseLocalDate(nextDue).getTime() - parseLocalDate(projectMax).getTime()) / 86400000);
           nextDue = projectMax;
-          nextStart = toISO(addDays(parseLocalDate(nextStart), -correction));
+          nextStart = toISO(addDays(parseLocalDate(nextDue), -durationDays));
         }
       } else if (dragState.mode === "resize-start") {
-        nextStart = clampDate(toISO(addDays(originalStart, delta)), project?.start_date?.slice(0, 10) ?? null, dragState.originalDue);
+        const anchor = parseLocalDate(dragState.visibleStart);
+        nextStart = clampDate(toISO(addDays(anchor, delta)), project?.start_date?.slice(0, 10) ?? null, dragState.originalDue);
       } else {
-        nextDue = clampDate(toISO(addDays(originalDue, delta)), dragState.originalStart, project?.end_date?.slice(0, 10) ?? null);
+        const anchor = parseLocalDate(dragState.visibleEnd);
+        nextDue = clampDate(toISO(addDays(anchor, delta)), dragState.originalStart, project?.end_date?.slice(0, 10) ?? null);
       }
       setTaskChange(dragState.taskId, { start_date: nextStart, current_due_date: nextDue });
     };
