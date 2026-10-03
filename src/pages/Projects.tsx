@@ -348,9 +348,9 @@ function CategoryIcon({ iconName, tone, size = 13 }: { iconName?: string; tone?:
   return <Icon size={size} color={color} style={{ flexShrink: 0 }} />;
 }
 
-const PROJECT_COLUMN_ORDER = ["name", "owner", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "category", "source", "planning_type", "project_type", "project_number", "created_at", "closed_at", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at"];
-const IC_OWNED_PROJECT_COLUMN_ORDER = ["name", "status", "health", "priority", "end_date", "actual_progress", "phase", "start_date", "category", "planning_type", "project_type", "wbs_status", "estimated_hours", "time_spent_hours", "source", "effort_level", "project_number", "created_at", "closed_at", "hours_variance", "hours_variance_pct", "days_extended", "baseline_approved_by", "baseline_approved_at", "owner"];
-const IC_INVOLVED_PROJECT_COLUMN_ORDER = ["name", "owner", "status", "health", "priority", "end_date", "actual_progress", "phase", "start_date", "category", "planning_type", "project_type", "wbs_status", "estimated_hours", "time_spent_hours", "source", "effort_level", "project_number", "created_at", "closed_at", "hours_variance", "hours_variance_pct", "days_extended", "baseline_approved_by", "baseline_approved_at"];
+const PROJECT_COLUMN_ORDER = ["project_number", "name", "owner", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "category", "source", "planning_type", "project_type", "created_at", "closed_at", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at"];
+const IC_OWNED_PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "priority", "end_date", "actual_progress", "phase", "start_date", "category", "planning_type", "project_type", "wbs_status", "estimated_hours", "time_spent_hours", "source", "effort_level", "project_number", "created_at", "closed_at", "hours_variance", "hours_variance_pct", "days_extended", "baseline_approved_by", "baseline_approved_at", "owner"];
+const IC_INVOLVED_PROJECT_COLUMN_ORDER = ["project_number", "name", "owner", "status", "health", "priority", "end_date", "actual_progress", "phase", "start_date", "category", "planning_type", "project_type", "wbs_status", "estimated_hours", "time_spent_hours", "source", "effort_level", "project_number", "created_at", "closed_at", "hours_variance", "hours_variance_pct", "days_extended", "baseline_approved_by", "baseline_approved_at"];
 
 // Default hidden-columns set for a brand-new Projects Timeline view (see
 // timelineDefaultHiddenColumns on ViewTabs / initialHiddenColumns on
@@ -1065,7 +1065,18 @@ export default function Projects() {
   const [usingSystemProjectView, setUsingSystemProjectView] = useState(true);
   const [renamingProjectView, setRenamingProjectView] = useState(false);
   const [projectViewNameDraft, setProjectViewNameDraft] = useState("");
+  const [projectDefaultViewId, setProjectDefaultViewId] = useState<string | null>(null);
   const initialProjectScopeApplied = useRef(false);
+
+  function projectDefaultViewStorageKey() {
+    return `tempo.projects.defaultView.${me?.id ?? "anonymous"}`;
+  }
+
+  function setCurrentProjectViewAsDefault() {
+    const id = usingSystemProjectView ? `system:${projectSystemView}` : `personal:${projectViews.activeViewId}`;
+    setProjectDefaultViewId(id);
+    if (me?.id) localStorage.setItem(projectDefaultViewStorageKey(), id);
+  }
 
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
@@ -1723,13 +1734,34 @@ export default function Projects() {
   // authorities (editing, closing, reopening, extension decisions, etc.)
   // are untouched -- only *visibility* and *creation* are now open to all.
   useEffect(() => {
-    if (initialProjectScopeApplied.current || !me?.id || chainPeople.length === 0) return;
+    if (initialProjectScopeApplied.current || !me?.id || chainPeople.length === 0 || !projectViews.loaded) return;
     initialProjectScopeApplied.current = true;
+
+    const savedDefault = localStorage.getItem(projectDefaultViewStorageKey());
+    setProjectDefaultViewId(savedDefault);
+
+    if (savedDefault?.startsWith("personal:")) {
+      const personalId = savedDefault.slice(9);
+      if (projectViews.views.some((v) => v.id === personalId)) {
+        setUsingSystemProjectView(false);
+        projectViews.setActiveViewId(personalId);
+        return;
+      }
+    }
+    if (savedDefault?.startsWith("system:")) {
+      const scope = savedDefault.slice(7) as "all" | "active" | "attention" | "owned" | "mine" | "team";
+      if (scope !== "team" || showTeamProjectScope) {
+        setUsingSystemProjectView(true);
+        setProjectSystemView(scope);
+        return;
+      }
+    }
+
     if (previewAsIndividual) setProjectSystemView("owned");
     else if (me.access_level === "full") setProjectSystemView("all");
     else if (directReportIds.size > 0) setProjectSystemView("team");
     else setProjectSystemView("owned");
-  }, [me?.id, me?.access_level, chainPeople.length, directReportIds.size, previewAsIndividual]);
+  }, [me?.id, me?.access_level, chainPeople.length, directReportIds.size, previewAsIndividual, projectViews.loaded, projectViews.views.length, showTeamProjectScope]);
 
   const canCreateProject = true;
   const [creatingProject, setCreatingProject] = useState(false);
