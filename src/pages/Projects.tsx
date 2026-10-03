@@ -2574,7 +2574,7 @@ export default function Projects() {
               >
                 {p.name || "Untitled project"}
               </button>
-              {usingSystemProjectView && projectSystemView === "mine" && myProjectRole(p) && (
+              {usingSystemProjectView && (projectSystemView === "owned" || projectSystemView === "mine") && myProjectRole(p) && (
                 <span
                   title={myProjectRole(p) === "Owner" ? "You own this project" : "You are assigned to work in this project"}
                   style={{
@@ -2591,7 +2591,7 @@ export default function Projects() {
                   {myProjectRole(p)}
                 </span>
               )}
-              {usingSystemProjectView && projectSystemView === "mine" && (() => {
+              {usingSystemProjectView && (projectSystemView === "owned" || projectSystemView === "mine") && (() => {
                 const health = healthOf(p, tasks, holidayDates);
                 const needsAttention = health.tone === "danger" || health.tone === "warning" || health.label === "Schedule review";
                 return needsAttention ? (
@@ -5442,12 +5442,12 @@ export default function Projects() {
                 marginTop: 10,
               }}
             >
-              {(usingSystemProjectView && projectSystemView === "mine"
+              {(usingSystemProjectView && (projectSystemView === "owned" || projectSystemView === "mine")
                 ? [
-                    { key: "owned", label: "My Active Projects", value: personalActiveProjectMeta.owned, tone: "#1976ed", hint: "Projects I own" },
-                    { key: "contributing", label: "Contributing To", value: personalActiveProjectMeta.contributing, tone: "#52657a", hint: "Projects owned by others" },
-                    { key: "involvement", label: "Current Involvement", value: personalActiveProjectMeta.total, tone: "#17324f", hint: "Owned + contributing" },
-                    { key: "attention", label: "Needs My Attention", value: personalActiveProjectMeta.needsAttention, tone: personalActiveProjectMeta.needsAttention ? "var(--danger-text)" : "#17324f", hint: "At risk / off track" },
+                    { key: "owned", label: "Projects I Own", value: personalProjectMeta.owned, tone: "#1976ed", hint: "Primary responsibility" },
+                    { key: "contributing", label: "Contributing To", value: personalProjectMeta.contributing, tone: "#52657a", hint: "Owned by someone else" },
+                    { key: "involvement", label: "Total Involvement", value: personalProjectMeta.total, tone: "#17324f", hint: "Owned + contributing" },
+                    { key: "attention", label: "Needs My Attention", value: personalProjectMeta.needsAttention, tone: personalProjectMeta.needsAttention ? "var(--danger-text)" : "#17324f", hint: "Current projects at risk" },
                   ]
                 : [
                     { key: "active", label: "Active Projects", value: projectPortfolioMeta.active, tone: "#1976ed", hint: "Portfolio-wide" },
@@ -5674,6 +5674,13 @@ export default function Projects() {
             />
           </div>
         </div>
+        {usingSystemProjectView && projectSystemView === "owned" && (
+          <div style={{ padding: "6px 12px 7px", borderTop: "1px solid var(--border)", background: "#fbfcfe", fontSize: 10.5, color: "var(--muted)" }}>
+            Showing <strong style={{ color: "#176b46" }}>{personalProjectMeta.owned}</strong> project{personalProjectMeta.owned === 1 ? "" : "s"} you own
+            <span style={{ margin: "0 6px", color: "#cbd5e1" }}>·</span>
+            Switch to <strong style={{ color: "#17324f" }}>My Projects &amp; Contributions</strong> to include projects where you are a contributor.
+          </div>
+        )}
         {usingSystemProjectView && projectSystemView === "mine" && (
           <div style={{ padding: "6px 12px 7px", borderTop: "1px solid var(--border)", background: "#fbfcfe", fontSize: 10.5, color: "var(--muted)" }}>
             <strong style={{ color: "#17324f" }}>{personalProjectScopeCounts.total}</strong> project{personalProjectScopeCounts.total === 1 ? "" : "s"} you are involved in
