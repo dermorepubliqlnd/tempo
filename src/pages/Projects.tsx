@@ -1227,6 +1227,7 @@ export default function Projects() {
   }, [chainPeople, me?.id]);
   const hasTeam = directReportIds.size > 0;
   const showTeamProjectScope = hasTeam && !previewAsIndividual;
+  const isIndividualProjectPerspective = previewAsIndividual || (me?.access_level !== "full" && !hasTeam);
   // Project Notes (2026-08-14): per-project note count for the list/board
   // bubble, and which project (if any) currently has the Notes sidebar
   // open. Counts are fetched once in loadAll() and kept in sync afterward
@@ -2388,7 +2389,7 @@ export default function Projects() {
     if (projectSystemView === "mine") return "My Projects & Contributions";
     if (projectSystemView === "team") return "My Team Projects";
     if (projectSystemView === "active") return "Active Projects";
-    if (projectSystemView === "attention") return "Needs Attention";
+    if (projectSystemView === "attention") return isIndividualProjectPerspective ? "Needs My Attention" : "Needs Attention";
     return "All Projects";
   }
 
@@ -2494,6 +2495,7 @@ export default function Projects() {
       });
     }
     return filteredProjects.filter((p) => {
+      if (isIndividualProjectPerspective && myProjectRole(p) === null) return false;
       const health = healthOf(p, tasks, holidayDates);
       return (
         health.tone === "danger" ||
@@ -2503,7 +2505,7 @@ export default function Projects() {
         health.label === "Completed – open tasks"
       );
     });
-  }, [filteredProjects, projectSystemView, me?.id, tasks, holidayDates, teamMemberIds]);
+  }, [filteredProjects, projectSystemView, me?.id, tasks, holidayDates, teamMemberIds, isIndividualProjectPerspective, projectPerspectivePersonId]);
 
   const personalProjectScopeCounts = useMemo(() => {
     const involved = filteredProjects.filter((p) => myProjectRole(p) !== null);
@@ -5502,12 +5504,24 @@ export default function Projects() {
                 style={{ minWidth: 190, height: 32, fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 8, padding: "0 9px", background: "var(--surface)" }}
               >
                 <optgroup label="System views">
-                  <option value="system:all">All Projects</option>
-                  <option value="system:active">Active Projects</option>
-                  <option value="system:attention">Needs Attention</option>
-                  <option value="system:owned">My Owned Projects</option>
-                  <option value="system:mine">My Projects & Contributions</option>
-                  {showTeamProjectScope && <option value="system:team">My Team Projects</option>}
+                  {isIndividualProjectPerspective ? (
+                    <>
+                      <option value="system:owned">My Owned Projects</option>
+                      <option value="system:mine">My Projects & Contributions</option>
+                      <option value="system:attention">Needs My Attention</option>
+                      <option value="system:active">Active Projects</option>
+                      <option value="system:all">All Projects</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="system:all">All Projects</option>
+                      {showTeamProjectScope && <option value="system:team">My Team Projects</option>}
+                      <option value="system:attention">Needs Attention</option>
+                      <option value="system:active">Active Projects</option>
+                      <option value="system:owned">My Owned Projects</option>
+                      <option value="system:mine">My Projects & Contributions</option>
+                    </>
+                  )}
                 </optgroup>
                 {projectViews.views.filter((v) => v.id !== "default").length > 0 && (
                   <optgroup label="My saved views">
