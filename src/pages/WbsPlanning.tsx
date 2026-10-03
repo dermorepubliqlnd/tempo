@@ -629,6 +629,18 @@ export default function WbsPlanning() {
     }
   }
   const [wbsHeaderMenu, setWbsHeaderMenu] = useState<{ x: number; y: number; colKey: string } | null>(null);
+  const [focusTaskNameId, setFocusTaskNameId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusTaskNameId) return;
+    const timer = window.setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>(`[data-wbs-nav-id="task-name-${focusTaskNameId}"]`);
+      if (!input) return;
+      input.focus();
+      input.select();
+      setFocusTaskNameId(null);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [focusTaskNameId, tasks]);
   // Gutter is a fixed 22px; the Task column's own width is whatever
   // wbsColWidth("task") currently resolves to (resizable) -- the frozen
   // Task column's sticky offset must track that live, not a constant.
@@ -2838,7 +2850,7 @@ export default function WbsPlanning() {
       newAssignee = await assigneePicker.pick("Assign the new task");
       if (!newAssignee) return;
     }
-    const { error } = await supabase.from("tasks").insert({
+    const { data: newTask, error } = await supabase.from("tasks").insert({
       project_id: project.id,
       assignee_id: newAssignee,
       name: "Untitled task",
@@ -2851,12 +2863,13 @@ export default function WbsPlanning() {
       original_due_date: defaultDue,
       current_due_date: defaultDue,
       sort_order: Date.now(),
-    });
+    }).select("id").single();
     if (error) {
       await alert(`Couldn't create task: ${error.message}`);
       return;
     }
-    loadAll(true);
+    if (newTask?.id) setFocusTaskNameId(newTask.id as string);
+    await loadAll(true);
   }
 
   async function addSubtask(parent: TaskRow & { depth: number }) {
@@ -2886,7 +2899,7 @@ export default function WbsPlanning() {
       newAssignee = await assigneePicker.pick("Assign the new sub-task", parent.assignee_id);
       if (!newAssignee) return;
     }
-    const { error } = await supabase.from("tasks").insert({
+    const { data: newTask, error } = await supabase.from("tasks").insert({
       project_id: parent.project_id,
       parent_task_id: parent.id,
       assignee_id: newAssignee,
@@ -2900,12 +2913,13 @@ export default function WbsPlanning() {
       original_due_date: parent.current_due_date,
       current_due_date: parent.current_due_date,
       sort_order: Date.now(),
-    });
+    }).select("id").single();
     if (error) {
       await alert(`Couldn't add subtask: ${error.message}`);
       return;
     }
-    loadAll(true);
+    if (newTask?.id) setFocusTaskNameId(newTask.id as string);
+    await loadAll(true);
   }
 
   // Sandra, 2026-07-24: "Allow deleting of tasks in WBS. Right now we can
@@ -3363,11 +3377,6 @@ export default function WbsPlanning() {
         !project.name?.trim() ? "Project Name" : null,
         !project.owner_id ? "Owner" : null,
         !project.start_date ? "Start Date" : null,
-        !project.category ? "Category" : null,
-        !project.source_id ? "Source" : null,
-        !project.project_type_id ? "Project Type" : null,
-        !project.effort_level ? "Complexity" : null,
-        !project.description?.trim() ? "Description" : null,
       ].filter((x): x is string => !!x);
 
       if (missing.length) {
@@ -4031,7 +4040,7 @@ export default function WbsPlanning() {
               looked like "icon overlapping the End date". `overflow:
               hidden` on the `<td>` itself (not just an inner span) is
               what actually stops that bleed. */}
-          <td style={{ ...style, overflow: "hidden", ...(conflict ? { background: "var(--danger-bg)", boxShadow: "inset 3px 0 0 var(--danger-text)" } : {}) }} title={conflict ? `Starts on or before "${conflict.name}" finishes (${formatDate(conflict.end)}) -- move this Start after that date, or click Refresh dates.` : undefined}>
+          <td className="wbs-readonly-cell" style={{ ...style, overflow: "hidden", ...(conflict ? { background: "var(--danger-bg)", boxShadow: "inset 3px 0 0 var(--danger-text)" } : {}) }} title={conflict ? `Starts on or before "${conflict.name}" finishes (${formatDate(conflict.end)}) -- move this Start after that date, or click Refresh dates.` : undefined}>
             <span
               title={
                 isParent
@@ -4055,8 +4064,8 @@ export default function WbsPlanning() {
               {/* phase127m: conflict shown as a red cell fill + hover note, no icon */}
             </span>
           </td>
-          <td style={entry ? style : { ...style, color: "var(--muted)" }}>{entry ? formatDate(entry.end) : "—"}</td>
-          <td style={entry ? style : { ...style, color: "var(--muted)" }}>{entry ? entry.durationDays : "—"}</td>
+          <td className="wbs-readonly-cell" style={entry ? style : { ...style, color: "var(--muted)" }}>{entry ? formatDate(entry.end) : "—"}</td>
+          <td className="wbs-readonly-cell" style={entry ? style : { ...style, color: "var(--muted)" }}>{entry ? entry.durationDays : "—"}</td>
         </>
       );
     }
@@ -4065,7 +4074,7 @@ export default function WbsPlanning() {
     const autoField = "start_standard_auto";
     return (
       <>
-        <td style={{ ...style, overflow: "hidden", ...(conflict ? { background: "var(--danger-bg)", boxShadow: "inset 3px 0 0 var(--danger-text)" } : {}) /* phase127m: red fill on dependency conflict */ }} title={conflict ? `Starts on or before "${conflict.name}" finishes (${formatDate(conflict.end)}) -- move this Start after that date, or click Refresh dates.` : undefined}>
+        <td className={canEditWbs && !isParent && !project!.timelines_locked ? "wbs-editable-cell" : "wbs-readonly-cell"} style={{ ...style, overflow: "hidden", ...(conflict ? { background: "var(--danger-bg)", boxShadow: "inset 3px 0 0 var(--danger-text)" } : {}) /* phase127m: red fill on dependency conflict */ }} title={conflict ? `Starts on or before "${conflict.name}" finishes (${formatDate(conflict.end)}) -- move this Start after that date, or click Refresh dates.` : undefined}>
           <span
             title={
               isParent
@@ -4143,7 +4152,7 @@ export default function WbsPlanning() {
             )}
           </span>
         </td>
-        <td style={entry ? style : { ...style, color: "var(--muted)" }}>
+        <td className={canEditWbs && !isParent && !project!.timelines_locked ? "wbs-editable-cell" : "wbs-readonly-cell"} style={entry ? style : { ...style, color: "var(--muted)" }}>
           {/* Phase 19 (2026-08-24): End is freely typable, and typing one
               here is what turns on the even-hours-per-day spread (see
               computeEntry's "manual" branch); clearing it (native
@@ -4204,7 +4213,7 @@ export default function WbsPlanning() {
             <span>—</span>
           )}
         </td>
-        <td style={entry ? style : { ...style, color: "var(--muted)" }}>
+        <td className="wbs-readonly-cell" style={entry ? style : { ...style, color: "var(--muted)" }}>
           {entry ? entry.durationDays : "—"}
           {entry?.avgHoursPerDay != null && (
             <span style={{ color: "var(--muted)", marginLeft: 4, fontSize: 11 }}>({entry.avgHoursPerDay}h/day)</span>
@@ -4643,6 +4652,34 @@ export default function WbsPlanning() {
           display: flex;
           align-items: center;
         }
+        .wbs-modern-page td.wbs-editable-cell {
+          background: #fbfdff !important;
+        }
+        .wbs-modern-page tr:hover td.wbs-editable-cell {
+          background: #f2f7fd !important;
+        }
+        .wbs-modern-page td.wbs-readonly-cell {
+          background: #f6f8fa !important;
+          color: #718096;
+        }
+        .wbs-modern-page .wbs-auto-badge {
+          display: inline-flex;
+          align-items: center;
+          padding: 1px 5px;
+          border-radius: 999px;
+          background: #eef1f4;
+          color: #7a8796;
+          font-size: 8.5px;
+          font-weight: 700;
+          letter-spacing: .02em;
+          text-transform: none;
+        }
+        .wbs-modern-page .wbs-required-start {
+          color: #d97706;
+          font-size: 9px;
+          font-weight: 900;
+          margin-left: 3px;
+        }
         .wbs-modern-page .wbs-project-info-grid .wbs-field-box {
           width: 100%;
           min-width: 0 !important;
@@ -5078,6 +5115,10 @@ export default function WbsPlanning() {
               <div style={{ fontSize: 10.5, color: "var(--muted)" }}>
                 {project.is_unsaved ? "Complete the basic details, then save to continue planning." : "Basic project details."}
               </div>
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12, fontSize: 10.5, color: "var(--muted)" }}>
+                <span><span style={{ color: "#d92d20", fontWeight: 800 }}>*</span> Required to save draft</span>
+                <span><span style={{ color: "#d97706", fontWeight: 900 }}>●</span> Required before Start Project</span>
+              </div>
             </div>
 
             <div className="wbs-project-setup-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(300px, 1fr)", gap: 18, alignItems: "stretch" }}>
@@ -5130,7 +5171,7 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Category <span style={{ color: "#d92d20" }}>*</span></span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Category <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.category, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect value={project.category ?? ""} editable={canEditWbs}
@@ -5141,7 +5182,7 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Source <span style={{ color: "#d92d20" }}>*</span></span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Source <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.source_id, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
@@ -5162,7 +5203,7 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Type <span style={{ color: "#d92d20" }}>*</span></span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Type</span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.project_type_id, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
@@ -5183,7 +5224,7 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Complexity <span style={{ color: "#d92d20" }}>*</span></span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Complexity <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.effort_level, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
@@ -5214,7 +5255,7 @@ export default function WbsPlanning() {
             </div>
 
               <div style={{ display: "grid", gridTemplateRows: "auto 1fr", minWidth: 0 }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#304963", marginBottom: 5 }}>Description <span style={{ color: "#d92d20" }}>*</span></div>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#304963", marginBottom: 5 }}>Description <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></div>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.description, undefined, !canEditWbs), width: "100%", minHeight: 0, height: "100%", alignItems: "stretch" }}>
                   <InlineTextArea
                     value={project.description ?? ""}
@@ -6050,6 +6091,12 @@ export default function WbsPlanning() {
             )}
             <span />
           </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "0 2px 7px", fontSize: 10.5, color: "var(--muted)" }}>
+            <span><span className="wbs-required-start">●</span> Required before Start Project</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#fbfdff", border: "1px solid #cfe0f3" }} /> Editable</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#f6f8fa", border: "1px solid #e1e6eb" }} /> Auto-calculated / read-only</span>
+            <span style={{ marginLeft: "auto" }}>Keyboard: Enter adds the next row · Tab moves across fields · Shift+Tab moves back</span>
+          </div>
           <div className="card" style={{ padding: 0, overflowX: "auto", overflowY: "visible" }}>
             <table
               className="data-table"
@@ -6082,17 +6129,17 @@ export default function WbsPlanning() {
                     className="row-gutter-cell"
                     style={{ width: 22, minWidth: 22, ...(wbsGutterStickyStyle(false) ?? {}) }}
                   />
-                  <ResizableTh colKey="task">Task</ResizableTh>
+                  <ResizableTh colKey="task">Task <span className="wbs-required-start" title="Required before Start Project">●</span></ResizableTh>
                   <ResizableTh colKey="depends_on">Depends on</ResizableTh>
-                  <ResizableTh colKey="assignee">Assignee</ResizableTh>
+                  <ResizableTh colKey="assignee">Assignee <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
                   <ResizableTh colKey="work_type">Work Type</ResizableTh>
-                  <ResizableTh colKey="output_type">Output Type</ResizableTh>
+                  <ResizableTh colKey="output_type">Output Type <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
                   <ResizableTh colKey="output_count">Output Count</ResizableTh>
-                  <ResizableTh colKey="effort_hours">Scoped Hours</ResizableTh>
-                  <ResizableTh colKey="spent_hrs">Logged Hours</ResizableTh>
-                  <ResizableTh colKey="effort">Effort</ResizableTh>
+                  <ResizableTh colKey="effort_hours">Scoped Hours <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
+                  <ResizableTh colKey="spent_hrs">Logged Hours <span className="wbs-auto-badge">Auto</span></ResizableTh>
+                  <ResizableTh colKey="effort">Effort <span className="wbs-auto-badge">Auto</span></ResizableTh>
                   <ResizableTh colKey="changes" title="vs the active Baseline">
-                    Changes vs Baseline
+                    Changes vs Baseline <span className="wbs-auto-badge">Auto</span>
                   </ResizableTh>
                   {/* Phase 21 (2026-08-24): column order now Forecasted,
                       Capacity-Based, Full everywhere (was Full,
@@ -6107,10 +6154,10 @@ export default function WbsPlanning() {
                 <tr>
                   <th style={{ width: 110, ...modeColStyle("manual") }}>Start</th>
                   <th style={{ width: 100, ...modeColStyle("manual") }}>End Date</th>
-                  <th style={{ width: 90, ...modeColStyle("manual") }}>Duration (days)</th>
-                  <th style={{ width: 110, ...modeColStyle("full_capacity") }}>Start</th>
-                  <th style={{ width: 100, ...modeColStyle("full_capacity") }}>End Date</th>
-                  <th style={{ width: 90, ...modeColStyle("full_capacity") }}>Duration (days)</th>
+                  <th style={{ width: 90, ...modeColStyle("manual") }}>Duration (days) <span className="wbs-auto-badge">Auto</span></th>
+                  <th style={{ width: 110, ...modeColStyle("full_capacity") }}>Start <span className="wbs-auto-badge">Auto</span></th>
+                  <th style={{ width: 100, ...modeColStyle("full_capacity") }}>End Date <span className="wbs-auto-badge">Auto</span></th>
+                  <th style={{ width: 90, ...modeColStyle("full_capacity") }}>Duration (days) <span className="wbs-auto-badge">Auto</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -6233,21 +6280,36 @@ export default function WbsPlanning() {
                           </span>
                         </div>
                       </td>
-                      <td style={{ overflow: "hidden", ...(wbsColStickyStyle("task", true, rowLocked) ?? {}) }}>
+                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={{ overflow: "hidden", ...(wbsColStickyStyle("task", true, rowLocked) ?? {}) }}>
                         <div style={{ paddingLeft: t.depth * 16, fontWeight: t.depth === 0 ? 600 : 400, display: "flex", alignItems: "center", gap: 4 }}>
                           <span title={glyph.title} style={{ display: "inline-flex", flexShrink: 0 }}>
                             <glyph.Icon size={13} color={glyph.color} />
                           </span>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <InlineText value={t.name} editable={rowEditable} bold={t.depth === 0} onCommit={(v) => saveTaskField(t.id, { name: v })} />
+                            <InlineText
+                              value={t.name}
+                              editable={rowEditable}
+                              bold={t.depth === 0}
+                              dataNavId={`task-name-${t.id}`}
+                              onCommit={(v) => saveTaskField(t.id, { name: v })}
+                              onEnter={() => {
+                                if (!rowEditable) return;
+                                if (t.depth === 0) {
+                                  void addTopLevelTask();
+                                } else {
+                                  const parent = orderedTasks.find((x) => x.id === t.parent_task_id && x.depth === 0);
+                                  if (parent) void addSubtask(parent);
+                                }
+                              }}
+                            />
                           </div>
                           {rowEditable && t.depth === 0 && (
-                            <button className="add-subtask-btn" onClick={() => addSubtask(t)} title="Add sub-task">
+                            <button className="add-subtask-btn" tabIndex={-1} onClick={() => addSubtask(t)} title="Add sub-task">
                               <Plus size={14} />
                             </button>
                           )}
-                          {rowEditable && (
-                            <button className="add-subtask-btn" onClick={() => deleteTask(t)} title={isParent ? "Delete task (and its sub-tasks)" : "Delete task"}>
+                          {rowEditable && project?.wbs_status === "draft" && (
+                            <button className="add-subtask-btn" tabIndex={-1} onClick={() => deleteTask(t)} title={isParent ? "Delete task (and its sub-tasks)" : "Delete task"}>
                               <Trash2 size={14} />
                             </button>
                           )}
@@ -6260,7 +6322,7 @@ export default function WbsPlanning() {
                               lockdown note elsewhere: Status editing lives
                               on the Tasks page) -- just this one action,
                               same "button next to Delete" affordance. */}
-                          {rowEditable && !isParent && (
+                          {rowEditable && project?.wbs_status !== "draft" && !isParent && (
                             <button
                               className="add-subtask-btn"
                               onClick={() => setCancelTaskDialogOpen({ taskId: t.id, label: `"${t.name}"` })}
@@ -6270,13 +6332,13 @@ export default function WbsPlanning() {
                             </button>
                           )}
                           {canEditWbs && t.status === "Cancelled" && (
-                            <button className="add-subtask-btn" onClick={() => uncancelTask(t.id)} title="Uncancel -- restore to In Progress">
+                            <button className="add-subtask-btn" tabIndex={-1} onClick={() => uncancelTask(t.id)} title="Uncancel -- restore to In Progress">
                               <RefreshCw size={14} />
                             </button>
                           )}
                         </div>
                       </td>
-                      <td style={{ position: "relative", ...(wbsColStickyStyle("depends_on", true, rowLocked) ?? {}) }}>
+                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={{ position: "relative", ...(wbsColStickyStyle("depends_on", true, rowLocked) ?? {}) }}>
                         <DependsOnPicker
                           task={t}
                           allTasks={orderedTasks}
@@ -6305,7 +6367,7 @@ export default function WbsPlanning() {
                           </span>
                         )}
                       </td>
-                      <td style={wbsColStickyStyle("assignee", true, rowLocked)}>
+                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("assignee", true, rowLocked)}>
                         {isParent ? (
                           (() => {
                             const { multiple } = parentAssigneeState(t.id);
@@ -6332,6 +6394,7 @@ export default function WbsPlanning() {
                           <InlineSelect
                             value={assignee?.name ?? ""}
                             editable={rowEditable}
+                            searchable
                             // phase126k: after Start Project an assignee can be changed, never removed.
                             allowEmpty={project?.wbs_status === "draft" || !t.assignee_id}
                             emptyLabel="Unassigned"
@@ -6361,7 +6424,7 @@ export default function WbsPlanning() {
                           />
                         )}
                       </td>
-                      <td style={wbsColStickyStyle("work_type", true, rowLocked)}>
+                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("work_type", true, rowLocked)}>
                         {isParent ? (
                           <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="Not applicable -- a parent task's own Work Type is already represented by its sub-tasks.">
                             N/A
@@ -6378,6 +6441,7 @@ export default function WbsPlanning() {
                               <InlineSelect
                                 value={currentWt?.name ?? ""}
                                 editable={rowEditable}
+                            searchable
                                 allowEmpty
                                 emptyLabel="Pick work type"
                                 options={pickable.map((w) => w.name)}
@@ -6390,7 +6454,7 @@ export default function WbsPlanning() {
                           })()
                         )}
                       </td>
-                      <td style={wbsColStickyStyle("output_type", true, rowLocked)}>
+                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("output_type", true, rowLocked)}>
                         {/* 2026-09-24 (Sandra): parent rows are N/A for Output Type too,
                             same as Work Type / Output Count -- outputs belong to the
                             sub-tasks that produce them. */}
@@ -6435,6 +6499,7 @@ export default function WbsPlanning() {
                             <InlineSelect
                               value={currentOt?.name ?? ""}
                               editable={rowEditable}
+                            searchable
                               allowEmpty
                               emptyLabel="Pick output type"
                               options={pickableOt.map((o) => o.name)}
@@ -6446,7 +6511,7 @@ export default function WbsPlanning() {
                           );
                         })()}
                       </td>
-                      <td style={wbsColStickyStyle("output_count", true, rowLocked)}>
+                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("output_count", true, rowLocked)}>
                         <InlineNumber
                           value={t.output_count}
                           // Sandra, 2026-08-26: "I can't edit output count.
@@ -6472,7 +6537,7 @@ export default function WbsPlanning() {
                           onCommit={(v) => saveTaskField(t.id, { output_count: v })}
                         />
                       </td>
-                      <td style={wbsColStickyStyle("effort_hours", true, rowLocked)}>
+                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("effort_hours", true, rowLocked)}>
                         <span title={isParent ? "Computed from this task's own sub-tasks (sum of their Scoped Hours)" : undefined}>
                           <InlineNumber
                             value={t.estimated_hours}
@@ -6482,7 +6547,7 @@ export default function WbsPlanning() {
                         </span>
                       </td>
                       <td style={{ fontVariantNumeric: "tabular-nums", ...(wbsColStickyStyle("spent_hrs", true, rowLocked) ?? {}) }}>{formatHours(spentHoursFor(t.id))}</td>
-                      <td style={wbsColStickyStyle("effort", true, rowLocked)}>
+                      <td className="wbs-readonly-cell" style={wbsColStickyStyle("effort", true, rowLocked)}>
                         {isParent ? (
                           <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="Not applicable -- a parent task's own effort is already represented by its sub-tasks' own Effort/points, so it doesn't carry a separate value.">
                             N/A
@@ -6510,7 +6575,7 @@ export default function WbsPlanning() {
                           </span>
                         )}
                       </td>
-                      <td style={wbsColStickyStyle("changes", true, rowLocked)}>
+                      <td className="wbs-readonly-cell" style={wbsColStickyStyle("changes", true, rowLocked)}>
                         {(() => {
                           // Sandra, 2026-07-29: "omit the notes column and
                           // just put the values in the changes vs baseline,
@@ -7212,6 +7277,7 @@ function DependsOnPicker({
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number; openUp: boolean } | null>(null);
+  const [query, setQuery] = useState("");
   // Scheduling-engine audit (2026-08-31), Fix 2: never offer a task's own
   // parent or its own sub-tasks as dependency candidates. A parent's dates
   // are DERIVED from its children (the rollup effect owns those columns),
@@ -7221,6 +7287,7 @@ function DependsOnPicker({
   // (addDependency refuses the same pair server-side of the UI, in case
   // one already exists in the data.)
   const candidates = allTasks.filter((t) => t.id !== task.id && t.id !== task.parent_task_id && t.parent_task_id !== task.id);
+  const visibleCandidates = candidates.filter((t) => !query.trim() || t.name.toLowerCase().includes(query.trim().toLowerCase()));
   const selectedNames = dependsOnIds
     .map((id) => allTasks.find((t) => t.id === id)?.name)
     .filter((n): n is string => !!n);
@@ -7239,6 +7306,7 @@ function DependsOnPicker({
         openUp,
       });
     }
+    if (!isOpen) setQuery("");
     onToggle();
   }
 
@@ -7295,8 +7363,18 @@ function DependsOnPicker({
                 boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
               }}
             >
+              <div style={{ padding: "2px 2px 6px" }}>
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search tasks..."
+                  style={{ width: "100%", padding: "6px 8px", fontSize: 11.5, border: "1px solid var(--border)", borderRadius: 5, outline: "none" }}
+                />
+              </div>
               {candidates.length === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", padding: 4 }}>No other tasks yet.</div>}
-              {candidates.map((c) => {
+              {candidates.length > 0 && visibleCandidates.length === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", padding: 4 }}>No matching tasks.</div>}
+              {visibleCandidates.map((c) => {
                 const checked = dependsOnIds.includes(c.id);
                 return (
                   <label
