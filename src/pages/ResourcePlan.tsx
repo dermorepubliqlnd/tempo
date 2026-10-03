@@ -392,11 +392,18 @@ export default function ResourcePlan() {
   const timelineEnd = days.length ? toISO(days[days.length - 1]) : "";
   const dayCount = Math.max(days.length, 1);
 
+  // Keep task row sequence stable while planning. Dragging/resizing changes
+  // schedule dates, so sorting by effective dates makes rows jump around
+  // during interaction. Resource Plan should preserve the WBS/task sequence
+  // and only move the bar horizontally.
   const taskRows = [...activeTasks].sort((a, b) => {
-    const aDate = a.start_date ?? a.current_due_date ?? "";
-    const bDate = b.start_date ?? b.current_due_date ?? "";
-    if (aDate !== bDate) return aDate.localeCompare(bDate);
-    return (a.created_at ?? "").localeCompare(b.created_at ?? "");
+    const aOrder = a.sort_order ?? Number.MAX_SAFE_INTEGER;
+    const bOrder = b.sort_order ?? Number.MAX_SAFE_INTEGER;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    const aCreated = a.created_at ?? "";
+    const bCreated = b.created_at ?? "";
+    if (aCreated !== bCreated) return aCreated.localeCompare(bCreated);
+    return a.name.localeCompare(b.name);
   });
 
   function taskBar(task: TaskRow) {
