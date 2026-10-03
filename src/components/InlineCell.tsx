@@ -11,14 +11,17 @@ interface InlineTextProps extends BaseProps {
   value: string;
   onCommit: (value: string) => void;
   bold?: boolean;
+  onEnter?: () => void;
+  dataNavId?: string;
 }
 
-export function InlineText({ value, onCommit, editable, bold, emptyLabel = "—" }: InlineTextProps) {
+export function InlineText({ value, onCommit, editable, bold, onEnter, dataNavId, emptyLabel = "—" }: InlineTextProps) {
   const [draft, setDraft] = useState(value);
   if (!editable) return <span style={bold ? { fontWeight: 600, color: "var(--navy)" } : undefined}>{value || emptyLabel}</span>;
   return (
     <input
       className="inline-cell"
+      data-wbs-nav-id={dataNavId}
       spellCheck={false}
       autoComplete="off"
       style={bold ? { fontWeight: 600, color: "var(--navy)" } : undefined}
@@ -30,7 +33,11 @@ export function InlineText({ value, onCommit, editable, bold, emptyLabel = "—"
         else setDraft(value);
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+          if (onEnter) window.setTimeout(onEnter, 0);
+        }
         if (e.key === "Escape") {
           setDraft(value);
           (e.target as HTMLInputElement).blur();
