@@ -74,6 +74,7 @@ interface ProjectRow {
   // page.
   category: string | null;
   source_id: string | null;
+  project_type_id: string | null;
   priority: string | null;
   effort_level: string | null;
   description: string | null;
@@ -575,6 +576,7 @@ export default function WbsPlanning() {
   // builds its own Category/Source pickers.
   const [projectCategoryOptions, setProjectCategoryOptions] = useState<{ name: string; is_active: boolean }[]>([]);
   const [projectSourceOptions, setProjectSourceOptions] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
+  const [projectTypeOptions, setProjectTypeOptions] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
   // Task Type <-> Output Type conditional mapping (Phase 23, 2026-08-25) --
   // Sandra: "I want the output be conditional based on task type." Filters
   // the Output Type picker below to only what's allowed for the task's
@@ -914,6 +916,7 @@ export default function WbsPlanning() {
   // Phase 2/3 workflow state.
   const [activeRevision, setActiveRevision] = useState<RevisionRow | null>(null);
   const [pendingClosure, setPendingClosure] = useState<ClosureRequestRow | null>(null);
+  const [closureFormOpen, setClosureFormOpen] = useState(false);
   // 2026-09-07 (Sandra: Sign Off Date) -- project_closeouts.closed_at,
   // fetched in loadAll above. null until wbs_status is actually 'closed'.
   const [closeoutClosedAt, setCloseoutClosedAt] = useState<string | null>(null);
@@ -1037,8 +1040,8 @@ export default function WbsPlanning() {
     // pass silent=true to skip that full-page loading flash entirely --
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
-    const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required").eq("id", projectId).single(),
+    const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }, { data: ptypes }] = await Promise.all([
+      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,project_type_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -1066,6 +1069,7 @@ export default function WbsPlanning() {
       supabase.from("work_type_output_types").select("work_type_id,output_type_id"),
       supabase.from("project_categories").select("name,is_active").order("sort_order"),
       supabase.from("project_sources").select("id,name,is_active").order("sort_order"),
+      supabase.from("project_types").select("id,name,is_active").order("sort_order"),
     ]);
     setProject((proj as ProjectRow) ?? null);
     // Phase 21 (2026-08-24): activeMode is now a fixed constant
@@ -1082,6 +1086,7 @@ export default function WbsPlanning() {
     setWorkTypeOutputTypes((wtots as { work_type_id: string; output_type_id: string }[]) ?? []);
     setProjectCategoryOptions((cats as { name: string; is_active: boolean }[]) ?? []);
     setProjectSourceOptions((srcs as { id: string; name: string; is_active: boolean }[]) ?? []);
+    setProjectTypeOptions((ptypes as { id: string; name: string; is_active: boolean }[]) ?? []);
 
     // Dependencies are same-project only (v1), so fetched as a follow-up
     // query scoped to this project's own task ids, once they're known --
@@ -2555,6 +2560,7 @@ export default function WbsPlanning() {
       await alert(`Couldn't request closure: ${error.message}`);
       return;
     }
+    setClosureFormOpen(false);
     await loadAll();
   }
 
@@ -4453,6 +4459,12 @@ export default function WbsPlanning() {
       ...(project.source_id ? [projectSourceOptions.find((s) => s.id === project.source_id)?.name].filter((n): n is string => !!n) : []),
     ])
   );
+  const projectTypePickerOptions = Array.from(
+    new Set([
+      ...projectTypeOptions.filter((t) => t.is_active).map((t) => t.name),
+      ...(project.project_type_id ? [projectTypeOptions.find((t) => t.id === project.project_type_id)?.name].filter((n): n is string => !!n) : []),
+    ])
+  );
 
   // Gantt chart (Sandra, 2026-07-24): a visual timeline below the task
   // table, built LAST and deliberately after every scheduling-logic
@@ -4822,7 +4834,8 @@ export default function WbsPlanning() {
                           disabled={workflowBusy}
                           onClick={() => {
                             setWbsActionsMenuOpen(false);
-                            handleRequestClosure();
+                            setClosureFormOpen(true);
+                            window.setTimeout(() => document.getElementById("project-closure-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
                           }}
                           style={{ display: "flex", width: "100%", textAlign: "left", background: "none", border: "none", borderRadius: 4, padding: "6px 8px", fontSize: 12.5, cursor: "pointer", color: "var(--text)" }}
                         >
@@ -4999,6 +5012,22 @@ export default function WbsPlanning() {
                   onCommit={(name) => {
                     const src = projectSourceOptions.find((s) => s.name === name);
                     saveProjectField({ source_id: src?.id ?? null });
+                  }}
+                />
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Project Type:</span>
+              <div className="wbs-field-box" style={fieldBoxStyle(true, 120, !canEditWbs)}>
+                <InlineSelect
+                  value={projectTypeOptions.find((t) => t.id === project.project_type_id)?.name ?? ""}
+                  editable={canEditWbs}
+                  allowEmpty
+                  emptyLabel="No type"
+                  options={projectTypePickerOptions}
+                  onCommit={(name) => {
+                    const type = projectTypeOptions.find((t) => t.name === name);
+                    saveProjectField({ project_type_id: type?.id ?? null });
                   }}
                 />
               </div>
