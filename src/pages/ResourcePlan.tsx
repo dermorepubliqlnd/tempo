@@ -86,6 +86,13 @@ function pctTone(pct: number | null) {
   return { bg: "#ecfdf3", fg: "var(--success-text)" };
 }
 
+const PLANNER_META_W = 460;
+const TASK_W = 240;
+const ASSIGNEE_W = 145;
+const SCOPED_W = 75;
+const DAY_W = 64;
+const AVG_W = 70;
+
 export default function ResourcePlan() {
   const { projectId } = useParams<{ projectId: string }>();
   const { person: me } = useSession();
@@ -521,7 +528,7 @@ export default function ResourcePlan() {
           <div>
             <div style={{ fontSize: 12.5, fontWeight: 700 }}>Contributor Capacity</div>
             <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>
-              Large % = total cross-project utilization · small line = hours coming from this project.
+              Same date grid as the task plan below · large % = total cross-project utilization · small line = hours from this project.
             </div>
           </div>
           <Link to="/utilization" style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -530,8 +537,11 @@ export default function ResourcePlan() {
         </div>
 
         <div style={{ overflowX: "auto" }}>
-          <div style={{ display: "grid", gridTemplateColumns: `minmax(190px,1.4fr) repeat(${days.length}, minmax(58px,.55fr)) 66px`, minWidth: Math.max(980, 260 + days.length * 58), fontSize: 10.5 }}>
-            <div style={{ padding: "7px 9px", color: "var(--muted)", fontWeight: 700, background: "var(--hover-bg)" }}>Contributor</div>
+          <div style={{ display: "grid", gridTemplateColumns: `${PLANNER_META_W}px repeat(${days.length}, ${DAY_W}px) ${AVG_W}px`, minWidth: PLANNER_META_W + days.length * DAY_W + AVG_W, fontSize: 10.5 }}>
+            <div style={{ padding: "7px 10px", color: "var(--muted)", fontWeight: 700, background: "var(--hover-bg)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <span>Contributor</span>
+              <span style={{ fontSize: 9, fontWeight: 500, opacity: .8 }}>Date columns aligned to task plan</span>
+            </div>
             {days.map((d) => {
               const date = toISO(d);
               const weekend = d.getDay() === 0 || d.getDay() === 6;
@@ -592,12 +602,12 @@ export default function ResourcePlan() {
         </div>
 
         <div style={{ overflowX: "auto" }}>
-          <div style={{ minWidth: Math.max(980, 430 + days.length * 38) }}>
-            <div style={{ display: "grid", gridTemplateColumns: `minmax(240px,1.7fr) 145px 76px minmax(${days.length * 38}px,3fr)`, background: "var(--hover-bg)", color: "var(--muted)", fontSize: 10, fontWeight: 700 }}>
+          <div style={{ minWidth: PLANNER_META_W + days.length * DAY_W }}>
+            <div style={{ display: "grid", gridTemplateColumns: `${TASK_W}px ${ASSIGNEE_W}px ${SCOPED_W}px ${days.length * DAY_W}px`, background: "var(--hover-bg)", color: "var(--muted)", fontSize: 10, fontWeight: 700 }}>
               <div style={{ padding: "7px 9px" }}>Task</div>
               <div style={{ padding: "7px 8px", borderLeft: "1px solid var(--border)" }}>Assignee</div>
               <div style={{ padding: "7px 8px", borderLeft: "1px solid var(--border)", textAlign: "right" }}>Scoped</div>
-              <div style={{ display: "grid", gridTemplateColumns: `repeat(${days.length}, minmax(38px,1fr))`, borderLeft: "1px solid var(--border)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${days.length}, ${DAY_W}px)`, borderLeft: "1px solid var(--border)" }}>
                 {days.map((d) => (
                   <div key={toISO(d)} style={{ padding: "5px 1px", textAlign: "center", borderLeft: "1px solid var(--border)", fontWeight: 600 }}>
                     <div>{d.toLocaleDateString(undefined, { weekday: "narrow" })}</div>
@@ -614,7 +624,7 @@ export default function ResourcePlan() {
                 const person = people.find((p) => p.id === task.assignee_id);
                 const bar = taskBar(task);
                 return (
-                  <div key={task.id} style={{ display: "grid", gridTemplateColumns: `minmax(240px,1.7fr) 145px 76px minmax(${days.length * 38}px,3fr)`, borderTop: "1px solid var(--border)", minHeight: 42, fontSize: 10.5 }}>
+                  <div key={task.id} style={{ display: "grid", gridTemplateColumns: `${TASK_W}px ${ASSIGNEE_W}px ${SCOPED_W}px ${days.length * DAY_W}px`, borderTop: "1px solid var(--border)", minHeight: 42, fontSize: 10.5 }}>
                     <div style={{ padding: "8px 9px", minWidth: 0 }}>
                       <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{task.name}</div>
                       <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>
