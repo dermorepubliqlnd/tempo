@@ -4757,107 +4757,111 @@ export default function WbsPlanning() {
             Reopened by {people.find((p) => p.id === project.reopened_by)?.name ?? "someone"} on {formatDate(project.reopened_at.slice(0, 10))}
           </span>
         )}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
-          {/* 2026-08-27 (Sandra: "can we just add an action button
-              instead and from there pick Re-Baseline and Close project")
-              -- single Actions menu replaces the separate Request Baseline
-              Approval button that used to render here AND the Close
-              Project button that used to render in its own button down in
-              the bottom status bar. Later the same day (Sandra: rename to
-              "Start Project" and remove Re-baseline entirely) -- the
-              request/approve RPCs (request_baseline_approval/
-              decide_baseline_request) and can_approve_rebaseline flag stay
-              as-is under the hood (still gate approving the first-ever
-              Start Project request via canDecideBaselineRequest below),
-              but canRequestBaseline is now draft-only so there is no UI
-              path left to invoke them a second time. */}
+        <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
           {(() => {
-            // 2026-08-27 (Sandra: re-baseline removed) -- Start Project (the
-            // renamed first-ever "Request Baseline Approval") is only
-            // reachable from Draft now; baseline_locked/changed_after_baseline
-            // projects no longer get a way to re-trigger this RPC.
-            const canRequestBaseline = canManageWbs && project.wbs_status === "draft" && !pendingBaselineRequest;
-            const canRequestClosure =
-              canManageWbs && (project.wbs_status === "baseline_locked" || project.wbs_status === "changed_after_baseline") && !pendingClosure;
-            // 2026-09-21 (Sandra: "allow admin permission to re-open
-            // projects") -- Full Access only, closed projects only.
+            const isDraft = project.wbs_status === "draft";
+            const isActivePlan = project.wbs_status === "baseline_locked" || project.wbs_status === "changed_after_baseline";
+            const canRequestStart = canManageWbs && isDraft && !pendingBaselineRequest;
+            const canRequestClosure = canManageWbs && isActivePlan && !pendingClosure;
             const canReopenProject = isFullAccess && project.wbs_status === "closed";
-            if (!canRequestBaseline && !canRequestClosure && !canReopenProject) return null;
+            const saveLabel = isDraft ? "Save Draft" : "Save Changes";
+
             return (
               <>
-                <button
-                  className="btn-secondary"
-                  disabled={workflowBusy}
-                  onClick={() => setWbsActionsMenuOpen((v) => !v)}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
-                >
-                  Actions <ChevronDown size={13} />
-                </button>
-                {wbsActionsMenuOpen && (
-                  <>
-                    {/* Transparent click-outside-to-close backdrop, same
-                        trick used elsewhere for lightweight popovers in
-                        this app (see DependsOnPicker below) rather than a
-                        document-level event listener. */}
-                    <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={() => setWbsActionsMenuOpen(false)} />
-                    <div
-                      className="card"
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {canEditWbs && project.wbs_status !== "closed" && (
+                    <button
+                      className="btn-secondary"
+                      disabled={saving}
+                      onClick={saveDraft}
+                    >
+                      {saving ? "Saving…" : saveLabel}
+                    </button>
+                  )}
+
+                  {canRequestStart && (
+                    <button
+                      className="btn-primary"
+                      disabled={workflowBusy || saving || hasUnsavedChanges}
+                      title={hasUnsavedChanges ? "Save your latest changes before requesting project start." : "Request approval to lock the baseline and start the project."}
+                      onClick={handleRequestBaseline}
+                    >
+                      Request Start Project
+                    </button>
+                  )}
+
+                  {isDraft && !!pendingBaselineRequest && (
+                    <span
                       style={{
-                        position: "absolute",
-                        top: "calc(100% + 4px)",
-                        right: 0,
-                        zIndex: 41,
-                        minWidth: 220,
-                        padding: 4,
-                        boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 2,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        minHeight: 32,
+                        padding: "0 10px",
+                        borderRadius: 999,
+                        background: "var(--warning-bg, #fff7ed)",
+                        color: "var(--warning-text, #b45309)",
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        border: "1px solid var(--warning-border, #fed7aa)",
                       }}
                     >
-                      {canRequestBaseline && (
-                        <button
-                          className="row-menu-item"
-                          disabled={workflowBusy}
-                          onClick={() => {
-                            setWbsActionsMenuOpen(false);
-                            handleRequestBaseline();
-                          }}
-                          style={{ display: "flex", width: "100%", textAlign: "left", background: "none", border: "none", borderRadius: 4, padding: "6px 8px", fontSize: 12.5, cursor: "pointer", color: "var(--text)" }}
-                        >
-                          Start Project
-                        </button>
-                      )}
-                      {canRequestClosure && (
-                        <button
-                          className="row-menu-item"
-                          disabled={workflowBusy}
-                          onClick={() => {
-                            setWbsActionsMenuOpen(false);
-                            setClosureFormOpen(true);
-                            window.setTimeout(() => document.getElementById("project-closure-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
-                          }}
-                          style={{ display: "flex", width: "100%", textAlign: "left", background: "none", border: "none", borderRadius: 4, padding: "6px 8px", fontSize: 12.5, cursor: "pointer", color: "var(--text)" }}
-                        >
-                          Close Project
-                        </button>
-                      )}
-                      {canReopenProject && (
-                        <button
-                          className="row-menu-item"
-                          disabled={workflowBusy}
-                          onClick={() => {
-                            setWbsActionsMenuOpen(false);
-                            handleReopenProject();
-                          }}
-                          style={{ display: "flex", width: "100%", textAlign: "left", background: "none", border: "none", borderRadius: 4, padding: "6px 8px", fontSize: 12.5, cursor: "pointer", color: "var(--text)" }}
-                        >
-                          Reopen Project
-                        </button>
-                      )}
-                    </div>
-                  </>
-                )}
+                      Start Project Requested · Awaiting Approval
+                    </span>
+                  )}
+
+                  {canRequestClosure && (
+                    <button
+                      className="btn-primary"
+                      disabled={workflowBusy || saving || hasUnsavedChanges}
+                      title={hasUnsavedChanges ? "Save your latest changes before requesting project closure." : "Prepare and submit a Project Closure request."}
+                      onClick={() => {
+                        setClosureFormOpen(true);
+                        window.setTimeout(() => document.getElementById("project-closure-section")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+                      }}
+                    >
+                      Request Project Closure
+                    </button>
+                  )}
+
+                  {isActivePlan && !!pendingClosure && (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        minHeight: 32,
+                        padding: "0 10px",
+                        borderRadius: 999,
+                        background: "var(--warning-bg, #fff7ed)",
+                        color: "var(--warning-text, #b45309)",
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        border: "1px solid var(--warning-border, #fed7aa)",
+                      }}
+                    >
+                      Closure Requested · Awaiting Approval
+                    </span>
+                  )}
+
+                  {canReopenProject && (
+                    <button className="btn-secondary" disabled={workflowBusy} onClick={handleReopenProject}>
+                      Reopen Project
+                    </button>
+                  )}
+                </div>
+
+                {hasUnsavedChanges && project.wbs_status !== "closed" ? (
+                  <span style={{ fontSize: 10.5, color: "var(--warning-text, #b45309)" }}>
+                    Save your latest changes before sending a workflow request.
+                  </span>
+                ) : project.scoping_effort_mode ? (
+                  <span style={{ fontSize: 10.5, color: "var(--muted)" }}>
+                    All changes saved.
+                  </span>
+                ) : project.wbs_status === "draft" ? (
+                  <span style={{ fontSize: 10.5, color: "var(--muted)" }}>
+                    Draft not saved yet.
+                  </span>
+                ) : null}
               </>
             );
           })()}
@@ -5066,36 +5070,7 @@ export default function WbsPlanning() {
                 </div>
               </div>
             )}
-            <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, flexShrink: 0 }}>
-              {/* Phase 21 (2026-08-24): Sandra -- "there should no longer
-                  be an option to choose which effort will be used, it
-                  will always capture the planned one." Save always
-                  operates on Forecasted (activeMode is now a fixed
-                  constant, see its declaration above).
-                  2026-09-03 (Sandra: "remove scoping effort field, there
-                  is really no other option but to save") -- the
-                  Scoping Effort label/box/tooltip that used to sit next
-                  to Save is gone; Save itself is unchanged (still always
-                  saves the Forecasted schedule). */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                {canEditWbs && (
-                  <button className="btn-primary" disabled={saving} onClick={saveDraft} style={{ flexShrink: 0 }}>
-                    {saving ? "Saving…" : "Save"}
-                  </button>
-                )}
-              </div>
-              {project.scoping_effort_mode && project.scoping_effort_mode !== activeMode ? (
-                <span style={{ fontSize: 11, color: "var(--warning-text)", fontWeight: 600 }}>
-                  Unsaved -- currently saved as {MODE_LABEL[project.scoping_effort_mode as Mode] ?? project.scoping_effort_mode}
-                </span>
-              ) : project.scoping_effort_mode ? (
-                <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                  Saved as {MODE_LABEL[project.scoping_effort_mode as Mode] ?? project.scoping_effort_mode}
-                </span>
-              ) : (
-                <span style={{ fontSize: 11, color: "var(--muted)" }}>Not saved yet</span>
-              )}
-            </div>
+
           </div>
 
           {/* Project Description -- added 2026-09-07 (Sandra: "add project
@@ -6559,7 +6534,7 @@ export default function WbsPlanning() {
                   ? "Closure details captured for this completed project."
                   : pendingClosure
                     ? "Closure request submitted. These details are now part of the approval request."
-                    : "Complete the close date and lessons learned, then submit the Project Closure request."}
+                    : "Confirm the actual end date and capture wins / lessons learned, then submit the Project Closure request."}
               </div>
             </div>
             {!pendingClosure && project.wbs_status !== "closed" && (
@@ -6568,14 +6543,14 @@ export default function WbsPlanning() {
                   Cancel
                 </button>
                 <button type="button" className="btn-primary" onClick={handleRequestClosure} disabled={workflowBusy}>
-                  {workflowBusy ? "Submitting…" : "Submit Closure Request"}
+                  {workflowBusy ? "Submitting…" : "Submit Project Closure Request"}
                 </button>
               </div>
             )}
           </div>
           <div style={{ display: "grid", gap: 12 }}>
                   <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 8, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", background: "var(--surface)" }}>
-                    <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Actual Project Close Date:</span>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)" }}>Actual Project End Date:</span>
                     <div className="wbs-field-box" style={fieldBoxStyle(!!project.actual_close_date, 110, !canEditWbs)}>
                       <InlineDate
                         value={project.actual_close_date ?? defaultActualCloseDate()}
@@ -6605,7 +6580,7 @@ export default function WbsPlanning() {
                       the Report page (BaselineReport.tsx) once a project is closed. */}
                   <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 8, display: "flex", gap: 14, flexWrap: "wrap", background: "var(--surface)" }}>
                     <div style={{ flex: "1 1 300px", minWidth: 260 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Worked:</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Worked / Wins:</div>
                       <div className="wbs-field-box" style={fieldBoxStyle(!!project.lessons_learned_worked, undefined, !canEditWbs)}>
                         <InlineTextArea
                           value={project.lessons_learned_worked ?? ""}
@@ -6616,7 +6591,7 @@ export default function WbsPlanning() {
                       </div>
                     </div>
                     <div style={{ flex: "1 1 300px", minWidth: 260 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Didn't Work:</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>What Didn’t Work / Lessons Learned:</div>
                       <div className="wbs-field-box" style={fieldBoxStyle(!!project.lessons_learned_not_worked, undefined, !canEditWbs)}>
                         <InlineTextArea
                           value={project.lessons_learned_not_worked ?? ""}
