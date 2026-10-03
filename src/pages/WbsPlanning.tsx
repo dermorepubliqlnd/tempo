@@ -5,9 +5,9 @@ import { useState, useEffect, useCallback, useRef, Fragment, type CSSProperties 
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { PauseReviewBanner } from "../components/PauseProjectModals";
-import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin } from "lucide-react";
+import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin, MoreHorizontal, Copy, ArrowUp, ArrowDown, CornerDownRight, Undo2 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import { archiveItem, ARCHIVE_MOVE_NOTE, splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, loggedTimeDeleteWarning } from "../lib/archive";
+import { archiveItem, restoreItem, ARCHIVE_MOVE_NOTE, splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, loggedTimeDeleteWarning } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { InlineText, InlineNumber, InlineSelect, InlineDate, InlineTextArea } from "../components/InlineCell";
@@ -18,7 +18,7 @@ import { rollupHoursFor, formatHours, type TimeEntryRow } from "../lib/timeTrack
 import { addDays, buildHolidaySet, isWorkingDay, parseLocalDate, toISO, workingDaysBetween, type HolidaySet } from "../lib/workingDays";
 import { fullCapacityScenario, capacityBasedScenario, packFullCapacityQueue, FULL_CAPACITY_DAILY_HOURS, type FullCapacityQueueTask } from "../lib/taskScheduling";
 import { buildForwardSchedule, type SchedTaskRow, type SchedProjectRow, type SchedAvailabilityRow } from "../lib/capacityScheduler";
-import { TASK_EFFORT_OPTIONS, TASK_EFFORT_DEFAULT_TONES, TASK_STATUS_GROUPED, statusGroupOf, PROJECT_EFFORT_LEVEL_OPTIONS, effortLevelLabel } from "../lib/notionOptions";
+import { TASK_EFFORT_OPTIONS, TASK_EFFORT_DEFAULT_TONES, TASK_STATUS_GROUPED, statusGroupOf, PROJECT_EFFORT_LEVEL_OPTIONS, PROJECT_PRIORITY_OPTIONS, effortLevelLabel } from "../lib/notionOptions";
 // One shared allocation engine for all three utilization surfaces -- this
 // snapshot, the Utilization page, and Scoped vs Logged. See
 // src/lib/dailyAllocation.ts. Replaces the old utilizationCalc.ts, which
@@ -74,6 +74,7 @@ interface ProjectRow {
   // page.
   category: string | null;
   source_id: string | null;
+  planning_type_id: string | null;
   project_type_id: string | null;
   priority: string | null;
   effort_level: string | null;
@@ -576,6 +577,7 @@ export default function WbsPlanning() {
   // builds its own Category/Source pickers.
   const [projectCategoryOptions, setProjectCategoryOptions] = useState<{ name: string; is_active: boolean }[]>([]);
   const [projectSourceOptions, setProjectSourceOptions] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
+  const [projectPlanningTypeOptions, setProjectPlanningTypeOptions] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
   const [projectTypeOptions, setProjectTypeOptions] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
   // Task Type <-> Output Type conditional mapping (Phase 23, 2026-08-25) --
   // Sandra: "I want the output be conditional based on task type." Filters
@@ -1050,8 +1052,8 @@ export default function WbsPlanning() {
     // pass silent=true to skip that full-page loading flash entirely --
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
-    const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }, { data: ptypes }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,project_type_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required").eq("id", projectId).single(),
+    const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }, { data: planningTypes }, { data: ptypes }] = await Promise.all([
+      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,planning_type_id,project_type_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -1079,6 +1081,7 @@ export default function WbsPlanning() {
       supabase.from("work_type_output_types").select("work_type_id,output_type_id"),
       supabase.from("project_categories").select("name,is_active").order("sort_order"),
       supabase.from("project_sources").select("id,name,is_active").order("sort_order"),
+      supabase.from("project_planning_types").select("id,name,is_active").order("sort_order"),
       supabase.from("project_types").select("id,name,is_active").order("sort_order"),
     ]);
     setProject((proj as ProjectRow) ?? null);
@@ -1096,6 +1099,7 @@ export default function WbsPlanning() {
     setWorkTypeOutputTypes((wtots as { work_type_id: string; output_type_id: string }[]) ?? []);
     setProjectCategoryOptions((cats as { name: string; is_active: boolean }[]) ?? []);
     setProjectSourceOptions((srcs as { id: string; name: string; is_active: boolean }[]) ?? []);
+    setProjectPlanningTypeOptions((planningTypes as { id: string; name: string; is_active: boolean }[]) ?? []);
     setProjectTypeOptions((ptypes as { id: string; name: string; is_active: boolean }[]) ?? []);
 
     // Dependencies are same-project only (v1), so fetched as a follow-up
@@ -2281,6 +2285,9 @@ export default function WbsPlanning() {
     // Project. No Full Access override (same as the Output Type gate
     // right below) -- these are meant to always be set by this point.
     const missingSetupFields: string[] = [];
+    if (!project.planning_type_id) missingSetupFields.push("Planning Type");
+    if (!project.project_type_id) missingSetupFields.push("Project Type");
+    if (!project.priority) missingSetupFields.push("Priority");
     if (!project.category) missingSetupFields.push("Category");
     if (!project.source_id) missingSetupFields.push("Source");
     if (!project.effort_level) missingSetupFields.push("Complexity");
@@ -4475,6 +4482,12 @@ export default function WbsPlanning() {
     new Set([
       ...projectSourceOptions.filter((s) => s.is_active).map((s) => s.name),
       ...(project.source_id ? [projectSourceOptions.find((s) => s.id === project.source_id)?.name].filter((n): n is string => !!n) : []),
+    ])
+  );
+  const planningTypePickerOptions = Array.from(
+    new Set([
+      ...projectPlanningTypeOptions.filter((t) => t.is_active).map((t) => t.name),
+      ...(project.planning_type_id ? [projectPlanningTypeOptions.find((t) => t.id === project.planning_type_id)?.name].filter((n): n is string => !!n) : []),
     ])
   );
   const projectTypePickerOptions = Array.from(
