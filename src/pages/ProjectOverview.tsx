@@ -39,6 +39,11 @@ interface ExtensionRow {
   created_at: string;
 }
 
+interface TimeEntryLite {
+  task_id: string | null;
+  duration_minutes: number | null;
+}
+
 function cardStyle(): React.CSSProperties {
   return {
     background: "var(--surface)",
@@ -67,6 +72,7 @@ export default function ProjectOverview() {
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
   const [holidayDates, setHolidayDates] = useState<string[]>([]);
   const [extensions, setExtensions] = useState<ExtensionRow[]>([]);
+  const [timeEntries, setTimeEntries] = useState<TimeEntryLite[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -93,6 +99,20 @@ export default function ProjectOverview() {
       setAvailability((availabilityRes.data as AvailabilityRow[] | null) ?? []);
       setHolidayDates(((holidaysRes.data as { date: string }[] | null) ?? []).map((h) => h.date));
       setExtensions((extensionRes.data as ExtensionRow[] | null) ?? []);
+
+      const projectTaskIds = ((tasksRes.data as TaskRow[] | null) ?? []).map((t) => t.id);
+      if (projectTaskIds.length > 0) {
+        const timeRes = await supabase
+          .from("time_entries")
+          .select("task_id,duration_minutes")
+          .in("task_id", projectTaskIds)
+          .in("status", ["confirmed", "approved"])
+          .eq("is_archived", false);
+        if (!cancelled) setTimeEntries((timeRes.data as TimeEntryLite[] | null) ?? []);
+      } else {
+        setTimeEntries([]);
+      }
+
       setLoading(false);
     })();
     return () => {
@@ -116,7 +136,7 @@ export default function ProjectOverview() {
   const owner = project ? people.find((p) => p.id === project.owner_id) : null;
   const assigneeIds = useMemo(() => Array.from(new Set(leafTasks.map((t) => t.assignee_id).filter((x): x is string => !!x))), [leafTasks]);
   const scopedHours = leafTasks.reduce((sum, t) => sum + Number(t.estimated_hours ?? 0), 0);
-  const assignedHours = leafTasks.filter((t) => t.assignee_id).reduce((sum, t) => sum + Number(t.estimated_hours ?? 0), 0);
+  const loggedHours = Math.round((timeEntries.reduce((sum, e) => sum + Number(e.duration_minutes ?? 0), 0) / 60) * 10) / 10;
   const completedCount = leafTasks.filter((t) => statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete").length;
   const cancelledCount = leafTasks.filter((t) => statusGroupOf(TASK_STATUS_GROUPED, t.status) === "cancelled").length;
   const inProgressCount = leafTasks.filter((t) => statusGroupOf(TASK_STATUS_GROUPED, t.status) === "in_progress").length;
@@ -309,18 +329,15 @@ export default function ProjectOverview() {
 
           {baselineStart && baselineEnd && forecastEnd ? (
             <div style={{ padding: "2px 2px 0" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "68px minmax(0,1fr) 72px", alignItems: "center", gap: 8, marginBottom: 9 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "68px minmax(0,1fr)", alignItems: "center", gap: 8, marginBottom: 9 }}>
                 <span style={{ fontSize: 10.5, color: "var(--muted)" }}>Baseline</span>
                 <div style={{ position: "relative", height: 14, minWidth: 0 }}>
                   <div style={{ position: "absolute", left: 0, right: 0, top: 5, height: 4, background: "var(--hover-bg)", borderRadius: 999 }} />
                   <div style={{ position: "absolute", left: 0, top: 2, width: `${baselineWidthPct}%`, height: 10, background: "#98a2b3", borderRadius: 999 }} />
                 </div>
-                <span style={{ fontSize: 10, color: "var(--text-secondary)", whiteSpace: "nowrap", textAlign: "right" }}>
-                  {formatDate(baselineEnd)}
-                </span>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "68px minmax(0,1fr) 72px", alignItems: "center", gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "68px minmax(0,1fr)", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 10.5, color: "var(--muted)" }}>Forecast</span>
                 <div style={{ position: "relative", height: 14, minWidth: 0 }}>
                   <div style={{ position: "absolute", left: 0, right: 0, top: 5, height: 4, background: "var(--hover-bg)", borderRadius: 999 }} />
@@ -337,9 +354,6 @@ export default function ProjectOverview() {
                     }} />
                   )}
                 </div>
-                <span style={{ fontSize: 10, color: varianceDays > 0 ? "var(--danger-text)" : "var(--text-secondary)", whiteSpace: "nowrap", textAlign: "right", fontWeight: 600 }}>
-                  {formatDate(forecastEnd)}
-                </span>
               </div>
 
               <div style={{ marginTop: 9, textAlign: "right", fontSize: 10.5, fontWeight: 700, color: varianceDays > 0 ? "var(--danger-text)" : varianceDays < 0 ? "var(--success-text)" : "var(--text-secondary)" }}>
@@ -403,7 +417,7 @@ export default function ProjectOverview() {
             {[
               ["Assignees", assigneeIds.length],
               ["Scoped Hours", `${Math.round(scopedHours * 10) / 10}h`],
-              ["Assigned Hours", `${Math.round(assignedHours * 10) / 10}h`],
+              ["Logged Hours", `${loggedHours}h`],
               ["Overallocated", overloadedAssignees],
             ].map(([label, value]) => (
               <div key={label as string} style={{ background: "var(--hover-bg)", borderRadius: 8, padding: "10px 11px" }}>
