@@ -803,7 +803,7 @@ export default function ResourcePlan() {
 
         <div ref={bandwidthScrollRef} onScroll={() => syncPlannerScroll("bandwidth")} style={{ overflowX: "auto" }}>
           <div style={{ display: "grid", gridTemplateColumns: `${PLANNER_META_W}px repeat(${days.length}, ${DAY_W}px) ${AVG_W}px`, minWidth: PLANNER_META_W + days.length * DAY_W + AVG_W, fontSize: 10.5 }}>
-            <div style={{ padding: "7px 10px", color: "var(--muted)", fontWeight: 700, background: "var(--hover-bg)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ padding: "7px 10px", color: "var(--muted)", fontWeight: 700, background: "var(--hover-bg)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, position: "sticky", left: 0, zIndex: 6, boxShadow: "1px 0 0 var(--border)" }}>
               <span>Contributor</span>
               <span style={{ fontSize: 9, fontWeight: 500, opacity: .8 }}>Date columns aligned to task plan</span>
             </div>
@@ -822,7 +822,7 @@ export default function ResourcePlan() {
 
             {resourceRows.map((r) => (
               <Fragment key={r.person.id}>
-                <div style={{ padding: "8px 9px", borderTop: "1px solid var(--border)", background: "var(--surface)", minWidth: 0 }}>
+                <div style={{ padding: "8px 9px", borderTop: "1px solid var(--border)", background: "var(--surface)", minWidth: 0, position: "sticky", left: 0, zIndex: 5, boxShadow: "1px 0 0 var(--border)" }}>
                   <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.person.name}</div>
                   <div style={{ marginTop: 2, fontSize: 9.5, color: "var(--muted)" }}>
                     {Math.round(r.projectScoped * 10) / 10}h scoped · {Math.round(r.projectHours * 10) / 10}h in period
@@ -950,9 +950,9 @@ export default function ResourcePlan() {
         <div ref={taskPlanScrollRef} onScroll={() => syncPlannerScroll("tasks")} style={{ overflowX: "auto" }}>
           <div style={{ minWidth: PLANNER_META_W + days.length * DAY_W, paddingRight: AVG_W }}>
             <div style={{ display: "grid", gridTemplateColumns: `${TASK_W}px ${ASSIGNEE_W}px ${SCOPED_W}px ${days.length * DAY_W}px`, background: "var(--hover-bg)", color: "var(--muted)", fontSize: 10, fontWeight: 700 }}>
-              <div style={{ padding: "7px 9px" }}>Task</div>
-              <div style={{ padding: "7px 8px", borderLeft: "1px solid var(--border)" }}>Assignee</div>
-              <div style={{ padding: "7px 8px", borderLeft: "1px solid var(--border)", textAlign: "right" }}>Scoped</div>
+              <div style={{ padding: "7px 9px", position: "sticky", left: 0, zIndex: 8, background: "var(--hover-bg)", boxShadow: "1px 0 0 var(--border)" }}>Task</div>
+              <div style={{ padding: "7px 8px", borderLeft: "1px solid var(--border)", position: "sticky", left: TASK_W, zIndex: 8, background: "var(--hover-bg)", boxShadow: "1px 0 0 var(--border)" }}>Assignee</div>
+              <div style={{ padding: "7px 8px", borderLeft: "1px solid var(--border)", textAlign: "right", position: "sticky", left: TASK_W + ASSIGNEE_W, zIndex: 8, background: "var(--hover-bg)", boxShadow: "1px 0 0 var(--border)" }}>Scoped</div>
               <div style={{ display: "grid", gridTemplateColumns: `repeat(${days.length}, ${DAY_W}px)`, borderLeft: "1px solid var(--border)" }}>
                 {days.map((d) => (
                   <div key={toISO(d)} style={{ padding: "5px 1px", textAlign: "center", borderLeft: "1px solid var(--border)", fontWeight: 600 }}>
@@ -971,13 +971,13 @@ export default function ResourcePlan() {
                 const bar = taskBar(task);
                 return (
                   <div key={task.id} style={{ display: "grid", gridTemplateColumns: `${TASK_W}px ${ASSIGNEE_W}px ${SCOPED_W}px ${days.length * DAY_W}px`, borderTop: "1px solid var(--border)", minHeight: 42, fontSize: 10.5 }}>
-                    <div style={{ padding: "8px 9px", minWidth: 0 }}>
+                    <div style={{ padding: "8px 9px", minWidth: 0, position: "sticky", left: 0, zIndex: 6, background: "var(--surface)", boxShadow: "1px 0 0 var(--border)" }}>
                       <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{task.name}</div>
                       <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>
                         {task.start_date ? formatDate(task.start_date) : "No start"} → {task.current_due_date ? formatDate(task.current_due_date) : "No due date"}
                       </div>
                     </div>
-                    <div style={{ padding: "6px", borderLeft: "1px solid var(--border)" }}>
+                    <div style={{ padding: "6px", borderLeft: "1px solid var(--border)", position: "sticky", left: TASK_W, zIndex: 6, background: "var(--surface)", boxShadow: "1px 0 0 var(--border)" }}>
                       <select
                         value={task.assignee_id ?? ""}
                         onChange={(e) => setTaskChange(task.id, { assignee_id: e.target.value || null })}
@@ -987,7 +987,7 @@ export default function ResourcePlan() {
                         {people.filter((p) => p.is_active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                     </div>
-                    <div style={{ padding: "8px", borderLeft: "1px solid var(--border)", textAlign: "right", fontWeight: 700 }}>
+                    <div style={{ padding: "8px", borderLeft: "1px solid var(--border)", textAlign: "right", fontWeight: 700, position: "sticky", left: TASK_W + ASSIGNEE_W, zIndex: 6, background: "var(--surface)", boxShadow: "1px 0 0 var(--border)" }}>
                       {task.estimated_hours != null ? `${Math.round(Number(task.estimated_hours) * 10) / 10}h` : "—"}
                     </div>
                     <div data-task-timeline style={{ position: "relative", borderLeft: "1px solid var(--border)", background: "repeating-linear-gradient(to right, transparent 0 calc((100% / " + days.length + ") - 1px), var(--border) calc((100% / " + days.length + ") - 1px) calc(100% / " + days.length + "))", userSelect: "none" }}>
