@@ -128,6 +128,7 @@ export default function ProjectOverview() {
     return !max || d > max ? d : max;
   }, null) ?? project?.end_date ?? null;
 
+  const baselineStart = project?.original_start_date ?? project?.start_date ?? null;
   const baselineEnd = project?.original_due_date ?? project?.end_date ?? null;
   const varianceDays = baselineEnd && forecastEnd
     ? Math.round((parseLocalDate(forecastEnd).getTime() - parseLocalDate(baselineEnd).getTime()) / 86400000)
@@ -202,9 +203,10 @@ export default function ProjectOverview() {
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {[
-            ["Start Date", project.start_date ? formatDate(project.start_date) : "—"],
+            ["Baseline Start", baselineStart ? formatDate(baselineStart) : "—"],
             ["Baseline End", baselineEnd ? formatDate(baselineEnd) : "—"],
             ["Forecast End", forecastEnd ? formatDate(forecastEnd) : "—"],
+            ["Variance", varianceDays === 0 ? "On baseline" : `${varianceDays > 0 ? "+" : ""}${varianceDays} day${Math.abs(varianceDays) === 1 ? "" : "s"}`],
           ].map(([label, value]) => (
             <div key={label} style={{ ...cardStyle(), padding: "8px 12px", minWidth: 112 }}>
               <div style={{ fontSize: 10.5, color: "var(--muted)" }}>{label}</div>
@@ -263,14 +265,14 @@ export default function ProjectOverview() {
         <section style={{ ...cardStyle(), gridColumn: "span 4" }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>Key Dates</div>
           {[
-            ["Project Start", project.start_date],
-            ["Baseline End", baselineEnd],
-            ["Forecast End", forecastEnd],
-            ["Approved End", project.end_date],
-          ].map(([label, date], i) => (
-            <div key={label as string} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderTop: i ? "1px solid var(--border)" : "none", gap: 10 }}>
+            { label: "Baseline Start", value: baselineStart ? formatDate(baselineStart) : "—" },
+            { label: "Baseline End", value: baselineEnd ? formatDate(baselineEnd) : "—" },
+            { label: "Forecast End", value: forecastEnd ? formatDate(forecastEnd) : "—", alert: varianceDays > 0 },
+            { label: "Variance", value: varianceDays === 0 ? "On baseline" : `${varianceDays > 0 ? "+" : ""}${varianceDays} day${Math.abs(varianceDays) === 1 ? "" : "s"}`, alert: varianceDays > 0 },
+          ].map(({ label, value, alert }, i) => (
+            <div key={label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderTop: i ? "1px solid var(--border)" : "none", gap: 10 }}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 11.5, color: "var(--text-secondary)" }}><CalendarDays size={13} /> {label}</span>
-              <strong style={{ fontSize: 11.5, color: label === "Forecast End" && varianceDays > 0 ? "var(--danger-text)" : "var(--navy)" }}>{date ? formatDate(date as string) : "—"}</strong>
+              <strong style={{ fontSize: 11.5, color: alert ? "var(--danger-text)" : "var(--navy)" }}>{value}</strong>
             </div>
           ))}
         </section>
