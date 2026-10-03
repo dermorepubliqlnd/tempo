@@ -5479,6 +5479,24 @@ export default function Projects() {
             />
           </div>
         </div>
+        {usingSystemProjectView && projectSystemView === "mine" && (
+          <div style={{ padding: "6px 12px 7px", borderTop: "1px solid var(--border)", background: "#fbfcfe", fontSize: 10.5, color: "var(--muted)" }}>
+            <strong style={{ color: "#17324f" }}>{personalProjectScopeCounts.total}</strong> project{personalProjectScopeCounts.total === 1 ? "" : "s"} you are involved in
+            <span style={{ margin: "0 6px", color: "#cbd5e1" }}>·</span>
+            <strong style={{ color: "#176b46" }}>{personalProjectScopeCounts.owned}</strong> owned
+            <span style={{ margin: "0 6px", color: "#cbd5e1" }}>·</span>
+            <strong style={{ color: "#52657a" }}>{personalProjectScopeCounts.contributing}</strong> contributing
+          </div>
+        )}
+        {usingSystemProjectView && projectSystemView === "team" && (
+          <div style={{ padding: "6px 12px 7px", borderTop: "1px solid var(--border)", background: "#fbfcfe", fontSize: 10.5, color: "var(--muted)" }}>
+            <strong style={{ color: "#17324f" }}>{teamProjectScopeCounts.total}</strong> team project{teamProjectScopeCounts.total === 1 ? "" : "s"}
+            <span style={{ margin: "0 6px", color: "#cbd5e1" }}>·</span>
+            <strong style={{ color: "#176b46" }}>{teamProjectScopeCounts.owned}</strong> owned by your team
+            <span style={{ margin: "0 6px", color: "#cbd5e1" }}>·</span>
+            <strong style={{ color: "#52657a" }}>{teamProjectScopeCounts.contributing}</strong> team contributing
+          </div>
+        )}
         {projectViews.activeView.viewType === "timeline" && (
           <div className="timeline-controls-row">
             <TimelineControls
