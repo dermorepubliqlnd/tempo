@@ -2363,11 +2363,14 @@ export default function Projects() {
         viewType: "table",
         groupBy: null,
         groupBy2: null,
+        hiddenColumns: [],
+        columnWidths: {},
         hiddenGroups: [],
         filterPersonIds: [],
         filterStatuses: [],
         sorts: SYSTEM_PROJECT_SORTS,
         columnOrder: PROJECT_COLUMN_ORDER,
+        progressDisplay: "bar",
       }
     : projectViews.activeView;
 
@@ -2581,6 +2584,28 @@ export default function Projects() {
                   {myProjectRole(p)}
                 </span>
               )}
+              {usingSystemProjectView && projectSystemView === "mine" && (() => {
+                const health = healthOf(p, tasks, holidayDates);
+                const needsAttention = health.tone === "danger" || health.tone === "warning" || health.label === "Schedule review";
+                return needsAttention ? (
+                  <span
+                    title={`Needs attention: ${health.label}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                      width: 18,
+                      height: 18,
+                      borderRadius: 999,
+                      background: health.tone === "danger" ? "#fff0f0" : "#fff8e6",
+                      color: health.tone === "danger" ? "var(--danger-text)" : "var(--warning-text)",
+                    }}
+                  >
+                    <AlertTriangle size={11} />
+                  </span>
+                ) : null;
+              })()}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -5410,33 +5435,35 @@ export default function Projects() {
                 marginTop: 10,
               }}
             >
-              {[
-                { key: "active", label: "Active Projects", value: projectPortfolioMeta.active, target: "active" as const, tone: "#1976ed", hint: "Portfolio-wide" },
-                { key: "attention", label: "Need Attention", value: projectPortfolioMeta.needsAttention, target: "attention" as const, tone: projectPortfolioMeta.needsAttention ? "var(--danger-text)" : "#17324f", hint: "At risk / off track" },
-                { key: "awaiting", label: "Awaiting Start", value: projectPortfolioMeta.awaitingStart, target: "all" as const, tone: "#17324f", hint: "Draft / not started" },
-                { key: "close", label: "Close Pending", value: projectPortfolioMeta.closePending, target: "attention" as const, tone: projectPortfolioMeta.closePending ? "var(--warning-text)" : "#17324f", hint: "Work complete" },
-              ].map((card) => (
-                <button
+              {(usingSystemProjectView && projectSystemView === "mine"
+                ? [
+                    { key: "owned", label: "My Active Projects", value: personalActiveProjectMeta.owned, tone: "#1976ed", hint: "Projects I own" },
+                    { key: "contributing", label: "Contributing To", value: personalActiveProjectMeta.contributing, tone: "#52657a", hint: "Projects owned by others" },
+                    { key: "involvement", label: "Current Involvement", value: personalActiveProjectMeta.total, tone: "#17324f", hint: "Owned + contributing" },
+                    { key: "attention", label: "Needs My Attention", value: personalActiveProjectMeta.needsAttention, tone: personalActiveProjectMeta.needsAttention ? "var(--danger-text)" : "#17324f", hint: "At risk / off track" },
+                  ]
+                : [
+                    { key: "active", label: "Active Projects", value: projectPortfolioMeta.active, tone: "#1976ed", hint: "Portfolio-wide" },
+                    { key: "attention", label: "Need Attention", value: projectPortfolioMeta.needsAttention, tone: projectPortfolioMeta.needsAttention ? "var(--danger-text)" : "#17324f", hint: "At risk / off track" },
+                    { key: "awaiting", label: "Awaiting Start", value: projectPortfolioMeta.awaitingStart, tone: "#17324f", hint: "Draft / not started" },
+                    { key: "close", label: "Close Pending", value: projectPortfolioMeta.closePending, tone: projectPortfolioMeta.closePending ? "var(--warning-text)" : "#17324f", hint: "Work complete" },
+                  ]
+              ).map((card) => (
+                <div
                   key={card.key}
-                  type="button"
-                  onClick={() => {
-                    setUsingSystemProjectView(true);
-                    setProjectSystemView(card.target);
-                  }}
                   style={{
                     textAlign: "left",
                     padding: "10px 12px",
                     border: "1px solid var(--border)",
                     borderRadius: 10,
                     background: "var(--surface)",
-                    cursor: "pointer",
                     boxShadow: "0 1px 2px rgba(15,41,66,.04)",
                   }}
                 >
                   <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", letterSpacing: ".025em", textTransform: "uppercase" }}>{card.label}</div>
                   <div style={{ marginTop: 4, fontSize: 21, lineHeight: 1, fontWeight: 750, color: card.tone }}>{card.value}</div>
                   <div style={{ marginTop: 5, fontSize: 9.5, color: "var(--muted)" }}>{card.hint}</div>
-                </button>
+                </div>
               ))}
             </div>
           </>
