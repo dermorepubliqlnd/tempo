@@ -1004,6 +1004,21 @@ export default function WbsPlanning() {
   const [rowActionsMenu, setRowActionsMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
   const [moveParentTaskId, setMoveParentTaskId] = useState<string | null>(null);
   const [lastDeletedTask, setLastDeletedTask] = useState<{ id: string; name: string } | null>(null);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [bulkCancelOpen, setBulkCancelOpen] = useState(false);
+  const [bulkCancelReason, setBulkCancelReason] = useState("");
+  function toggleTaskSelected(taskId: string) {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }
+  function clearTaskSelection() {
+    setSelectedTaskIds(new Set());
+  }
   useEffect(() => {
     if (!lastDeletedTask) return;
     const timer = window.setTimeout(() => setLastDeletedTask(null), 7000);
@@ -1097,6 +1112,10 @@ export default function WbsPlanning() {
     // ("manual"/Forecasted, always), not state -- no more seeding needed
     // here. See the activeMode declaration above for why.
     setTasks((tks as TaskRow[]) ?? []);
+    setSelectedTaskIds((prev) => {
+      const valid = new Set(((tks as TaskRow[]) ?? []).map((t) => t.id));
+      return new Set(Array.from(prev).filter((id) => valid.has(id)));
+    });
     setPeople((ppl as PersonRow[]) ?? []);
     setAvailability(avail);
     setHolidays(hols);
@@ -3041,6 +3060,165 @@ export default function WbsPlanning() {
       return;
     }
     setMoveParentTaskId(null);
+    await loadAll(true);
+  }
+
+  function selectedTasks(): (TaskRow & { depth: number })[] {
+    return orderedTasks.filter((t) => selectedTaskIds.has(t.id));
+  }
+
+  async function bulkAssignSelected() {
+    const eligible = selectedTasks().filter((t) => !hasChildren(t.id) && !isLockedStatus(t.status) && t.status !== "Cancelled");
+    if (!eligible.length) {
+      await alert("Select at least one editable leaf task to assign.");
+      return;
+    }
+    const personId = await assigneePicker.pick(`Assign ${eligible.length} selected task${eligible.length === 1 ? "" : "s"}`);
+    if (!personId) return;
+    for (const t of eligible) {
+      const { error } = await supabase.from("tasks").update({ assignee_id: personId }).eq("id", t.id);
+      if (error) {
+        await alert(`Couldn't assign "${t.name}": ${error.message}`);
+        return;
+      }
+    }
+    clearTaskSelection();
+    await loadAll(true);
+  }
+
+  async function bulkDuplicateSelected() {
+    const chosen = selectedTasks();
+    const eligible = chosen.filter((t) => !hasChildren(t.id));
+    if (!eligible.length) {
+      await alert("Select at least one task without sub-tasks to duplicate.");
+      return;
+    }
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    for (const t of eligible) {
+      const siblings = siblingsFor(t);
+      const at = siblings.findIndex((x) => x.id === t.id);
+      const next = siblings[at + 1];
+      const sortOrder = next && t.sort_order != null && next.sort_order != null
+        ? (t.sort_order + next.sort_order) / 2
+        : (t.sort_order ?? Date.now()) + 500;
+      const { error } = await supabase.from("tasks").insert({
+        project_id: t.project_id,
+        parent_task_id: t.parent_task_id,
+        assignee_id: t.assignee_id,
+        name: `${t.name || "Untitled task"} copy`,
+        status: "Not Started",
+        start_date: t.start_date,
+        start_date_full: t.start_date_full,
+        start_date_standard: t.start_date_standard,
+        start_full_auto: t.start_full_auto,
+        start_standard_auto: t.start_standard_auto,
+        manual_end_date: t.manual_end_date,
+        original_due_date: t.current_due_date,
+        current_due_date: t.current_due_date,
+        estimated_hours: t.estimated_hours,
+        work_type_id: t.work_type_id,
+        output_type_id: t.output_type_id,
+        output_count: t.output_count,
+        sort_order: sortOrder,
+      });
+      if (error) {
+        await alert(`Couldn't duplicate "${t.name}": ${error.message}`);
+        return;
+      }
+    }
+    clearTaskSelection();
+    await loadAll(true);
+    if (eligible.length < chosen.length) {
+      await alert(`${chosen.length - eligible.length} parent task(s) with sub-tasks were skipped. Duplicate those individually if needed.`);
+    }
+  }
+
+  async function bulkDeleteSelected() {
+    if (project?.wbs_status !== "draft") return;
+    const chosen = selectedTasks();
+    if (!chosen.length) return;
+    const chosenIds = new Set(chosen.map((t) => t.id));
+    const roots = chosen.filter((t) => !t.parent_task_id || !chosenIds.has(t.parent_task_id));
+    const { blocked } = await splitByArchivePermission("task", roots.map((t) => t.id));
+    if (blocked.length) {
+      await alert({ title: "Some tasks can't be deleted", message: blockedDeleteMessage("task", roots.map((t) => t.name), roots.length - blocked.length) });
+      return;
+    }
+    const allAffectedIds = Array.from(new Set(roots.flatMap((t) => [t.id, ...tasks.filter((x) => x.parent_task_id === t.id).map((x) => x.id)])));
+    const logged = await loggedHoursOnTasks(allAffectedIds);
+    const ok = await confirm({
+      title: `Delete ${roots.length} selected task${roots.length === 1 ? "" : "s"}`,
+      message: logged.entries > 0
+        ? `${loggedTimeDeleteWarning("The selected tasks", logged.hours, logged.entries)}\n\nThey will be moved to Archive and can be restored.`
+        : `Move ${roots.length} selected task${roots.length === 1 ? "" : "s"} to Archive? Parent tasks include their sub-tasks.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    for (const t of roots) {
+      const { error } = await archiveItem("task", t.id);
+      if (error) {
+        await alert(`Couldn't delete "${t.name}": ${error.message}`);
+        return;
+      }
+    }
+    setLastDeletedTask(roots.length === 1 ? { id: roots[0].id, name: roots[0].name } : null);
+    clearTaskSelection();
+    await loadAll(true);
+  }
+
+  async function bulkMoveSelected(parentId: string | null) {
+    const chosen = selectedTasks();
+    const eligible = chosen.filter((t) => !hasChildren(t.id) && !isLockedStatus(t.status));
+    if (!eligible.length) {
+      await alert("Select at least one movable task without sub-tasks.");
+      return;
+    }
+    let nextOrder = Math.max(0, ...orderedTasks.filter((x) => x.parent_task_id === parentId).map((x) => x.sort_order ?? 0)) + 1000;
+    for (const t of eligible) {
+      if (parentId === t.id) continue;
+      const { error } = await supabase.from("tasks").update({ parent_task_id: parentId, sort_order: nextOrder }).eq("id", t.id);
+      if (error) {
+        await alert(`Couldn't move "${t.name}": ${error.message}`);
+        return;
+      }
+      nextOrder += 1000;
+    }
+    setBulkMoveOpen(false);
+    clearTaskSelection();
+    await loadAll(true);
+    if (eligible.length < chosen.length) {
+      await alert(`${chosen.length - eligible.length} task(s) were skipped because they are locked or already contain sub-tasks.`);
+    }
+  }
+
+  async function bulkCancelSelected() {
+    const reason = bulkCancelReason.trim();
+    if (!reason) return;
+    const chosen = selectedTasks();
+    const eligible = chosen.filter((t) => !hasChildren(t.id) && !isLockedStatus(t.status) && t.status !== "Cancelled");
+    if (!eligible.length) {
+      await alert("Select at least one active leaf task to cancel.");
+      return;
+    }
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    for (const t of eligible) {
+      const { error } = await supabase
+        .from("tasks")
+        .update({ status: "Cancelled", cancellation_reason: reason, submitted_on: null, submitted_by: null, actual_completion_date: null })
+        .eq("id", t.id);
+      if (error) {
+        await alert(`Couldn't cancel "${t.name}": ${error.message}`);
+        return;
+      }
+    }
+    setBulkCancelOpen(false);
+    setBulkCancelReason("");
+    clearTaskSelection();
     await loadAll(true);
   }
 
