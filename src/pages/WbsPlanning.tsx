@@ -7173,29 +7173,24 @@ export default function WbsPlanning() {
                           // Output ship).
                           const needsWorkTypeFirst = !t.work_type_id;
                           if (needsWorkTypeFirst) {
+                            // 2026-10-04: a quiet disabled field with a tooltip
+                            // instead of a click-to-alert dialog.
                             return (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (rowEditable) {
-                                    void alert("Select a Work Type first. Output Type options depend on the selected Work Type.");
-                                  }
-                                }}
-                                disabled={!rowEditable}
-                                title={rowEditable ? "Select a Work Type first to choose an Output Type." : undefined}
+                              <span
+                                aria-disabled="true"
+                                title={rowEditable ? "Select a Work Type first — Output Type options depend on it." : undefined}
                                 style={{
+                                  display: "block",
                                   width: "100%",
                                   padding: "3px 4px",
-                                  border: "none",
-                                  background: "transparent",
                                   color: "var(--muted)",
-                                  textAlign: "left",
+                                  opacity: 0.55,
                                   fontSize: 11.5,
-                                  cursor: rowEditable ? "pointer" : "default",
+                                  cursor: rowEditable ? "not-allowed" : "default",
                                 }}
                               >
                                 —
-                              </button>
+                              </span>
                             );
                           }
                           return (

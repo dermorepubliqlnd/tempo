@@ -11,11 +11,11 @@ import {
   Users,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import { actualProgress, healthOf, type ProjectRow, type TaskRow } from "./Projects";
+import { actualProgress, healthOf, projectStatusOf, type ProjectRow, type TaskRow } from "./Projects";
 import { formatDate } from "../lib/formatDate";
 import { TASK_STATUS_GROUPED, statusGroupOf } from "../lib/notionOptions";
 import { createAllocationEngine, dailyCapacityHours, type UtilProjectRow, type UtilTaskRow } from "../lib/dailyAllocation";
-import { addDays, buildHolidaySet, isWorkingDay, parseLocalDate, toISO } from "../lib/workingDays";
+import { addDays, buildHolidaySet, isWorkingDay, parseLocalDate, toISO, workingDayDelta } from "../lib/workingDays";
 
 interface PersonRow {
   id: string;
@@ -152,12 +152,13 @@ export default function ProjectOverview() {
 
   const baselineStart = project?.original_start_date ?? project?.start_date ?? null;
   const baselineEnd = project?.original_due_date ?? project?.end_date ?? null;
+  // Working days (Mon-Fri minus holidays), same convention as extensions.
   const varianceDays = baselineEnd && forecastEnd
-    ? Math.round((parseLocalDate(forecastEnd).getTime() - parseLocalDate(baselineEnd).getTime()) / 86400000)
+    ? workingDayDelta(baselineEnd.slice(0, 10), forecastEnd.slice(0, 10), holidaySet)
     : 0;
 
   const overdueTasks = openTasks.filter((t) => t.current_due_date && t.current_due_date.slice(0, 10) < toISO(new Date())).length;
-  const tasksChangedAfterBaseline = project?.wbs_status === "changed_after_baseline" ? openTasks.length : 0;
+  const changedAfterBaseline = project?.wbs_status === "changed_after_baseline";
   const pendingExtensions = extensions.filter((e) => e.status === "Pending").length;
   const unassignedTasks = openTasks.filter((t) => !t.assignee_id).length;
 
@@ -222,6 +223,7 @@ export default function ProjectOverview() {
     );
   }
 
+  const displayStatus = projectStatusOf(project);
   const projectCode = `P-${String(project.project_number ?? "").padStart(4, "0")}`;
 
   const scheduleStartMs = baselineStart ? parseLocalDate(baselineStart).getTime() : null;
@@ -254,8 +256,8 @@ export default function ProjectOverview() {
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <h1 style={{ marginBottom: 3 }}>{project.name}</h1>
-            <span className="status-pill" data-tone={project.status === "In Progress" ? "accent" : project.status === "Completed" ? "success" : project.status === "Paused" ? "purple" : "neutral"}>
-              {project.status ?? "Not Started"}
+            <span className="status-pill" data-tone={displayStatus === "In Progress" ? "accent" : displayStatus === "Completed" ? "success" : displayStatus === "Paused" ? "purple" : "neutral"}>
+              {displayStatus ?? "Not Started"}
             </span>
           </div>
           <div style={{ fontSize: 12.5, color: "var(--text-secondary)", maxWidth: 760 }}>{project.description || "No project description yet."}</div>
@@ -294,7 +296,7 @@ export default function ProjectOverview() {
             <Gauge size={14} /> {healthLabel}
           </div>
           <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-secondary)", lineHeight: 1.45 }}>
-            {varianceDays > 0 ? `Forecast is ${varianceDays} day${varianceDays === 1 ? "" : "s"} beyond the current baseline.` : "Forecast remains within the current project envelope."}
+            {varianceDays > 0 ? `Forecast is ${varianceDays} working day${varianceDays === 1 ? "" : "s"} beyond the current baseline.` : "Forecast remains within the current project envelope."}
           </div>
         </div>
         <div style={{ padding: 16, borderLeft: "1px solid var(--border)" }}>
@@ -343,7 +345,7 @@ export default function ProjectOverview() {
               ["Baseline Start", baselineStart ? formatDate(baselineStart) : "—"],
               ["Baseline End", baselineEnd ? formatDate(baselineEnd) : "—"],
               ["Forecast End", forecastEnd ? formatDate(forecastEnd) : "—"],
-              ["Variance", varianceDays === 0 ? "On baseline" : `${varianceDays > 0 ? "+" : ""}${varianceDays} day${Math.abs(varianceDays) === 1 ? "" : "s"}`],
+              ["Variance", varianceDays === 0 ? "On baseline" : `${varianceDays > 0 ? "+" : ""}${varianceDays} working day${Math.abs(varianceDays) === 1 ? "" : "s"}`],
             ].map(([label, value], i) => (
               <div key={label} style={{ padding: "8px 9px", borderLeft: i ? "1px solid var(--border)" : "none", minWidth: 0 }}>
                 <div style={{ fontSize: 9.5, color: "var(--muted)", whiteSpace: "nowrap" }}>{label}</div>
@@ -392,7 +394,7 @@ export default function ProjectOverview() {
               </div>
 
               <div style={{ marginTop: 9, textAlign: "right", fontSize: 10.5, fontWeight: 700, color: varianceDays > 0 ? "var(--danger-text)" : varianceDays < 0 ? "var(--success-text)" : "var(--text-secondary)" }}>
-                {varianceDays === 0 ? "On baseline" : `${varianceDays > 0 ? "+" : ""}${varianceDays} day${Math.abs(varianceDays) === 1 ? "" : "s"} vs baseline`}
+                {varianceDays === 0 ? "On baseline" : `${varianceDays > 0 ? "+" : ""}${varianceDays} working day${Math.abs(varianceDays) === 1 ? "" : "s"} vs baseline`}
               </div>
             </div>
           ) : (
@@ -408,11 +410,11 @@ export default function ProjectOverview() {
             { Icon: AlertTriangle, label: "Overdue tasks", count: overdueTasks },
             { Icon: Users, label: "Overallocated assignees", count: overloadedAssignees },
             { Icon: Clock3, label: "Pending extension requests", count: pendingExtensions },
-            { Icon: CheckCircle2, label: "Changed after baseline", count: tasksChangedAfterBaseline ? 1 : 0 },
-          ].map(({ Icon, label, count }, i) => (
+            { Icon: CheckCircle2, label: "Changed after baseline", count: changedAfterBaseline ? 1 : 0, text: changedAfterBaseline ? "Yes" : "No" },
+          ].map(({ Icon, label, count, text }: { Icon: typeof CheckCircle2; label: string; count: number; text?: string }, i) => (
             <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: i ? "1px solid var(--border)" : "none", fontSize: 11.5 }}>
               <span style={{ display: "inline-flex", gap: 7, alignItems: "center", color: "var(--text-secondary)" }}><Icon size={13} /> {label}</span>
-              <strong style={{ color: count > 0 ? "var(--danger-text)" : "var(--muted)" }}>{count}</strong>
+              <strong style={{ color: count > 0 ? "var(--danger-text)" : "var(--muted)" }}>{text ?? count}</strong>
             </div>
           ))}
         </section>

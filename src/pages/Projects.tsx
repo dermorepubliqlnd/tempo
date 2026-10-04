@@ -551,7 +551,7 @@ function loadDismissedDoneSuggestions(storageKey: string): Set<string> {
 // list. Status WRITES stay gated by canEditStatus/changeProjectStatus as
 // before; this only affects what gets displayed for a value nobody can
 // currently edit anyway.
-function projectStatusOf(p: ProjectRow): string | null {
+export function projectStatusOf(p: ProjectRow): string | null {
   return p.wbs_status === "draft" ? "Not Started" : p.status;
 }
 
