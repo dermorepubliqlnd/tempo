@@ -1072,16 +1072,6 @@ export default function Projects() {
     return `tempo.projects.defaultView.${me?.id ?? "anonymous"}`;
   }
 
-  const roleBasedProjectDefaultViewId =
-    previewAsIndividual
-      ? "system:owned"
-      : me?.access_level === "full"
-      ? "system:all"
-      : directReportIds.size > 0
-      ? "system:team"
-      : "system:owned";
-  const effectiveProjectDefaultViewId = projectDefaultViewId ?? roleBasedProjectDefaultViewId;
-
   function setCurrentProjectViewAsDefault() {
     const id = usingSystemProjectView ? `system:${projectSystemView}` : `personal:${projectViews.activeViewId}`;
     setProjectDefaultViewId(id);
@@ -1249,6 +1239,15 @@ export default function Projects() {
   const hasTeam = directReportIds.size > 0;
   const showTeamProjectScope = hasTeam && !previewAsIndividual;
   const isIndividualProjectPerspective = previewAsIndividual || (me?.access_level !== "full" && !hasTeam);
+  const roleBasedProjectDefaultViewId =
+    previewAsIndividual
+      ? "system:owned"
+      : me?.access_level === "full"
+      ? "system:all"
+      : hasTeam
+      ? "system:team"
+      : "system:owned";
+  const effectiveProjectDefaultViewId = projectDefaultViewId ?? roleBasedProjectDefaultViewId;
   // Project Notes (2026-08-14): per-project note count for the list/board
   // bubble, and which project (if any) currently has the Notes sidebar
   // open. Counts are fetched once in loadAll() and kept in sync afterward
