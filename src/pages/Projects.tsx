@@ -6077,6 +6077,7 @@ export default function Projects() {
               collapseAllContainer={projectPillsRowEl}
               pageSizeOptions={[25, 50, 100]}
               pageStorageKey="projects"
+              stickyHeaderAnchor={projectClusterRef}
               emptyLabel="No projects yet. Add one below."
               selectable
               selectedKeys={selectedProjectIds}
@@ -6347,6 +6348,7 @@ export default function Projects() {
               collapseAllContainer={taskPillsRowEl}
               pageSizeOptions={[50, 100, 150]}
               pageStorageKey="tasks"
+              stickyHeaderAnchor={taskClusterRef}
               emptyLabel="No tasks yet. Add tasks from WBS Planning."
               compactGutter
               selectable

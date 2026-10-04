@@ -59,6 +59,11 @@ interface DataTableProps<T> {
   // pageStorageKey. Sub-tasks are never split from their parent.
   pageSizeOptions?: number[];
   pageStorageKey?: string;
+  // 2026-10-04: pin the header row under this (sticky) element while the
+  // PAGE scrolls -- used instead of maxBodyHeight's inner scroll box. Done
+  // with a scroll-synced transform because the horizontal-scroll wrapper
+  // would otherwise trap position:sticky.
+  stickyHeaderAnchor?: React.RefObject<HTMLElement | null>;
 }
 
 // ~1.3cm at 96dpi -- narrow enough for icon-only columns, but still a
@@ -102,7 +107,42 @@ export default function DataTable<T>({
   maxBodyHeight,
   pageSizeOptions,
   pageStorageKey,
+  stickyHeaderAnchor,
 }: DataTableProps<T>) {
+  const pinHeader = !!maxBodyHeight || !!stickyHeaderAnchor;
+  const tableElRef = useRef<HTMLTableElement>(null);
+  useEffect(() => {
+    if (!stickyHeaderAnchor || maxBodyHeight) return;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const table = tableElRef.current;
+      const anchor = stickyHeaderAnchor.current;
+      const thead = table?.tHead;
+      if (!table || !anchor || !thead) return;
+      const anchorBottom = anchor.getBoundingClientRect().bottom;
+      const tRect = table.getBoundingClientRect();
+      const headH = thead.getBoundingClientRect().height;
+      const offset = Math.max(0, Math.min(anchorBottom - tRect.top, tRect.height - headH * 2));
+      const value = offset > 0 ? `translateY(${offset}px)` : "";
+      thead.querySelectorAll("th").forEach((th) => {
+        if ((th as HTMLElement).style.transform !== value) (th as HTMLElement).style.transform = value;
+      });
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    window.addEventListener("scroll", schedule, true);
+    window.addEventListener("resize", schedule);
+    schedule();
+    const timer = window.setInterval(schedule, 500); // layout shifts (data loads, collapses)
+    return () => {
+      window.removeEventListener("scroll", schedule, true);
+      window.removeEventListener("resize", schedule);
+      window.clearInterval(timer);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [stickyHeaderAnchor, maxBodyHeight]);
   const navigate = useNavigate();
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dragRowKey, setDragRowKey] = useState<string | null>(null);
@@ -419,11 +459,11 @@ export default function DataTable<T>({
               minWidth: gutterWidth,
               maxWidth: gutterWidth,
               padding: 0,
-              position: maxBodyHeight || frozenUpToIndex >= 0 ? "sticky" : undefined,
+              position: maxBodyHeight || frozenUpToIndex >= 0 ? "sticky" : pinHeader ? "relative" : undefined,
               top: maxBodyHeight ? 0 : undefined,
               left: frozenUpToIndex >= 0 ? 0 : undefined,
-              zIndex: maxBodyHeight ? 5 : frozenUpToIndex >= 0 ? 3 : undefined,
-              background: maxBodyHeight && frozenUpToIndex < 0 ? "var(--surface)" : undefined,
+              zIndex: pinHeader ? 5 : frozenUpToIndex >= 0 ? 3 : undefined,
+              background: pinHeader && frozenUpToIndex < 0 ? "var(--surface)" : undefined,
             }}
           />
         )}
@@ -453,8 +493,8 @@ export default function DataTable<T>({
               position: maxBodyHeight || isFrozen ? "sticky" : "relative",
               top: maxBodyHeight ? 0 : undefined,
               left: isFrozen ? frozenLeft : undefined,
-              zIndex: maxBodyHeight ? (isFrozen ? 4 : 3) : isFrozen ? 2 : undefined,
-              background: maxBodyHeight && !isFrozen ? "var(--surface)" : undefined,
+              zIndex: pinHeader ? (isFrozen ? 4 : 3) : isFrozen ? 2 : undefined,
+              background: pinHeader && !isFrozen ? "var(--surface)" : undefined,
               boxShadow: isLastFrozen ? "2px 0 6px -2px rgba(0,0,0,0.18)" : undefined,
               width: displayWidth(c.key),
               maxWidth: displayWidth(c.key),
@@ -844,7 +884,7 @@ export default function DataTable<T>({
           <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 2px 4px" }}>{collapseAllButton}</div>
         ))}
       <div style={{ width: "100%", overflowX: "auto", overflowY: maxBodyHeight ? "auto" : "visible", maxHeight: maxBodyHeight }}>
-        <table className="data-table" style={{ tableLayout: "fixed", width: totalWidth }}>
+        <table ref={tableElRef} className="data-table" style={{ tableLayout: "fixed", width: totalWidth }}>
           {header}
           {body}
           {footerContent != null && (
