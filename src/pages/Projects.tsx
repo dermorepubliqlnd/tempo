@@ -5495,7 +5495,7 @@ export default function Projects() {
         </div>
         {/* phase127g (Sandra 2026-10-01): header "Add New Project" button,
             styled like Time Tracking's Add Time pill. Same createBlankProject
-            as the in-table "New project" rows, which stay. */}
+            as the in-table "New project" rows (removed 2026-10-04 -- header button only). */}
         {canCreateProject && pageTab === "projects" && (
           <button
             onClick={async () => {
@@ -5788,12 +5788,6 @@ export default function Projects() {
               onMoveCard={getProjectBoardMoveHandler(resolveBoardGroupBy(projectViews.activeView.groupBy, PROJECT_BOARD_GROUPABLE_KEYS, "phase"))}
               onReorderCard={reorderProjects}
             />
-            {canCreateProject && (
-              <div className="add-row-trigger" style={{ margin: "0 12px 12px" }} onClick={createBlankProject}>
-                <Plus size={12} />
-                New project
-              </div>
-            )}
           </>
         ) : projectViews.activeView.viewType === "timeline" ? (
           <>
@@ -5823,12 +5817,6 @@ export default function Projects() {
               labelWidth={projectViews.activeView.timelineLabelWidth ?? 460}
               onLabelWidthChange={(timelineLabelWidth) => updateProjectView({ timelineLabelWidth })}
             />
-            {canCreateProject && (
-              <div className="add-row-trigger" style={{ margin: "0 12px 12px" }} onClick={createBlankProject}>
-                <Plus size={12} />
-                New project
-              </div>
-            )}
           </>
         ) : projectViews.activeView.viewType === "calendar" ? (
           <>
@@ -5859,12 +5847,6 @@ export default function Projects() {
               )}
               isNonWorkingDay={(d) => !isWorkingDay(d, holidayDates)}
             />
-            {canCreateProject && (
-              <div className="add-row-trigger" style={{ margin: "0 12px 12px" }} onClick={createBlankProject}>
-                <Plus size={12} />
-                New project
-              </div>
-            )}
           </>
         ) : (
           <div className="data-table-dense">
@@ -5886,18 +5868,6 @@ export default function Projects() {
               onToggleSelectAll={toggleProjectSelectAll}
               orderable
               onReorder={reorderProjects}
-              footerRow={
-                canCreateProject
-                  ? (colSpan) => (
-                      <td colSpan={colSpan} className="add-row-cell">
-                        <div className="add-row-trigger" onClick={createBlankProject}>
-                          <Plus size={12} />
-                          New project
-                        </div>
-                      </td>
-                    )
-                  : undefined
-              }
             />
           </div>
         )}
