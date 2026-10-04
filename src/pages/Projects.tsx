@@ -5462,6 +5462,7 @@ export default function Projects() {
         <div className="sticky-toolbar-cluster" ref={projectClusterRef}>
         <div className="table-toolbar">
           <ViewTabs
+            mode="dropdown"
             views={projectViews.views}
             activeViewId={projectViews.activeViewId}
             rows={projects}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Pencil, Copy, Trash2, Table2, Kanban, Calendar, GanttChart, Search } from "lucide-react";
+import { Plus, Pencil, Copy, Trash2, Table2, Kanban, Calendar, GanttChart, Search, ChevronDown, MoreHorizontal, Check } from "lucide-react";
 import type { GroupOption, TableView, ViewType } from "../lib/tableTypes";
 import { VIEW_ICON_LIBRARY, VIEW_ICON_SECTIONS } from "../lib/viewIcons";
 
@@ -39,6 +39,12 @@ interface ViewTabsProps<T> {
   // function yet just renders without drag affordances, same fallback-safe
   // pattern as the other optional callbacks above.
   onReorder?: (draggedId: string, targetId: string) => void;
+  // 2026-10-04 (Sandra): "dropdown" = one grouped view selector
+  // (My Projects / Team Views / My Views) + Add view, instead of a tab per
+  // view. Groups come from systemGroup ("my" | "organization"); every
+  // non-system view lands under My Views.
+  mode?: "tabs" | "dropdown";
+  dropdownGroupLabels?: { my: string; organization: string; custom: string };
 }
 
 const MAX_VISIBLE = 6;
@@ -103,6 +109,8 @@ export default function ViewTabs<T>({
   onDuplicate,
   confirm,
   onReorder,
+  mode = "tabs",
+  dropdownGroupLabels = { my: "My Projects", organization: "Team Views", custom: "My Views" },
 }: ViewTabsProps<T>) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -116,6 +124,9 @@ export default function ViewTabs<T>({
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [addSearch, setAddSearch] = useState("");
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [selectorPos, setSelectorPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const selectorRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // Drag-to-reorder state for the tab bar (see onReorder prop doc).
   const [dragViewId, setDragViewId] = useState<string | null>(null);
@@ -151,14 +162,28 @@ export default function ViewTabs<T>({
       if (menuDropdownRef.current?.contains(target)) return;
       if (overflowDropdownRef.current?.contains(target)) return;
       if (addPopoverRef.current?.contains(target)) return;
+      if (selectorRef.current?.contains(target)) return;
       setMenuOpenId(null);
       setIconPickerOpenId(null);
       setIconSearch("");
       setOverflowOpen(false);
       setAddOpen(false);
+      setSelectorOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      setMenuOpenId(null);
+      setIconPickerOpenId(null);
+      setOverflowOpen(false);
+      setAddOpen(false);
+      setSelectorOpen(false);
     }
     document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
   }, []);
 
   function openPositionedMenu(e: ReactMouseEvent<HTMLElement>, setPos: (p: { top: number; left: number }) => void, width: number) {
@@ -202,12 +227,10 @@ export default function ViewTabs<T>({
   const overflow = views.filter((v) => !visible.includes(v));
   const filteredViews = views.filter((v) => v.name.toLowerCase().includes(addSearch.trim().toLowerCase()));
 
-  function renderTab(v: TableView) {
-    const active = v.id === activeViewId;
+  // Per-view Rename / Icon & color / Duplicate / Delete dropdown, shared by
+  // the tab bar and the dropdown selector (2026-10-04).
+  function renderViewMenu(v: TableView) {
     const color = TAB_COLORS[v.color] ?? TAB_COLORS.neutral;
-    // A view's own icon (v.icon, chosen from VIEW_ICON_LIBRARY) wins when
-    // set; otherwise falls back to the old per-viewType default, exactly
-    // as every view rendered before this feature existed.
     const Icon = (v.icon && VIEW_ICON_LIBRARY[v.icon]) || VIEW_TYPE_ICONS[v.viewType] || Table2;
     const iconQuery = iconSearch.trim().toLowerCase();
     const iconSections = iconQuery
@@ -216,74 +239,7 @@ export default function ViewTabs<T>({
         )
       : VIEW_ICON_SECTIONS;
     return (
-      <div
-        key={v.id}
-        className={`view-tab${active ? " active" : ""}${dragViewId === v.id ? " dragging" : ""}`}
-        style={{ color: active ? color : undefined }}
-        title={v.systemView ? (v.isDefaultView ? "System view · Default" : "System view") : active ? "Click again for view options" : undefined}
-        draggable={!!onReorder && !v.systemView && editingId !== v.id}
-        onDragStart={(e) => {
-          e.stopPropagation();
-          setDragViewId(v.id);
-        }}
-        onDragOver={(e) => {
-          if (dragViewId) e.preventDefault();
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (dragViewId && dragViewId !== v.id) onReorder?.(dragViewId, v.id);
-          setDragViewId(null);
-        }}
-        onDragEnd={() => setDragViewId(null)}
-        onClick={(e) => {
-          // Sandra, 2026-09-03 ("remove the ellipsis... highlight the
-          // active view... 1st click displays the view, 2nd click on the
-          // active tab shows view settings"): the separate always-visible
-          // "..." button is gone -- the tab itself is now the trigger.
-          // Selecting an inactive tab just switches to it, same as
-          // before; clicking a tab that's ALREADY active (this is the
-          // Notion behavior she's describing) toggles the same
-          // Rename/Duplicate/Color/Delete dropdown that used to live
-          // behind the "..." icon.
-          if (active && v.systemView) {
-            setMenuOpenId(null);
-            return;
-          }
-          if (active) {
-            if (menuOpenId === v.id) {
-              setMenuOpenId(null);
-            } else {
-              openPositionedMenu(e, setMenuPos, 260);
-              setMenuOpenId(v.id);
-            }
-          } else {
-            onSelect(v.id);
-            setMenuOpenId(null);
-          }
-        }}
-      >
-        {editingId === v.id ? (
-          <input
-            autoFocus
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onBlur={commitRename}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commitRename();
-              if (e.key === "Escape") setEditingId(null);
-            }}
-            onClick={(e) => e.stopPropagation()}
-            style={{ fontSize: 12, fontWeight: 600, padding: "1px 4px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", width: 100 }}
-          />
-        ) : (
-          <>
-            <Icon size={12} className="view-tab-icon" style={{ color }} />
-            {v.name}
-            {v.isDefaultView && <span title="Default view" style={{ fontSize: 10, lineHeight: 1 }}>★</span>}
-            {v.systemView && <span title="System view" style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", letterSpacing: 0.2 }}>SYSTEM</span>}
-            {v.showCount && <span className="view-tab-count">{visibleCountFor(v, rows, groupOptions)}</span>}
-            {menuOpenId === v.id && !v.systemView &&
+      menuOpenId === v.id && !v.systemView &&
               createPortal(
               <div
                 ref={menuDropdownRef}
@@ -453,58 +409,94 @@ export default function ViewTabs<T>({
                 )}
               </div>,
               document.body
-              )}
+              )
+    );
+  }
+
+  function renderTab(v: TableView) {
+    const active = v.id === activeViewId;
+    const color = TAB_COLORS[v.color] ?? TAB_COLORS.neutral;
+    // A view's own icon (v.icon, chosen from VIEW_ICON_LIBRARY) wins when
+    // set; otherwise falls back to the old per-viewType default, exactly
+    // as every view rendered before this feature existed.
+    const Icon = (v.icon && VIEW_ICON_LIBRARY[v.icon]) || VIEW_TYPE_ICONS[v.viewType] || Table2;
+    return (
+      <div
+        key={v.id}
+        className={`view-tab${active ? " active" : ""}${dragViewId === v.id ? " dragging" : ""}`}
+        style={{ color: active ? color : undefined }}
+        title={v.systemView ? (v.isDefaultView ? "System view · Default" : "System view") : active ? "Click again for view options" : undefined}
+        draggable={!!onReorder && !v.systemView && editingId !== v.id}
+        onDragStart={(e) => {
+          e.stopPropagation();
+          setDragViewId(v.id);
+        }}
+        onDragOver={(e) => {
+          if (dragViewId) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (dragViewId && dragViewId !== v.id) onReorder?.(dragViewId, v.id);
+          setDragViewId(null);
+        }}
+        onDragEnd={() => setDragViewId(null)}
+        onClick={(e) => {
+          // Sandra, 2026-09-03 ("remove the ellipsis... highlight the
+          // active view... 1st click displays the view, 2nd click on the
+          // active tab shows view settings"): the separate always-visible
+          // "..." button is gone -- the tab itself is now the trigger.
+          // Selecting an inactive tab just switches to it, same as
+          // before; clicking a tab that's ALREADY active (this is the
+          // Notion behavior she's describing) toggles the same
+          // Rename/Duplicate/Color/Delete dropdown that used to live
+          // behind the "..." icon.
+          if (active && v.systemView) {
+            setMenuOpenId(null);
+            return;
+          }
+          if (active) {
+            if (menuOpenId === v.id) {
+              setMenuOpenId(null);
+            } else {
+              openPositionedMenu(e, setMenuPos, 260);
+              setMenuOpenId(v.id);
+            }
+          } else {
+            onSelect(v.id);
+            setMenuOpenId(null);
+          }
+        }}
+      >
+        {editingId === v.id ? (
+          <input
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitRename();
+              if (e.key === "Escape") setEditingId(null);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            style={{ fontSize: 12, fontWeight: 600, padding: "1px 4px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", width: 100 }}
+          />
+        ) : (
+          <>
+            <Icon size={12} className="view-tab-icon" style={{ color }} />
+            {v.name}
+            {v.isDefaultView && <span title="Default view" style={{ fontSize: 10, lineHeight: 1 }}>★</span>}
+            {v.systemView && <span title="System view" style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", letterSpacing: 0.2 }}>SYSTEM</span>}
+            {v.showCount && <span className="view-tab-count">{visibleCountFor(v, rows, groupOptions)}</span>}
+            {renderViewMenu(v)}
           </>
         )}
       </div>
     );
   }
 
-  return (
-    <div ref={containerRef} className="view-tabs">
-      {visible.map(renderTab)}
-      {overflow.length > 0 && (
-        <div
-          className="view-tab"
-          style={{ position: "relative" }}
-          onClick={(e) => {
-            if (overflowOpen) {
-              setOverflowOpen(false);
-            } else {
-              openPositionedMenu(e, setOverflowPos, 160);
-              setOverflowOpen(true);
-            }
-          }}
-        >
-          {overflow.length} more
-          {overflowOpen &&
-            createPortal(
-            <div
-              ref={overflowDropdownRef}
-              className="view-tab-dropdown"
-              style={{ position: "fixed", top: overflowPos.top, left: overflowPos.left, width: 160 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {overflow.map((v) => {
-                const Icon = VIEW_TYPE_ICONS[v.viewType] ?? Table2;
-                return (
-                  <button
-                    key={v.id}
-                    onClick={() => {
-                      onSelect(v.id);
-                      setOverflowOpen(false);
-                    }}
-                  >
-                    <Icon size={12} />
-                    {v.name}
-                  </button>
-                );
-              })}
-            </div>,
-            document.body
-            )}
-        </div>
-      )}
+  function renderAddView() {
+    return (
       <div
         className="view-tab"
         style={{ position: "relative" }}
@@ -582,6 +574,190 @@ export default function ViewTabs<T>({
           document.body
           )}
       </div>
+    );
+  }
+
+  if (mode === "dropdown") {
+    const active = views.find((v) => v.id === activeViewId) ?? views[0];
+    const activeColor = active ? TAB_COLORS[active.color] ?? TAB_COLORS.neutral : TAB_COLORS.neutral;
+    const ActiveIcon = active ? (active.icon && VIEW_ICON_LIBRARY[active.icon]) || VIEW_TYPE_ICONS[active.viewType] || Table2 : Table2;
+    const groups = [
+      { key: "my", label: dropdownGroupLabels.my, items: views.filter((v) => v.systemView && v.systemGroup === "my") },
+      { key: "organization", label: dropdownGroupLabels.organization, items: views.filter((v) => v.systemView && v.systemGroup === "organization") },
+      { key: "custom", label: dropdownGroupLabels.custom, items: views.filter((v) => !v.systemView) },
+    ].filter((g) => g.items.length > 0 || g.key === "custom");
+    const badge = (text: string, tone: "muted" | "accent" = "muted") => (
+      <span
+        style={{
+          fontSize: 9, fontWeight: 700, letterSpacing: 0.3, padding: "2px 6px", borderRadius: 999,
+          color: tone === "accent" ? "var(--accent)" : "var(--muted)",
+          background: tone === "accent" ? "var(--accent-soft, rgba(37,99,235,.08))" : "var(--hover-bg)",
+        }}
+      >
+        {text}
+      </span>
+    );
+    return (
+      <div ref={containerRef} className="view-tabs" style={{ alignItems: "center", gap: 8 }}>
+        <button
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded={selectorOpen}
+          onClick={(e) => {
+            if (selectorOpen) {
+              setSelectorOpen(false);
+            } else {
+              openPositionedMenu(e, setSelectorPos, 280);
+              setSelectorOpen(true);
+              setMenuOpenId(null);
+            }
+          }}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 7, height: 30, padding: "0 10px",
+            border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)",
+            color: "var(--navy)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", width: "auto", whiteSpace: "nowrap",
+          }}
+        >
+          <ActiveIcon size={13} style={{ color: activeColor, flexShrink: 0 }} />
+          <span>{active?.name ?? "Select view"}</span>
+          {active?.isDefaultView && <span title="Default view" style={{ fontSize: 11, lineHeight: 1, color: "#f5b301" }}>★</span>}
+          <ChevronDown size={13} style={{ color: "var(--muted)", flexShrink: 0 }} />
+        </button>
+        {active?.systemView && badge("SYSTEM")}
+        {active?.isDefaultView && badge("DEFAULT", "accent")}
+        {active && !active.systemView && (
+          <button
+            type="button"
+            title="View options"
+            aria-label="View options"
+            onClick={(e) => {
+              if (menuOpenId === active.id) {
+                setMenuOpenId(null);
+              } else {
+                openPositionedMenu(e, setMenuPos, 260);
+                setMenuOpenId(active.id);
+                setSelectorOpen(false);
+              }
+            }}
+            style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, padding: 0, border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", borderRadius: 6 }}
+          >
+            <MoreHorizontal size={14} />
+          </button>
+        )}
+        {active && editingId === active.id && (
+          <input
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitRename();
+              if (e.key === "Escape") setEditingId(null);
+            }}
+            style={{ fontSize: 12, fontWeight: 600, padding: "3px 6px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", width: 160 }}
+          />
+        )}
+        {active && renderViewMenu(active)}
+        {renderAddView()}
+        {selectorOpen &&
+          createPortal(
+            <div
+              ref={selectorRef}
+              role="listbox"
+              className="view-tab-dropdown"
+              style={{ position: "fixed", top: selectorPos.top, left: selectorPos.left, width: 280, maxHeight: "min(70vh, 460px)", overflowY: "auto", padding: 6 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {groups.map((g, gi) => (
+                <div key={g.key} style={{ marginTop: gi ? 6 : 0, paddingTop: gi ? 6 : 0, borderTop: gi ? "1px solid var(--border)" : "none" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.4, padding: "4px 8px" }}>{g.label}</div>
+                  {g.items.length === 0 && (
+                    <div style={{ fontSize: 11.5, color: "var(--muted)", padding: "4px 8px 6px" }}>No personal views yet. Use + Add view.</div>
+                  )}
+                  {g.items.map((v) => {
+                    const ItemIcon = (v.icon && VIEW_ICON_LIBRARY[v.icon]) || VIEW_TYPE_ICONS[v.viewType] || Table2;
+                    const itemColor = TAB_COLORS[v.color] ?? TAB_COLORS.neutral;
+                    const isActive = v.id === activeViewId;
+                    return (
+                      <button
+                        key={v.id}
+                        role="option"
+                        aria-selected={isActive}
+                        onClick={() => {
+                          onSelect(v.id);
+                          setSelectorOpen(false);
+                        }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+                          padding: "6px 8px", borderRadius: 6, border: "none", cursor: "pointer",
+                          background: isActive ? "var(--hover-bg)" : "transparent",
+                          fontSize: 12.5, fontWeight: isActive ? 700 : 500, color: "var(--navy)",
+                        }}
+                      >
+                        <ItemIcon size={13} style={{ color: itemColor, flexShrink: 0 }} />
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.name}</span>
+                        {v.isDefaultView && <span title="Default view" style={{ fontSize: 11, color: "#f5b301" }}>★</span>}
+                        {v.systemView && <span style={{ fontSize: 8.5, fontWeight: 700, color: "var(--muted)", letterSpacing: 0.3, opacity: 0.8 }}>SYSTEM</span>}
+                        {v.showCount && <span className="view-tab-count">{visibleCountFor(v, rows, groupOptions)}</span>}
+                        {isActive && <Check size={13} style={{ color: "var(--accent)", flexShrink: 0 }} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>,
+            document.body
+          )}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={containerRef} className="view-tabs">
+      {visible.map(renderTab)}
+      {overflow.length > 0 && (
+        <div
+          className="view-tab"
+          style={{ position: "relative" }}
+          onClick={(e) => {
+            if (overflowOpen) {
+              setOverflowOpen(false);
+            } else {
+              openPositionedMenu(e, setOverflowPos, 160);
+              setOverflowOpen(true);
+            }
+          }}
+        >
+          {overflow.length} more
+          {overflowOpen &&
+            createPortal(
+            <div
+              ref={overflowDropdownRef}
+              className="view-tab-dropdown"
+              style={{ position: "fixed", top: overflowPos.top, left: overflowPos.left, width: 160 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {overflow.map((v) => {
+                const Icon = VIEW_TYPE_ICONS[v.viewType] ?? Table2;
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => {
+                      onSelect(v.id);
+                      setOverflowOpen(false);
+                    }}
+                  >
+                    <Icon size={12} />
+                    {v.name}
+                  </button>
+                );
+              })}
+            </div>,
+            document.body
+            )}
+        </div>
+      )}
+      {renderAddView()}
     </div>
   );
 }
