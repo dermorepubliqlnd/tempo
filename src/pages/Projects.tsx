@@ -348,16 +348,21 @@ function CategoryIcon({ iconName, tone, size = 13 }: { iconName?: string; tone?:
   return <Icon size={size} color={color} style={{ flexShrink: 0 }} />;
 }
 
-const PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "created_at", "owner", "category", "planning_type", "project_type", "source", "start_date", "closed_at", "wbs_status", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at"];
+const PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "created_at", "owner", "category", "planning_type", "project_type", "source", "start_date", "closed_at", "wbs_status", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at", "my_open_tasks", "my_next_due", "my_hours"];
 
 // 2026-10-04 (Sandra): owner lens = what an owner acts on -- lifecycle
 // (WBS Status), delivery (Status/Health/Phase/Due/Progress), effort
 // (Scoped/Spent/Variance) and schedule slippage (Days Extended). Owner
 // column hidden in "I own" views (it's always you); Created dropped.
-const PROJECT_SYSTEM_COLUMN_ORDER = ["project_number", "name", "owner", "wbs_status", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type", ...PROJECT_COLUMN_ORDER.filter((k) => !["project_number", "name", "owner", "wbs_status", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"].includes(k))];
+const PROJECT_SYSTEM_LEAD = ["project_number", "name", "owner", "wbs_status", "status", "health", "phase", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
+const PROJECT_SYSTEM_COLUMN_ORDER = [...PROJECT_SYSTEM_LEAD, ...PROJECT_COLUMN_ORDER.filter((k) => !PROJECT_SYSTEM_LEAD.includes(k))];
 const PROJECT_OWNER_VISIBLE = new Set(["project_number", "name", "wbs_status", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended"]);
-const PROJECT_PORTFOLIO_VISIBLE = new Set([...PROJECT_OWNER_VISIBLE, "owner"]);
-const PROJECT_ORG_VISIBLE = new Set([...PROJECT_PORTFOLIO_VISIBLE, "category", "planning_type", "project_type"]);
+// 2026-10-04 (Sandra): portfolio lens = "what am I involved in and what do
+// I owe on each" -- grouped by My Role, soonest Due first, with the
+// viewer's own open tasks / next due / hours instead of owner metrics.
+const PROJECT_ACTIVE_PORTFOLIO_VISIBLE = new Set(["project_number", "name", "owner", "wbs_status", "health", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours"]);
+const PROJECT_FULL_PORTFOLIO_VISIBLE = new Set([...PROJECT_ACTIVE_PORTFOLIO_VISIBLE, "status"]);
+const PROJECT_ORG_VISIBLE = new Set([...PROJECT_OWNER_VISIBLE, "owner", "category", "planning_type", "project_type"]);
 
 function projectSystemView(
   id: string,
@@ -378,12 +383,12 @@ function projectSystemView(
     columnOrder: PROJECT_SYSTEM_COLUMN_ORDER,
     hiddenColumns: PROJECT_SYSTEM_COLUMN_ORDER.filter((key) => !visible.has(key)),
     columnWidths: {},
-    groupBy: null,
+    groupBy: scope === "my_active_portfolio" || scope === "my_full_portfolio" ? "my_role" : null,
     hiddenGroups: [],
     color: "neutral",
     showCount: false,
     sorts: scope === "my_active_portfolio" || scope === "my_full_portfolio"
-      ? []
+      ? [{ key: "end_date", direction: "asc" }]
       : [{ key: "project_number", direction: "asc" }],
     progressDisplay: "bar",
   };
@@ -391,9 +396,9 @@ function projectSystemView(
 
 const PROJECT_SYSTEM_VIEWS: TableView[] = [
   projectSystemView("system_my_active_projects", "My Active Projects", "my_active_owned", "my", PROJECT_OWNER_VISIBLE, true),
-  projectSystemView("system_my_active_portfolio", "My Active Portfolio", "my_active_portfolio", "my", PROJECT_PORTFOLIO_VISIBLE),
+  projectSystemView("system_my_active_portfolio", "My Active Portfolio", "my_active_portfolio", "my", PROJECT_ACTIVE_PORTFOLIO_VISIBLE),
   projectSystemView("system_all_projects_i_own", "All Projects I Own", "my_owned_all", "my", PROJECT_OWNER_VISIBLE),
-  projectSystemView("system_my_full_portfolio", "My Full Portfolio", "my_full_portfolio", "my", PROJECT_PORTFOLIO_VISIBLE),
+  projectSystemView("system_my_full_portfolio", "My Full Portfolio", "my_full_portfolio", "my", PROJECT_FULL_PORTFOLIO_VISIBLE),
   projectSystemView("system_active_project_portfolio", "Active Project Portfolio", "org_active", "organization", PROJECT_ORG_VISIBLE),
   projectSystemView("system_all_projects", "All Projects", "org_all", "organization", PROJECT_ORG_VISIBLE),
 ];
@@ -2612,6 +2617,39 @@ export default function Projects() {
     };
   }, [projects, tasks, me?.id, holidayDates]);
 
+  // 2026-10-04: the viewer's own involvement per project, for the
+  // portfolio views' My Role group and My Open Tasks / My Next Due / My
+  // Hours columns. Leaf tasks only; Cancelled tasks don't count. A project
+  // you own with no tasks of your own shows "—" in the "my" columns.
+  const myStatsByProject = useMemo(() => {
+    const out = new Map<string, { role: "Owner" | "Contributor" | null; open: number; nextDue: string | null; scoped: number; spent: number; hasTasks: boolean }>();
+    const meId = me?.id;
+    const parentIdSet = new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
+    const taskProject = new Map(tasks.map((t) => [t.id, t.project_id]));
+    for (const p of projects) out.set(p.id, { role: p.owner_id === meId ? "Owner" : null, open: 0, nextDue: null, scoped: 0, spent: 0, hasTasks: false });
+    if (!meId) return out;
+    for (const t of tasks) {
+      if (t.is_archived || t.assignee_id !== meId || parentIdSet.has(t.id) || t.status === "Cancelled") continue;
+      const s = out.get(t.project_id);
+      if (!s) continue;
+      s.hasTasks = true;
+      if (!s.role) s.role = "Contributor";
+      s.scoped += Number(t.estimated_hours ?? 0);
+      if (t.status !== "Done") {
+        s.open += 1;
+        const due = t.current_due_date?.slice(0, 10) ?? null;
+        if (due && (!s.nextDue || due < s.nextDue)) s.nextDue = due;
+      }
+    }
+    for (const e of timeEntries) {
+      if (e.person_id !== meId || !e.task_id) continue;
+      const pid = taskProject.get(e.task_id);
+      const s = pid ? out.get(pid) : undefined;
+      if (s) s.spent += Number(e.duration_minutes ?? 0) / 60;
+    }
+    return out;
+  }, [projects, tasks, timeEntries, me?.id]);
+
   const projectColumns: ColumnDef<ProjectRow>[] = useMemo(
     () => [
       {
@@ -3224,8 +3262,53 @@ export default function Projects() {
           return <span className="status-pill gold" title={`${calDays} calendar days`}>+{days} working day{days === 1 ? "" : "s"}</span>;
         },
       },
+      {
+        key: "my_open_tasks",
+        label: "My Open Tasks",
+        defaultWidth: 110,
+        maxWidth: 140,
+        render: (p) => {
+          const s = myStatsByProject.get(p.id);
+          if (!s?.hasTasks) return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>—</span>;
+          return <span style={{ fontWeight: 600, color: s.open > 0 ? "var(--navy)" : "var(--muted)" }}>{s.open}</span>;
+        },
+      },
+      {
+        key: "my_next_due",
+        label: "My Next Due",
+        defaultWidth: 115,
+        maxWidth: 150,
+        render: (p) => {
+          const s = myStatsByProject.get(p.id);
+          if (!s?.nextDue) return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>—</span>;
+          const overdue = s.nextDue < toISOWorkingDay(new Date());
+          return (
+            <span style={{ color: overdue ? "var(--danger-text)" : undefined, fontWeight: overdue ? 600 : undefined }} title={overdue ? "Overdue" : undefined}>
+              {formatDate(s.nextDue)}
+            </span>
+          );
+        },
+      },
+      {
+        key: "my_hours",
+        label: "My Hours",
+        defaultWidth: 115,
+        maxWidth: 150,
+        render: (p) => {
+          const s = myStatsByProject.get(p.id);
+          if (!s?.hasTasks) return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>—</span>;
+          const spent = Math.round(s.spent * 10) / 10;
+          const scoped = Math.round(s.scoped * 10) / 10;
+          const over = scoped > 0 && spent > scoped;
+          return (
+            <span title="Your logged hours (approved/confirmed) / your scoped hours" style={{ color: over ? "var(--danger-text)" : undefined }}>
+              {spent} / {scoped}h
+            </span>
+          );
+        },
+      },
     ],
-    [people, projects, me, tasks, holidayDates, projectViews.activeView.progressDisplay, projectViews.activeView.priorityDisplay, projectViews.activeView.complexityDisplay, noteCounts, timeEntries, deletedSpentHours, projectCategoryOptions, categoryIconMap, categoryToneMap, projectPhases, phaseStatusMapping, activePhaseNames, projectPlanningTypes, projectTypes, closedAtByProjectId, baselineApprovalByProjectId]
+    [people, projects, me, tasks, holidayDates, projectViews.activeView.progressDisplay, projectViews.activeView.priorityDisplay, projectViews.activeView.complexityDisplay, noteCounts, timeEntries, deletedSpentHours, projectCategoryOptions, categoryIconMap, categoryToneMap, projectPhases, phaseStatusMapping, activePhaseNames, projectPlanningTypes, projectTypes, closedAtByProjectId, baselineApprovalByProjectId, myStatsByProject]
   );
 
   // Board-view card body. Name always renders first/bold as the card's
@@ -3326,6 +3409,12 @@ export default function Projects() {
       label: "Owner",
       getGroup: (p) => ownerName(p.owner_id),
       allGroups: () => [...people.map((person) => person.name), "—"],
+    },
+    {
+      key: "my_role",
+      label: "My Role",
+      getGroup: (p) => myStatsByProject.get(p.id)?.role ?? "Not involved",
+      allGroups: () => ["Owner", "Contributor", "Not involved"],
     },
     {
       key: "category",
@@ -3615,6 +3704,9 @@ export default function Projects() {
     { key: "effort_level", label: "Complexity", getValue: (p) => PROJECT_EFFORT_LEVEL_OPTIONS.indexOf(p.effort_level ?? "") },
     { key: "start_date", label: "Start", getValue: (p) => (p.start_date ? new Date(p.start_date).getTime() : null) },
     { key: "end_date", label: "Due", getValue: (p) => (p.end_date ? new Date(p.end_date).getTime() : null) },
+    { key: "my_open_tasks", label: "My Open Tasks", getValue: (p) => (myStatsByProject.get(p.id)?.hasTasks ? myStatsByProject.get(p.id)!.open : null) },
+    { key: "my_next_due", label: "My Next Due", getValue: (p) => { const d = myStatsByProject.get(p.id)?.nextDue; return d ? new Date(d).getTime() : null; } },
+    { key: "my_hours", label: "My Hours", getValue: (p) => (myStatsByProject.get(p.id)?.hasTasks ? myStatsByProject.get(p.id)!.spent : null) },
     { key: "health", label: "Health", getValue: (p) => healthRank(healthOf(p, tasks, holidayDates).label) },
     { key: "actual_progress", label: "Actual Progress", getValue: (p) => actualProgress(p.id, tasks) ?? -1 },
     { key: "estimated_hours", label: "Scoped Hours", getValue: (p) => projectEstimatedHoursTotal(p.id, tasks) ?? -1 },
