@@ -118,7 +118,7 @@ export default function BoardView<T>({
               onDragOver={draggable ? (e) => e.preventDefault() : undefined}
               onDrop={draggable ? (e) => handleDropOnColumn(e, col.value) : undefined}
             >
-              <div className="board-column-cluster" style={{ color: tone.text }}>{isClusterStart ? col.clusterLabel : " "}</div>
+              <div className="board-column-cluster" style={{ color: tone.text }}>{" "}</div>
               <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", color: tone.text, fontSize: 11.5, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, padding: "6px 0" }}>
                 {col.label}
                 <span className="board-column-count">{colRows.length}</span>
