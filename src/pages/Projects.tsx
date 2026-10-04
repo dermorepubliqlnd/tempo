@@ -349,8 +349,8 @@ function CategoryIcon({ iconName, tone, size = 13 }: { iconName?: string; tone?:
 }
 
 const PROJECT_COLUMN_ORDER = ["project_number", "name", "owner", "status", "health", "phase", "priority", "start_date", "end_date", "actual_progress", "category", "source", "planning_type", "project_type", "created_at", "closed_at", "wbs_status", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at"];
-const IC_OWNED_PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "priority", "end_date", "actual_progress", "phase", "start_date", "category", "planning_type", "project_type", "wbs_status", "estimated_hours", "time_spent_hours", "source", "effort_level", "project_number", "created_at", "closed_at", "hours_variance", "hours_variance_pct", "days_extended", "baseline_approved_by", "baseline_approved_at", "owner"];
-const IC_INVOLVED_PROJECT_COLUMN_ORDER = ["project_number", "name", "owner", "status", "health", "priority", "end_date", "actual_progress", "phase", "start_date", "category", "planning_type", "project_type", "wbs_status", "estimated_hours", "time_spent_hours", "source", "effort_level", "project_number", "created_at", "closed_at", "hours_variance", "hours_variance_pct", "days_extended", "baseline_approved_by", "baseline_approved_at"];
+const IC_OWNED_PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "priority", "end_date", "actual_progress", "phase", "start_date", "category", "planning_type", "project_type", "wbs_status", "estimated_hours", "time_spent_hours", "source", "effort_level", "created_at", "closed_at", "hours_variance", "hours_variance_pct", "days_extended", "baseline_approved_by", "baseline_approved_at", "owner"];
+const IC_INVOLVED_PROJECT_COLUMN_ORDER = ["project_number", "name", "owner", "status", "health", "priority", "end_date", "actual_progress", "phase", "start_date", "category", "planning_type", "project_type", "wbs_status", "estimated_hours", "time_spent_hours", "source", "effort_level", "created_at", "closed_at", "hours_variance", "hours_variance_pct", "days_extended", "baseline_approved_by", "baseline_approved_at"];
 
 // Default hidden-columns set for a brand-new Projects Timeline view (see
 // timelineDefaultHiddenColumns on ViewTabs / initialHiddenColumns on
@@ -1071,6 +1071,16 @@ export default function Projects() {
   function projectDefaultViewStorageKey() {
     return `tempo.projects.defaultView.${me?.id ?? "anonymous"}`;
   }
+
+  const roleBasedProjectDefaultViewId =
+    previewAsIndividual
+      ? "system:owned"
+      : me?.access_level === "full"
+      ? "system:all"
+      : hasTeam
+      ? "system:team"
+      : "system:owned";
+  const effectiveProjectDefaultViewId = projectDefaultViewId ?? roleBasedProjectDefaultViewId;
 
   function setCurrentProjectViewAsDefault() {
     const id = usingSystemProjectView ? `system:${projectSystemView}` : `personal:${projectViews.activeViewId}`;
@@ -5547,34 +5557,34 @@ export default function Projects() {
                 <optgroup label="System views">
                   {isIndividualProjectPerspective ? (
                     <>
-                      <option value="system:owned">My Owned Projects{projectDefaultViewId === "system:owned" ? " · Default" : ""}</option>
-                      <option value="system:mine">My Projects & Contributions{projectDefaultViewId === "system:mine" ? " · Default" : ""}</option>
-                      <option value="system:attention">Needs My Attention{projectDefaultViewId === "system:attention" ? " · Default" : ""}</option>
-                      <option value="system:active">Active Projects{projectDefaultViewId === "system:active" ? " · Default" : ""}</option>
-                      <option value="system:all">All Projects{projectDefaultViewId === "system:all" ? " · Default" : ""}</option>
+                      <option value="system:owned">My Owned Projects{effectiveProjectDefaultViewId === "system:owned" ? " · Default" : ""}</option>
+                      <option value="system:mine">My Projects & Contributions{effectiveProjectDefaultViewId === "system:mine" ? " · Default" : ""}</option>
+                      <option value="system:attention">Needs My Attention{effectiveProjectDefaultViewId === "system:attention" ? " · Default" : ""}</option>
+                      <option value="system:active">Active Projects{effectiveProjectDefaultViewId === "system:active" ? " · Default" : ""}</option>
+                      <option value="system:all">All Projects{effectiveProjectDefaultViewId === "system:all" ? " · Default" : ""}</option>
                     </>
                   ) : (
                     <>
-                      <option value="system:all">All Projects{projectDefaultViewId === "system:all" ? " · Default" : ""}</option>
-                      {showTeamProjectScope && <option value="system:team">My Team Projects{projectDefaultViewId === "system:team" ? " · Default" : ""}</option>}
-                      <option value="system:attention">Needs Attention{projectDefaultViewId === "system:attention" ? " · Default" : ""}</option>
-                      <option value="system:active">Active Projects{projectDefaultViewId === "system:active" ? " · Default" : ""}</option>
-                      <option value="system:owned">My Owned Projects{projectDefaultViewId === "system:owned" ? " · Default" : ""}</option>
-                      <option value="system:mine">My Projects & Contributions{projectDefaultViewId === "system:mine" ? " · Default" : ""}</option>
+                      <option value="system:all">All Projects{effectiveProjectDefaultViewId === "system:all" ? " · Default" : ""}</option>
+                      {showTeamProjectScope && <option value="system:team">My Team Projects{effectiveProjectDefaultViewId === "system:team" ? " · Default" : ""}</option>}
+                      <option value="system:attention">Needs Attention{effectiveProjectDefaultViewId === "system:attention" ? " · Default" : ""}</option>
+                      <option value="system:active">Active Projects{effectiveProjectDefaultViewId === "system:active" ? " · Default" : ""}</option>
+                      <option value="system:owned">My Owned Projects{effectiveProjectDefaultViewId === "system:owned" ? " · Default" : ""}</option>
+                      <option value="system:mine">My Projects & Contributions{effectiveProjectDefaultViewId === "system:mine" ? " · Default" : ""}</option>
                     </>
                   )}
                 </optgroup>
                 {projectViews.views.filter((v) => v.id !== "default").length > 0 && (
                   <optgroup label="My saved views">
                     {projectViews.views.filter((v) => v.id !== "default").map((v) => (
-                      <option key={v.id} value={`personal:${v.id}`}>{v.name}{projectDefaultViewId === `personal:${v.id}` ? " · Default" : ""}</option>
+                      <option key={v.id} value={`personal:${v.id}`}>{v.name}{effectiveProjectDefaultViewId === `personal:${v.id}` ? " · Default" : ""}</option>
                     ))}
                   </optgroup>
                 )}
               </select>
             </label>
 
-            {projectDefaultViewId === (usingSystemProjectView ? `system:${projectSystemView}` : `personal:${projectViews.activeViewId}`) ? (
+            {effectiveProjectDefaultViewId === (usingSystemProjectView ? `system:${projectSystemView}` : `personal:${projectViews.activeViewId}`) ? (
               <div style={{ height: 32, display: "flex", alignItems: "center", paddingBottom: 1 }}>
                 <span
                   style={{
