@@ -7155,7 +7155,20 @@ export default function WbsPlanning() {
                                 options={pickable.map((w) => w.name)}
                                 onCommit={(v) => {
                                   const match = pickable.find((w) => w.name === v);
-                                  saveTaskField(t.id, { work_type_id: match?.id ?? null });
+                                  // 2026-10-04 (Sandra): a Work Type mapped to exactly
+                                  // one (active) Output Type fills it in automatically,
+                                  // e.g. Training Delivery -> Session. Otherwise the
+                                  // Output Type is left as it was.
+                                  const onlyOutput = match
+                                    ? outputTypes.filter(
+                                        (o) => o.is_active && workTypeOutputTypes.some((m) => m.work_type_id === match.id && m.output_type_id === o.id)
+                                      )
+                                    : [];
+                                  if (onlyOutput.length === 1 && !isParent) {
+                                    saveTaskField(t.id, { work_type_id: match!.id, output_type_id: onlyOutput[0].id });
+                                  } else {
+                                    saveTaskField(t.id, { work_type_id: match?.id ?? null });
+                                  }
                                 }}
                               />
                             );
