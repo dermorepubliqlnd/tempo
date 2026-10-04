@@ -220,8 +220,8 @@ export default function ViewTabs<T>({
         key={v.id}
         className={`view-tab${active ? " active" : ""}${dragViewId === v.id ? " dragging" : ""}`}
         style={{ color: active ? color : undefined }}
-        title={active ? "Click again for view options" : undefined}
-        draggable={!!onReorder && editingId !== v.id}
+        title={v.systemView ? (v.isDefaultView ? "System view · Default" : "System view") : active ? "Click again for view options" : undefined}
+        draggable={!!onReorder && !v.systemView && editingId !== v.id}
         onDragStart={(e) => {
           e.stopPropagation();
           setDragViewId(v.id);
@@ -246,6 +246,10 @@ export default function ViewTabs<T>({
           // Notion behavior she's describing) toggles the same
           // Rename/Duplicate/Color/Delete dropdown that used to live
           // behind the "..." icon.
+          if (active && v.systemView) {
+            setMenuOpenId(null);
+            return;
+          }
           if (active) {
             if (menuOpenId === v.id) {
               setMenuOpenId(null);
@@ -276,8 +280,10 @@ export default function ViewTabs<T>({
           <>
             <Icon size={12} className="view-tab-icon" style={{ color }} />
             {v.name}
+            {v.isDefaultView && <span title="Default view" style={{ fontSize: 10, lineHeight: 1 }}>★</span>}
+            {v.systemView && <span title="System view" style={{ fontSize: 9, fontWeight: 700, color: "var(--muted)", letterSpacing: 0.2 }}>SYSTEM</span>}
             {v.showCount && <span className="view-tab-count">{visibleCountFor(v, rows, groupOptions)}</span>}
-            {menuOpenId === v.id &&
+            {menuOpenId === v.id && !v.systemView &&
               createPortal(
               <div
                 ref={menuDropdownRef}
