@@ -170,7 +170,7 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
       if (cancelled) return;
 
       if (!error && data && Array.isArray(data.views) && data.views.length > 0) {
-        const merged = (data.views as TableView[]).map((v) => backfillView(v, defaultView));
+        const merged = (data.views as TableView[]).map((v) => normalizeTableView(tableKey, backfillView(v, defaultView)));
         const activeId = data.active_view_id && merged.some((v) => v.id === data.active_view_id) ? data.active_view_id : merged[0].id;
         skipNextWriteRef.current = true;
         setViews(merged);
@@ -287,7 +287,7 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
   }
 
   function renameView(id: string, name: string) {
-    setViews((vs) => vs.map((v) => (v.id === id ? { ...v, name } : v)));
+    setViews((vs) => vs.map((v) => (v.id === id && !v.systemView ? { ...v, name } : v)));
   }
 
   function duplicateView(id: string) {
@@ -305,11 +305,28 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
   }
 
   function setViewColor(id: string, color: string) {
-    setViews((vs) => vs.map((v) => (v.id === id ? { ...v, color } : v)));
+    setViews((vs) => vs.map((v) => (v.id === id && !v.systemView ? { ...v, color } : v)));
   }
 
   function setViewIcon(id: string, icon: string | null) {
-    setViews((vs) => vs.map((v) => (v.id === id ? { ...v, icon } : v)));
+    setViews((vs) => vs.map((v) => (v.id === id && !v.systemView ? { ...v, icon } : v)));
+  }
+
+  function installSystemViews(systemViews: TableView[], defaultSystemViewId: string) {
+    const normalizedSystemViews = systemViews.map((v) => normalizeTableView(tableKey, v));
+    setViews((vs) => {
+      const systemIds = new Set(normalizedSystemViews.map((v) => v.id));
+      const custom = vs.filter((v) => !v.systemView && v.id !== "default" && !systemIds.has(v.id));
+      const next = [...normalizedSystemViews, ...custom];
+      return JSON.stringify(next) === JSON.stringify(vs) ? vs : next;
+    });
+    setActiveViewId((current) => {
+      const systemIds = new Set(normalizedSystemViews.map((v) => v.id));
+      if (current === "default") return defaultSystemViewId;
+      if (systemIds.has(current)) return current;
+      if (views.some((v) => v.id === current && !v.systemView && v.id !== "default")) return current;
+      return defaultSystemViewId;
+    });
   }
 
   // Notion-style drag-to-reorder for the view tab bar itself (2026-09-21,
@@ -335,9 +352,11 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
   }
 
   function deleteView(id: string) {
+    const target = views.find((v) => v.id === id);
+    if (target?.systemView) return;
     setViews((vs) => {
       const remaining = vs.filter((v) => v.id !== id);
-      return remaining.length ? remaining : [makeDefault(defaultView)];
+      return remaining.length ? remaining : [makeDefault(defaultView, tableKey)];
     });
     setActiveViewId((current) => {
       if (current !== id) return current;
@@ -346,5 +365,5 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     });
   }
 
-  return { views, activeView, activeViewId, setActiveViewId, updateActiveView, createView, renameView, duplicateView, setViewColor, setViewIcon, deleteView, reorderViews, loaded };
+  return { views, activeView, activeViewId, setActiveViewId, updateActiveView, createView, renameView, duplicateView, setViewColor, setViewIcon, deleteView, reorderViews, installSystemViews, loaded };
 }
