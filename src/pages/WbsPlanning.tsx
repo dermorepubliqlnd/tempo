@@ -5,11 +5,12 @@ import { useState, useEffect, useCallback, useRef, Fragment, type CSSProperties 
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { PauseReviewBanner } from "../components/PauseProjectModals";
-import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin, MoreHorizontal, Copy, ArrowUp, ArrowDown, CornerDownRight, Undo2 } from "lucide-react";
+import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin, MoreHorizontal, Copy, ArrowUp, ArrowDown, CornerDownRight, Undo2, MessageCircle } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { archiveItem, restoreItem, ARCHIVE_MOVE_NOTE, splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, loggedTimeDeleteWarning } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
+import NotesSidebar from "../components/NotesSidebar";
 import { InlineText, InlineNumber, InlineSelect, InlineDate, InlineTextArea } from "../components/InlineCell";
 import { CancelTaskDialog } from "../components/CancelTaskDialog";
 import ClosedProjectReportPanel from "../components/ClosedProjectReportPanel";
@@ -556,6 +557,17 @@ export default function WbsPlanning() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { person: me } = useSession();
+  // 2026-10-04: project + task notes on the WBS page.
+  const [wbsNotes, setWbsNotes] = useState<{ taskId: string | null } | null>(null);
+  const [wbsNoteCounts, setWbsNoteCounts] = useState<{ project: number; byTask: Record<string, number> }>({ project: 0, byTask: {} });
+  useEffect(() => {
+    if (!projectId) return;
+    supabase.from("project_notes").select("task_id").eq("project_id", projectId).then(({ data }) => {
+      const byTask: Record<string, number> = {};
+      ((data as { task_id: string | null }[]) ?? []).forEach((r) => { if (r.task_id) byTask[r.task_id] = (byTask[r.task_id] ?? 0) + 1; });
+      setWbsNoteCounts({ project: (data ?? []).length, byTask });
+    });
+  }, [projectId, wbsNotes]);
   const { confirm, alert, dialog } = useConfirm();
   const isFullAccess = me?.access_level === "full";
 
@@ -5194,6 +5206,7 @@ export default function WbsPlanning() {
                 {task.depth === 0 && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
                 {menuItem("Add task below", <CornerDownRight size={13} />, () => void addTaskBelow(task))}
                 {menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
+                {menuItem(wbsNoteCounts.byTask[task.id] ? `Notes (${wbsNoteCounts.byTask[task.id]})` : "Add note", <MessageCircle size={13} />, () => setWbsNotes({ taskId: task.id }))}
                 <div style={{ height: 1, background: "var(--border)", margin: "4px 2px" }} />
                 {menuItem("Move up", <ArrowUp size={13} />, () => void moveTaskDirection(task, -1), { disabled: !canMoveUp })}
                 {menuItem("Move down", <ArrowDown size={13} />, () => void moveTaskDirection(task, 1), { disabled: !canMoveDown })}
@@ -5539,7 +5552,30 @@ export default function WbsPlanning() {
         >
           WBS
         </Link>
+        <button
+          type="button"
+          onClick={() => setWbsNotes({ taskId: null })}
+          title={wbsNoteCounts.project ? `${wbsNoteCounts.project} note${wbsNoteCounts.project === 1 ? "" : "s"} on this project` : "Add a note to this project"}
+          style={{ marginLeft: "auto", alignSelf: "center", display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 999, padding: "5px 12px", fontSize: 12, fontWeight: 600, color: "var(--navy)", cursor: "pointer", width: "auto" }}
+        >
+          <MessageCircle size={13} /> Notes{wbsNoteCounts.project ? ` (${wbsNoteCounts.project})` : ""}
+        </button>
       </div>
+      {wbsNotes && (() => {
+        const nt = wbsNotes.taskId ? tasks.find((x) => x.id === wbsNotes.taskId) : null;
+        return (
+          <NotesSidebar
+            projectId={project.id}
+            projectName={project.name || "Untitled project"}
+            taskId={nt?.id ?? null}
+            taskLabel={nt ? nt.name || "Untitled task" : undefined}
+            people={people.map((p) => ({ id: p.id, name: p.name }))}
+            currentPersonId={me?.id ?? null}
+            onClose={() => setWbsNotes(null)}
+            onCountChange={() => {}}
+          />
+        );
+      })()}
       {/* phase118: Paused details / Schedule Review Required banner. */}
       <PauseReviewBanner
         project={project}
@@ -7017,6 +7053,18 @@ export default function WbsPlanning() {
                               }}
                             />
                           </div>
+                          {!!wbsNoteCounts.byTask[t.id] && (
+                            <button
+                              type="button"
+                              tabIndex={-1}
+                              onClick={(e) => { e.stopPropagation(); setWbsNotes({ taskId: t.id }); }}
+                              title={`${wbsNoteCounts.byTask[t.id]} note${wbsNoteCounts.byTask[t.id] === 1 ? "" : "s"} on this task`}
+                              className="note-bubble-btn has-notes"
+                            >
+                              <MessageCircle size={12} />
+                              <span className="note-bubble-count">{wbsNoteCounts.byTask[t.id]}</span>
+                            </button>
+                          )}
                           <span className="wbs-row-actions">
                           {rowEditable && t.depth === 0 && (
                             <button

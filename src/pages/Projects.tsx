@@ -1335,6 +1335,9 @@ export default function Projects() {
   // open. Counts are fetched once in loadAll() and kept in sync afterward
   // by NotesSidebar itself calling onCountChange whenever it loads/posts.
   const [noteCounts, setNoteCounts] = useState<Record<string, number>>({});
+  // 2026-10-04: per-task note counts + which task's notes are open.
+  const [taskNoteCounts, setTaskNoteCounts] = useState<Record<string, number>>({});
+  const [notesSidebarTaskId, setNotesSidebarTaskId] = useState<string | null>(null);
   // 2026-09-07 (Sandra: Sign Off Date -- "capture sign off date, that's
   // when the project was tagged as closed"): project_closeouts.closed_at
   // per project, keyed by project_id -- a separate table (stamped by
@@ -1497,7 +1500,7 @@ export default function Projects() {
       // note, reduced client-side into a count map. The sidebar itself
       // fetches full note rows (body, timestamps, mentions) lazily only
       // when opened for a given project.
-      supabase.from("project_notes").select("project_id"),
+      supabase.from("project_notes").select("project_id,task_id"),
       // Deletion archive (2026-08-14c) -- see DeletedSpentHourRow above.
       supabase.from("deleted_project_spent_hours_archive").select("project_id,person_id,hours"),
       supabase.from("work_types").select("id,name,is_active,sort_order,color").order("sort_order"),
@@ -1577,10 +1580,13 @@ export default function Projects() {
     }
     setDeclinedBaselineByProjectId(nextDeclinedBaseline);
     const nextNoteCounts: Record<string, number> = {};
-    for (const row of (noteData as { project_id: string }[]) ?? []) {
+    const nextTaskNoteCounts: Record<string, number> = {};
+    for (const row of (noteData as { project_id: string; task_id: string | null }[]) ?? []) {
       nextNoteCounts[row.project_id] = (nextNoteCounts[row.project_id] ?? 0) + 1;
+      if (row.task_id) nextTaskNoteCounts[row.task_id] = (nextTaskNoteCounts[row.task_id] ?? 0) + 1;
     }
     setNoteCounts(nextNoteCounts);
+    setTaskNoteCounts(nextTaskNoteCounts);
     // Drop any selection for rows that no longer exist in the fresh load
     // (e.g. after a bulk delete) so the bulk-action bar doesn't linger.
     const projectIds = new Set(nextProjects.map((p) => p.id));
@@ -3905,6 +3911,17 @@ export default function Projects() {
                     -- structural additions belong in WBS Planning. */}
                 <InlineText value={t.name} editable={false} bold={t._depth === 0} onCommit={(v) => updateTask(t.id, { name: v })} />
               </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setNotesSidebarTaskId(t.id);
+                }}
+                title={taskNoteCounts[t.id] ? `${taskNoteCounts[t.id]} note${taskNoteCounts[t.id] === 1 ? "" : "s"} on this task` : "Add a note to this task"}
+                className={`note-bubble-btn${taskNoteCounts[t.id] ? " has-notes" : ""}`}
+              >
+                <MessageCircle size={13} />
+                {!!taskNoteCounts[t.id] && <span className="note-bubble-count">{taskNoteCounts[t.id]}</span>}
+              </button>
             </div>
           );
         },
@@ -4900,7 +4917,7 @@ export default function Projects() {
         render: (t) => <span>{ownerName(t.created_by)}</span>,
       },
     ],
-    [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents]
+    [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents, taskNoteCounts]
   );
 
   // Board cards get their own name renderer rather than reusing the table
@@ -4930,8 +4947,21 @@ export default function Projects() {
     return (
       <>
         {!hidden.includes("name") && (
-          <div style={{ minWidth: 0 }}>
-            <InlineText value={t.name} editable={false} bold onCommit={(v) => updateTask(t.id, { name: v })} />
+          <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 4 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <InlineText value={t.name} editable={false} bold onCommit={(v) => updateTask(t.id, { name: v })} />
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setNotesSidebarTaskId(t.id);
+              }}
+              title={taskNoteCounts[t.id] ? `${taskNoteCounts[t.id]} note${taskNoteCounts[t.id] === 1 ? "" : "s"} on this task` : "Add a note to this task"}
+              className={`note-bubble-btn${taskNoteCounts[t.id] ? " has-notes" : ""}`}
+            >
+              <MessageCircle size={13} />
+              {!!taskNoteCounts[t.id] && <span className="note-bubble-count">{taskNoteCounts[t.id]}</span>}
+            </button>
           </div>
         )}
         {t.parent_task_id && (
@@ -6317,7 +6347,24 @@ export default function Projects() {
               rows={sortRowsHierarchical(filteredVisibleTasks, taskActiveView.sorts, taskSortOptions, (t) => t.id, (t) => t.parent_task_id)}
               rowKey={(t) => t.id}
               renderLabel={(t) => (
-                <InlineText value={t.name} editable={false} bold onCommit={(v) => updateTask(t.id, { name: v })} />
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0, maxWidth: "100%" }}>
+                  <span style={{ minWidth: 0, overflow: "hidden" }}>
+                    <InlineText value={t.name} editable={false} bold onCommit={(v) => updateTask(t.id, { name: v })} />
+                  </span>
+                  {!!taskNoteCounts[t.id] && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setNotesSidebarTaskId(t.id);
+                      }}
+                      title={`${taskNoteCounts[t.id]} note${taskNoteCounts[t.id] === 1 ? "" : "s"} on this task`}
+                      className="note-bubble-btn has-notes"
+                    >
+                      <MessageCircle size={12} />
+                      <span className="note-bubble-count">{taskNoteCounts[t.id]}</span>
+                    </button>
+                  )}
+                </span>
               )}
               getParentLabel={(t) => (t.parent_task_id ? tasks.find((pt) => pt.id === t.parent_task_id)?.name ?? null : null)}
               getProjectLabel={(t) => projectName(t.project_id)}
@@ -6415,6 +6462,26 @@ export default function Projects() {
           onCountChange={(projectId, count) => setNoteCounts((prev) => ({ ...prev, [projectId]: count }))}
         />
       )}
+      {notesSidebarTaskId && (() => {
+        const nt = tasks.find((t) => t.id === notesSidebarTaskId);
+        if (!nt) return null;
+        return (
+          <NotesSidebar
+            projectId={nt.project_id}
+            projectName={projectName(nt.project_id)}
+            taskId={nt.id}
+            taskLabel={`${nt.task_number ? `T-${String(nt.task_number).padStart(4, "0")} · ` : ""}${nt.name || "Untitled task"}`}
+            people={people}
+            currentPersonId={me?.id ?? null}
+            onClose={() => setNotesSidebarTaskId(null)}
+            onCountChange={(taskId, count) => {
+              const delta = count - (taskNoteCounts[taskId] ?? 0);
+              if (delta) setNoteCounts((pc) => ({ ...pc, [nt.project_id]: (pc[nt.project_id] ?? 0) + delta }));
+              setTaskNoteCounts((prev) => ({ ...prev, [taskId]: count }));
+            }}
+          />
+        );
+      })()}
 
       {hoursBreakdownTaskId && (() => {
         const task = tasks.find((t) => t.id === hoursBreakdownTaskId);

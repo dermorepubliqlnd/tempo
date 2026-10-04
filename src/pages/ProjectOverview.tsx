@@ -11,6 +11,9 @@ import {
   Users,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import NotesSidebar from "../components/NotesSidebar";
+import { useSession } from "../lib/useSession";
+import { MessageCircle } from "lucide-react";
 import { actualProgress, healthOf, projectStatusOf, type ProjectRow, type TaskRow } from "./Projects";
 import { formatDate } from "../lib/formatDate";
 import { TASK_STATUS_GROUPED, statusGroupOf } from "../lib/notionOptions";
@@ -70,6 +73,13 @@ export default function ProjectOverview() {
   const [allTasks, setAllTasks] = useState<TaskRow[]>([]);
   const [allProjects, setAllProjects] = useState<ProjectRow[]>([]);
   const [deletedHours, setDeletedHours] = useState(0);
+  const { person: me } = useSession();
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [noteCount, setNoteCount] = useState(0);
+  useEffect(() => {
+    if (!projectId) return;
+    supabase.from("project_notes").select("id", { count: "exact", head: true }).eq("project_id", projectId).then(({ count }) => setNoteCount(count ?? 0));
+  }, [projectId]);
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
   const [holidayDates, setHolidayDates] = useState<string[]>([]);
@@ -278,7 +288,25 @@ export default function ProjectOverview() {
         <Link to={`/projects/${project.id}/wbs`} style={{ padding: "9px 2px", color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}>
           WBS
         </Link>
+        <button
+          type="button"
+          onClick={() => setNotesOpen(true)}
+          title={noteCount ? `${noteCount} note${noteCount === 1 ? "" : "s"} on this project` : "Add a note to this project"}
+          style={{ marginLeft: "auto", alignSelf: "center", display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 999, padding: "5px 12px", fontSize: 12, fontWeight: 600, color: "var(--navy)", cursor: "pointer", width: "auto" }}
+        >
+          <MessageCircle size={13} /> Notes{noteCount ? ` (${noteCount})` : ""}
+        </button>
       </div>
+      {notesOpen && (
+        <NotesSidebar
+          projectId={project.id}
+          projectName={project.name || "Untitled project"}
+          people={people.map((p) => ({ id: p.id, name: p.name }))}
+          currentPersonId={me?.id ?? null}
+          onClose={() => setNotesOpen(false)}
+          onCountChange={(_k, n) => setNoteCount(n)}
+        />
+      )}
 
       <div style={{ ...cardStyle(), display: "grid", gridTemplateColumns: "minmax(0,1.6fr) minmax(220px,.75fr) minmax(220px,.75fr)", gap: 0, padding: 0, overflow: "hidden", marginBottom: 12 }}>
         <div style={{ padding: 16, display: "flex", alignItems: "center", gap: 14 }}>

@@ -17,6 +17,7 @@ interface ProjectNoteRow {
   mentioned_person_ids: string[];
   created_at: string;
   note_type?: "manual" | "system";
+  task_id?: string | null;
 }
 
 interface NotesSidebarProps {
@@ -25,7 +26,13 @@ interface NotesSidebarProps {
   people: NotePersonOption[];
   currentPersonId: string | null;
   onClose: () => void;
-  onCountChange: (projectId: string, count: number) => void;
+  // Called with the task id in task mode, otherwise the project id.
+  onCountChange: (key: string, count: number) => void;
+  // 2026-10-04 (Sandra): notes on a single task. Omit for project notes --
+  // the project view then shows every note in the project, task notes
+  // tagged with their task.
+  taskId?: string | null;
+  taskLabel?: string;
 }
 
 const SIDEBAR_WIDTH = 380;
@@ -79,7 +86,13 @@ function renderBodyWithMentions(body: string, people: NotePersonOption[]) {
   );
 }
 
-export default function NotesSidebar({ projectId, projectName, people, currentPersonId, onClose, onCountChange }: NotesSidebarProps) {
+export default function NotesSidebar({ projectId, projectName, people, currentPersonId, onClose, onCountChange, taskId, taskLabel }: NotesSidebarProps) {
+  const [taskLabels, setTaskLabels] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   const [notes, setNotes] = useState<ProjectNoteRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [composeText, setComposeText] = useState("");
@@ -93,18 +106,27 @@ export default function NotesSidebar({ projectId, projectName, people, currentPe
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, taskId]);
 
   async function load() {
     setLoading(true);
-    const { data } = await supabase
-      .from("project_notes")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("created_at", { ascending: true });
+    let q = supabase.from("project_notes").select("*").eq("project_id", projectId);
+    if (taskId) q = q.eq("task_id", taskId);
+    const { data } = await q.order("created_at", { ascending: true });
     const rows = (data as ProjectNoteRow[]) ?? [];
     setNotes(rows);
-    onCountChange(projectId, rows.length);
+    onCountChange(taskId ?? projectId, rows.length);
+    if (!taskId) {
+      const ids = Array.from(new Set(rows.map((r) => r.task_id).filter(Boolean))) as string[];
+      if (ids.length) {
+        const { data: tRows } = await supabase.from("tasks").select("id,name,task_number").in("id", ids);
+        const map: Record<string, string> = {};
+        ((tRows as { id: string; name: string; task_number: number | null }[]) ?? []).forEach((t) => {
+          map[t.id] = `${t.task_number ? `T-${String(t.task_number).padStart(4, "0")} · ` : ""}${t.name || "Untitled task"}`;
+        });
+        setTaskLabels(map);
+      }
+    }
     setLoading(false);
   }
 
@@ -151,8 +173,10 @@ export default function NotesSidebar({ projectId, projectName, people, currentPe
     const body = composeText.trim();
     if (!body || !currentPersonId || posting) return;
     setPosting(true);
+    const replyTaskId = replyToId ? notes.find((n) => n.id === replyToId)?.task_id ?? null : null;
     const { error } = await supabase.from("project_notes").insert({
       project_id: projectId,
+      task_id: taskId ?? replyTaskId,
       parent_id: replyToId,
       author_id: currentPersonId,
       body,
@@ -174,6 +198,11 @@ export default function NotesSidebar({ projectId, projectName, people, currentPe
     const { relative, full } = formatTimestamp(note.created_at);
     return (
       <div style={{ marginLeft: isReply ? 22 : 0, marginBottom: 10 }}>
+        {!isReply && !taskId && note.task_id && (
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 3 }}>
+            On task: <span style={{ fontWeight: 600, color: "var(--text-secondary)" }}>{taskLabels[note.task_id] ?? "a task"}</span>
+          </div>
+        )}
         <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 2 }}>
           {isReply && <CornerDownRight size={12} color="var(--muted)" />}
           <span style={{ fontWeight: 600, fontSize: 12.5 }}>{authorName(note.author_id)}</span>
@@ -237,8 +266,10 @@ export default function NotesSidebar({ projectId, projectName, people, currentPe
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.4 }}>Notes</div>
-            <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{projectName}</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.4 }}>{taskId ? "Task notes" : "Project notes"}</div>
+            <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{taskId ? taskLabel ?? "Task" : projectName}</div>
+            {taskId && <div style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{projectName}</div>}
+            {!taskId && <div style={{ fontSize: 11, color: "var(--muted)" }}>Includes notes left on this project's tasks</div>}
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", flexShrink: 0 }}>
             <X size={18} />
