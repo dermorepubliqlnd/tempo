@@ -213,6 +213,13 @@ export type ViewType = "table" | "board" | "calendar" | "timeline";
 export interface TableView {
   id: string;
   name: string;
+  // System-managed views are shipped by Tempo and cannot be overwritten.
+  // projectScope is used only by the Projects page to apply the system
+  // portfolio semantics without baking them into generic table filters.
+  systemView?: boolean;
+  systemGroup?: "my" | "organization";
+  isDefaultView?: boolean;
+  projectScope?: "my_active_owned" | "my_active_portfolio" | "my_owned_all" | "my_full_portfolio" | "org_active" | "org_all";
   // Which layout this view renders as. Only "table" is actually built right
   // now -- Board/Calendar/Timeline exist as a forward-compatible field plus
   // placeholder tiles in the "Add view" picker (see ViewTabs.tsx) so people
