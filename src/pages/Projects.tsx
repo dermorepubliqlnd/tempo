@@ -913,7 +913,44 @@ const TASK_TIMING_BOARD_COLUMNS: BoardColumnDef[] = [
 // enumerable set of Kanban columns); anything else (free text, dates,
 // computed percentages) is marked boardGroupable: false on the relevant
 // GroupOption instead and falls back to this list's first/default entry.
-const PROJECT_BOARD_GROUPABLE_KEYS = ["status", "phase", "priority", "category", "source", "planning_type", "project_type", "effort_level", "owner", "wbs_status"];
+const PROJECT_BOARD_GROUPABLE_KEYS = ["status", "phase", "health", "priority", "category", "source", "planning_type", "project_type", "effort_level", "owner", "wbs_status"];
+
+// 2026-10-04 (Sandra): Board card spec -- title fixed; max 4 Primary + 4
+// Secondary properties; system indicators (column, colour stripe,
+// Timing/Health chip) don't count. Defaults per page.
+const CARD_MAX = 4;
+const TASK_CARD_DEFAULT = { primary: ["task_number", "project", "assignee", "current_due_date"], secondary: ["estimated_hours", "time_spent_hours", "due_date_ext"] };
+const PROJECT_CARD_DEFAULT = { primary: ["project_number", "owner", "end_date", "actual_progress"], secondary: ["estimated_hours", "time_spent_hours", "days_extended", "priority"] };
+const CARD_SHORT_LABELS: Record<string, string> = {
+  task_number: "ID", project_number: "ID", current_due_date: "Due", end_date: "Due", start_date: "Start",
+  estimated_hours: "Scoped", time_spent_hours: "Spent", due_date_ext: "Ext.", days_extended: "Extended",
+  actual_progress: "Progress", hours_variance: "Var.", hours_variance_pct: "Var. %", time_log_status: "Logs",
+  actual_completion_date: "Reported", validated_completion_date: "Confirmed", validated_by: "Validated by",
+};
+const TONE_STRIPE: Record<string, string> = { danger: "#dc2626", warning: "#f59e0b", gold: "#ca8a04", success: "#16a34a", purple: "#7c3aed" };
+const TONE_CHIP: Record<string, { fg: string; bg: string }> = {
+  danger: { fg: "#b91c1c", bg: "#fdecec" }, warning: { fg: "#b45309", bg: "#fff7e6" }, gold: { fg: "#a16207", bg: "#fdf6e3" },
+  success: { fg: "#15803d", bg: "#e8f7ee" }, purple: { fg: "#6d28d9", bg: "#f1ecff" },
+};
+// Health board columns: healthOf() labels bucketed into a fixed set.
+const HEALTH_BOARD_COLUMNS: BoardColumnDef[] = [
+  { value: "On track", label: "On track", tone: "success" },
+  { value: "At risk", label: "At risk", tone: "warning" },
+  { value: "Off track", label: "Off track", tone: "danger" },
+  { value: "Overdue", label: "Overdue", tone: "danger" },
+  { value: "Schedule review", label: "Schedule review", tone: "gold" },
+  { value: "Paused", label: "Paused", tone: "purple" },
+  { value: "Not started", label: "Not started", tone: "neutral" },
+  { value: "Health unavailable", label: "Health unavailable", tone: "slate" },
+  { value: "Done · close pending", label: "Done · close pending", tone: "success" },
+  { value: "Completed", label: "Completed", tone: "neutral" },
+  { value: "Cancelled", label: "Cancelled", tone: "neutral" },
+];
+function healthBucket(label: string): string {
+  if (label.startsWith("Completed")) return "Completed";
+  if (label.includes("close pending")) return "Done · close pending";
+  return label;
+}
 const TASK_BOARD_GROUPABLE_KEYS = ["status", "assignee", "effort", "work_type", "project", "timing", "due_date_ext"];
 
 function resolveBoardGroupBy(groupBy: string | null, groupableKeys: string[], fallback: string): string {
@@ -2511,6 +2548,12 @@ export default function Projects() {
     // groups change what the view means -> offer "Save as New View".
     const layoutOnly = Object.keys(patch).every((k) => {
       if (k === "columnOrder" || k === "columnWidths" || k === "frozenUpTo") return true;
+      if (k === "cardPrimary" || k === "cardSecondary") {
+        const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((x) => b.includes(x));
+        const cur = k === "cardPrimary" ? active.cardPrimary : active.cardSecondary;
+        const fallback = k === "cardPrimary" ? (active.taskScope ? TASK_CARD_DEFAULT.primary : PROJECT_CARD_DEFAULT.primary) : (active.taskScope ? TASK_CARD_DEFAULT.secondary : PROJECT_CARD_DEFAULT.secondary);
+        return sameSet(patch[k] ?? [], cur ?? fallback);
+      }
       if (k === "sorts") {
         const next = patch.sorts ?? [];
         return next.length === active.sorts.length && next.every((s, i) => s.key === active.sorts[i]?.key);
@@ -2553,6 +2596,8 @@ export default function Projects() {
           filterStatuses: patch.filterStatuses ?? active.filterStatuses,
           boardShowPropertyLabels: patch.boardShowPropertyLabels ?? active.boardShowPropertyLabels,
           frozenUpTo: patch.frozenUpTo ?? active.frozenUpTo,
+          cardPrimary: patch.cardPrimary ?? active.cardPrimary,
+          cardSecondary: patch.cardSecondary ?? active.cardSecondary,
           systemView: false,
           systemGroup: undefined,
           isDefaultView: false,
@@ -3410,24 +3455,63 @@ export default function Projects() {
   // matched the rest (Sandra, 2026-07-29: "all are tagged as shown but
   // only a few property actually shows" / "property names are shown for
   // the others, so make it consistent for the rest").
-  function renderProjectCard(p: ProjectRow) {
-    const hidden = projectViews.activeView.hiddenColumns;
-    const showLabels = projectViews.activeView.boardShowPropertyLabels ?? true;
-    const find = (key: string) => projectColumns.find((c) => c.key === key);
-    const groupByKey = resolveBoardGroupBy(projectViews.activeView.groupBy, PROJECT_BOARD_GROUPABLE_KEYS, "phase");
-    const propertyColumns = visibleOrderedColumns(projectColumns, projectViews.activeView).filter(
-      (c) => c.key !== "name" && c.key !== groupByKey
+  // 2026-10-04: card value is "empty" -> skipped on the card (no "—" rows).
+  function projectCardEmpty(key: string, p: ProjectRow): boolean {
+    switch (key) {
+      case "owner": return !p.owner_id;
+      case "end_date": return !p.end_date;
+      case "start_date": return !p.start_date;
+      case "priority": return !p.priority;
+      case "category": return !p.category;
+      case "source": return !p.source_id;
+      case "planning_type": return !p.planning_type_id;
+      case "project_type": return !p.project_type_id;
+      case "effort_level": return !p.effort_level;
+      case "estimated_hours": return !projectEstimatedHoursTotal(p.id, tasks);
+      case "time_spent_hours": return !projectSpentHoursTotal(p.id, tasks, timeEntries, deletedSpentHours);
+      case "days_extended": return !p.original_due_date || !p.end_date || p.end_date.slice(0, 10) <= p.original_due_date.slice(0, 10);
+      case "actual_progress": return actualProgress(p.id, tasks) === null;
+      default: return false;
+    }
+  }
+  function renderCardSections<R>(row: R, cols: ColumnDef<R>[], primaryKeys: string[], secondaryKeys: string[], excluded: string, isEmpty: (k: string) => boolean, showLabels: boolean) {
+    const byKey = new Map(cols.map((c) => [c.key, c]));
+    const label = (c: ColumnDef<R>) => CARD_SHORT_LABELS[c.key] ?? c.plainLabel ?? (typeof c.label === "string" ? c.label : c.key);
+    const prim = primaryKeys.filter((k) => k !== excluded && byKey.has(k) && !isEmpty(k)).map((k) => byKey.get(k)!);
+    const sec = secondaryKeys.filter((k) => k !== excluded && byKey.has(k) && !isEmpty(k)).map((k) => byKey.get(k)!);
+    return (
+      <>
+        {prim.map((c) => (
+          <div key={c.key} className="board-card-property">
+            {showLabels && <span className="board-card-property-label">{label(c)}</span>}
+            <span className="board-card-property-value">{c.render(row)}</span>
+          </div>
+        ))}
+        {sec.length > 0 && (
+          <div className="board-card-chips">
+            {sec.map((c) => (
+              <span key={c.key} style={{ display: "inline-flex", alignItems: "center", minWidth: 0 }}>
+                <span className="chip-label">{label(c)}</span>
+                {c.render(row)}
+              </span>
+            ))}
+          </div>
+        )}
+      </>
     );
+  }
+
+  function renderProjectCard(p: ProjectRow) {
+    const view = projectViews.activeView;
+    const showLabels = view.boardShowPropertyLabels ?? true;
+    const find = (key: string) => projectColumns.find((c) => c.key === key);
+    const groupByKey = resolveBoardGroupBy(view.groupBy, PROJECT_BOARD_GROUPABLE_KEYS, "phase");
+    const health = healthOf(p, tasks, holidayDates);
+    const showHealthChip = groupByKey !== "health" && ["danger", "warning", "gold"].includes(health.tone);
     return (
       <>
         <div className="board-card-name-row">
-          {!hidden.includes("name") && <div className="board-card-name-row-title">{find("name")?.render(p)}</div>}
-          {/* Quality audit follow-on (2026-08-21, UX #5): Board had no
-              delete/archive affordance at all -- only Table view's
-              toolbar did. Projects only (not Tasks) -- Tasks' bulk
-              delete was deliberately removed from Table view itself by
-              the 2026-07-29 governance lockdown, so adding it back here
-              would contradict that decision. */}
+          <div className="board-card-name-row-title">{find("name")?.render(p)}</div>
           <CardActionMenu
             items={[
               {
@@ -3439,14 +3523,12 @@ export default function Projects() {
             ]}
           />
         </div>
-        {propertyColumns.map((c) => (
-          <div key={c.key} className="board-card-property">
-            {showLabels && (
-              <span className="board-card-property-label">{c.plainLabel ?? (typeof c.label === "string" ? c.label : c.key)}</span>
-            )}
-            <span className="board-card-property-value">{c.render(p)}</span>
+        {showHealthChip && (
+          <div>
+            <span className="board-card-indicator" style={{ color: TONE_CHIP[health.tone]?.fg, background: TONE_CHIP[health.tone]?.bg }}>{health.label}</span>
           </div>
-        ))}
+        )}
+        {renderCardSections(p, projectColumns, view.cardPrimary ?? PROJECT_CARD_DEFAULT.primary, view.cardSecondary ?? PROJECT_CARD_DEFAULT.secondary, groupByKey, (k) => projectCardEmpty(k, p), showLabels)}
       </>
     );
   }
@@ -3574,6 +3656,7 @@ export default function Projects() {
   const projectBoardGroupOptions: GroupOption<ProjectRow>[] = [
     { key: "name", label: "Project", getGroup: () => "", boardGroupable: false },
     { key: "owner", label: "Owner", getGroup: (p) => ownerName(p.owner_id), boardGroupable: true },
+    { key: "health", label: "Health", getGroup: (p) => healthBucket(healthOf(p, tasks, holidayDates).label), boardGroupable: true },
     {
       key: "priority",
       label: "Priority",
@@ -3676,6 +3759,7 @@ export default function Projects() {
     if (groupBy === "owner") return people.map((person) => ({ value: person.id, label: person.name, tone: "neutral" }));
     if (groupBy === "wbs_status") return WBS_STATUS_BOARD_COLUMNS;
     if (groupBy === "status") return PROJECT_BOARD_STATUS_COLUMNS;
+    if (groupBy === "health") return HEALTH_BOARD_COLUMNS;
     // default board grouping is Phase -- the real pipeline view. Built
     // live (not a static array) since Phase is now Sandra-editable --
     // clusters each active phase under whichever Status column(s) its
@@ -3702,10 +3786,12 @@ export default function Projects() {
     if (groupBy === "owner") return p.owner_id;
     if (groupBy === "wbs_status") return p.wbs_status;
     if (groupBy === "status") return projectStatusOf(p);
+    if (groupBy === "health") return healthBucket(healthOf(p, tasks, holidayDates).label);
     return p.phase;
   }
 
   function getProjectBoardMoveHandler(groupBy: string): ((p: ProjectRow, newValue: string) => void) | undefined {
+    if (groupBy === "health") return undefined; // computed -- read-only board
     if (groupBy === "priority") return (p, v) => updateProject(p.id, { priority: (v || null) as ProjectRow["priority"] });
     // 2026-09-03: Category/Source/Complexity are WBS-only once a project
     // leaves Draft (see canEditProjectSetupField above) -- same rule
@@ -4937,47 +5023,61 @@ export default function Projects() {
   // renders as a plain label/value row in the exact order the Properties
   // popover's drag handles set, skipping whichever field currently drives
   // the Kanban grouping (already shown as the column itself).
+  function taskCardEmpty(key: string, t: TaskWithDepth): boolean {
+    const isParent = t._depth === 0 && hasChildren(t.id);
+    switch (key) {
+      case "task_number": return !t.task_number;
+      case "assignee": return !t.assignee_id;
+      case "current_due_date": return !t.current_due_date;
+      case "start_date": return !t.start_date;
+      case "estimated_hours": return !t.estimated_hours;
+      case "time_spent_hours": return !spentHoursFor(t.id);
+      case "due_date_ext": return isParent || dueDateExtStatus(t).label === "No Extension";
+      case "work_type": return isParent || !t.work_type_id;
+      case "output_type": return isParent || !t.output_type_id;
+      case "output_count": return isParent || t.output_count == null;
+      case "effort": return !t.effort;
+      case "timing": return isParent || taskTiming(t).label === "N/A";
+      case "actual_completion_date": return !t.actual_completion_date;
+      case "validated_completion_date": return !t.validated_completion_date;
+      case "validated_by": return !t.validated_by;
+      case "time_log_status": return timeLogStatusFor(t.id) === "none";
+      default: return false;
+    }
+  }
+
   function renderTaskCard(t: TaskWithDepth) {
-    const hidden = taskActiveView.hiddenColumns;
-    const showLabels = taskActiveView.boardShowPropertyLabels ?? true;
-    const groupByKey = resolveBoardGroupBy(taskActiveView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status");
-    const propertyColumns = visibleOrderedColumns(taskColumns, taskActiveView).filter(
-      (c) => c.key !== "name" && c.key !== groupByKey
-    );
+    const view = taskActiveView;
+    const showLabels = view.boardShowPropertyLabels ?? true;
+    const groupByKey = resolveBoardGroupBy(view.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status");
+    const isParent = t._depth === 0 && hasChildren(t.id);
+    const timing = isParent ? null : taskTiming(t);
+    const showTimingChip = groupByKey !== "timing" && !!timing && ["danger", "warning"].includes(timing.tone);
     return (
       <>
-        {!hidden.includes("name") && (
-          <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 4 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <InlineText value={t.name} editable={false} bold onCommit={(v) => updateTask(t.id, { name: v })} />
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setNotesSidebarTaskId(t.id);
-              }}
-              title={taskNoteCounts[t.id] ? `${taskNoteCounts[t.id]} note${taskNoteCounts[t.id] === 1 ? "" : "s"} on this task` : "Add a note to this task"}
-              className={`note-bubble-btn${taskNoteCounts[t.id] ? " has-notes" : ""}`}
-            >
-              <MessageCircle size={13} />
-              {!!taskNoteCounts[t.id] && <span className="note-bubble-count">{taskNoteCounts[t.id]}</span>}
-            </button>
+        <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 4 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <InlineText value={t.name} editable={false} bold onCommit={(v) => updateTask(t.id, { name: v })} />
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setNotesSidebarTaskId(t.id);
+            }}
+            title={taskNoteCounts[t.id] ? `${taskNoteCounts[t.id]} note${taskNoteCounts[t.id] === 1 ? "" : "s"} on this task` : "Add a note to this task"}
+            className={`note-bubble-btn${taskNoteCounts[t.id] ? " has-notes" : ""}`}
+          >
+            <MessageCircle size={13} />
+            {!!taskNoteCounts[t.id] && <span className="note-bubble-count">{taskNoteCounts[t.id]}</span>}
+          </button>
+        </div>
+        {t.parent_task_id && <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: -3 }}>↳ {taskName(t.parent_task_id)}</div>}
+        {showTimingChip && timing && (
+          <div>
+            <span className="board-card-indicator" style={{ color: TONE_CHIP[timing.tone]?.fg, background: TONE_CHIP[timing.tone]?.bg }}>{timing.label}</span>
           </div>
         )}
-        {t.parent_task_id && (
-          <div className="board-card-property">
-            {showLabels && <span className="board-card-property-label">Parent</span>}
-            <span className="board-card-property-value">{taskName(t.parent_task_id)}</span>
-          </div>
-        )}
-        {propertyColumns.map((c) => (
-          <div key={c.key} className="board-card-property">
-            {showLabels && (
-              <span className="board-card-property-label">{c.plainLabel ?? (typeof c.label === "string" ? c.label : c.key)}</span>
-            )}
-            <span className="board-card-property-value">{c.render(t)}</span>
-          </div>
-        ))}
+        {renderCardSections(t, taskColumns, view.cardPrimary ?? TASK_CARD_DEFAULT.primary, view.cardSecondary ?? TASK_CARD_DEFAULT.secondary, groupByKey, (k) => taskCardEmpty(k, t), showLabels)}
       </>
     );
   }
@@ -5318,6 +5418,12 @@ export default function Projects() {
     }
     const layoutOnly = Object.keys(patch).every((k) => {
       if (k === "columnOrder" || k === "columnWidths" || k === "frozenUpTo") return true;
+      if (k === "cardPrimary" || k === "cardSecondary") {
+        const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((x) => b.includes(x));
+        const cur = k === "cardPrimary" ? active.cardPrimary : active.cardSecondary;
+        const fallback = k === "cardPrimary" ? (active.taskScope ? TASK_CARD_DEFAULT.primary : PROJECT_CARD_DEFAULT.primary) : (active.taskScope ? TASK_CARD_DEFAULT.secondary : PROJECT_CARD_DEFAULT.secondary);
+        return sameSet(patch[k] ?? [], cur ?? fallback);
+      }
       if (k === "sorts") {
         const next = patch.sorts ?? [];
         return next.length === active.sorts.length && next.every((s, i) => s.key === active.sorts[i]?.key);
@@ -5904,6 +6010,17 @@ export default function Projects() {
                   : undefined
               }
               nonReorderableKeys={projectViews.activeView.viewType === "board" ? ["name"] : undefined}
+              cardLayout={
+                projectViews.activeView.viewType === "board"
+                  ? {
+                      primary: projectViews.activeView.cardPrimary ?? PROJECT_CARD_DEFAULT.primary,
+                      secondary: projectViews.activeView.cardSecondary ?? PROJECT_CARD_DEFAULT.secondary,
+                      max: CARD_MAX,
+                      excludedKey: resolveBoardGroupBy(projectViews.activeView.groupBy, PROJECT_BOARD_GROUPABLE_KEYS, "phase"),
+                      onChange: (cardPrimary, cardSecondary) => updateProjectView({ cardPrimary, cardSecondary }),
+                    }
+                  : undefined
+              }
             />
           </div>
         </div>
@@ -6031,6 +6148,11 @@ export default function Projects() {
               getValue={(p) => getProjectBoardValue(p, resolveBoardGroupBy(projectViews.activeView.groupBy, PROJECT_BOARD_GROUPABLE_KEYS, "phase"))}
               hiddenColumns={projectViews.activeView.hiddenGroups}
               renderCard={renderProjectCard}
+              getStripeColor={(p) => {
+                if (resolveBoardGroupBy(projectViews.activeView.groupBy, PROJECT_BOARD_GROUPABLE_KEYS, "phase") === "health") return null;
+                return TONE_STRIPE[healthOf(p, tasks, holidayDates).tone] ?? null;
+              }}
+              defaultCollapsed={["Done", "Completed", "Cancelled", "closed", "Done · close pending"]}
               onMoveCard={getProjectBoardMoveHandler(resolveBoardGroupBy(projectViews.activeView.groupBy, PROJECT_BOARD_GROUPABLE_KEYS, "phase"))}
               onReorderCard={reorderProjects}
             />
@@ -6239,6 +6361,17 @@ export default function Projects() {
                   : undefined
               }
               nonReorderableKeys={taskActiveView.viewType === "board" ? ["name"] : undefined}
+              cardLayout={
+                taskActiveView.viewType === "board"
+                  ? {
+                      primary: taskActiveView.cardPrimary ?? TASK_CARD_DEFAULT.primary,
+                      secondary: taskActiveView.cardSecondary ?? TASK_CARD_DEFAULT.secondary,
+                      max: CARD_MAX,
+                      excludedKey: resolveBoardGroupBy(taskActiveView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status"),
+                      onChange: (cardPrimary, cardSecondary) => updateTaskView({ cardPrimary, cardSecondary }),
+                    }
+                  : undefined
+              }
             />
           </div>
         </div>
@@ -6315,6 +6448,12 @@ export default function Projects() {
               getValue={(t) => getTaskBoardValue(t, resolveBoardGroupBy(taskActiveView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status"))}
               hiddenColumns={taskActiveView.hiddenGroups}
               renderCard={renderTaskCard}
+              getStripeColor={(t) => {
+                if (resolveBoardGroupBy(taskActiveView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status") === "timing") return null;
+                if (t._depth === 0 && hasChildren(t.id)) return null;
+                return TONE_STRIPE[taskTiming(t).tone] ?? null;
+              }}
+              defaultCollapsed={TASK_STATUS_GROUPED.filter((g) => g.label.toLowerCase().includes("complete") || g.label.toLowerCase().includes("cancel")).flatMap((g) => g.options)}
               onMoveCard={getTaskBoardMoveHandler(resolveBoardGroupBy(taskActiveView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status"))}
             />
 

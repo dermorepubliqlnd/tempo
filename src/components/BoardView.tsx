@@ -35,6 +35,12 @@ interface BoardViewProps<T> {
   // (e.g. grouped by Owner or Category instead of Status).
   onMoveCard?: (row: T, newValue: string) => void;
   onReorderCard?: (draggedKey: string, targetKey: string) => void;
+  // 2026-10-04: system indicator -- a coloured left edge per card (Timing
+  // for tasks, Health for projects). Return null for no stripe.
+  getStripeColor?: (row: T) => string | null;
+  // Columns that start collapsed (e.g. Complete / Cancelled). Click a
+  // collapsed column to expand it again.
+  defaultCollapsed?: string[];
 }
 
 const NO_VALUE_COLUMN = "__none__";
@@ -48,8 +54,15 @@ export default function BoardView<T>({
   renderCard,
   onMoveCard,
   onReorderCard,
+  getStripeColor,
+  defaultCollapsed,
 }: BoardViewProps<T>) {
   const [dragKey, setDragKey] = useState<string | null>(null);
+  const colsSignature = columns.map((c) => c.value).join("|");
+  const [collapsedState, setCollapsedState] = useState<{ sig: string; values: string[] }>({ sig: colsSignature, values: defaultCollapsed ?? [] });
+  const collapsed = collapsedState.sig === colsSignature ? collapsedState.values : defaultCollapsed ?? [];
+  const toggleCollapsed = (v: string) =>
+    setCollapsedState({ sig: colsSignature, values: collapsed.includes(v) ? collapsed.filter((x) => x !== v) : [...collapsed, v] });
   const draggable = Boolean(onMoveCard && onReorderCard);
 
   const hasUnassigned = rows.some((r) => !getValue(r));
@@ -94,12 +107,40 @@ export default function BoardView<T>({
         const isClusterStart = col.clusterLabel && col.clusterLabel !== visibleColumns[idx - 1]?.clusterLabel;
         const colRows = rowsFor(col.value);
         const tone = TONE_STYLES[col.tone ?? "neutral"] ?? TONE_STYLES.neutral;
+        if (collapsed.includes(col.value)) {
+          return (
+            <div
+              key={col.value}
+              className="board-column board-column-collapsed"
+              style={{ background: tone.bg, cursor: "pointer" }}
+              onClick={() => toggleCollapsed(col.value)}
+              title={`Show ${col.label} (${colRows.length})`}
+              onDragOver={draggable ? (e) => e.preventDefault() : undefined}
+              onDrop={draggable ? (e) => handleDropOnColumn(e, col.value) : undefined}
+            >
+              <div className="board-column-cluster" style={{ color: tone.text }}>{isClusterStart ? col.clusterLabel : " "}</div>
+              <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", color: tone.text, fontSize: 11.5, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, padding: "6px 0" }}>
+                {col.label}
+                <span className="board-column-count">{colRows.length}</span>
+              </div>
+            </div>
+          );
+        }
         return (
           <div key={col.value} className="board-column" style={{ background: tone.bg }}>
             <div className="board-column-cluster" style={{ color: tone.text }}>{isClusterStart ? col.clusterLabel : " "}</div>
             <div className="board-column-header" style={{ color: tone.text }} title={col.hint}>
               {col.label}
               <span className="board-column-count">{colRows.length}</span>
+              <button
+                type="button"
+                onClick={() => toggleCollapsed(col.value)}
+                title="Collapse column"
+                aria-label={`Collapse ${col.label}`}
+                style={{ marginLeft: "auto", border: "none", background: "transparent", color: "inherit", opacity: 0.55, cursor: "pointer", fontSize: 12, padding: "0 2px", width: "auto" }}
+              >
+                ‹
+              </button>
             </div>
             <div
               className="board-column-body"
@@ -117,7 +158,7 @@ export default function BoardView<T>({
                     onDragEnd={draggable ? () => setDragKey(null) : undefined}
                     onDragOver={draggable ? (e) => e.preventDefault() : undefined}
                     onDrop={draggable ? (e) => handleDropOnCard(e, row, col.value) : undefined}
-                    style={{ opacity: dragKey === key ? 0.4 : 1 }}
+                    style={{ opacity: dragKey === key ? 0.4 : 1, ...(getStripeColor && getStripeColor(row) ? { borderLeft: `3px solid ${getStripeColor(row)}` } : {}) }}
                   >
                     {draggable && (
                       <span className="board-card-grip">

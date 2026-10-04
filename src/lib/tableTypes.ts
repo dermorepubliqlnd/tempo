@@ -222,6 +222,11 @@ export interface TableView {
   // 2026-10-04: the view this person chose as their own default (opens on
   // page load). Overrides the system default when set on any view.
   personalDefault?: boolean;
+  // Board view card layout (2026-10-04): up to 4 Primary + 4 Secondary
+  // property keys. Undefined = the page's default layout. Independent of
+  // hiddenColumns, so tidying a board never hides table columns.
+  cardPrimary?: string[];
+  cardSecondary?: string[];
   // Tasks page system views (2026-10-04): which task set the view covers.
   taskScope?: "my_open" | "my_done" | "owner_open" | "owner_at_risk" | "org_open" | "org_all";
   projectScope?: "my_active_owned" | "my_active_portfolio" | "my_owned_all" | "my_full_portfolio" | "org_active" | "org_all";

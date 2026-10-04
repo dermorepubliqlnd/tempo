@@ -1,3 +1,4 @@
+import CardLayoutEditor from "./CardLayoutEditor";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowUpDown, Layers, SlidersHorizontal, Filter, Eye, EyeOff, ArrowUp, ArrowDown, GripVertical, Plus, Trash2, X } from "lucide-react";
@@ -94,6 +95,15 @@ interface ViewControlsProps<T> {
   // label handling), same undefined-means-not-applicable pattern as
   // propertyLockInfo above.
   boardLabelToggle?: { checked: boolean; onChange: (value: boolean) => void };
+  // 2026-10-04: Board views configure cards as Primary / Secondary / Hidden
+  // (max per section) instead of a show/hide checklist.
+  cardLayout?: {
+    primary: string[];
+    secondary: string[];
+    max: number;
+    excludedKey?: string | null;
+    onChange: (primary: string[], secondary: string[]) => void;
+  };
   // Keys that can still be shown/hidden via the eye toggle but can't be
   // dragged to a different position in the Properties list -- used for
   // Board's Name property, which a card always pins to the top/title
@@ -267,6 +277,7 @@ export default function ViewSettingsMenu<T>({
   hideGroupBy,
   boardLabelToggle,
   nonReorderableKeys,
+  cardLayout,
 }: ViewControlsProps<T>) {
   const activeOption = groupOptions.find((g) => g.key === groupBy);
   const groupValues = activeOption
@@ -581,8 +592,25 @@ export default function ViewSettingsMenu<T>({
       </IconPopoverButton>
       )}
 
-      <IconPopoverButton icon={<SlidersHorizontal size={13} />} label="Properties" active={hiddenColumns.length > 0} width={240}>
+      <IconPopoverButton icon={<SlidersHorizontal size={13} />} label={cardLayout ? "Card layout" : "Properties"} active={cardLayout ? true : hiddenColumns.length > 0} width={cardLayout ? 300 : 240}>
         {(close) => {
+          if (cardLayout) {
+            return (
+              <>
+                <PopoverHeader label="Card layout" onClose={close} />
+                <CardLayoutEditor
+                  fields={columns
+                    .filter((c) => c.key !== "name")
+                    .map((c) => ({ key: c.key, label: c.plainLabel ?? (typeof c.label === "string" ? c.label : c.key) }))}
+                  primary={cardLayout.primary}
+                  secondary={cardLayout.secondary}
+                  max={cardLayout.max}
+                  excludedKey={cardLayout.excludedKey}
+                  onChange={cardLayout.onChange}
+                />
+              </>
+            );
+          }
           const known = columns.map((c) => c.key);
           // Same "stored order, then anything new tacked on the end" logic
           // as DataTable's own orderedKeys -- keeps this list's order
