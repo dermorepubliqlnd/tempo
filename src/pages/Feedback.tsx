@@ -3,6 +3,7 @@ import { MessageSquarePlus, Lightbulb, Clock, CheckCircle2, XCircle, Search } fr
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import Modal from "../components/Modal";
+import { useConfirm } from "../lib/useConfirm";
 
 // 2026-10-04 (Sandra): capture enhancement requests / feedback.
 // Data: Name (submitter), Submitted date, Subject, Details. Everyone can
@@ -20,9 +21,10 @@ interface FeedbackRow {
   responded_by: string | null;
   responded_at: string | null;
 }
-type Status = "New" | "Under review" | "Planned" | "Done" | "Declined";
+type Status = "New" | "Under review" | "Planned" | "Done" | "Declined" | "Cancelled";
+// Admin-settable statuses. "Cancelled" is set only by the submitter (while New).
 const STATUSES: Status[] = ["New", "Under review", "Planned", "Done", "Declined"];
-const STATUS_TONE: Record<Status, string> = { New: "accent", "Under review": "warning", Planned: "purple", Done: "success", Declined: "neutral" };
+const STATUS_TONE: Record<Status, string> = { New: "accent", "Under review": "warning", Planned: "purple", Done: "success", Declined: "neutral", Cancelled: "slate" };
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -31,6 +33,7 @@ function fmtDate(iso: string) {
 export default function Feedback() {
   const { person: me } = useSession();
   const isFullAccess = me?.access_level === "full";
+  const { confirm, dialog } = useConfirm();
   const [rows, setRows] = useState<FeedbackRow[]>([]);
   const [people, setPeople] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,6 +104,17 @@ export default function Feedback() {
     }
   }
 
+  async function cancelRequest(r: FeedbackRow) {
+    const { error } = await supabase.rpc("cancel_feedback_request", { p_id: r.id });
+    if (error) {
+      setNotice(error.message);
+      return;
+    }
+    setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, status: "Cancelled" } : x)));
+    setNotice(`FB-${String(r.request_number).padStart(4, "0")} was cancelled.`);
+    window.setTimeout(() => setNotice(null), 4000);
+  }
+
   async function saveResponse(r: FeedbackRow) {
     const text = (responseDraft[r.id] ?? "").trim();
     if (!text || !me?.id) return;
@@ -124,6 +138,7 @@ export default function Feedback() {
 
   return (
     <div>
+      {dialog}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 6 }}>
         <h1 style={{ margin: 0 }}>Feedback &amp; Requests</h1>
         <button
@@ -207,7 +222,7 @@ export default function Feedback() {
               <th style={{ width: 170 }}>Name</th>
               <th style={{ width: 120 }}>Submitted</th>
               <th>Subject</th>
-              <th style={{ width: 150 }}>Status</th>
+              <th style={{ width: 210 }}>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -236,15 +251,36 @@ export default function Feedback() {
                       {r.admin_response && <span className="status-pill success" style={{ marginLeft: 8, fontSize: 9.5 }}>Responded</span>}
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
-                      {isFullAccess ? (
-                        <select value={r.status} onChange={(e) => setStatus(r, e.target.value as Status)} style={{ fontSize: 12, padding: "3px 6px", borderRadius: 6, border: "1px solid var(--border)", width: "100%" }}>
-                          {STATUSES.map((s) => (
-                            <option key={s} value={s}>{s}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className={`status-pill ${STATUS_TONE[r.status]}`}>{r.status}</span>
-                      )}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {isFullAccess && r.status !== "Cancelled" ? (
+                          <select value={r.status} onChange={(e) => setStatus(r, e.target.value as Status)} style={{ fontSize: 12, padding: "3px 6px", borderRadius: 6, border: "1px solid var(--border)", flex: 1, minWidth: 0 }}>
+                            {STATUSES.map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className={`status-pill ${STATUS_TONE[r.status]}`}>{r.status}</span>
+                        )}
+                        {r.person_id === me?.id && r.status === "New" && (
+                          <button
+                            type="button"
+                            title="Cancel this request (only while it's New)"
+                            onClick={async () => {
+                              const ok = await confirm({
+                                title: "Cancel this request?",
+                                message: `FB-${String(r.request_number).padStart(4, "0")} "${r.subject}" will be marked Cancelled. You can't undo this.`,
+                                confirmLabel: "Cancel request",
+                                cancelLabel: "Keep it",
+                                danger: true,
+                              });
+                              if (ok) void cancelRequest(r);
+                            }}
+                            style={{ fontSize: 11, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--danger-text)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", width: "auto", flexShrink: 0 }}
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                   {open && (
