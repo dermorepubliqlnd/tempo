@@ -23,6 +23,7 @@ import AuditTrail from "./pages/AuditTrail";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import Archive from "./pages/Archive";
 import Login from "./pages/Login";
+import Feedback from "./pages/Feedback";
 import SetPassword from "./pages/SetPassword";
 
 // 2026-09-24 (sidebar cleanup): Extension Requests left the menu -- its
@@ -103,6 +104,7 @@ export default function App() {
           <Route path="/knowledge-base/category/:categoryId" element={<KnowledgeBase />} />
           <Route path="/knowledge-base/article/:entryId" element={<KnowledgeBase />} />
           <Route path="/archive" element={<Archive />} />
+          <Route path="/feedback" element={<Feedback />} />
           <Route path="/tasks" element={<Navigate to="/projects?tab=tasks" replace />} />
           <Route path="/tasks/:taskId" element={<Navigate to="/projects?tab=tasks" replace />} />
           <Route path="/approval-center" element={<ApprovalCenterGate />} />

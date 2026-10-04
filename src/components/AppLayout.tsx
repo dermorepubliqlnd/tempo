@@ -18,6 +18,7 @@ import {
   ClipboardCheck,
   BookOpen,
   Archive as ArchiveIcon,
+  MessageSquarePlus,
   type LucideIcon,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -40,6 +41,7 @@ const mainItems: NavItem[] = [
   { to: "/approval-center", label: "Approval Center", icon: ClipboardCheck },
   { to: "/knowledge-base", label: "Knowledge Base", icon: BookOpen },
   { to: "/archive", label: "Archive", icon: ArchiveIcon },
+  { to: "/feedback", label: "Feedback", icon: MessageSquarePlus },
 ];
 
 const resourcePlanningItems: NavItem[] = [
