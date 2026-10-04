@@ -3656,7 +3656,6 @@ export default function Projects() {
   const projectBoardGroupOptions: GroupOption<ProjectRow>[] = [
     { key: "name", label: "Project", getGroup: () => "", boardGroupable: false },
     { key: "owner", label: "Owner", getGroup: (p) => ownerName(p.owner_id), boardGroupable: true },
-    { key: "health", label: "Health", getGroup: (p) => healthBucket(healthOf(p, tasks, holidayDates).label), boardGroupable: true },
     {
       key: "priority",
       label: "Priority",
@@ -3681,9 +3680,9 @@ export default function Projects() {
     {
       key: "health",
       label: "Health",
-      getGroup: (p) => healthOf(p, tasks, holidayDates).label,
+      getGroup: (p) => healthBucket(healthOf(p, tasks, holidayDates).label),
       getTone: (p) => healthOf(p, tasks, holidayDates).tone,
-      boardGroupable: false,
+      boardGroupable: true,
     },
     { key: "actual_progress", label: "Actual Progress", getGroup: () => "", boardGroupable: false },
     {
