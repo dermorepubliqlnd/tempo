@@ -430,6 +430,53 @@ const TASK_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["project", "timing_variance_days",
 const TASK_CALENDAR_DEFAULT_HIDDEN_COLUMNS = ["status", "timing", "validated_completion_date", "validated_by", "actual_completion_date", "estimated_hours", "time_spent_hours", "timing_variance_days", "hours_variance", "hours_variance_pct", "work_type", "output_type", "output_count"];
 const TASK_COLUMN_ORDER = ["name", "task_number", "project", "assignee", "status", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "time_log_status", "effort", "timing_variance_days", "due_date_ext", "work_type", "output_type", "output_count", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
 
+// 2026-10-04 (Sandra): Tasks system views answer "what needs doing, by whom,
+// and when" -- project health/progress stays on Projects + Overview.
+// System groups: "my" -> My Tasks (incl. the owner lens over projects I
+// own), "organization" -> Team Views. Personal views land under My Views.
+const TASK_SYS_LEAD = ["task_number", "name", "project", "assignee", "status", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext", "actual_completion_date", "validated_completion_date", "validated_by", "hours_variance"];
+const TASK_SYSTEM_COLUMN_ORDER = [...TASK_SYS_LEAD, ...TASK_COLUMN_ORDER.filter((k) => !TASK_SYS_LEAD.includes(k))];
+const TASK_MY_VISIBLE = new Set(["task_number", "name", "project", "status", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext"]);
+const TASK_TEAM_VISIBLE = new Set([...TASK_MY_VISIBLE, "assignee"]);
+const TASK_DONE_VISIBLE = new Set(["task_number", "name", "project", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "hours_variance"]);
+function taskSystemView(
+  id: string,
+  name: string,
+  scope: NonNullable<TableView["taskScope"]>,
+  group: "my" | "organization",
+  visible: Set<string>,
+  opts: { groupBy?: string | null; viewType?: TableView["viewType"]; sortKey?: string; isDefault?: boolean } = {}
+): TableView {
+  return {
+    id,
+    name,
+    viewType: opts.viewType ?? "table",
+    systemView: true,
+    systemGroup: group,
+    isDefaultView: !!opts.isDefault,
+    taskScope: scope,
+    columnOrder: TASK_SYSTEM_COLUMN_ORDER,
+    hiddenColumns: TASK_SYSTEM_COLUMN_ORDER.filter((key) => !visible.has(key)),
+    columnWidths: {},
+    groupBy: opts.groupBy ?? null,
+    hiddenGroups: [],
+    hideEmptyGroups: true,
+    color: "neutral",
+    showCount: false,
+    sorts: [{ key: opts.sortKey ?? "current_due_date", direction: "asc" }],
+  };
+}
+const TASK_SYSTEM_VIEWS: TableView[] = [
+  taskSystemView("system_tasks_my_open", "My Open Tasks", "my_open", "my", TASK_MY_VISIBLE, { groupBy: "due_window", isDefault: true }),
+  taskSystemView("system_tasks_my_by_project", "My Tasks by Project", "my_open", "my", TASK_MY_VISIBLE, { groupBy: "project" }),
+  taskSystemView("system_tasks_my_calendar", "My Task Calendar", "my_open", "my", TASK_MY_VISIBLE, { viewType: "calendar" }),
+  taskSystemView("system_tasks_my_done", "My Completed Tasks", "my_done", "my", TASK_DONE_VISIBLE, { groupBy: "validation" }),
+  taskSystemView("system_tasks_owner_open", "Tasks in My Projects", "owner_open", "my", TASK_TEAM_VISIBLE, { groupBy: "assignee" }),
+  taskSystemView("system_tasks_owner_at_risk", "At-Risk Tasks in My Projects", "owner_at_risk", "my", TASK_TEAM_VISIBLE, { groupBy: "project" }),
+  taskSystemView("system_tasks_org_open", "All Open Tasks", "org_open", "organization", TASK_TEAM_VISIBLE, { groupBy: "assignee" }),
+  taskSystemView("system_tasks_org_all", "All Tasks", "org_all", "organization", TASK_TEAM_VISIBLE, { groupBy: "project", sortKey: "task_number" }),
+];
+
 // "Fun, not corporate" icons for Task Effort (Sandra's request) — a light
 // feather for quick work, a weight plate for a moderate lift, and a flexed
 // bicep for the heavy stuff. Colors are NOT hardcoded to these icons; the
@@ -2354,6 +2401,10 @@ export default function Projects() {
   }
 
   async function reorderTasks(draggedId: string, targetId: string) {
+    if (taskViews.activeView.systemView) {
+      await alert("Rows can't be reordered in a System View. Duplicate this view as your own to set a manual order.");
+      return;
+    }
     if (taskViews.activeView.sorts.length > 0) {
       const ok = await confirm({
         title: "Clear sort to reorder",
@@ -2361,7 +2412,7 @@ export default function Projects() {
         confirmLabel: "Clear sort & reorder",
       });
       if (!ok) return;
-      taskViews.updateActiveView({ sorts: [] });
+      updateTaskView({ sorts: [] });
     }
     const newVal = reorderedSortValue(tasks.map((t) => ({ id: t.id, sort_order: t.sort_order })), draggedId, targetId);
     if (newVal == null) return;
@@ -4878,7 +4929,36 @@ export default function Projects() {
     );
   }
 
+  // 2026-10-04: Due window / Validation groupings for the Tasks system views.
+  function dueWindowOf(t: TaskRow): string {
+    const d = t.current_due_date?.slice(0, 10);
+    if (!d) return "No due date";
+    const today = new Date();
+    const todayIso = toISOWorkingDay(today);
+    if (d < todayIso) return "Overdue";
+    if (d === todayIso) return "Today";
+    const dow = (today.getDay() + 6) % 7; // Mon=0
+    const sunday = new Date(today); sunday.setDate(today.getDate() + (6 - dow));
+    const nextSunday = new Date(sunday); nextSunday.setDate(sunday.getDate() + 7);
+    if (d <= toISOWorkingDay(sunday)) return "This week";
+    if (d <= toISOWorkingDay(nextSunday)) return "Next week";
+    return "Later";
+  }
   const taskGroupOptions: GroupOption<TaskWithDepth>[] = [
+    {
+      key: "due_window",
+      label: "Due Window",
+      getGroup: (t) => dueWindowOf(t),
+      getTone: (t) => ({ Overdue: "danger", Today: "warning", "This week": "accent" } as Record<string, string>)[dueWindowOf(t)] ?? "neutral",
+      allGroups: () => ["Overdue", "Today", "This week", "Next week", "Later", "No due date"],
+    },
+    {
+      key: "validation",
+      label: "Validation",
+      getGroup: (t) => (statusGroupOf(TASK_STATUS_GROUPED, t.status) !== "complete" ? "Not done" : t.validated_completion_date ? "Validated" : "Awaiting validation"),
+      getTone: (t) => (statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete" && !t.validated_completion_date ? "warning" : "success"),
+      allGroups: () => ["Awaiting validation", "Validated"],
+    },
     {
       key: "project",
       label: "Project",
@@ -5169,12 +5249,56 @@ export default function Projects() {
   });
 
   useEffect(() => {
+    if (!taskViews.loaded) return;
+    taskViews.installSystemViews(TASK_SYSTEM_VIEWS, "system_tasks_my_open");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskViews.loaded]);
+
+  // Same System View edit rule as updateProjectView.
+  function updateTaskView(patch: Partial<TableView>) {
+    const active = taskViews.activeView;
+    if (!active.systemView) {
+      taskViews.updateActiveView(patch);
+      return;
+    }
+    const layoutOnly = Object.keys(patch).every((k) => {
+      if (k === "columnOrder" || k === "columnWidths" || k === "frozenUpTo") return true;
+      if (k === "sorts") {
+        const next = patch.sorts ?? [];
+        return next.length === active.sorts.length && next.every((s, i) => s.key === active.sorts[i]?.key);
+      }
+      return false;
+    });
+    if (layoutOnly) {
+      taskViews.updateActiveView(patch);
+      return;
+    }
+    confirm({
+      title: "You've modified a System View.",
+      message: "Save these changes as a new personal view?",
+      confirmLabel: "Save as New View",
+      cancelLabel: "Discard Changes",
+    }).then((saveAsNew) => {
+      if (!saveAsNew) return;
+      const { id: _sysId, name: _sysName, ...merged } = { ...active, ...patch };
+      void _sysId; void _sysName;
+      taskViews.createView(`${active.name} - Personal`, merged.viewType, merged.groupBy ?? undefined, merged.hiddenColumns, {
+        ...merged,
+        systemView: false,
+        systemGroup: undefined,
+        isDefaultView: false,
+        personalDefault: undefined,
+      });
+    });
+  }
+
+  useEffect(() => {
     // Wait for this person's REAL saved views to come back from Supabase
     // first -- creating/switching before that resolves gets silently
     // reverted the instant the fetch lands (see useTableViews' `loaded`
     // doc comment).
     if (!wantsMyProjectsView || !projectViews.loaded) return;
-    const existing = projectViews.views.find((v) => v.name === "My Projects");
+    const existing = projectViews.views.find((v) => v.id === "system_my_active_projects") ?? projectViews.views.find((v) => v.name === "My Projects");
     if (existing) {
       if (projectViews.activeViewId !== existing.id) projectViews.setActiveViewId(existing.id);
     } else {
@@ -5187,7 +5311,8 @@ export default function Projects() {
 
   useEffect(() => {
     if (!wantsMyTasksView || !taskViews.loaded) return;
-    const existing = taskViews.views.find((v) => v.name === "My Tasks");
+    // 2026-10-04: "View all tasks" links land on the My Open Tasks system view.
+    const existing = taskViews.views.find((v) => v.id === "system_tasks_my_open") ?? taskViews.views.find((v) => v.name === "My Tasks");
     if (existing) {
       if (taskViews.activeViewId !== existing.id) taskViews.setActiveViewId(existing.id);
     } else {
@@ -5215,6 +5340,37 @@ export default function Projects() {
   const filteredVisibleTasks = useMemo(() => {
     const view = taskViews.activeView;
     let out = visibleTasks;
+    if (view.taskScope) {
+      const group = (t: TaskRow) => statusGroupOf(TASK_STATUS_GROUPED, t.status);
+      const isOpen = (t: TaskRow) => group(t) !== "complete" && group(t) !== "cancelled";
+      const ownedIds = new Set(projects.filter((p) => p.owner_id === me?.id).map((p) => p.id));
+      const isLeaf = (t: TaskRow) => !tasks.some((x) => x.parent_task_id === t.id);
+      const atRisk = (t: TaskRow) => {
+        if (!isOpen(t) || !isLeaf(t)) return false;
+        if (!t.assignee_id) return true;
+        const label = taskTiming(t).label;
+        return label === "Overdue" || label === "Paused · Overdue" || label === "Due soon";
+      };
+      switch (view.taskScope) {
+        case "my_open":
+          out = out.filter((t) => t.assignee_id === me?.id && isOpen(t));
+          break;
+        case "my_done":
+          out = out.filter((t) => t.assignee_id === me?.id && group(t) === "complete");
+          break;
+        case "owner_open":
+          out = out.filter((t) => ownedIds.has(t.project_id) && isOpen(t));
+          break;
+        case "owner_at_risk":
+          out = out.filter((t) => ownedIds.has(t.project_id) && atRisk(t));
+          break;
+        case "org_open":
+          out = out.filter(isOpen);
+          break;
+        case "org_all":
+          break;
+      }
+    }
     const personIds = resolveFilterPersonIds(view);
     if (personIds.length > 0) {
       out = out.filter((t) => personIds.some((id) => (id === "me" ? t.assignee_id === me?.id : t.assignee_id === id)));
@@ -5224,7 +5380,8 @@ export default function Projects() {
       out = out.filter((t) => statuses.includes(t.status ?? ""));
     }
     return out;
-  }, [visibleTasks, taskViews.activeView, me?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleTasks, taskViews.activeView, me?.id, projects, tasks]);
 
   // Instant, Notion-style row creation (mirrors createBlankProject): insert
   // a sensibly-defaulted task immediately and let the person fill it in via
@@ -5880,6 +6037,9 @@ export default function Projects() {
         <div className="sticky-toolbar-cluster" ref={taskClusterRef}>
         <div className="table-toolbar">
           <ViewTabs
+            mode="dropdown"
+            onSetDefault={taskViews.setDefaultView}
+            dropdownGroupLabels={{ my: "My Tasks", organization: "Team Views", custom: "My Views" }}
             views={taskViews.views}
             activeViewId={taskViews.activeViewId}
             rows={visibleTasks}
@@ -5902,37 +6062,37 @@ export default function Projects() {
               rows={filteredVisibleTasks}
               columns={taskColumns}
               hiddenColumns={taskViews.activeView.hiddenColumns}
-              onHiddenColumnsChange={(hiddenColumns) => taskViews.updateActiveView({ hiddenColumns })}
+              onHiddenColumnsChange={(hiddenColumns) => updateTaskView({ hiddenColumns })}
               columnOrder={taskViews.activeView.columnOrder}
-              onColumnOrderChange={(columnOrder) => taskViews.updateActiveView({ columnOrder })}
+              onColumnOrderChange={(columnOrder) => updateTaskView({ columnOrder })}
               groupOptions={taskGroupModeOptions}
               groupBy={taskResolvedGroupBy}
               groupBy2={taskResolvedGroupBy2}
               hiddenGroups={taskViews.activeView.hiddenGroups}
-              onGroupByChange={(groupBy) => taskViews.updateActiveView({ groupBy, hiddenGroups: [] })}
-              onGroupBy2Change={(groupBy2) => taskViews.updateActiveView({ groupBy2 })}
-              onHiddenGroupsChange={(hiddenGroups) => taskViews.updateActiveView({ hiddenGroups })}
+              onGroupByChange={(groupBy) => updateTaskView({ groupBy, hiddenGroups: [] })}
+              onGroupBy2Change={(groupBy2) => updateTaskView({ groupBy2 })}
+              onHiddenGroupsChange={(hiddenGroups) => updateTaskView({ hiddenGroups })}
               hideEmptyGroups={taskViews.activeView.hideEmptyGroups}
-              onHideEmptyGroupsChange={(hideEmptyGroups) => taskViews.updateActiveView({ hideEmptyGroups })}
+              onHideEmptyGroupsChange={(hideEmptyGroups) => updateTaskView({ hideEmptyGroups })}
               showCount={taskViews.activeView.showCount}
-              onShowCountChange={(showCount) => taskViews.updateActiveView({ showCount })}
+              onShowCountChange={(showCount) => updateTaskView({ showCount })}
               sortOptions={taskSortOptions}
               sorts={taskViews.activeView.sorts}
-              onSortsChange={(sorts) => taskViews.updateActiveView({ sorts })}
+              onSortsChange={(sorts) => updateTaskView({ sorts })}
               groupMode={taskGroupMode}
               people={people}
               filterPersonIds={resolveFilterPersonIds(taskViews.activeView)}
-              onFilterPersonIdsChange={(filterPersonIds) => taskViews.updateActiveView({ filterPersonIds })}
+              onFilterPersonIdsChange={(filterPersonIds) => updateTaskView({ filterPersonIds })}
               statusOptions={TASK_STATUS_OPTIONS}
               filterStatuses={taskViews.activeView.filterStatuses ?? []}
-              onFilterStatusesChange={(filterStatuses) => taskViews.updateActiveView({ filterStatuses })}
+              onFilterStatusesChange={(filterStatuses) => updateTaskView({ filterStatuses })}
               propertyLockInfo={taskTimelinePropertyLockInfo}
               hideGroupBy={taskViews.activeView.viewType === "calendar"}
               boardLabelToggle={
                 taskViews.activeView.viewType === "board"
                   ? {
                       checked: taskViews.activeView.boardShowPropertyLabels ?? true,
-                      onChange: (boardShowPropertyLabels) => taskViews.updateActiveView({ boardShowPropertyLabels }),
+                      onChange: (boardShowPropertyLabels) => updateTaskView({ boardShowPropertyLabels }),
                     }
                   : undefined
               }
@@ -5944,9 +6104,9 @@ export default function Projects() {
           <div className="timeline-controls-row">
             <TimelineControls
               scale={taskViews.activeView.timelineScale ?? "month"}
-              onScaleChange={(timelineScale) => taskViews.updateActiveView({ timelineScale })}
+              onScaleChange={(timelineScale) => updateTaskView({ timelineScale })}
               dateMode={taskViews.activeView.timelineDateMode ?? "range"}
-              onDateModeChange={(timelineDateMode) => taskViews.updateActiveView({ timelineDateMode })}
+              onDateModeChange={(timelineDateMode) => updateTaskView({ timelineDateMode })}
             />
           </div>
         )}
@@ -5954,18 +6114,18 @@ export default function Projects() {
           groupOptions={taskGroupModeOptions}
           groupBy={taskResolvedGroupBy}
           groupBy2={taskResolvedGroupBy2}
-          onGroupBy2Change={(groupBy2) => taskViews.updateActiveView({ groupBy2 })}
+          onGroupBy2Change={(groupBy2) => updateTaskView({ groupBy2 })}
           hiddenGroups={taskViews.activeView.hiddenGroups}
-          onGroupByChange={(groupBy) => taskViews.updateActiveView({ groupBy, hiddenGroups: [] })}
-          onHiddenGroupsChange={(hiddenGroups) => taskViews.updateActiveView({ hiddenGroups })}
+          onGroupByChange={(groupBy) => updateTaskView({ groupBy, hiddenGroups: [] })}
+          onHiddenGroupsChange={(hiddenGroups) => updateTaskView({ hiddenGroups })}
           sortOptions={taskSortOptions}
           sorts={taskViews.activeView.sorts}
-          onSortsChange={(sorts) => taskViews.updateActiveView({ sorts })}
+          onSortsChange={(sorts) => updateTaskView({ sorts })}
           groupMode={taskGroupMode}
           people={people}
           filterPersonIds={resolveFilterPersonIds(taskViews.activeView)}
           filterStatuses={taskViews.activeView.filterStatuses ?? []}
-          onClearFilter={() => taskViews.updateActiveView({ filterPersonIds: [], filterStatuses: [] })}
+          onClearFilter={() => updateTaskView({ filterPersonIds: [], filterStatuses: [] })}
           containerRef={setTaskPillsRowEl}
         />
         {taskViews.activeView.viewType !== "board" && taskViews.activeView.viewType !== "timeline" && selectedTaskIds.length > 0 && (
@@ -6035,7 +6195,7 @@ export default function Projects() {
               getGroupTone={taskTimelineGroupOption?.getTone}
               hiddenGroups={taskViews.activeView.hiddenGroups}
               labelWidth={taskViews.activeView.timelineLabelWidth ?? 460}
-              onLabelWidthChange={(timelineLabelWidth) => taskViews.updateActiveView({ timelineLabelWidth })}
+              onLabelWidthChange={(timelineLabelWidth) => updateTaskView({ timelineLabelWidth })}
             />
 
           </>
@@ -6056,7 +6216,7 @@ export default function Projects() {
               getTooltip={(t) => `${t.name} · ${formatDate(t.start_date)} → ${formatDate(t.current_due_date)}`}
               emptyLabel="No tasks yet. Add tasks from WBS Planning."
               dateMode={taskViews.activeView.timelineDateMode ?? "range"}
-              onDateModeChange={(timelineDateMode) => taskViews.updateActiveView({ timelineDateMode })}
+              onDateModeChange={(timelineDateMode) => updateTaskView({ timelineDateMode })}
               propertyColumns={taskCalendarPropertyColumns}
               isNonWorkingDay={(d) => !isWorkingDay(d, holidayDates)}
             />
@@ -6070,7 +6230,7 @@ export default function Projects() {
               rowKey={(t) => t.id}
               getParentId={(t) => t.parent_task_id}
               view={taskViews.activeView}
-              onViewChange={taskViews.updateActiveView}
+              onViewChange={updateTaskView}
               groupOptions={taskGroupOptions}
               sortOptions={taskSortOptions}
               collapseAllContainer={taskPillsRowEl}
