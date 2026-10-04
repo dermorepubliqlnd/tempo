@@ -2337,6 +2337,73 @@ export default function Projects() {
     return out;
   }, [projects, projectViews.activeView, me?.id]);
 
+
+  // Personal portfolio KPI snapshot (2026-10-04).
+  // Deliberately independent of the selected Projects saved/system view:
+  // switching between My Active Projects, My Active Portfolio, All Projects
+  // I Own, or My Full Portfolio changes the table below, not this snapshot.
+  //
+  // "Contributor" currently means the person has at least one non-archived
+  // task assigned in the project. Owner wins over contributor, so a project
+  // is never double-counted across Owned + Contributing To.
+  const personalPortfolioKpis = useMemo(() => {
+    const personId = me?.id;
+    if (!personId) {
+      return {
+        portfolio: 0,
+        owned: 0,
+        contributing: 0,
+        activeOwned: 0,
+        activeContributions: 0,
+        needsAttention: 0,
+        atRisk: 0,
+        offTrack: 0,
+        overdue: 0,
+      };
+    }
+
+    const contributedProjectIds = new Set(
+      tasks
+        .filter((t) => !t.is_archived && t.assignee_id === personId)
+        .map((t) => t.project_id)
+    );
+
+    const ownedProjects = projects.filter((p) => p.owner_id === personId);
+    const contributionProjects = projects.filter(
+      (p) => p.owner_id !== personId && contributedProjectIds.has(p.id)
+    );
+
+    const activeOwnedProjects = ownedProjects.filter((p) => projectStatusOf(p) === "In Progress");
+    const activeContributionProjects = contributionProjects.filter((p) => projectStatusOf(p) === "In Progress");
+
+    // Phase 1 attention rule reuses Tempo's existing health engine rather
+    // than maintaining a second schedule-risk calculation here.
+    // Categories are mutually exclusive because healthOf returns one label.
+    let atRisk = 0;
+    let offTrack = 0;
+    let overdue = 0;
+    for (const p of ownedProjects) {
+      const status = projectStatusOf(p);
+      if (status === "Completed" || status === "Cancelled") continue;
+      const health = healthOf(p, tasks, holidayDates).label;
+      if (health === "At risk") atRisk += 1;
+      else if (health === "Off track") offTrack += 1;
+      else if (health === "Overdue") overdue += 1;
+    }
+
+    return {
+      portfolio: ownedProjects.length + contributionProjects.length,
+      owned: ownedProjects.length,
+      contributing: contributionProjects.length,
+      activeOwned: activeOwnedProjects.length,
+      activeContributions: activeContributionProjects.length,
+      needsAttention: atRisk + offTrack + overdue,
+      atRisk,
+      offTrack,
+      overdue,
+    };
+  }, [projects, tasks, me?.id, holidayDates]);
+
   const projectColumns: ColumnDef<ProjectRow>[] = useMemo(
     () => [
       {
@@ -5149,6 +5216,57 @@ export default function Projects() {
             <Plus size={14} /> {creatingProject ? "Creating…" : "Add New Project"}
           </button>
         )}
+      </div>
+
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+          Overall Portfolio
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginBottom: 12 }}>
+          {[
+            { label: "My Portfolio", value: personalPortfolioKpis.portfolio, note: "Owned + contributed to" },
+            { label: "Projects Owned", value: personalPortfolioKpis.owned, note: "All statuses" },
+            { label: "Contributing To", value: personalPortfolioKpis.contributing, note: "Owned by someone else" },
+          ].map((item) => (
+            <div key={item.label} className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>{item.label}</div>
+              <div style={{ fontSize: 26, lineHeight: 1, fontWeight: 700, color: "var(--navy)", fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>{item.note}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+          Active & Attention
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+          <div className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>Active Owned</div>
+            <div style={{ fontSize: 26, lineHeight: 1, fontWeight: 700, color: "var(--navy)", fontVariantNumeric: "tabular-nums" }}>{personalPortfolioKpis.activeOwned}</div>
+            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>In-progress projects I own</div>
+          </div>
+          <div className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>Active Contributions</div>
+            <div style={{ fontSize: 26, lineHeight: 1, fontWeight: 700, color: "var(--navy)", fontVariantNumeric: "tabular-nums" }}>{personalPortfolioKpis.activeContributions}</div>
+            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>In-progress projects I support</div>
+          </div>
+          <div className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>Needs Attention</div>
+              {personalPortfolioKpis.needsAttention > 0 && <AlertTriangle size={14} color="var(--warning)" />}
+            </div>
+            <div style={{ fontSize: 26, lineHeight: 1, fontWeight: 700, color: "var(--navy)", fontVariantNumeric: "tabular-nums", marginTop: 6 }}>{personalPortfolioKpis.needsAttention}</div>
+            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>
+              {personalPortfolioKpis.needsAttention === 0
+                ? "No owned projects currently flagged"
+                : [
+                    personalPortfolioKpis.atRisk ? `${personalPortfolioKpis.atRisk} At Risk` : null,
+                    personalPortfolioKpis.offTrack ? `${personalPortfolioKpis.offTrack} Off Track` : null,
+                    personalPortfolioKpis.overdue ? `${personalPortfolioKpis.overdue} Overdue` : null,
+                  ].filter(Boolean).join(" · ")}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="card" style={{ padding: 0, marginBottom: 20 }}>
