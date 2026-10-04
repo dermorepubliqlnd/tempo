@@ -54,6 +54,11 @@ interface DataTableProps<T> {
   // when omitted -- no caller is forced to wire this up.
   collapseAllContainer?: HTMLElement | null;
   maxBodyHeight?: string;
+  // 2026-10-04 (Sandra): page the rows instead of an inner scroll box.
+  // First option is the default; the chosen size is remembered per
+  // pageStorageKey. Sub-tasks are never split from their parent.
+  pageSizeOptions?: number[];
+  pageStorageKey?: string;
 }
 
 // ~1.3cm at 96dpi -- narrow enough for icon-only columns, but still a
@@ -95,6 +100,8 @@ export default function DataTable<T>({
   onReorder,
   collapseAllContainer,
   maxBodyHeight,
+  pageSizeOptions,
+  pageStorageKey,
 }: DataTableProps<T>) {
   const navigate = useNavigate();
   const [dragKey, setDragKey] = useState<string | null>(null);
@@ -308,12 +315,52 @@ export default function DataTable<T>({
     activeGroupOption && view.groupBy2 && view.groupBy2 !== activeGroupOption.key
       ? groupOptions?.find((g) => g.key === view.groupBy2)
       : undefined;
-  const sortedRows = useMemo(() => {
+  const allSortedRows = useMemo(() => {
     if (!sortOptions || !view.sorts?.length) return rows;
     return getParentId
       ? sortRowsHierarchical(rows, view.sorts, sortOptions, rowKey, getParentId)
       : sortRows(rows, view.sorts, sortOptions);
   }, [rows, sortOptions, view.sorts, getParentId, rowKey]);
+
+  // Pagination. Pages are built from "units" (a top-level row plus its
+  // descendants that follow it) so a parent and its sub-tasks stay together.
+  const [pageSize, setPageSize] = useState<number>(() => {
+    const fallback = pageSizeOptions?.[0] ?? 0;
+    if (!pageSizeOptions || !pageStorageKey) return fallback;
+    try {
+      const saved = Number(localStorage.getItem(`tempo_page_size_${pageStorageKey}`));
+      return pageSizeOptions.includes(saved) ? saved : fallback;
+    } catch {
+      return fallback;
+    }
+  });
+  const [page, setPage] = useState(0);
+  useEffect(() => {
+    setPage(0);
+  }, [view.id, view.groupBy, JSON.stringify(view.sorts)]);
+  const pages = useMemo(() => {
+    if (!pageSizeOptions || !pageSize) return [allSortedRows];
+    const out: T[][] = [];
+    let cur: T[] = [];
+    const keys = new Set(allSortedRows.map((r) => rowKey(r)));
+    allSortedRows.forEach((row) => {
+      const parent = getParentId ? getParentId(row) : null;
+      const startsUnit = !parent || !keys.has(parent);
+      if (startsUnit && cur.length >= pageSize) {
+        out.push(cur);
+        cur = [];
+      }
+      cur.push(row);
+    });
+    if (cur.length || out.length === 0) out.push(cur);
+    return out;
+  }, [allSortedRows, pageSizeOptions, pageSize, getParentId, rowKey]);
+  const safePage = Math.min(page, pages.length - 1);
+  const sortedRows = pages[safePage] ?? [];
+  const totalRows = allSortedRows.length;
+  const firstRowNo = pages.slice(0, safePage).reduce((n, p) => n + p.length, 0) + (sortedRows.length ? 1 : 0);
+  const lastRowNo = firstRowNo + sortedRows.length - (sortedRows.length ? 1 : 0);
+  const showPager = !!pageSizeOptions && totalRows > Math.min(...pageSizeOptions);
 
   // Names of every group section actually rendered right now (mirrors the
   // group-building logic in the `activeGroupOption` render branch below,
@@ -807,6 +854,41 @@ export default function DataTable<T>({
           )}
         </table>
       </div>
+      {showPager && (
+        <div className="data-table-pager" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 14, padding: "8px 12px", fontSize: 11.5, color: "var(--text-secondary)", borderTop: "1px solid var(--border)" }}>
+          <span>
+            {firstRowNo}–{lastRowNo} of {totalRows}
+          </span>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            Rows per page
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                setPageSize(n);
+                setPage(0);
+                if (pageStorageKey) {
+                  try { localStorage.setItem(`tempo_page_size_${pageStorageKey}`, String(n)); } catch { /* ignore */ }
+                }
+              }}
+              style={{ fontSize: 11.5, padding: "2px 4px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--surface)", width: "auto" }}
+            >
+              {pageSizeOptions!.map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <button type="button" disabled={safePage === 0} onClick={() => setPage(safePage - 1)} style={{ border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 6, padding: "2px 8px", cursor: safePage === 0 ? "default" : "pointer", opacity: safePage === 0 ? 0.4 : 1, width: "auto" }} aria-label="Previous page">
+              ‹ Prev
+            </button>
+            Page {safePage + 1} of {pages.length}
+            <button type="button" disabled={safePage >= pages.length - 1} onClick={() => setPage(safePage + 1)} style={{ border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 6, padding: "2px 8px", cursor: safePage >= pages.length - 1 ? "default" : "pointer", opacity: safePage >= pages.length - 1 ? 0.4 : 1, width: "auto" }} aria-label="Next page">
+              Next ›
+            </button>
+          </span>
+        </div>
+      )}
       {colContextMenu &&
         createPortal(
           <div

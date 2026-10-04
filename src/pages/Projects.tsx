@@ -3,7 +3,7 @@ import { useProjectStartDatePrompt } from "../components/ProjectStartDatePrompt"
 import ValidateCompletionModal from "../components/ValidateCompletionModal";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, CornerDownRight, ChevronRight, ChevronDown, Archive, ArchiveRestore, Trash2, Feather, Weight, BicepsFlexed, Flame, AlertTriangle, CalendarClock, CheckCircle2, X, RotateCcw, MessageCircle, Handshake, ShieldCheck, Cpu, Crown, TrendingUp, Wrench, Sparkles, Folder, Lock } from "lucide-react";
+import { FolderKanban, UserCheck, Users, Activity, ListTodo, BadgeCheck, Clock, Plus, CornerDownRight, ChevronRight, ChevronDown, Archive, ArchiveRestore, Trash2, Feather, Weight, BicepsFlexed, Flame, AlertTriangle, CalendarClock, CheckCircle2, X, RotateCcw, MessageCircle, Handshake, ShieldCheck, Cpu, Crown, TrendingUp, Wrench, Sparkles, Folder, Lock } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { useSession } from "../lib/useSession";
@@ -1091,6 +1091,15 @@ function FieldPickerButton({
 // scroll container too (overflow-x/-y axis coupling), which broke
 // position:sticky on the <thead> -- it stuck at the wrong offset and
 // overlapped body rows instead of tracking real page scroll.
+// 2026-10-04: soft icon badge for the Projects / Tasks KPI cards.
+function KpiIcon({ icon: Icon, color, bg }: { icon: typeof Plus; color: string; bg: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 8, background: bg, color, flexShrink: 0 }}>
+      <Icon size={14} />
+    </span>
+  );
+}
+
 function useStickyOffset<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const [height, setHeight] = useState(0);
@@ -5763,12 +5772,15 @@ export default function Projects() {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginBottom: 12 }}>
           {[
-            { label: "My Portfolio", value: personalPortfolioKpis.portfolio, note: "Owned + contributed to" },
-            { label: "Projects Owned", value: personalPortfolioKpis.owned, note: "All statuses" },
-            { label: "Contributing To", value: personalPortfolioKpis.contributing, note: "Owned by someone else" },
+            { label: "My Portfolio", value: personalPortfolioKpis.portfolio, note: "Owned + contributed to", icon: FolderKanban, color: "#2563eb", bg: "#eff6ff" },
+            { label: "Projects Owned", value: personalPortfolioKpis.owned, note: "All statuses", icon: UserCheck, color: "#7c3aed", bg: "#f5f3ff" },
+            { label: "Contributing To", value: personalPortfolioKpis.contributing, note: "Owned by someone else", icon: Users, color: "#0d9488", bg: "#f0fdfa" },
           ].map((item) => (
             <div key={item.label} className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>{item.label}</div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>{item.label}</div>
+                <KpiIcon icon={item.icon} color={item.color} bg={item.bg} />
+              </div>
               <div style={{ fontSize: 26, lineHeight: 1, fontWeight: 700, color: "var(--navy)", fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
               <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>{item.note}</div>
             </div>
@@ -5780,19 +5792,25 @@ export default function Projects() {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
           <div className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>Active Owned</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>Active Owned</div>
+              <KpiIcon icon={Activity} color="#2563eb" bg="#eff6ff" />
+            </div>
             <div style={{ fontSize: 26, lineHeight: 1, fontWeight: 700, color: "var(--navy)", fontVariantNumeric: "tabular-nums" }}>{personalPortfolioKpis.activeOwned}</div>
             <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>In-progress projects I own</div>
           </div>
           <div className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>Active Contributions</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>Active Contributions</div>
+              <KpiIcon icon={Handshake} color="#0d9488" bg="#f0fdfa" />
+            </div>
             <div style={{ fontSize: 26, lineHeight: 1, fontWeight: 700, color: "var(--navy)", fontVariantNumeric: "tabular-nums" }}>{personalPortfolioKpis.activeContributions}</div>
             <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>In-progress projects I support</div>
           </div>
           <div className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>Needs Attention</div>
-              {personalPortfolioKpis.needsAttention > 0 && <AlertTriangle size={14} color="var(--warning)" />}
+              <KpiIcon icon={AlertTriangle} color={personalPortfolioKpis.needsAttention > 0 ? "#b45309" : "#64748b"} bg={personalPortfolioKpis.needsAttention > 0 ? "#fffbeb" : "#f1f5f9"} />
             </div>
             <div style={{ fontSize: 26, lineHeight: 1, fontWeight: 700, color: "var(--navy)", fontVariantNumeric: "tabular-nums", marginTop: 6 }}>{personalPortfolioKpis.needsAttention}</div>
             <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>
@@ -6072,7 +6090,8 @@ export default function Projects() {
               groupOptions={projectGroupOptions}
               sortOptions={projectSortOptions}
               collapseAllContainer={projectPillsRowEl}
-              maxBodyHeight={`max(300px, calc(100vh - ${Math.round(projectClusterHeight)}px - 260px))`}
+              pageSizeOptions={[25, 50, 100]}
+              pageStorageKey="projects"
               emptyLabel="No projects yet. Add one below."
               selectable
               selectedKeys={selectedProjectIds}
@@ -6112,7 +6131,19 @@ export default function Projects() {
                 background: active ? "var(--hover-bg)" : undefined,
               }}
             >
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>{QUICK_LIST_META[c.key].label}</div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>{QUICK_LIST_META[c.key].label}</div>
+                {(() => {
+                  const ic = {
+                    open: { icon: ListTodo, color: "#2563eb", bg: "#eff6ff" },
+                    overdue: { icon: Clock, color: "#b91c1c", bg: "#fef2f2" },
+                    due_week: { icon: CalendarClock, color: "#b45309", bg: "#fffbeb" },
+                    awaiting: { icon: BadgeCheck, color: "#7c3aed", bg: "#f5f3ff" },
+                    at_risk: { icon: AlertTriangle, color: "#b91c1c", bg: "#fef2f2" },
+                  }[c.key];
+                  return <KpiIcon icon={ic.icon} color={ic.color} bg={ic.bg} />;
+                })()}
+              </div>
               <div style={{ fontSize: 20, lineHeight: 1.1, fontWeight: 700, color: c.tone, fontVariantNumeric: "tabular-nums", marginTop: 4 }}>{taskKpis[c.key]}</div>
               <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>{c.note}</div>
             </button>
@@ -6334,7 +6365,8 @@ export default function Projects() {
               groupOptions={taskGroupOptions}
               sortOptions={taskSortOptions}
               collapseAllContainer={taskPillsRowEl}
-              maxBodyHeight={`max(300px, calc(100vh - ${Math.round(taskClusterHeight)}px - 260px))`}
+              pageSizeOptions={[50, 100, 150]}
+              pageStorageKey="tasks"
               emptyLabel="No tasks yet. Add tasks from WBS Planning."
               compactGutter
               selectable
