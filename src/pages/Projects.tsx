@@ -377,7 +377,9 @@ function projectSystemView(
     hiddenGroups: [],
     color: "neutral",
     showCount: false,
-    sorts: [{ key: "project_number", direction: "asc" }],
+    sorts: scope === "my_active_portfolio" || scope === "my_full_portfolio"
+      ? []
+      : [{ key: "project_number", direction: "asc" }],
     progressDisplay: "bar",
   };
 }
@@ -2374,6 +2376,7 @@ export default function Projects() {
       title: "You've modified a System View.",
       message: "Save these changes as a new personal view?",
       confirmLabel: "Save as New View",
+      cancelLabel: "Discard Changes",
     }).then((saveAsNew) => {
       if (!saveAsNew) return;
       projectViews.createView(
