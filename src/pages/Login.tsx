@@ -1,3 +1,4 @@
+import { AUTO_LOGOUT_FLAG } from "../lib/useSession";
 import { useState, type FormEvent } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
@@ -10,6 +11,15 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [autoLoggedOut] = useState(() => {
+    try {
+      const v = sessionStorage.getItem(AUTO_LOGOUT_FLAG) === "1";
+      sessionStorage.removeItem(AUTO_LOGOUT_FLAG);
+      return v;
+    } catch {
+      return false;
+    }
+  });
   // "Forgot password?" (Sandra, 2026-08-14): the recovery-link handling
   // (RequireAuth redirecting anyone with a pending "recovery" auth type to
   // /set-password) already existed for the invite flow -- this just adds
@@ -64,6 +74,11 @@ export default function Login() {
         className="card"
         style={{ width: 420, padding: "36px 40px", display: "flex", flexDirection: "column", gap: 16 }}
       >
+        {autoLoggedOut && (
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", background: "var(--hover-bg)", borderRadius: 8, padding: "8px 10px" }}>
+            You were signed out automatically at 10:00 PM. Please sign in again.
+          </div>
+        )}
         <div style={{ marginBottom: 4 }}>
           <div
             style={{

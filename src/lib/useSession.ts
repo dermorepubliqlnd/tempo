@@ -35,6 +35,27 @@ export interface Person {
   tracks_time?: boolean;
 }
 
+// 2026-10-04 (Sandra): everyone is signed out at 10:00 PM Philippine time
+// so the day starts with a fresh sign-in. Rule: if this session's sign-in
+// happened before the most recent 10 PM PH cutoff, sign out. Checked on
+// load, every minute, and whenever the tab regains focus -- so a laptop
+// left open overnight is signed out at 10 PM, and one that was closed is
+// signed out the moment it's opened the next morning.
+export const AUTO_LOGOUT_FLAG = "tempo_auto_logged_out";
+const PH_OFFSET_MS = 8 * 60 * 60 * 1000; // UTC+8, no daylight saving
+const CUTOFF_HOUR_PH = 22;
+export function mostRecentAutoLogoutCutoff(now: Date = new Date()): Date {
+  const ph = new Date(now.getTime() + PH_OFFSET_MS);
+  let cutoff = Date.UTC(ph.getUTCFullYear(), ph.getUTCMonth(), ph.getUTCDate(), CUTOFF_HOUR_PH) - PH_OFFSET_MS;
+  if (cutoff > now.getTime()) cutoff -= 24 * 60 * 60 * 1000;
+  return new Date(cutoff);
+}
+function signedInBeforeCutoff(session: Session | null): boolean {
+  const at = session?.user?.last_sign_in_at;
+  if (!at) return false;
+  return new Date(at).getTime() < mostRecentAutoLogoutCutoff().getTime();
+}
+
 // Tracks the current Supabase Auth session and the matching `people` row
 // (which carries access_level, used everywhere we need to gate a screen
 // or action to Full Access users). `loading` is true until both the
@@ -78,6 +99,27 @@ export function useSession() {
       listener.subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    let signingOut = false;
+    const check = () => {
+      if (signingOut || !signedInBeforeCutoff(session)) return;
+      signingOut = true;
+      try { sessionStorage.setItem(AUTO_LOGOUT_FLAG, "1"); } catch { /* ignore */ }
+      void supabase.auth.signOut();
+    };
+    check();
+    const timer = window.setInterval(check, 60_000);
+    const onVisible = () => { if (document.visibilityState === "visible") check(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", check);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", check);
+    };
+  }, [session]);
 
   return { session, person, loading };
 }
