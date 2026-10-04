@@ -1077,7 +1077,7 @@ export default function Projects() {
       ? "system:owned"
       : me?.access_level === "full"
       ? "system:all"
-      : hasTeam
+      : directReportIds.size > 0
       ? "system:team"
       : "system:owned";
   const effectiveProjectDefaultViewId = projectDefaultViewId ?? roleBasedProjectDefaultViewId;
