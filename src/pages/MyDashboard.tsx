@@ -1030,7 +1030,7 @@ export default function MyDashboard() {
               <span style={{ flex: "0 0 auto", color: x.days !== null && x.days >= 7 ? "var(--danger-text)" : "var(--text-secondary)" }}>
                 {x.days === null ? "—" : `Last task done ${x.days === 0 ? "today" : `${x.days}d ago`}`}
               </span>
-              <Link to="/projects" style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+              <Link to="/projects?tab=projects" style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
                 Mark Completed →
               </Link>
             </div>

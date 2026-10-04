@@ -248,7 +248,7 @@ export default function ProjectOverview() {
 
   return (
     <div style={{ paddingBottom: 24 }}>
-      <Link to="/projects" className="back-link" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
+      <Link to="/projects?tab=projects" className="back-link" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
         <ArrowLeft size={13} /> Projects & Tasks
       </Link>
 

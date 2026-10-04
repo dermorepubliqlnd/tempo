@@ -1318,11 +1318,11 @@ export default function Dashboard() {
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>Needs Attention</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-          <AttentionChip icon={<ShieldQuestion size={24} />} tone="purple" count={needsAttention.baselinePending} label="Baseline approvals pending" to="/projects" />
+          <AttentionChip icon={<ShieldQuestion size={24} />} tone="purple" count={needsAttention.baselinePending} label="Baseline approvals pending" to="/projects?tab=projects" />
           <AttentionChip icon={<Clock3 size={24} />} tone="accent" count={needsAttention.extPending} label="Extension requests pending" to="/approval-center" />
-          <AttentionChip icon={<AlertTriangle size={24} />} tone="warning" count={needsAttention.atRisk} label="At risk" to="/projects" />
-          <AttentionChip icon={<Ban size={24} />} tone="danger" count={needsAttention.overdue} label="Overdue" to="/projects" />
-          <AttentionChip icon={<CalendarClock size={24} />} tone="accent" count={needsAttention.dueSoon} label="Due in next 7 days" to="/projects" />
+          <AttentionChip icon={<AlertTriangle size={24} />} tone="warning" count={needsAttention.atRisk} label="At risk" to="/projects?tab=projects" />
+          <AttentionChip icon={<Ban size={24} />} tone="danger" count={needsAttention.overdue} label="Overdue" to="/projects?tab=projects" />
+          <AttentionChip icon={<CalendarClock size={24} />} tone="accent" count={needsAttention.dueSoon} label="Due in next 7 days" to="/projects?tab=projects" />
         </div>
         {/* phase114/115: project completion flags (same as the owner's
             My Dashboard reminders), for everyone using this dashboard. */}
@@ -1401,7 +1401,7 @@ export default function Dashboard() {
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>Active Projects</div>
-          <Link to="/projects" style={{ fontSize: 11.5, color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>
+          <Link to="/projects?tab=projects" style={{ fontSize: 11.5, color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>
             View All
           </Link>
         </div>

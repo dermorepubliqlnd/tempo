@@ -103,8 +103,8 @@ export default function App() {
           <Route path="/knowledge-base/category/:categoryId" element={<KnowledgeBase />} />
           <Route path="/knowledge-base/article/:entryId" element={<KnowledgeBase />} />
           <Route path="/archive" element={<Archive />} />
-          <Route path="/tasks" element={<Navigate to="/projects" replace />} />
-          <Route path="/tasks/:taskId" element={<Navigate to="/projects" replace />} />
+          <Route path="/tasks" element={<Navigate to="/projects?tab=tasks" replace />} />
+          <Route path="/tasks/:taskId" element={<Navigate to="/projects?tab=tasks" replace />} />
           <Route path="/approval-center" element={<ApprovalCenterGate />} />
           <Route path="/extension-requests" element={<ExtensionRequestsRedirect />} />
           <Route path="/time-tracking" element={<TimeTracking />} />

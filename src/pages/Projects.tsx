@@ -1098,6 +1098,21 @@ export default function Projects() {
   const [searchParams] = useSearchParams();
   const wantsMyProjectsView = searchParams.get("owner") === "me";
   const wantsMyTasksView = searchParams.get("assignee") === "me";
+  // Projects | Tasks tab (2026-10-04). ?tab=tasks deep-links; otherwise the
+  // last tab this person used (per browser), defaulting to Projects.
+  const [pageTab, setPageTab] = useState<"projects" | "tasks">(() => {
+    if (searchParams.get("tab") === "tasks" || wantsMyTasksView) return "tasks";
+    if (searchParams.get("tab") === "projects" || searchParams.get("owner") === "me") return "projects";
+    try {
+      return localStorage.getItem("tempo_projects_page_tab") === "tasks" ? "tasks" : "projects";
+    } catch {
+      return "projects";
+    }
+  });
+  function switchPageTab(next: "projects" | "tasks") {
+    setPageTab(next);
+    try { localStorage.setItem("tempo_projects_page_tab", next); } catch { /* ignore */ }
+  }
 
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
@@ -5028,7 +5043,8 @@ export default function Projects() {
     } else {
       projectViews.createView("My Projects", "table", undefined, undefined, { filterPersonIds: ["me"] });
     }
-    navigate("/projects", { replace: true });
+    switchPageTab("projects");
+    navigate("/projects?tab=projects", { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantsMyProjectsView, projectViews.loaded]);
 
@@ -5049,8 +5065,8 @@ export default function Projects() {
         sorts: [{ key: "current_due_date", direction: "asc" }],
       });
     }
-    document.getElementById("tasks-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    navigate("/projects", { replace: true });
+    switchPageTab("tasks");
+    navigate("/projects?tab=tasks", { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantsMyTasksView, taskViews.loaded]);
 
@@ -5338,12 +5354,12 @@ export default function Projects() {
       />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <div>
-          <h1 style={{ margin: 0 }}>Projects</h1>
+          <h1 style={{ margin: 0 }}>Projects &amp; Tasks</h1>
         </div>
         {/* phase127g (Sandra 2026-10-01): header "Add New Project" button,
             styled like Time Tracking's Add Time pill. Same createBlankProject
             as the in-table "New project" rows, which stay. */}
-        {canCreateProject && (
+        {canCreateProject && pageTab === "projects" && (
           <button
             onClick={async () => {
               if (creatingProject) return;
@@ -5367,6 +5383,30 @@ export default function Projects() {
         )}
       </div>
 
+      {/* 2026-10-04 (Sandra): Projects and Tasks split into two tabs. Both
+          stay mounted (display:none) so view state, sticky toolbars and
+          selections survive switching. */}
+      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginBottom: 16 }} role="tablist">
+        {(["projects", "tasks"] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={pageTab === key}
+            onClick={() => switchPageTab(key)}
+            style={{
+              padding: "9px 2px", border: "none", background: "transparent", cursor: "pointer",
+              borderBottom: pageTab === key ? "2px solid var(--accent)" : "2px solid transparent",
+              color: pageTab === key ? "var(--accent)" : "var(--text-secondary)",
+              fontSize: 12.5, fontWeight: pageTab === key ? 700 : 600, marginBottom: -1,
+            }}
+          >
+            {key === "projects" ? "Projects" : "Tasks"}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: pageTab === "projects" ? undefined : "none" }}>
       <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
           Overall Portfolio
@@ -5729,8 +5769,9 @@ export default function Projects() {
           </div>
         )}
       </div>
+      </div>
 
-      <h2 id="tasks-section" style={{ marginTop: 0 }}>Tasks</h2>
+      <div id="tasks-section" style={{ display: pageTab === "tasks" ? undefined : "none" }}>
 
       <div className="card" style={{ padding: 0 }}>
         <div className="sticky-toolbar-cluster" ref={taskClusterRef}>
@@ -5947,6 +5988,7 @@ export default function Projects() {
             />
           </div>
         )}
+      </div>
       </div>
 
       {followUpTask && (
