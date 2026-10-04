@@ -47,6 +47,12 @@ interface KbEntry {
   updated_at: string;
   updated_by: string | null;
   is_pinned: boolean;
+  article_number?: number | null;
+}
+
+// 2026-10-04 (Sandra): permanent KB article IDs, shown as KB-0001.
+function kbId(e: { article_number?: number | null }): string {
+  return e.article_number ? `KB-${String(e.article_number).padStart(4, "0")}` : "";
 }
 
 interface KbVersion {
@@ -339,7 +345,10 @@ function ArticleRow({ entry, category, to, showCategory = true, html }: { entry:
     <Link to={to} className="kb-row" style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", textDecoration: "none", color: "inherit", borderTop: "1px solid var(--border)" }}>
       <FileText size={16} style={{ color: "var(--accent)", flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>{entry.title}</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>
+          {kbId(entry) && <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", marginRight: 6, fontVariantNumeric: "tabular-nums" }}>{kbId(entry)}</span>}
+          {entry.title}
+        </div>
         {html !== undefined ? (
           <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginTop: 2, lineHeight: 1.45 }} dangerouslySetInnerHTML={{ __html: html }} />
         ) : (
@@ -456,7 +465,7 @@ export default function KnowledgeBase() {
   async function loadAll() {
     const [{ data: catData }, { data: entryData }, { data: peopleData }] = await Promise.all([
       supabase.from("kb_categories").select("id,name,sort_order,description,icon,color").eq("is_active", true).order("sort_order"),
-      supabase.from("kb_entries").select("id,category_id,title,content,sort_order,updated_at,updated_by,is_pinned").eq("is_active", true).order("sort_order"),
+      supabase.from("kb_entries").select("id,category_id,title,content,sort_order,updated_at,updated_by,is_pinned,article_number").eq("is_active", true).order("sort_order"),
       supabase.from("people").select("id,name"),
     ]);
     setCategories((catData as KbCategory[]) ?? []);
@@ -519,7 +528,8 @@ export default function KnowledgeBase() {
     return pool
       .map((e) => {
         const cat = categoryById.get(e.category_id)?.name.toLowerCase() ?? "";
-        const score = e.title.toLowerCase().includes(ql) ? 3 : cat.includes(ql) ? 2 : plainText(e.content).toLowerCase().includes(ql) ? 1 : 0;
+        const idHit = !!e.article_number && (kbId(e).toLowerCase() === ql.replace(/\s/g, "") || ql.replace(/^kb-?0*/, "") === String(e.article_number));
+        const score = idHit ? 4 : e.title.toLowerCase().includes(ql) ? 3 : cat.includes(ql) ? 2 : plainText(e.content).toLowerCase().includes(ql) ? 1 : 0;
         return { e, score };
       })
       .filter((x) => x.score > 0)
@@ -695,6 +705,7 @@ export default function KnowledgeBase() {
                   )}
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 11, color: "var(--muted)", margin: "12px 0 18px", paddingBottom: 14, borderBottom: "1px solid var(--border)" }}>
+                  {kbId(entry) && <span style={{ fontWeight: 600 }}>{kbId(entry)}</span>}
                   <span>Last updated {fmtDate(entry.updated_at)}</span>
                   <span>Updated by {personName(entry.updated_by)}</span>
                   <span>{readMinutes(entry)} min read</span>
@@ -814,7 +825,7 @@ export default function KnowledgeBase() {
         {dialog}
         <Breadcrumb parts={[{ label: "Knowledge Base", to: "/knowledge-base" }, { label: "Search" }]} />
         <div style={{ marginBottom: 14 }}>
-          <SearchBox initial={q} placeholder="Search articles, features, or processes..." onSubmit={(v) => runSearch(v)} large showButton />
+          <SearchBox initial={q} placeholder="Search articles, features, processes, or a KB ID..." onSubmit={(v) => runSearch(v)} large showButton />
         </div>
         <div style={sectionCard}>
           <div style={{ padding: "12px 14px", fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>
@@ -850,7 +861,7 @@ export default function KnowledgeBase() {
       {categoryFormFor === "new" && <CategoryForm initial={{}} saving={saving} onSave={saveCategory} onCancel={() => setCategoryFormFor(null)} />}
 
       <div className="card" style={{ padding: 18, marginBottom: 20, background: "var(--accent-bg, #eaf2fb)", border: "1px solid var(--border)" }}>
-        <SearchBox initial="" placeholder="Search articles, features, or processes..." onSubmit={(v) => runSearch(v)} large showButton />
+        <SearchBox initial="" placeholder="Search articles, features, processes, or a KB ID..." onSubmit={(v) => runSearch(v)} large showButton />
         {categories.length > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
             <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Popular searches</span>
