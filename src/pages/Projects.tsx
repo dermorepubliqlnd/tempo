@@ -1094,9 +1094,23 @@ function FieldPickerButton({
 // 2026-10-04: soft icon badge for the Projects / Tasks KPI cards.
 function KpiIcon({ icon: Icon, color, bg }: { icon: typeof Plus; color: string; bg: string }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 8, background: bg, color, flexShrink: 0 }}>
-      <Icon size={14} />
+    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: "50%", background: bg, color, flexShrink: 0 }}>
+      <Icon size={17} />
     </span>
+  );
+}
+
+// Card body in the My Dashboard style: round icon left, label / value / note stacked.
+function KpiCardBody({ icon, color, bg, label, value, note, valueColor }: { icon: typeof Plus; color: string; bg: string; label: string; value: React.ReactNode; note?: React.ReactNode; valueColor?: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+      <KpiIcon icon={icon} color={color} bg={bg} />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 11, fontWeight: 500, color: "var(--text-secondary)" }}>{label}</div>
+        <div style={{ fontSize: 20, lineHeight: 1.15, fontWeight: 700, color: valueColor ?? "var(--navy)", fontVariantNumeric: "tabular-nums" }}>{value}</div>
+        {note && <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{note}</div>}
+      </div>
+    </div>
   );
 }
 
@@ -5766,63 +5780,34 @@ export default function Projects() {
       </div>
 
       <div style={{ display: pageTab === "projects" ? undefined : "none" }}>
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-          Overall Portfolio
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, marginBottom: 12 }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10 }}>
           {[
-            { label: "My Portfolio", value: personalPortfolioKpis.portfolio, note: "Owned + contributed to", icon: FolderKanban, color: "#2563eb", bg: "#eff6ff" },
-            { label: "Projects Owned", value: personalPortfolioKpis.owned, note: "All statuses", icon: UserCheck, color: "#7c3aed", bg: "#f5f3ff" },
-            { label: "Contributing To", value: personalPortfolioKpis.contributing, note: "Owned by someone else", icon: Users, color: "#0d9488", bg: "#f0fdfa" },
+            { label: "My Portfolio", value: personalPortfolioKpis.portfolio, note: "Owned + contributed to", icon: FolderKanban, color: "#2563eb", bg: "#eaf2ff" },
+            { label: "Projects Owned", value: personalPortfolioKpis.owned, note: "All statuses", icon: UserCheck, color: "#7c3aed", bg: "#f1ecff" },
+            { label: "Contributing To", value: personalPortfolioKpis.contributing, note: "Owned by someone else", icon: Users, color: "#0d9488", bg: "#e6f7f4" },
+            { label: "Active Owned", value: personalPortfolioKpis.activeOwned, note: "In-progress projects I own", icon: Activity, color: "#16a34a", bg: "#e8f7ee" },
+            { label: "Active Contributions", value: personalPortfolioKpis.activeContributions, note: "In-progress projects I support", icon: Handshake, color: "#0284c7", bg: "#e6f4fb" },
+            {
+              label: "Needs Attention",
+              value: personalPortfolioKpis.needsAttention,
+              note:
+                personalPortfolioKpis.needsAttention === 0
+                  ? "No owned projects flagged"
+                  : [
+                      personalPortfolioKpis.atRisk ? `${personalPortfolioKpis.atRisk} At Risk` : null,
+                      personalPortfolioKpis.offTrack ? `${personalPortfolioKpis.offTrack} Off Track` : null,
+                      personalPortfolioKpis.overdue ? `${personalPortfolioKpis.overdue} Overdue` : null,
+                    ].filter(Boolean).join(" · "),
+              icon: AlertTriangle,
+              color: "#dc2626",
+              bg: "#fdecec",
+            },
           ].map((item) => (
             <div key={item.label} className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>{item.label}</div>
-                <KpiIcon icon={item.icon} color={item.color} bg={item.bg} />
-              </div>
-              <div style={{ fontSize: 26, lineHeight: 1, fontWeight: 700, color: "var(--navy)", fontVariantNumeric: "tabular-nums" }}>{item.value}</div>
-              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>{item.note}</div>
+              <KpiCardBody icon={item.icon} color={item.color} bg={item.bg} label={item.label} value={item.value} note={item.note} />
             </div>
           ))}
-        </div>
-
-        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-          Active & Attention
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
-          <div className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>Active Owned</div>
-              <KpiIcon icon={Activity} color="#2563eb" bg="#eff6ff" />
-            </div>
-            <div style={{ fontSize: 26, lineHeight: 1, fontWeight: 700, color: "var(--navy)", fontVariantNumeric: "tabular-nums" }}>{personalPortfolioKpis.activeOwned}</div>
-            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>In-progress projects I own</div>
-          </div>
-          <div className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>Active Contributions</div>
-              <KpiIcon icon={Handshake} color="#0d9488" bg="#f0fdfa" />
-            </div>
-            <div style={{ fontSize: 26, lineHeight: 1, fontWeight: 700, color: "var(--navy)", fontVariantNumeric: "tabular-nums" }}>{personalPortfolioKpis.activeContributions}</div>
-            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>In-progress projects I support</div>
-          </div>
-          <div className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--muted)" }}>Needs Attention</div>
-              <KpiIcon icon={AlertTriangle} color={personalPortfolioKpis.needsAttention > 0 ? "#b45309" : "#64748b"} bg={personalPortfolioKpis.needsAttention > 0 ? "#fffbeb" : "#f1f5f9"} />
-            </div>
-            <div style={{ fontSize: 26, lineHeight: 1, fontWeight: 700, color: "var(--navy)", fontVariantNumeric: "tabular-nums", marginTop: 6 }}>{personalPortfolioKpis.needsAttention}</div>
-            <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>
-              {personalPortfolioKpis.needsAttention === 0
-                ? "No owned projects currently flagged"
-                : [
-                    personalPortfolioKpis.atRisk ? `${personalPortfolioKpis.atRisk} At Risk` : null,
-                    personalPortfolioKpis.offTrack ? `${personalPortfolioKpis.offTrack} Off Track` : null,
-                    personalPortfolioKpis.overdue ? `${personalPortfolioKpis.overdue} Overdue` : null,
-                  ].filter(Boolean).join(" · ")}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -6126,26 +6111,21 @@ export default function Projects() {
               onClick={() => setQuickList(active ? null : c.key)}
               title={active ? "Back to the selected view" : `Show ${QUICK_LIST_META[c.key].label.toLowerCase()}`}
               style={{
-                padding: "10px 12px", textAlign: "left", cursor: "pointer", minWidth: 0,
+                padding: "14px 16px", textAlign: "left", cursor: "pointer", minWidth: 0,
                 border: active ? "1.5px solid var(--accent)" : undefined,
                 background: active ? "var(--hover-bg)" : undefined,
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>{QUICK_LIST_META[c.key].label}</div>
-                {(() => {
-                  const ic = {
-                    open: { icon: ListTodo, color: "#2563eb", bg: "#eff6ff" },
-                    overdue: { icon: Clock, color: "#b91c1c", bg: "#fef2f2" },
-                    due_week: { icon: CalendarClock, color: "#b45309", bg: "#fffbeb" },
-                    awaiting: { icon: BadgeCheck, color: "#7c3aed", bg: "#f5f3ff" },
-                    at_risk: { icon: AlertTriangle, color: "#b91c1c", bg: "#fef2f2" },
-                  }[c.key];
-                  return <KpiIcon icon={ic.icon} color={ic.color} bg={ic.bg} />;
-                })()}
-              </div>
-              <div style={{ fontSize: 20, lineHeight: 1.1, fontWeight: 700, color: c.tone, fontVariantNumeric: "tabular-nums", marginTop: 4 }}>{taskKpis[c.key]}</div>
-              <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>{c.note}</div>
+              {(() => {
+                const ic = {
+                  open: { icon: ListTodo, color: "#2563eb", bg: "#eaf2ff" },
+                  overdue: { icon: Clock, color: "#dc2626", bg: "#fdecec" },
+                  due_week: { icon: CalendarClock, color: "#16a34a", bg: "#e8f7ee" },
+                  awaiting: { icon: BadgeCheck, color: "#7c3aed", bg: "#f1ecff" },
+                  at_risk: { icon: AlertTriangle, color: "#dc2626", bg: "#fdecec" },
+                }[c.key];
+                return <KpiCardBody icon={ic.icon} color={ic.color} bg={ic.bg} label={QUICK_LIST_META[c.key].label} value={taskKpis[c.key]} note={c.note} valueColor={c.tone} />;
+              })()}
             </button>
           );
         })}
