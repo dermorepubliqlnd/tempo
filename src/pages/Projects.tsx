@@ -2433,7 +2433,7 @@ export default function Projects() {
 
     const contributedProjectIds = new Set(
       tasks
-        .filter((t) => !t.is_archived && t.assignee_id === me?.id)
+        .filter((t) => !t.is_archived && t.status !== "Cancelled" && t.assignee_id === me?.id)
         .map((t) => t.project_id)
     );
     const isMine = (p: ProjectRow) => p.owner_id === me?.id;
@@ -2513,7 +2513,7 @@ export default function Projects() {
 
     const contributedProjectIds = new Set(
       tasks
-        .filter((t) => !t.is_archived && t.assignee_id === personId)
+        .filter((t) => !t.is_archived && t.status !== "Cancelled" && t.assignee_id === personId)
         .map((t) => t.project_id)
     );
 

@@ -212,6 +212,15 @@ export default function ProjectOverview() {
 
   if (loading) return <div style={{ padding: 24, color: "var(--muted)" }}>Loading project overview…</div>;
   if (!project) return <div style={{ padding: 24 }}>Project not found.</div>;
+  if (project.is_archived) {
+    return (
+      <div style={{ padding: 24 }}>
+        <div style={{ fontWeight: 600, color: "var(--navy)", marginBottom: 6 }}>{project.name} is in the Archive.</div>
+        <div style={{ color: "var(--muted)", marginBottom: 12 }}>Restore it from the Archive to view or edit it again.</div>
+        <Link to="/archive">Go to Archive</Link>
+      </div>
+    );
+  }
 
   const projectCode = `P-${String(project.project_number ?? "").padStart(4, "0")}`;
 

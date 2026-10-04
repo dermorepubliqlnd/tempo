@@ -1008,6 +1008,20 @@ export default function WbsPlanning() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [bulkCancelOpen, setBulkCancelOpen] = useState(false);
+  // 2026-10-04: Esc closes the row "⋯" menu and the Move / Bulk Move /
+  // Bulk Cancel dialogs.
+  useEffect(() => {
+    if (!rowActionsMenu && !moveParentTaskId && !bulkMoveOpen && !bulkCancelOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setRowActionsMenu(null);
+      setMoveParentTaskId(null);
+      setBulkMoveOpen(false);
+      setBulkCancelOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rowActionsMenu, moveParentTaskId, bulkMoveOpen, bulkCancelOpen]);
   const [bulkCancelReason, setBulkCancelReason] = useState("");
   function toggleTaskSelected(taskId: string) {
     setSelectedTaskIds((prev) => {

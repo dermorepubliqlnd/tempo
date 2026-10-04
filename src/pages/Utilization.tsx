@@ -319,6 +319,27 @@ export default function Utilization() {
   const [personFilterOpen, setPersonFilterOpen] = useState(false);
   const [personFilterSearch, setPersonFilterSearch] = useState("");
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const advancedFiltersRef = useRef<HTMLDivElement>(null);
+  const legendRef = useRef<HTMLDetailsElement>(null);
+  // 2026-10-04: Esc or a click outside closes Advanced Filters and Legend.
+  useEffect(() => {
+    const close = () => {
+      setAdvancedFiltersOpen(false);
+      if (legendRef.current) legendRef.current.open = false;
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (advancedFiltersRef.current && !advancedFiltersRef.current.contains(t)) setAdvancedFiltersOpen(false);
+      if (legendRef.current && !legendRef.current.contains(t)) legendRef.current.open = false;
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onDown);
+    };
+  }, []);
   // Role filter (2026-09-18, Sandra: "add option to filter by role") --
   // filters by the same job_title field shown under each name.
   const [roleFilter, setRoleFilter] = useState<string | null>(null);
@@ -1443,7 +1464,7 @@ export default function Utilization() {
               <UtilPersonFilterButton people={scopedPeople} selected={personFilter} open={personFilterOpen} setOpen={setPersonFilterOpen} search={personFilterSearch} setSearch={setPersonFilterSearch} onChange={setPersonFilter} allLabel="All active team members" />
             </div>
 
-            <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 4 }}>
+            <div ref={advancedFiltersRef} style={{ position: "relative", display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)" }}>Advanced Filters</span>
               <button
                 onClick={() => setAdvancedFiltersOpen((v) => !v)}
@@ -1631,7 +1652,7 @@ export default function Utilization() {
       <div ref={utilScrollRef} className="card" style={{ padding: 0, overflowX: "auto", overflowY: "visible" }}>
         <div style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "var(--surface)" }}>
           <span style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)" }}>{capacityLens === "committed" ? "UTILIZATION" : "AVAILABLE BANDWIDTH"}</span>
-          <details style={{ position: "relative" }}>
+          <details ref={legendRef} style={{ position: "relative" }}>
             <summary style={{ listStyle: "none", cursor: "pointer", fontSize: 9.5, fontWeight: 600, color: "var(--accent)" }}>Legend</summary>
             <div className="card" style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 40, width: 330, padding: 10, boxShadow: "0 8px 24px rgba(15,35,65,.14)" }}>
               {capacityLens === "committed" ? (
