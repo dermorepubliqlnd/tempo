@@ -1478,7 +1478,16 @@ export default function Utilization() {
               )}
             </div>
 
-            {(personFilter !== null || projectFilter.length > 0 || includePending || showAllPeople) && (
+            {roleFilter && (
+              <button
+                onClick={() => setRoleFilter(null)}
+                title="This saved view filters by role. Click to clear."
+                style={{ border: "1px solid var(--border)", background: "var(--surface)", color: "var(--navy)", fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: "4px 9px", borderRadius: 999 }}
+              >
+                Role: {roleFilter} ×
+              </button>
+            )}
+            {(personFilter !== null || projectFilter.length > 0 || includePending || showAllPeople || roleFilter !== null) && (
               <button
                 onClick={() => {
                   setPersonFilter(null);
@@ -1509,7 +1518,7 @@ export default function Utilization() {
             ) : (
               <>
                 <span style={{ fontSize: 23, fontWeight: 600, color: teamPlanningSummary.netBandwidthHours < 0 ? "var(--danger)" : "#059669" }}>{teamPlanningSummary.netBandwidthHours.toFixed(1)}h</span>
-                <span style={{ fontSize: 9.5, color: teamPlanningSummary.bandwidthPct < 0 ? "var(--danger)" : "var(--muted)" }}>{displayPct(teamPlanningSummary.bandwidthPct)}% available</span>
+                <span style={{ fontSize: 9.5, color: teamPlanningSummary.bandwidthPct < 0 ? "var(--danger)" : "var(--muted)" }}>{teamPlanningSummary.bandwidthPct < 0 ? `${displayPct(Math.abs(teamPlanningSummary.bandwidthPct))}% over capacity` : `${displayPct(teamPlanningSummary.bandwidthPct)}% available`}</span>
               </>
             )}
           </div>

@@ -11,7 +11,7 @@
 import { addDays, isWorkingDay, parseLocalDate, toISO, type HolidaySet } from "./workingDays";
 // Single source of truth for the PM-overhead rate and for a project's REAL
 // current end date (consolidated 2026-08-31 -- see dailyAllocation.ts).
-import { PROJECT_PM_DAILY_HOURS, pmWindowEnd, taskAllocationDays, buildOffDaySet, type UtilTaskRow } from "./dailyAllocation";
+import { PROJECT_PM_DAILY_HOURS, pmWindowEnd, taskAllocationDaysWithinProject, buildOffDaySet, type UtilTaskRow } from "./dailyAllocation";
 
 // Unifies what used to be two separate PM-overhead mechanisms (Day
 // Planner's manual-entry default of 0.5h/day, and Utilization's old
@@ -307,7 +307,8 @@ export function buildForwardSchedule(args: ForwardScheduleArgs): ForwardSchedule
   if (reserved.length) {
     const offDays = buildOffDaySet(availability, personId);
     for (const task of reserved) {
-      const days = taskAllocationDays(task as unknown as UtilTaskRow, holidaySet, offDays);
+      // Same project-start clamp as the Utilization engine, so the two agree.
+      const days = taskAllocationDaysWithinProject(task as unknown as UtilTaskRow, projects.find((p) => p.id === (task as unknown as UtilTaskRow).project_id), holidaySet, offDays);
       if (!days.length) continue;
       const per = (task.estimated_hours ?? 0) / days.length;
       for (const dateStr of days) {

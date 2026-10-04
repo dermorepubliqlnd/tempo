@@ -170,15 +170,17 @@ export function taskAllocationDays(t: UtilTaskRow, holidays: HolidaySet, offDays
  * project start becomes its effective start; if its dates are inconsistent
  * (due before project start), keep the effort at/after the project start
  * rather than fabricating pre-project utilization. */
-function taskAllocationDaysWithinProject(
+export function taskAllocationDaysWithinProject(
   t: UtilTaskRow,
-  project: UtilProjectRow | undefined,
+  project: Pick<UtilProjectRow, "start_date"> | undefined,
   holidays: HolidaySet,
   offDays?: OffDaySet
 ): string[] {
   if (!t.current_due_date) return [];
   const projectStart = project?.start_date?.slice(0, 10) ?? null;
-  let startStr = (t.start_date ?? projectStart ?? t.current_due_date).slice(0, 10);
+  // 2026-10-04: a task with no Start keeps the long-standing rule (all
+  // hours on its due date); only the project-start clamp is new.
+  let startStr = (t.start_date ?? t.current_due_date).slice(0, 10);
   if (projectStart && startStr < projectStart) startStr = projectStart;
 
   const start = parseLocalDate(startStr);
@@ -197,7 +199,8 @@ function taskAllocationDaysWithinProject(
     const d = addDays(end, i);
     if (isAllocatableDay(d, holidays, offDays)) return [toISO(d)];
   }
-  return [];
+  // Never drop the hours entirely -- park them on the window's end day.
+  return [toISO(end)];
 }
 
 /** A task's hours on one date -- 0 if that date isn't one of its own

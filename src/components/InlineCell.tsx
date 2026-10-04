@@ -80,6 +80,14 @@ export function InlineSelect({ value, onCommit, options, editable, allowEmpty, e
     setSearchDraft(value);
   }, [value]);
 
+  // 2026-10-04: searchable mode -- focus the search box on the click that
+  // opened edit mode (it previously only focused the hidden <select>).
+  useEffect(() => {
+    if (isEditing && searchable && !alwaysSelect && searchRef.current) {
+      searchRef.current.focus();
+    }
+  }, [isEditing, searchable, alwaysSelect]);
+
   useEffect(() => {
     if (isEditing && selectRef.current) {
       selectRef.current.focus();
@@ -154,6 +162,9 @@ export function InlineSelect({ value, onCommit, options, editable, allowEmpty, e
             onBlur={() => {
               window.setTimeout(() => {
                 setSearchOpen(false);
+                // Leave edit mode so the cell returns to its read-only look
+                // (assignee dot, pill) -- unless it's an always-on field.
+                if (!alwaysSelect) setIsEditing(false);
                 if (searchDraft === "" && allowEmpty) {
                   if (value !== "") onCommit("");
                   return;

@@ -2438,6 +2438,9 @@ export default function WbsPlanning() {
     if (!project.category) missingSetupFields.push("Category");
     if (!project.source_id) missingSetupFields.push("Source");
     if (!project.effort_level) missingSetupFields.push("Complexity");
+    if (!project.priority) missingSetupFields.push("Priority");
+    if (!project.planning_type_id) missingSetupFields.push("Planning Type");
+    if (!project.project_type_id) missingSetupFields.push("Project Type");
     if (missingSetupFields.length) {
       await alert(
         `Can't approve yet -- this project is still missing: ${missingSetupFields.join(", ")}. Set these above (Project Details) or on the Projects & Tasks list first.`
@@ -3004,9 +3007,18 @@ export default function WbsPlanning() {
   }
 
   async function duplicateTask(t: TaskRow & { depth: number }) {
-    if (!project) return;
+    if (!project || project.wbs_status === "closed" || isLockedStatus(t.status)) return;
+    if (hasChildren(t.id)) {
+      await alert("Parent tasks can't be duplicated with their sub-tasks yet. Duplicate the sub-tasks individually.");
+      return;
+    }
     const flushed = await flushPendingEdits();
     if (!flushed) return;
+    let dupAssignee = t.assignee_id;
+    if (project.wbs_status !== "draft" && !dupAssignee) {
+      dupAssignee = await assigneePicker.pick("Assign the duplicated task");
+      if (!dupAssignee) return;
+    }
     const siblings = siblingsFor(t);
     const at = siblings.findIndex((x) => x.id === t.id);
     const next = siblings[at + 1];
@@ -3016,7 +3028,7 @@ export default function WbsPlanning() {
     const { data: newTask, error } = await supabase.from("tasks").insert({
       project_id: t.project_id,
       parent_task_id: t.parent_task_id,
-      assignee_id: t.assignee_id,
+      assignee_id: dupAssignee,
       name: `${t.name || "Untitled task"} copy`,
       status: "Not Started",
       start_date: t.start_date,
@@ -3049,11 +3061,46 @@ export default function WbsPlanning() {
     await reorderTask(t.id, target.id);
   }
 
+  // 2026-10-04 (QA of the row-menu/bulk Move): one rule set for single and
+  // bulk re-parenting so a move can't break the WBS rules --
+  //  - closed projects are read-only; Done/Cancelled tasks are locked
+  //  - target must be an open top-level task
+  //  - a leaf target with logged time can't become a parent (its hours
+  //    would be stranded on a roll-up row)
+  //  - in a started project, moving the last sub-task out must not leave
+  //    an unassigned leaf behind (Start rule: every leaf has an assignee)
+  async function moveBlockReason(t: TaskRow & { depth: number }, parentId: string | null, movingIds: Set<string>): Promise<string | null> {
+    if (!project || project.wbs_status === "closed") return "This project is closed, so its WBS is read-only.";
+    if (isLockedStatus(t.status)) return `"${t.name}" is ${t.status} and locked.`;
+    if (hasChildren(t.id)) return `"${t.name}" has sub-tasks. Move or remove its sub-tasks first.`;
+    if (parentId === t.parent_task_id) return null;
+    if (parentId) {
+      const target = tasks.find((x) => x.id === parentId);
+      if (!target || target.parent_task_id) return "Tasks can only be moved under a top-level task.";
+      if (isLockedStatus(target.status)) return `"${target.name}" is ${target.status}, so nothing can be moved under it.`;
+      if (!hasChildren(target.id)) {
+        const logged = await loggedHoursOnTasks([target.id]);
+        if (logged.entries > 0) return `"${target.name}" already has logged time, so it can't become a parent task.`;
+      }
+    }
+    if (t.parent_task_id && project.wbs_status !== "draft") {
+      const oldParent = tasks.find((x) => x.id === t.parent_task_id);
+      const remaining = tasks.filter((x) => x.parent_task_id === t.parent_task_id && !movingIds.has(x.id));
+      if (oldParent && remaining.length === 0 && !oldParent.assignee_id) {
+        return `Moving this would leave "${oldParent.name}" as a task with no assignee. Assign it first.`;
+      }
+    }
+    return null;
+  }
+
   async function moveTaskToParent(t: TaskRow & { depth: number }, parentId: string | null) {
-    if (hasChildren(t.id)) {
-      await alert("A task with sub-tasks can't be moved under another parent. Move or remove its sub-tasks first.");
+    const blockReason = await moveBlockReason(t, parentId, new Set([t.id]));
+    if (blockReason) {
+      await alert({ title: "Can't move this task", message: blockReason });
       return;
     }
+    const flushedMove = await flushPendingEdits();
+    if (!flushedMove) return;
     const nextOrder = Math.max(0, ...orderedTasks.filter((x) => x.parent_task_id === parentId).map((x) => x.sort_order ?? 0)) + 1000;
     const { error } = await supabase.from("tasks").update({ parent_task_id: parentId, sort_order: nextOrder }).eq("id", t.id);
     if (error) {
@@ -3069,6 +3116,7 @@ export default function WbsPlanning() {
   }
 
   async function bulkAssignSelected() {
+    if (project?.wbs_status === "closed") return;
     const eligible = selectedTasks().filter((t) => !hasChildren(t.id) && !isLockedStatus(t.status) && t.status !== "Cancelled");
     if (!eligible.length) {
       await alert("Select at least one editable leaf task to assign.");
@@ -3088,10 +3136,14 @@ export default function WbsPlanning() {
   }
 
   async function bulkDuplicateSelected() {
+    if (project?.wbs_status === "closed") return;
     const chosen = selectedTasks();
-    const eligible = chosen.filter((t) => !hasChildren(t.id));
+    // Only open leaf tasks; in a started project the copy must carry an
+    // assignee (Start rule), so unassigned sources are skipped.
+    const started = project?.wbs_status !== "draft";
+    const eligible = chosen.filter((t) => !hasChildren(t.id) && !isLockedStatus(t.status) && (!started || !!t.assignee_id));
     if (!eligible.length) {
-      await alert("Select at least one task without sub-tasks to duplicate.");
+      await alert("Select at least one open task without sub-tasks to duplicate.");
       return;
     }
     const flushed = await flushPendingEdits();
@@ -3131,7 +3183,7 @@ export default function WbsPlanning() {
     clearTaskSelection();
     await loadAll(true);
     if (eligible.length < chosen.length) {
-      await alert(`${chosen.length - eligible.length} parent task(s) with sub-tasks were skipped. Duplicate those individually if needed.`);
+      await alert(`${chosen.length - eligible.length} task(s) were skipped (parents with sub-tasks, Done/Cancelled tasks${started ? ", or tasks with no assignee" : ""}).`);
     }
   }
 
@@ -3172,12 +3224,20 @@ export default function WbsPlanning() {
   }
 
   async function bulkMoveSelected(parentId: string | null) {
-    const chosen = selectedTasks();
-    const eligible = chosen.filter((t) => !hasChildren(t.id) && !isLockedStatus(t.status));
+    const chosen = selectedTasks().filter((t) => t.id !== parentId);
+    const movingIds = new Set(chosen.map((t) => t.id));
+    const eligible: (TaskRow & { depth: number })[] = [];
+    const skipped: string[] = [];
+    for (const t of chosen) {
+      const why = await moveBlockReason(t, parentId, movingIds);
+      if (why) skipped.push(why); else eligible.push(t);
+    }
     if (!eligible.length) {
-      await alert("Select at least one movable task without sub-tasks.");
+      await alert({ title: "Nothing to move", message: skipped.slice(0, 5).join("\n") || "Select at least one movable task without sub-tasks." });
       return;
     }
+    const flushedMove = await flushPendingEdits();
+    if (!flushedMove) return;
     let nextOrder = Math.max(0, ...orderedTasks.filter((x) => x.parent_task_id === parentId).map((x) => x.sort_order ?? 0)) + 1000;
     for (const t of eligible) {
       if (parentId === t.id) continue;
@@ -3191,12 +3251,13 @@ export default function WbsPlanning() {
     setBulkMoveOpen(false);
     clearTaskSelection();
     await loadAll(true);
-    if (eligible.length < chosen.length) {
-      await alert(`${chosen.length - eligible.length} task(s) were skipped because they are locked or already contain sub-tasks.`);
+    if (skipped.length) {
+      await alert({ title: `${skipped.length} task(s) not moved`, message: skipped.slice(0, 5).join("\n") });
     }
   }
 
   async function bulkCancelSelected() {
+    if (!project || project.wbs_status === "closed") return;
     const reason = bulkCancelReason.trim();
     if (!reason) return;
     const chosen = selectedTasks();
@@ -5090,6 +5151,8 @@ export default function WbsPlanning() {
                   boxShadow: "0 8px 24px rgba(15,41,66,.18)",
                 }}
               >
+                {task.status !== "Cancelled" && (
+                  <>
                 {task.depth === 0 && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
                 {menuItem("Add task below", <CornerDownRight size={13} />, () => void addTaskBelow(task))}
                 {menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
@@ -5099,13 +5162,15 @@ export default function WbsPlanning() {
                 {!hasKids && menuItem("Move to parent…", <CornerDownRight size={13} />, () => setMoveParentTaskId(task.id))}
                 {task.depth === 1 && menuItem("Move to top level", <ArrowLeft size={13} />, () => void moveTaskToParent(task, null))}
                 <div style={{ height: 1, background: "var(--border)", margin: "4px 2px" }} />
-                {isDraft && menuItem(
+                  </>
+                )}
+                {task.status !== "Cancelled" && menuItem(
                   hasKids ? `Delete task and ${tasks.filter((x) => x.parent_task_id === task.id).length} sub-task(s)` : "Delete task",
                   <Trash2 size={13} />,
                   () => void deleteTask(task),
                   { danger: true }
                 )}
-                {!isDraft && task.status !== "Cancelled" && task.depth > 0 && menuItem("Cancel task", <XCircle size={13} />, () => setCancelTaskDialogOpen({ taskId: task.id, label: `"${task.name}"` }))}
+                {!hasKids && task.status !== "Cancelled" && menuItem("Cancel task", <XCircle size={13} />, () => setCancelTaskDialogOpen({ taskId: task.id, label: `"${task.name}"` }))}
                 {task.status === "Cancelled" && menuItem("Uncancel task", <RefreshCw size={13} />, () => void uncancelTask(task.id))}
               </div>
             </>,
@@ -5116,7 +5181,7 @@ export default function WbsPlanning() {
         (() => {
           const task = orderedTasks.find((x) => x.id === moveParentTaskId);
           if (!task) return null;
-          const parents = orderedTasks.filter((x) => x.depth === 0 && x.id !== task.id && x.id !== task.parent_task_id);
+          const parents = orderedTasks.filter((x) => x.depth === 0 && x.id !== task.id && x.id !== task.parent_task_id && !isLockedStatus(x.status));
           return createPortal(
             <div
               style={{ position: "fixed", inset: 0, zIndex: 1200, background: "rgba(15,41,66,.28)", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -5170,7 +5235,7 @@ export default function WbsPlanning() {
                   Move to top level
                 </button>
                 {orderedTasks
-                  .filter((p) => p.depth === 0 && !selectedTaskIds.has(p.id))
+                  .filter((p) => p.depth === 0 && !selectedTaskIds.has(p.id) && !isLockedStatus(p.status))
                   .map((p) => (
                     <button
                       key={p.id}
@@ -6864,7 +6929,7 @@ export default function WbsPlanning() {
                         style={wbsGutterStickyStyle(true, rowLocked)}
                       >
                         <div className="wbs-row-gutter-controls">
-                          {(rowEditable || t.status === "Cancelled") && (
+                          {(rowEditable || (canEditWbs && t.status === "Cancelled")) && (
                             <input
                               type="checkbox"
                               className="wbs-row-select"
@@ -6926,7 +6991,7 @@ export default function WbsPlanning() {
                               <Plus size={14} />
                             </button>
                           )}
-                          {(rowEditable || t.status === "Cancelled") && (
+                          {(rowEditable || (canEditWbs && t.status === "Cancelled")) && (
                             <button
                               className="add-subtask-btn"
                               tabIndex={-1}

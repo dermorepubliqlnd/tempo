@@ -58,6 +58,7 @@ function statusTone(label: string) {
   const l = label.toLowerCase();
   if (l.includes("overdue") || l.includes("off track")) return { bg: "#fff1f1", fg: "#b42318" };
   if (l.includes("risk")) return { bg: "#fff7e8", fg: "#b54708" };
+  if (l.includes("late") || l.includes("open tasks")) return { bg: "#fffaeb", fg: "#b54708" };
   if (l.includes("track") || l.includes("complete")) return { bg: "#ecfdf3", fg: "#067647" };
   return { bg: "var(--hover-bg)", fg: "var(--text-secondary)" };
 }
@@ -160,14 +161,19 @@ export default function ProjectOverview() {
   const pendingExtensions = extensions.filter((e) => e.status === "Pending").length;
   const unassignedTasks = openTasks.filter((t) => !t.assignee_id).length;
 
-  const committedProjects = allProjects.filter((p) => p.wbs_status && p.wbs_status !== "draft");
-  const engine = useMemo(() => createAllocationEngine({
-    tasks: allTasks as UtilTaskRow[],
-    projects: committedProjects as UtilProjectRow[],
-    holidays: holidaySet,
-    availability,
-    todayStr: toISO(new Date()),
-  }), [allTasks, committedProjects, holidaySet, availability]);
+  // Load = committed (started) projects only, matching Utilization's
+  // default view -- plus this project itself so a draft still previews.
+  const engine = useMemo(() => {
+    const committedProjects = allProjects.filter((p) => (p.wbs_status && p.wbs_status !== "draft") || p.id === projectId);
+    const committedIds = new Set(committedProjects.map((p) => p.id));
+    return createAllocationEngine({
+      tasks: allTasks.filter((t) => committedIds.has(t.project_id)) as UtilTaskRow[],
+      projects: committedProjects as UtilProjectRow[],
+      holidays: holidaySet,
+      availability,
+      todayStr: toISO(new Date()),
+    });
+  }, [allTasks, allProjects, projectId, holidaySet, availability]);
 
   const nextTwoWeeks = useMemo(() => Array.from({ length: 14 }, (_, i) => addDays(new Date(), i)), []);
   const resourceRows = assigneeIds
