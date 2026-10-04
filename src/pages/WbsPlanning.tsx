@@ -1095,7 +1095,7 @@ export default function WbsPlanning() {
       supabase
         .from("tasks")
         .select(
-          "id,project_id,parent_task_id,name,assignee_id,status,start_date,start_date_full,start_date_standard,start_full_auto,start_standard_auto,manual_end_date,current_due_date,estimated_hours,effort,work_type_id,output_type_id,output_count,cancellation_reason,is_archived,sort_order,actual_completion_date"
+          "id,project_id,parent_task_id,name,assignee_id,status,start_date,start_date_full,start_date_standard,start_full_auto,start_standard_auto,manual_end_date,current_due_date,estimated_hours,effort,work_type_id,output_type_id,output_count,cancellation_reason,is_archived,sort_order,actual_completion_date,cancelled_at"
         )
         .eq("project_id", projectId)
         .eq("is_archived", false)
@@ -1108,12 +1108,12 @@ export default function WbsPlanning() {
       fetchAllRows<UtilTaskRow>((from, to) =>
         supabase
           .from("tasks")
-          .select("id,project_id,parent_task_id,assignee_id,status,start_date,current_due_date,estimated_hours,effort,sort_order,work_type_id")
+          .select("id,project_id,parent_task_id,assignee_id,status,start_date,current_due_date,estimated_hours,effort,sort_order,work_type_id,cancelled_at,actual_completion_date")
           .eq("is_archived", false)
           .order("id")
           .range(from, to)
       ),
-      supabase.from("projects").select("id,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at").eq("is_archived", false),
+      supabase.from("projects").select("id,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at,cancelled_at,completed_at,actual_close_date").eq("is_archived", false),
       supabase.from("work_types").select("id,name,is_active,sort_order,is_fixed_schedule").order("sort_order"),
       supabase.from("output_types").select("id,name,is_active,sort_order").order("sort_order"),
       supabase.from("work_type_output_types").select("work_type_id,output_type_id"),
@@ -2531,6 +2531,30 @@ export default function WbsPlanning() {
 
   async function handleRequestClosure() {
     if (!project) return;
+    // phase135 (Sandra 2026-10-04): a project with no tasks can't be closed
+    // -- add the tasks if work happened, otherwise delete the project.
+    if (!tasks.some((t) => !t.is_archived)) {
+      const del = await confirm({
+        title: "This project has no tasks",
+        message: "A project can't be closed without tasks.\n\nWas there any work on it? If yes, add the tasks below first. If nothing happened, delete the project instead.",
+        confirmLabel: "Delete project",
+        cancelLabel: "I'll add tasks",
+        danger: true,
+      });
+      if (!del) return;
+      const { blocked } = await splitByArchivePermission("project", [project.id]);
+      if (blocked.length) {
+        await alert({ title: "You can't delete this", message: blockedDeleteMessage("project", [project.name], 0) });
+        return;
+      }
+      const { error } = await archiveItem("project", project.id);
+      if (error) {
+        await alert(`Couldn't delete project: ${error.message}`);
+        return;
+      }
+      navigate("/projects?tab=projects");
+      return;
+    }
     // Actual Close Date defaults to the latest task completion date when
     // the requester hasn't picked one.
     if (!project.actual_close_date) {

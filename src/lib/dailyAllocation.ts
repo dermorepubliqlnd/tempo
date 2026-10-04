@@ -49,6 +49,10 @@ export interface UtilTaskRow {
   estimated_hours?: number | null;
   sort_order?: number | null;
   work_type_id?: string | null;
+  // phase135: when a task stopped consuming capacity. Optional -- callers
+  // that don't select them fall back to the old "from today on" cutoff.
+  cancelled_at?: string | null;
+  actual_completion_date?: string | null;
 }
 export interface UtilProjectRow {
   id: string;
@@ -58,6 +62,10 @@ export interface UtilProjectRow {
   wbs_status?: string | null;
   // phase118: pause window -- a paused project frees its people's capacity.
   status?: string | null;
+  // phase135: stop dates for Cancelled / Completed / Closed projects.
+  cancelled_at?: string | null;
+  completed_at?: string | null;
+  actual_close_date?: string | null;
   paused_at?: string | null;
   resumed_at?: string | null;
 }
@@ -77,6 +85,27 @@ export function isProjectPausedOn(p: UtilProjectRow | undefined, dateStr: string
   if (p.status === "Paused") return true;
   if (p.resumed_at) return dateStr < localIsoOf(p.resumed_at);
   return false;
+}
+
+// phase135 (Sandra, 2026-10-04): "if effort was spent or still tagged as
+// active during that time it should still count" -- a stopped project/task
+// keeps its load up to and including the day it stopped, and nothing after.
+// Returns that last counted day, or null when unknown (old cutoff applies).
+function dateOnly(v: string | null | undefined): string | null {
+  if (!v) return null;
+  return v.length > 10 ? localIsoOf(v) : v.slice(0, 10);
+}
+function taskStopDate(t: UtilTaskRow): string | null {
+  if (t.status === "Cancelled") return dateOnly(t.cancelled_at);
+  if (t.status === "Done") return dateOnly(t.actual_completion_date);
+  return null;
+}
+function projectStopDate(p: UtilProjectRow | undefined): string | null {
+  if (!p) return null;
+  if (p.status === "Cancelled") return dateOnly(p.cancelled_at);
+  if (p.status === "Completed") return dateOnly(p.completed_at) ?? dateOnly(p.actual_close_date);
+  if (p.wbs_status === "closed") return dateOnly(p.actual_close_date) ?? dateOnly(p.completed_at);
+  return null;
 }
 
 function projectStopsFutureCapacity(p: UtilProjectRow | undefined): boolean {
@@ -423,8 +452,12 @@ export function createAllocationEngine(config: AllocationEngineConfig): Allocati
     // todayStr (a draft preview with no "today" concept) means no cutoff at
     // all, matching the closed-project check's own fallback below.
     if (!isOpenTask(task) && todayStr && dateStr >= todayStr) return 0;
+    const taskStop = taskStopDate(task);
+    if (taskStop && dateStr > taskStop) return 0;
     const project = projectById.get(task.project_id);
     if (todayStr && dateStr >= todayStr && projectStopsFutureCapacity(project)) return 0;
+    const projStop = projectStopDate(project);
+    if (projStop && dateStr > projStop) return 0;
     if (isProjectPausedOn(project, dateStr)) return 0;
     if (!assigneeMatchesOnDate(task, personId, dateStr, assigneeHistory)) return 0;
     const days = taskDays(personId, task);
@@ -434,6 +467,8 @@ export function createAllocationEngine(config: AllocationEngineConfig): Allocati
 
   function pmHoursOnDateFn(personId: string, project: UtilProjectRow, dateStr: string): number {
     if (todayStr && dateStr >= todayStr && projectStopsFutureCapacity(project)) return 0;
+    const projStop = projectStopDate(project);
+    if (projStop && dateStr > projStop) return 0;
     if (isProjectPausedOn(project, dateStr)) return 0;
     if (!ownerMatchesOnDate(project, personId, dateStr, ownerHistory)) return 0;
     return pmDays(personId, project).has(dateStr) ? PROJECT_PM_DAILY_HOURS : 0;

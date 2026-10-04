@@ -69,6 +69,7 @@ export default function ProjectOverview() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [allTasks, setAllTasks] = useState<TaskRow[]>([]);
   const [allProjects, setAllProjects] = useState<ProjectRow[]>([]);
+  const [deletedHours, setDeletedHours] = useState(0);
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
   const [holidayDates, setHolidayDates] = useState<string[]>([]);
@@ -113,6 +114,10 @@ export default function ProjectOverview() {
       } else {
         setTimeEntries([]);
       }
+      // Hours from tasks that were permanently deleted, same source the
+      // Projects table's Time Spent column adds back in.
+      const delRes = await supabase.from("deleted_project_spent_hours_archive").select("hours").eq("project_id", projectId);
+      if (!cancelled) setDeletedHours(((delRes.data as { hours: number }[] | null) ?? []).reduce((s, r) => s + Number(r.hours ?? 0), 0));
 
       setLoading(false);
     })();
@@ -138,7 +143,7 @@ export default function ProjectOverview() {
   const assigneeIds = useMemo(() => Array.from(new Set(leafTasks.map((t) => t.assignee_id).filter((x): x is string => !!x))), [leafTasks]);
   const scopedHours = leafTasks.reduce((sum, t) => sum + Number(t.estimated_hours ?? 0), 0);
   const unassignedScopedHours = leafTasks.filter((t) => !t.assignee_id).reduce((sum, t) => sum + Number(t.estimated_hours ?? 0), 0);
-  const loggedHours = Math.round((timeEntries.reduce((sum, e) => sum + Number(e.duration_minutes ?? 0), 0) / 60) * 10) / 10;
+  const loggedHours = Math.round((timeEntries.reduce((sum, e) => sum + Number(e.duration_minutes ?? 0), 0) / 60 + deletedHours) * 10) / 10;
   const completedCount = leafTasks.filter((t) => statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete").length;
   const cancelledCount = leafTasks.filter((t) => statusGroupOf(TASK_STATUS_GROUPED, t.status) === "cancelled").length;
   const inProgressCount = leafTasks.filter((t) => statusGroupOf(TASK_STATUS_GROUPED, t.status) === "in_progress").length;
@@ -448,6 +453,11 @@ export default function ProjectOverview() {
             <div style={{ background: "var(--hover-bg)", borderRadius: 8, padding: "10px 11px" }}>
               <div style={{ fontSize: 15, fontWeight: 800 }}>{loggedHours}h</div>
               <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Logged Hours</div>
+              {deletedHours > 0 && (
+                <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3 }}>
+                  incl. {Math.round(deletedHours * 10) / 10}h from deleted tasks
+                </div>
+              )}
             </div>
           </div>
           <div style={{ marginBottom: 14 }}>

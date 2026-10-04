@@ -462,9 +462,9 @@ export default function Utilization() {
     const [{ data: p }, { data: ap }, { data: pr }, { data: pt }, { data: tk }, { data: av }, { data: hol }, { data: wts }, { data: ownHist }, { data: assHist }, { data: delHrs }, { data: settings }] = await Promise.all([
       supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title,tracks_time").eq("is_active", true).order("name"),
       supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title,tracks_time").order("name"),
-      supabase.from("projects").select("id,name,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at,project_type_id").eq("is_archived", false).eq("is_unsaved", false),
+      supabase.from("projects").select("id,name,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at,project_type_id,cancelled_at,completed_at,actual_close_date").eq("is_archived", false).eq("is_unsaved", false),
       supabase.from("project_types").select("id,name,sort_order").eq("is_active", true).order("sort_order"),
-      supabase.from("tasks").select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,sort_order,work_type_id,created_at,created_by").eq("is_archived", false),
+      supabase.from("tasks").select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,sort_order,work_type_id,created_at,created_by,cancelled_at,actual_completion_date").eq("is_archived", false),
       supabase.from("person_availability").select("*"),
       supabase.from("holidays").select("*"),
       supabase.from("work_types").select("id,is_fixed_schedule"),
@@ -1346,6 +1346,14 @@ export default function Utilization() {
               </optgroup>
             )}
           </select>
+          {showAllPeople && (
+            <span
+              title="Inactive team members are included in this view. Turn off in Advanced Filters."
+              style={{ fontSize: 9.5, fontWeight: 700, color: "var(--muted)", background: "var(--hover-bg)", borderRadius: 999, padding: "3px 8px" }}
+            >
+              + inactive
+            </span>
+          )}
 
           {activeViewId.startsWith("personal:") && !savedViews.find((view) => view.id === activeViewId)?.isDefault && (
             <button onClick={setActiveViewAsDefault} style={{ border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--accent)", fontSize: 10, fontWeight: 600, height: 32, padding: "0 9px", cursor: "pointer" }}>Set as default</button>

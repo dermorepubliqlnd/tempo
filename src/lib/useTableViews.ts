@@ -327,18 +327,16 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
         .filter((v, i, arr) => arr.findIndex((x) => x.id === v.id) === i);
       const mergedSystem = normalizedSystemViews.map((sv) => {
         const saved = vs.find((v) => v.id === sv.id);
-        return saved ? { ...sv, columnWidths: saved.columnWidths ?? sv.columnWidths, frozenUpTo: saved.frozenUpTo ?? sv.frozenUpTo } : sv;
+        return saved ? { ...sv, columnWidths: saved.columnWidths ?? sv.columnWidths, frozenUpTo: saved.frozenUpTo ?? sv.frozenUpTo, personalDefault: saved.personalDefault } : sv;
       });
-      const next = [...mergedSystem, ...custom];
+      // One default: the person's own pick if any, else the system default.
+      const merged = [...mergedSystem, ...custom];
+      const chosen = merged.find((v) => v.personalDefault)?.id ?? defaultSystemViewId;
+      const next = merged.map((v) => ({ ...v, isDefaultView: v.id === chosen }));
       return JSON.stringify(next) === JSON.stringify(vs) ? vs : next;
     });
-    setActiveViewId((current) => {
-      const systemIds = new Set(normalizedSystemViews.map((v) => v.id));
-      if (current === "default") return defaultSystemViewId;
-      if (systemIds.has(current)) return current;
-      if (views.some((v) => v.id === current && !v.systemView && v.id !== "default")) return current;
-      return defaultSystemViewId;
-    });
+    // Page load always opens the person's default view.
+    setActiveViewId(() => views.find((v) => v.personalDefault)?.id ?? defaultSystemViewId);
   }
 
   // Notion-style drag-to-reorder for the view tab bar itself (2026-09-21,
@@ -349,6 +347,11 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
   // (reorderedSortValue in Projects.tsx) -- just operating on array
   // position here instead of a numeric sort_order column, since views
   // don't have one.
+  // 2026-10-04: mark a view (system or personal) as this person's default.
+  function setDefaultView(id: string) {
+    setViews((vs) => vs.map((v) => ({ ...v, personalDefault: v.id === id ? true : undefined, isDefaultView: v.id === id })));
+  }
+
   function reorderViews(draggedId: string, targetId: string) {
     if (draggedId === targetId) return;
     setViews((vs) => {
@@ -377,5 +380,5 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     });
   }
 
-  return { views, activeView, activeViewId, setActiveViewId, updateActiveView, createView, renameView, duplicateView, setViewColor, setViewIcon, deleteView, reorderViews, installSystemViews, loaded };
+  return { views, activeView, activeViewId, setActiveViewId, updateActiveView, createView, renameView, duplicateView, setViewColor, setViewIcon, deleteView, reorderViews, installSystemViews, setDefaultView, loaded };
 }

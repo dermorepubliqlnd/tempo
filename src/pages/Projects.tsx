@@ -350,7 +350,12 @@ function CategoryIcon({ iconName, tone, size = 13 }: { iconName?: string; tone?:
 
 const PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "created_at", "owner", "category", "planning_type", "project_type", "source", "start_date", "closed_at", "wbs_status", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at"];
 
-const PROJECT_OWNER_VISIBLE = new Set(["project_number", "name", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "created_at"]);
+// 2026-10-04 (Sandra): owner lens = what an owner acts on -- lifecycle
+// (WBS Status), delivery (Status/Health/Phase/Due/Progress), effort
+// (Scoped/Spent/Variance) and schedule slippage (Days Extended). Owner
+// column hidden in "I own" views (it's always you); Created dropped.
+const PROJECT_SYSTEM_COLUMN_ORDER = ["project_number", "name", "owner", "wbs_status", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type", ...PROJECT_COLUMN_ORDER.filter((k) => !["project_number", "name", "owner", "wbs_status", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"].includes(k))];
+const PROJECT_OWNER_VISIBLE = new Set(["project_number", "name", "wbs_status", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended"]);
 const PROJECT_PORTFOLIO_VISIBLE = new Set([...PROJECT_OWNER_VISIBLE, "owner"]);
 const PROJECT_ORG_VISIBLE = new Set([...PROJECT_PORTFOLIO_VISIBLE, "category", "planning_type", "project_type"]);
 
@@ -370,8 +375,8 @@ function projectSystemView(
     systemGroup: group,
     isDefaultView,
     projectScope: scope,
-    columnOrder: PROJECT_COLUMN_ORDER,
-    hiddenColumns: PROJECT_COLUMN_ORDER.filter((key) => !visible.has(key)),
+    columnOrder: PROJECT_SYSTEM_COLUMN_ORDER,
+    hiddenColumns: PROJECT_SYSTEM_COLUMN_ORDER.filter((key) => !visible.has(key)),
     columnWidths: {},
     groupBy: null,
     hiddenGroups: [],
@@ -1590,6 +1595,20 @@ export default function Projects() {
       alert(`"${p.name}" hasn't started yet -- Status stays "Not Started" until Start Project is run on its WBS page.`);
       return;
     }
+    // phase135 (Sandra 2026-10-04): no tasks = nothing happened. Add the
+    // tasks if work was done, otherwise delete the project.
+    if (newStatus === "Completed" && projectStatusOf(p) !== "Completed" && !tasks.some((t) => t.project_id === p.id && !t.is_archived)) {
+      void confirm({
+        title: "This project has no tasks",
+        message: `"${p.name}" can't be completed without tasks.\n\nWas there any work on it? If yes, add the tasks on its WBS page first. If nothing happened, delete the project instead.`,
+        confirmLabel: "Delete project",
+        cancelLabel: "I'll add tasks",
+        danger: true,
+      }).then((del) => {
+        if (del) void archiveProjects([p.id]);
+      });
+      return;
+    }
     if (newStatus === "Completed" && projectStatusOf(p) !== "Completed") {
       const open = openTasksOf(p.id);
       if (open.length > 0) {
@@ -2139,6 +2158,15 @@ export default function Projects() {
     const ids = selectedProjectIds;
     if (ids.length === 0) return;
     if (newStatus === "Completed") {
+      const empty = projects.filter((p) => ids.includes(p.id) && projectStatusOf(p) !== "Completed" && !tasks.some((t) => t.project_id === p.id && !t.is_archived));
+      if (empty.length > 0) {
+        alert(
+          `**Can't mark ${empty.length === 1 ? "this project" : `${empty.length} projects`} Completed** -- no tasks:\n` +
+            empty.map((p) => `• ${p.name}`).join("\n") +
+            `\n\nIf work happened, add the tasks first. If nothing happened, delete the project instead. Nothing was changed.`
+        );
+        return;
+      }
       const blocked = projects.filter((p) => ids.includes(p.id) && projectStatusOf(p) !== "Completed" && openTasksOf(p.id).length > 0);
       if (blocked.length > 0) {
         alert(
@@ -5463,6 +5491,7 @@ export default function Projects() {
         <div className="table-toolbar">
           <ViewTabs
             mode="dropdown"
+            onSetDefault={projectViews.setDefaultView}
             views={projectViews.views}
             activeViewId={projectViews.activeViewId}
             rows={projects}

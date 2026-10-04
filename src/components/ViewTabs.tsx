@@ -44,6 +44,8 @@ interface ViewTabsProps<T> {
   // view. Groups come from systemGroup ("my" | "organization"); every
   // non-system view lands under My Views.
   mode?: "tabs" | "dropdown";
+  // Dropdown mode: star on each item sets that view as this person's default.
+  onSetDefault?: (id: string) => void;
   dropdownGroupLabels?: { my: string; organization: string; custom: string };
 }
 
@@ -110,6 +112,7 @@ export default function ViewTabs<T>({
   confirm,
   onReorder,
   mode = "tabs",
+  onSetDefault,
   dropdownGroupLabels = { my: "My Projects", organization: "Team Views", custom: "My Views" },
 }: ViewTabsProps<T>) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -623,7 +626,6 @@ export default function ViewTabs<T>({
           {active?.isDefaultView && <span title="Default view" style={{ fontSize: 11, lineHeight: 1, color: "#f5b301" }}>★</span>}
           <ChevronDown size={13} style={{ color: "var(--muted)", flexShrink: 0 }} />
         </button>
-        {active?.systemView && badge("SYSTEM")}
         {active?.isDefaultView && badge("DEFAULT", "accent")}
         {active && !active.systemView && (
           <button
@@ -696,8 +698,31 @@ export default function ViewTabs<T>({
                       >
                         <ItemIcon size={13} style={{ color: itemColor, flexShrink: 0 }} />
                         <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.name}</span>
-                        {v.isDefaultView && <span title="Default view" style={{ fontSize: 11, color: "#f5b301" }}>★</span>}
                         {v.systemView && <span style={{ fontSize: 8.5, fontWeight: 700, color: "var(--muted)", letterSpacing: 0.3, opacity: 0.8 }}>SYSTEM</span>}
+                        {onSetDefault ? (
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            title={v.isDefaultView ? "Your default view" : "Set as my default view"}
+                            aria-label={v.isDefaultView ? "Default view" : `Set ${v.name} as default view`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!v.isDefaultView) onSetDefault(v.id);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (!v.isDefaultView) onSetDefault(v.id);
+                              }
+                            }}
+                            style={{ fontSize: 13, lineHeight: 1, color: v.isDefaultView ? "#f5b301" : "var(--muted)", opacity: v.isDefaultView ? 1 : 0.45, cursor: v.isDefaultView ? "default" : "pointer", padding: "0 2px" }}
+                          >
+                            {v.isDefaultView ? "★" : "☆"}
+                          </span>
+                        ) : (
+                          v.isDefaultView && <span title="Default view" style={{ fontSize: 11, color: "#f5b301" }}>★</span>
+                        )}
                         {v.showCount && <span className="view-tab-count">{visibleCountFor(v, rows, groupOptions)}</span>}
                         {isActive && <Check size={13} style={{ color: "var(--accent)", flexShrink: 0 }} />}
                       </button>

@@ -219,6 +219,9 @@ export interface TableView {
   systemView?: boolean;
   systemGroup?: "my" | "organization";
   isDefaultView?: boolean;
+  // 2026-10-04: the view this person chose as their own default (opens on
+  // page load). Overrides the system default when set on any view.
+  personalDefault?: boolean;
   projectScope?: "my_active_owned" | "my_active_portfolio" | "my_owned_all" | "my_full_portfolio" | "org_active" | "org_all";
   // Which layout this view renders as. Only "table" is actually built right
   // now -- Board/Calendar/Timeline exist as a forward-compatible field plus

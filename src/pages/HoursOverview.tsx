@@ -255,10 +255,10 @@ export default function HoursOverview() {
       await Promise.all([
         supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title,tracks_time").eq("is_active", true).order("name"),
         supabase.from("people").select("id,name,daily_capacity_hours,is_active,job_title,tracks_time").order("name"),
-        supabase.from("projects").select("id,name,is_archived,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at,schedule_review_required").eq("is_archived", false),
+        supabase.from("projects").select("id,name,is_archived,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at,schedule_review_required,cancelled_at,completed_at,actual_close_date").eq("is_archived", false),
         supabase
           .from("tasks")
-          .select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,task_number,submitted_on,validated_completion_date,actual_completion_date")
+          .select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,task_number,submitted_on,validated_completion_date,actual_completion_date,cancelled_at")
           .eq("is_archived", false),
         supabase
           .from("time_entries")
