@@ -50,10 +50,22 @@ export function mostRecentAutoLogoutCutoff(now: Date = new Date()): Date {
   if (cutoff > now.getTime()) cutoff -= 24 * 60 * 60 * 1000;
   return new Date(cutoff);
 }
+// Tempo's own sign-in stamp (ms epoch), written at the moment someone
+// actually signs in (Login form, or arriving from an invite/recovery link).
+// Not Supabase's last_sign_in_at: that one moves on every background token
+// refresh, so a session restored in the morning could slip past the rule.
+export const SIGNED_IN_AT_KEY = "tempo_signed_in_at";
+export function markSignedInNow() {
+  try { localStorage.setItem(SIGNED_IN_AT_KEY, String(Date.now())); } catch { /* ignore */ }
+}
 function signedInBeforeCutoff(session: Session | null): boolean {
-  const at = session?.user?.last_sign_in_at;
-  if (!at) return false;
-  return new Date(at).getTime() < mostRecentAutoLogoutCutoff().getTime();
+  if (!session) return false;
+  try {
+    if (sessionStorage.getItem("capaciq_pending_auth_type")) return false; // mid invite/recovery
+  } catch { /* ignore */ }
+  let at = 0;
+  try { at = Number(localStorage.getItem(SIGNED_IN_AT_KEY) ?? 0); } catch { /* ignore */ }
+  return !at || at < mostRecentAutoLogoutCutoff().getTime();
 }
 
 // Tracks the current Supabase Auth session and the matching `people` row
@@ -107,7 +119,8 @@ export function useSession() {
       if (signingOut || !signedInBeforeCutoff(session)) return;
       signingOut = true;
       try { sessionStorage.setItem(AUTO_LOGOUT_FLAG, "1"); } catch { /* ignore */ }
-      void supabase.auth.signOut();
+      try { localStorage.removeItem(SIGNED_IN_AT_KEY); } catch { /* ignore */ }
+      void supabase.auth.signOut({ scope: "local" }).finally(() => { signingOut = false; });
     };
     check();
     const timer = window.setInterval(check, 60_000);

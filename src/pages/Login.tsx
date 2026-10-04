@@ -1,4 +1,4 @@
-import { AUTO_LOGOUT_FLAG } from "../lib/useSession";
+import { AUTO_LOGOUT_FLAG, markSignedInNow } from "../lib/useSession";
 import { useState, type FormEvent } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
@@ -32,6 +32,9 @@ export default function Login() {
     e.preventDefault();
     setError(null);
     setLoading(true);
+    // Stamp first: the session listener checks the stamp the instant
+    // Supabase reports the new session.
+    markSignedInNow();
     const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (signInError) {

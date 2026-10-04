@@ -16,6 +16,8 @@ const KEY = "capaciq_pending_auth_type";
 const match = window.location.hash.match(/type=(invite|recovery)/);
 if (match) {
   sessionStorage.setItem(KEY, match[1]);
+  // Arriving from an invite/recovery link counts as signing in (10 PM rule).
+  try { localStorage.setItem("tempo_signed_in_at", String(Date.now())); } catch { /* ignore */ }
 }
 
 export function getPendingAuthType(): string | null {
