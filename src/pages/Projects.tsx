@@ -2401,11 +2401,11 @@ export default function Projects() {
   }
 
   async function reorderTasks(draggedId: string, targetId: string) {
-    if (taskViews.activeView.systemView) {
+    if (taskActiveView.systemView) {
       await alert("Rows can't be reordered in a System View. Duplicate this view as your own to set a manual order.");
       return;
     }
-    if (taskViews.activeView.sorts.length > 0) {
+    if (taskActiveView.sorts.length > 0) {
       const ok = await confirm({
         title: "Clear sort to reorder",
         message: "This view is currently sorted. Dragging to reorder will clear that sort so your manual order can show. Continue?",
@@ -4898,10 +4898,10 @@ export default function Projects() {
   // popover's drag handles set, skipping whichever field currently drives
   // the Kanban grouping (already shown as the column itself).
   function renderTaskCard(t: TaskWithDepth) {
-    const hidden = taskViews.activeView.hiddenColumns;
-    const showLabels = taskViews.activeView.boardShowPropertyLabels ?? true;
-    const groupByKey = resolveBoardGroupBy(taskViews.activeView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status");
-    const propertyColumns = visibleOrderedColumns(taskColumns, taskViews.activeView).filter(
+    const hidden = taskActiveView.hiddenColumns;
+    const showLabels = taskActiveView.boardShowPropertyLabels ?? true;
+    const groupByKey = resolveBoardGroupBy(taskActiveView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status");
+    const propertyColumns = visibleOrderedColumns(taskColumns, taskActiveView).filter(
       (c) => c.key !== "name" && c.key !== groupByKey
     );
     return (
@@ -5256,6 +5256,8 @@ export default function Projects() {
 
   // Same System View edit rule as updateProjectView.
   function updateTaskView(patch: Partial<TableView>) {
+    // A Quick List (KPI card) is temporary -- layout edits aren't saved.
+    if (quickList) return;
     const active = taskViews.activeView;
     if (!active.systemView) {
       taskViews.updateActiveView(patch);
@@ -5291,6 +5293,59 @@ export default function Projects() {
       });
     });
   }
+  // 2026-10-04 (Sandra): Tasks KPI cards. Clicking a card opens a temporary
+  // "Quick List" of exactly those tasks with a layout suited to them --
+  // nothing is saved and no view is created; × (or the card again) returns
+  // to the selected view.
+  type QuickListKey = "open" | "overdue" | "due_week" | "awaiting" | "at_risk";
+  const [quickList, setQuickList] = useState<QuickListKey | null>(null);
+  function taskIsOpen(t: TaskRow) {
+    const g = statusGroupOf(TASK_STATUS_GROUPED, t.status);
+    return g !== "complete" && g !== "cancelled";
+  }
+  function quickMatch(key: QuickListKey, t: TaskRow, ownedIds: Set<string>): boolean {
+    const mine = t.assignee_id === me?.id;
+    switch (key) {
+      case "open":
+        return mine && taskIsOpen(t);
+      case "overdue":
+        return mine && taskIsOpen(t) && dueWindowOf(t) === "Overdue";
+      case "due_week": {
+        const w = dueWindowOf(t);
+        return mine && taskIsOpen(t) && (w === "Today" || w === "This week");
+      }
+      case "awaiting":
+        return mine && statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete" && !t.validated_completion_date;
+      case "at_risk": {
+        if (!ownedIds.has(t.project_id) || !taskIsOpen(t) || tasks.some((x) => x.parent_task_id === t.id)) return false;
+        if (!t.assignee_id) return true;
+        const label = taskTiming(t).label;
+        return label === "Overdue" || label === "Paused · Overdue" || label === "Due soon";
+      }
+    }
+  }
+  const myOwnedProjectIds = useMemo(() => new Set(projects.filter((p) => p.owner_id === me?.id).map((p) => p.id)), [projects, me?.id]);
+  const taskKpis = useMemo(() => {
+    const live = tasks.filter((t) => !t.is_archived);
+    const count = (k: QuickListKey) => live.filter((t) => quickMatch(k, t, myOwnedProjectIds)).length;
+    return { open: count("open"), overdue: count("overdue"), due_week: count("due_week"), awaiting: count("awaiting"), at_risk: count("at_risk") };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, projects, me?.id, myOwnedProjectIds]);
+  const QUICK_LIST_META: Record<QuickListKey, { label: string; template: string; groupBy: string | null }> = {
+    open: { label: "My Open Tasks", template: "system_tasks_my_open", groupBy: "due_window" },
+    overdue: { label: "Overdue", template: "system_tasks_my_open", groupBy: "project" },
+    due_week: { label: "Due This Week", template: "system_tasks_my_open", groupBy: "due_window" },
+    awaiting: { label: "Awaiting Validation", template: "system_tasks_my_done", groupBy: "project" },
+    at_risk: { label: "At Risk in My Projects", template: "system_tasks_owner_at_risk", groupBy: "project" },
+  };
+  const taskActiveView: TableView = useMemo(() => {
+    if (!quickList) return taskViews.activeView;
+    const meta = QUICK_LIST_META[quickList];
+    const tpl = TASK_SYSTEM_VIEWS.find((v) => v.id === meta.template) ?? taskViews.activeView;
+    return { ...tpl, id: "quick_list", name: meta.label, viewType: "table", groupBy: meta.groupBy, groupBy2: null, filterPersonIds: [], filterStatuses: [], sorts: [{ key: "current_due_date", direction: "asc" }] };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quickList, taskViews.activeView]);
+
 
   useEffect(() => {
     // Wait for this person's REAL saved views to come back from Supabase
@@ -5338,8 +5393,9 @@ export default function Projects() {
   // resolveFilterPersonIds() (see filteredProjects above for the full
   // rationale).
   const filteredVisibleTasks = useMemo(() => {
-    const view = taskViews.activeView;
+    const view = taskActiveView;
     let out = visibleTasks;
+    if (quickList) return out.filter((t) => quickMatch(quickList, t, myOwnedProjectIds));
     if (view.taskScope) {
       const group = (t: TaskRow) => statusGroupOf(TASK_STATUS_GROUPED, t.status);
       const isOpen = (t: TaskRow) => group(t) !== "complete" && group(t) !== "cancelled";
@@ -5381,7 +5437,7 @@ export default function Projects() {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleTasks, taskViews.activeView, me?.id, projects, tasks]);
+  }, [visibleTasks, taskActiveView, me?.id, projects, tasks, quickList, myOwnedProjectIds]);
 
   // Instant, Notion-style row creation (mirrors createBlankProject): insert
   // a sensibly-defaulted task immediately and let the person fill it in via
@@ -5464,16 +5520,16 @@ export default function Projects() {
     projectGroupMode || projectViews.activeView.viewType === "calendar" ? null : projectViews.activeView.groupBy2 ?? null;
 
   const taskGroupMode: "board" | "timeline" | undefined =
-    taskViews.activeView.viewType === "board" ? "board" : taskViews.activeView.viewType === "timeline" ? "timeline" : undefined;
+    taskActiveView.viewType === "board" ? "board" : taskActiveView.viewType === "timeline" ? "timeline" : undefined;
   const taskGroupModeOptions = taskGroupMode ? taskBoardGroupOptions : taskGroupOptions;
   const taskResolvedGroupBy =
-    taskViews.activeView.viewType === "calendar"
+    taskActiveView.viewType === "calendar"
       ? null
       : taskGroupMode === "board"
-      ? resolveBoardGroupBy(taskViews.activeView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status")
+      ? resolveBoardGroupBy(taskActiveView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status")
       : taskGroupMode === "timeline"
-      ? resolveTimelineGroupBy(taskViews.activeView.groupBy, TASK_BOARD_GROUPABLE_KEYS)
-      : taskViews.activeView.groupBy;
+      ? resolveTimelineGroupBy(taskActiveView.groupBy, TASK_BOARD_GROUPABLE_KEYS)
+      : taskActiveView.groupBy;
   const taskTimelineGroupOption =
     taskGroupMode === "timeline" ? taskBoardGroupOptions.find((g) => g.key === taskResolvedGroupBy) : undefined;
   // Sandra, 2026-09-15 ("2-tier grouping ... group by project owner and
@@ -5481,7 +5537,7 @@ export default function Projects() {
   // grouping, Table view only, same rationale as projectResolvedGroupBy2
   // above.
   const taskResolvedGroupBy2 =
-    taskGroupMode || taskViews.activeView.viewType === "calendar" ? null : taskViews.activeView.groupBy2 ?? null;
+    taskGroupMode || taskActiveView.viewType === "calendar" ? null : taskActiveView.groupBy2 ?? null;
 
   // Timeline chips: curated per Sandra's Projects-Timeline spec. Name is
   // never a chip (it's the label itself); Actual Progress is never a chip
@@ -5527,7 +5583,7 @@ export default function Projects() {
   // is redundant (Sandra: "remove start and due dates in columns since this
   // is covered in the gantt").
   const TASK_TIMELINE_EXCLUDED_KEYS = ["name", "start_date", "current_due_date"];
-  const taskTimelinePropertyColumns = visibleOrderedColumns(taskColumns, taskViews.activeView).filter(
+  const taskTimelinePropertyColumns = visibleOrderedColumns(taskColumns, taskActiveView).filter(
     (c) => !TASK_TIMELINE_EXCLUDED_KEYS.includes(c.key)
   );
   // Calendar's card structure treats Project the same way Timeline treats
@@ -5542,7 +5598,7 @@ export default function Projects() {
   // render includes a live Start/Stop timer button that has no business
   // being clickable on a small calendar card.
   const TASK_CALENDAR_EXCLUDED_KEYS = ["name", "project", "start_date", "current_due_date", "time_spent_hours", "effort"];
-  const taskCalendarPropertyColumns = visibleOrderedColumns(taskColumns, taskViews.activeView).filter(
+  const taskCalendarPropertyColumns = visibleOrderedColumns(taskColumns, taskActiveView).filter(
     (c) => !TASK_CALENDAR_EXCLUDED_KEYS.includes(c.key)
   );
 
@@ -5571,9 +5627,9 @@ export default function Projects() {
           end_date: { reason: `Shown via ${projectDatesShownStructurally}, not as a separate property`, forcedVisible: false },
         }
       : undefined;
-  const taskDatesShownStructurally = taskViews.activeView.viewType === "timeline" ? "the bar's position on the chart" : "which day the card sits on";
+  const taskDatesShownStructurally = taskActiveView.viewType === "timeline" ? "the bar's position on the chart" : "which day the card sits on";
   const taskTimelinePropertyLockInfo =
-    taskViews.activeView.viewType === "timeline" || taskViews.activeView.viewType === "calendar"
+    taskActiveView.viewType === "timeline" || taskActiveView.viewType === "calendar"
       ? {
           name: { reason: "Always shown as the row/card title, not a separate property", forcedVisible: true },
           start_date: { reason: `Shown via ${taskDatesShownStructurally}, not as a separate property`, forcedVisible: false },
@@ -5582,7 +5638,7 @@ export default function Projects() {
           // under the title, see getProjectLabel), same structural
           // treatment as Name -- not a togglable chip the way it is on
           // Timeline (hidden-by-default there, but still a normal chip).
-          ...(taskViews.activeView.viewType === "calendar"
+          ...(taskActiveView.viewType === "calendar"
             ? {
                 project: { reason: "Always shown as its own line under the task title", forcedVisible: true },
                 time_spent_hours: { reason: "Not shown on Calendar cards -- its Start/Stop timer control doesn't belong on a small card", forcedVisible: false },
@@ -6032,6 +6088,47 @@ export default function Projects() {
       </div>
 
       <div id="tasks-section" style={{ display: pageTab === "tasks" ? undefined : "none" }}>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${myOwnedProjectIds.size > 0 ? 5 : 4}, minmax(0, 1fr))`, gap: 8, marginBottom: 12 }}>
+        {(
+          [
+            { key: "open", note: "Not done or cancelled", tone: "var(--navy)" },
+            { key: "overdue", note: "Past due", tone: taskKpis.overdue > 0 ? "var(--danger-text)" : "var(--navy)" },
+            { key: "due_week", note: "Due today through Sunday", tone: "var(--navy)" },
+            { key: "awaiting", note: "Done, not yet validated", tone: taskKpis.awaiting > 0 ? "var(--warning-text)" : "var(--navy)" },
+            ...(myOwnedProjectIds.size > 0 ? [{ key: "at_risk", note: "Overdue, due soon or unassigned", tone: taskKpis.at_risk > 0 ? "var(--danger-text)" : "var(--navy)" }] : []),
+          ] as { key: QuickListKey; note: string; tone: string }[]
+        ).map((c) => {
+          const active = quickList === c.key;
+          return (
+            <button
+              key={c.key}
+              type="button"
+              className="card"
+              onClick={() => setQuickList(active ? null : c.key)}
+              title={active ? "Back to the selected view" : `Show ${QUICK_LIST_META[c.key].label.toLowerCase()}`}
+              style={{
+                padding: "10px 12px", textAlign: "left", cursor: "pointer", minWidth: 0,
+                border: active ? "1.5px solid var(--accent)" : undefined,
+                background: active ? "var(--hover-bg)" : undefined,
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>{QUICK_LIST_META[c.key].label}</div>
+              <div style={{ fontSize: 20, lineHeight: 1.1, fontWeight: 700, color: c.tone, fontVariantNumeric: "tabular-nums", marginTop: 4 }}>{taskKpis[c.key]}</div>
+              <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>{c.note}</div>
+            </button>
+          );
+        })}
+      </div>
+      {quickList && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, fontSize: 12 }}>
+          <span style={{ fontWeight: 600, color: "var(--navy)", background: "var(--hover-bg)", borderRadius: 999, padding: "4px 10px" }}>
+            Showing: {QUICK_LIST_META[quickList].label} ({filteredVisibleTasks.length})
+          </span>
+          <button type="button" onClick={() => setQuickList(null)} style={{ border: "none", background: "transparent", color: "var(--accent)", fontWeight: 600, cursor: "pointer", fontSize: 12 }}>
+            × Back to {taskViews.activeView.name}
+          </button>
+        </div>
+      )}
 
       <div className="card" style={{ padding: 0 }}>
         <div className="sticky-toolbar-cluster" ref={taskClusterRef}>
@@ -6044,7 +6141,10 @@ export default function Projects() {
             activeViewId={taskViews.activeViewId}
             rows={visibleTasks}
             groupOptions={taskGroupOptions}
-            onSelect={taskViews.setActiveViewId}
+            onSelect={(id) => {
+              setQuickList(null);
+              taskViews.setActiveViewId(id);
+            }}
             onCreate={taskViews.createView}
             boardDefaultGroupBy="status"
             timelineDefaultHiddenColumns={TASK_TIMELINE_DEFAULT_HIDDEN_COLUMNS}
@@ -6061,51 +6161,51 @@ export default function Projects() {
             <ViewSettingsMenu
               rows={filteredVisibleTasks}
               columns={taskColumns}
-              hiddenColumns={taskViews.activeView.hiddenColumns}
+              hiddenColumns={taskActiveView.hiddenColumns}
               onHiddenColumnsChange={(hiddenColumns) => updateTaskView({ hiddenColumns })}
-              columnOrder={taskViews.activeView.columnOrder}
+              columnOrder={taskActiveView.columnOrder}
               onColumnOrderChange={(columnOrder) => updateTaskView({ columnOrder })}
               groupOptions={taskGroupModeOptions}
               groupBy={taskResolvedGroupBy}
               groupBy2={taskResolvedGroupBy2}
-              hiddenGroups={taskViews.activeView.hiddenGroups}
+              hiddenGroups={taskActiveView.hiddenGroups}
               onGroupByChange={(groupBy) => updateTaskView({ groupBy, hiddenGroups: [] })}
               onGroupBy2Change={(groupBy2) => updateTaskView({ groupBy2 })}
               onHiddenGroupsChange={(hiddenGroups) => updateTaskView({ hiddenGroups })}
-              hideEmptyGroups={taskViews.activeView.hideEmptyGroups}
+              hideEmptyGroups={taskActiveView.hideEmptyGroups}
               onHideEmptyGroupsChange={(hideEmptyGroups) => updateTaskView({ hideEmptyGroups })}
-              showCount={taskViews.activeView.showCount}
+              showCount={taskActiveView.showCount}
               onShowCountChange={(showCount) => updateTaskView({ showCount })}
               sortOptions={taskSortOptions}
-              sorts={taskViews.activeView.sorts}
+              sorts={taskActiveView.sorts}
               onSortsChange={(sorts) => updateTaskView({ sorts })}
               groupMode={taskGroupMode}
               people={people}
-              filterPersonIds={resolveFilterPersonIds(taskViews.activeView)}
+              filterPersonIds={resolveFilterPersonIds(taskActiveView)}
               onFilterPersonIdsChange={(filterPersonIds) => updateTaskView({ filterPersonIds })}
               statusOptions={TASK_STATUS_OPTIONS}
-              filterStatuses={taskViews.activeView.filterStatuses ?? []}
+              filterStatuses={taskActiveView.filterStatuses ?? []}
               onFilterStatusesChange={(filterStatuses) => updateTaskView({ filterStatuses })}
               propertyLockInfo={taskTimelinePropertyLockInfo}
-              hideGroupBy={taskViews.activeView.viewType === "calendar"}
+              hideGroupBy={taskActiveView.viewType === "calendar"}
               boardLabelToggle={
-                taskViews.activeView.viewType === "board"
+                taskActiveView.viewType === "board"
                   ? {
-                      checked: taskViews.activeView.boardShowPropertyLabels ?? true,
+                      checked: taskActiveView.boardShowPropertyLabels ?? true,
                       onChange: (boardShowPropertyLabels) => updateTaskView({ boardShowPropertyLabels }),
                     }
                   : undefined
               }
-              nonReorderableKeys={taskViews.activeView.viewType === "board" ? ["name"] : undefined}
+              nonReorderableKeys={taskActiveView.viewType === "board" ? ["name"] : undefined}
             />
           </div>
         </div>
-        {taskViews.activeView.viewType === "timeline" && (
+        {taskActiveView.viewType === "timeline" && (
           <div className="timeline-controls-row">
             <TimelineControls
-              scale={taskViews.activeView.timelineScale ?? "month"}
+              scale={taskActiveView.timelineScale ?? "month"}
               onScaleChange={(timelineScale) => updateTaskView({ timelineScale })}
-              dateMode={taskViews.activeView.timelineDateMode ?? "range"}
+              dateMode={taskActiveView.timelineDateMode ?? "range"}
               onDateModeChange={(timelineDateMode) => updateTaskView({ timelineDateMode })}
             />
           </div>
@@ -6115,20 +6215,20 @@ export default function Projects() {
           groupBy={taskResolvedGroupBy}
           groupBy2={taskResolvedGroupBy2}
           onGroupBy2Change={(groupBy2) => updateTaskView({ groupBy2 })}
-          hiddenGroups={taskViews.activeView.hiddenGroups}
+          hiddenGroups={taskActiveView.hiddenGroups}
           onGroupByChange={(groupBy) => updateTaskView({ groupBy, hiddenGroups: [] })}
           onHiddenGroupsChange={(hiddenGroups) => updateTaskView({ hiddenGroups })}
           sortOptions={taskSortOptions}
-          sorts={taskViews.activeView.sorts}
+          sorts={taskActiveView.sorts}
           onSortsChange={(sorts) => updateTaskView({ sorts })}
           groupMode={taskGroupMode}
           people={people}
-          filterPersonIds={resolveFilterPersonIds(taskViews.activeView)}
-          filterStatuses={taskViews.activeView.filterStatuses ?? []}
+          filterPersonIds={resolveFilterPersonIds(taskActiveView)}
+          filterStatuses={taskActiveView.filterStatuses ?? []}
           onClearFilter={() => updateTaskView({ filterPersonIds: [], filterStatuses: [] })}
           containerRef={setTaskPillsRowEl}
         />
-        {taskViews.activeView.viewType !== "board" && taskViews.activeView.viewType !== "timeline" && selectedTaskIds.length > 0 && (
+        {taskActiveView.viewType !== "board" && taskActiveView.viewType !== "timeline" && selectedTaskIds.length > 0 && (
           <div className="bulk-bar">
             <span className="bulk-bar-count">{selectedTaskIds.length} selected</span>
             <button className="bulk-bar-clear" onClick={() => setSelectedTaskIds([])}>
@@ -6164,45 +6264,45 @@ export default function Projects() {
         </div>
         {loading && !hasLoadedOnce.current ? (
           <div style={{ padding: 14, color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>
-        ) : taskViews.activeView.viewType === "board" ? (
+        ) : taskActiveView.viewType === "board" ? (
           <>
             <BoardView
-              rows={sortRowsHierarchical(filteredVisibleTasks, taskViews.activeView.sorts, taskSortOptions, (t) => t.id, (t) => t.parent_task_id)}
+              rows={sortRowsHierarchical(filteredVisibleTasks, taskActiveView.sorts, taskSortOptions, (t) => t.id, (t) => t.parent_task_id)}
               rowKey={(t) => t.id}
-              columns={getTaskBoardColumns(resolveBoardGroupBy(taskViews.activeView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status"))}
-              getValue={(t) => getTaskBoardValue(t, resolveBoardGroupBy(taskViews.activeView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status"))}
-              hiddenColumns={taskViews.activeView.hiddenGroups}
+              columns={getTaskBoardColumns(resolveBoardGroupBy(taskActiveView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status"))}
+              getValue={(t) => getTaskBoardValue(t, resolveBoardGroupBy(taskActiveView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status"))}
+              hiddenColumns={taskActiveView.hiddenGroups}
               renderCard={renderTaskCard}
-              onMoveCard={getTaskBoardMoveHandler(resolveBoardGroupBy(taskViews.activeView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status"))}
+              onMoveCard={getTaskBoardMoveHandler(resolveBoardGroupBy(taskActiveView.groupBy, TASK_BOARD_GROUPABLE_KEYS, "status"))}
             />
 
           </>
-        ) : taskViews.activeView.viewType === "timeline" ? (
+        ) : taskActiveView.viewType === "timeline" ? (
           <>
             <TimelineView
-              rows={sortRowsHierarchical(filteredVisibleTasks, taskViews.activeView.sorts, taskSortOptions, (t) => t.id, (t) => t.parent_task_id)}
+              rows={sortRowsHierarchical(filteredVisibleTasks, taskActiveView.sorts, taskSortOptions, (t) => t.id, (t) => t.parent_task_id)}
               rowKey={(t) => t.id}
               renderLabel={(t) => taskColumns.find((c) => c.key === "name")?.render(t)}
               getStart={(t) => t.start_date}
               getDue={(t) => t.current_due_date}
-              dateMode={taskViews.activeView.timelineDateMode ?? "range"}
-              scale={taskViews.activeView.timelineScale ?? "month"}
+              dateMode={taskActiveView.timelineDateMode ?? "range"}
+              scale={taskActiveView.timelineScale ?? "month"}
               getTone={(t) => statusTone(statusGroupOf(TASK_STATUS_GROUPED, t.status))}
               getTooltip={(t) => `${t.name} · ${formatDate(t.start_date)} → ${formatDate(t.current_due_date)}`}
               emptyLabel="No tasks yet. Add tasks from WBS Planning."
               propertyColumns={taskTimelinePropertyColumns}
               getGroup={taskTimelineGroupOption ? (t) => taskTimelineGroupOption.getGroup(t) : undefined}
               getGroupTone={taskTimelineGroupOption?.getTone}
-              hiddenGroups={taskViews.activeView.hiddenGroups}
-              labelWidth={taskViews.activeView.timelineLabelWidth ?? 460}
+              hiddenGroups={taskActiveView.hiddenGroups}
+              labelWidth={taskActiveView.timelineLabelWidth ?? 460}
               onLabelWidthChange={(timelineLabelWidth) => updateTaskView({ timelineLabelWidth })}
             />
 
           </>
-        ) : taskViews.activeView.viewType === "calendar" ? (
+        ) : taskActiveView.viewType === "calendar" ? (
           <>
             <CalendarView
-              rows={sortRowsHierarchical(filteredVisibleTasks, taskViews.activeView.sorts, taskSortOptions, (t) => t.id, (t) => t.parent_task_id)}
+              rows={sortRowsHierarchical(filteredVisibleTasks, taskActiveView.sorts, taskSortOptions, (t) => t.id, (t) => t.parent_task_id)}
               rowKey={(t) => t.id}
               renderLabel={(t) => (
                 <InlineText value={t.name} editable={false} bold onCommit={(v) => updateTask(t.id, { name: v })} />
@@ -6215,7 +6315,7 @@ export default function Projects() {
               getTone={(t) => statusTone(statusGroupOf(TASK_STATUS_GROUPED, t.status))}
               getTooltip={(t) => `${t.name} · ${formatDate(t.start_date)} → ${formatDate(t.current_due_date)}`}
               emptyLabel="No tasks yet. Add tasks from WBS Planning."
-              dateMode={taskViews.activeView.timelineDateMode ?? "range"}
+              dateMode={taskActiveView.timelineDateMode ?? "range"}
               onDateModeChange={(timelineDateMode) => updateTaskView({ timelineDateMode })}
               propertyColumns={taskCalendarPropertyColumns}
               isNonWorkingDay={(d) => !isWorkingDay(d, holidayDates)}
@@ -6229,7 +6329,7 @@ export default function Projects() {
               rows={filteredVisibleTasks}
               rowKey={(t) => t.id}
               getParentId={(t) => t.parent_task_id}
-              view={taskViews.activeView}
+              view={taskActiveView}
               onViewChange={updateTaskView}
               groupOptions={taskGroupOptions}
               sortOptions={taskSortOptions}
