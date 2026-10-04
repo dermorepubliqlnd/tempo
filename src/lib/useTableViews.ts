@@ -316,8 +316,20 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     const normalizedSystemViews = systemViews.map((v) => normalizeTableView(tableKey, v));
     setViews((vs) => {
       const systemIds = new Set(normalizedSystemViews.map((v) => v.id));
-      const custom = vs.filter((v) => !v.systemView && v.id !== "default" && !systemIds.has(v.id));
-      const next = [...normalizedSystemViews, ...custom];
+      // 2026-10-04 hotfix: never drop a person's own "default" ("All") view --
+      // it carries their saved columns/widths/groupings/filters. It is kept
+      // as an ordinary personal view (renamed so it doesn't read like the
+      // system "All Projects" view). Personal layout tweaks made on a system
+      // view (column widths, freeze) are carried over instead of reset.
+      const custom = vs
+        .filter((v) => !v.systemView && !systemIds.has(v.id))
+        .map((v) => (v.id === "default" ? { ...v, id: "legacy_default", name: v.name === "All" ? "My saved layout" : v.name } : v))
+        .filter((v, i, arr) => arr.findIndex((x) => x.id === v.id) === i);
+      const mergedSystem = normalizedSystemViews.map((sv) => {
+        const saved = vs.find((v) => v.id === sv.id);
+        return saved ? { ...sv, columnWidths: saved.columnWidths ?? sv.columnWidths, frozenUpTo: saved.frozenUpTo ?? sv.frozenUpTo } : sv;
+      });
+      const next = [...mergedSystem, ...custom];
       return JSON.stringify(next) === JSON.stringify(vs) ? vs : next;
     });
     setActiveViewId((current) => {

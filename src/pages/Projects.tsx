@@ -2211,6 +2211,10 @@ export default function Projects() {
   }
 
   async function reorderProjects(draggedId: string, targetId: string) {
+    if (projectViews.activeView.systemView) {
+      await alert("Rows can't be reordered in a System View. Duplicate this view as a personal view to set your own order.");
+      return;
+    }
     if (projectViews.activeView.sorts.length > 0) {
       const ok = await confirm({
         title: "Clear sort to reorder",
@@ -2454,21 +2458,24 @@ export default function Projects() {
         break;
       case "org_all":
         break;
-      default: {
-        const personIds = resolveFilterPersonIds(view);
-        if (personIds.length > 0) {
-          out = out.filter((p) => personIds.some((id) => (id === "me" ? p.owner_id === me?.id : p.owner_id === id)));
-        }
-        if (view.filterStatuses && view.filterStatuses.length > 0) {
-          const statuses = view.filterStatuses;
-          out = out.filter((p) => statuses.includes(projectStatusOf(p) ?? ""));
-        }
+    }
+    // 2026-10-04: person/status filters apply on top of any scope, so a
+    // personal copy of a system view honours the filters its pills show.
+    {
+      const personIds = resolveFilterPersonIds(view);
+      if (personIds.length > 0) {
+        out = out.filter((p) => personIds.some((id) => (id === "me" ? p.owner_id === me?.id : p.owner_id === id)));
+      }
+      if (view.filterStatuses && view.filterStatuses.length > 0) {
+        const statuses = view.filterStatuses;
+        out = out.filter((p) => statuses.includes(projectStatusOf(p) ?? ""));
       }
     }
 
     // System portfolio views intentionally show owned projects first, then
     // projects the person contributes to; each section is ordered by Project ID.
-    if (view.projectScope === "my_active_portfolio" || view.projectScope === "my_full_portfolio") {
+    // Only for the system views themselves -- personal copies sort freely.
+    if (view.systemView && view.sorts.length === 0 && (view.projectScope === "my_active_portfolio" || view.projectScope === "my_full_portfolio")) {
       out.sort((a, b) => {
         const ownerRankA = isMine(a) ? 0 : 1;
         const ownerRankB = isMine(b) ? 0 : 1;
@@ -2571,7 +2578,7 @@ export default function Projects() {
                   e.stopPropagation();
                   navigate(`/projects/${p.id}`);
                 }}
-                title={p.description || "Open this project's WBS page (name and owner are edited there)"}
+                title={p.description || "Open this project's Overview (name and owner are edited there)"}
                 style={{
                   flex: 1,
                   minWidth: 0,
@@ -5687,7 +5694,13 @@ export default function Projects() {
               rows={filteredProjects}
               rowKey={(p) => p.id}
               view={projectViews.activeView}
-              onViewChange={projectViews.updateActiveView}
+              onViewChange={(patch) => {
+                // Widths and freeze are personal layout tweaks -- allowed on
+                // system views without the "Save as New View" prompt.
+                const keys = Object.keys(patch);
+                if (keys.every((k) => k === "columnWidths" || k === "frozenUpTo")) projectViews.updateActiveView(patch);
+                else updateProjectView(patch);
+              }}
               groupOptions={projectGroupOptions}
               sortOptions={projectSortOptions}
               collapseAllContainer={projectPillsRowEl}
