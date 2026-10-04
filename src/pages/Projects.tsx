@@ -384,6 +384,7 @@ function projectSystemView(
     hiddenColumns: PROJECT_SYSTEM_COLUMN_ORDER.filter((key) => !visible.has(key)),
     columnWidths: {},
     groupBy: scope === "my_active_portfolio" || scope === "my_full_portfolio" ? "my_role" : null,
+    hideEmptyGroups: scope === "my_active_portfolio" || scope === "my_full_portfolio" ? true : undefined,
     hiddenGroups: [],
     color: "neutral",
     showCount: false,
@@ -3414,7 +3415,7 @@ export default function Projects() {
       key: "my_role",
       label: "My Role",
       getGroup: (p) => myStatsByProject.get(p.id)?.role ?? "Not involved",
-      allGroups: () => ["Owner", "Contributor", "Not involved"],
+      allGroups: () => ["Owner", "Contributor"],
     },
     {
       key: "category",
