@@ -9,8 +9,26 @@ const STORAGE_PREFIX = "capaciq_views";
 // dragging -- without this, each of those would be its own round-trip.
 const WRITE_DEBOUNCE_MS = 800;
 
-function makeDefault(defaultView: DefaultView): TableView {
-  return { id: "default", name: "All", ...defaultView };
+function normalizeTableView(tableKey: string, view: TableView): TableView {
+  // Projects: Project ID is a required identity column. Keep it visible
+  // and pinned first in every table view, including existing personal views.
+  // This is enforced here (not only in the default column array) so a saved
+  // custom order, drag reorder, duplicate, or old persisted view cannot move
+  // or hide it.
+  if (tableKey !== "projects") return view;
+
+  const columnOrder = [
+    "project_number",
+    ...view.columnOrder.filter((key) => key !== "project_number"),
+  ];
+  const hiddenColumns = view.hiddenColumns.filter((key) => key !== "project_number");
+
+  return { ...view, columnOrder, hiddenColumns };
+}
+
+function makeDefault(defaultView: DefaultView, tableKey?: string): TableView {
+  const view: TableView = { id: "default", name: "All", ...defaultView };
+  return tableKey ? normalizeTableView(tableKey, view) : view;
 }
 
 // Shared by both the localStorage path (load, below) and the Supabase
@@ -51,17 +69,17 @@ function backfillView(v: TableView, defaultView: DefaultView): TableView {
   return merged;
 }
 
-function load(storageKey: string, defaultView: DefaultView): TableView[] {
+function load(storageKey: string, defaultView: DefaultView, tableKey: string): TableView[] {
   try {
     const raw = localStorage.getItem(storageKey);
     if (raw) {
       const parsed = JSON.parse(raw) as TableView[];
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed.map((v) => backfillView(v, defaultView));
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed.map((v) => normalizeTableView(tableKey, backfillView(v, defaultView)));
     }
   } catch {
     // ignore corrupt storage, fall through to default
   }
-  return [makeDefault(defaultView)];
+  return [makeDefault(defaultView, tableKey)];
 }
 
 // Which view was last active also needs its own persisted slot -- without
@@ -106,8 +124,8 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
   // replaced the moment the Supabase fetch below resolves (for a
   // returning person, on effectively every load, since normal render
   // beats a network round-trip).
-  const [views, setViews] = useState<TableView[]>(() => load(storageKey, defaultView));
-  const [activeViewId, setActiveViewId] = useState<string>(() => loadActiveId(activeKey, load(storageKey, defaultView)));
+  const [views, setViews] = useState<TableView[]>(() => load(storageKey, defaultView, tableKey));
+  const [activeViewId, setActiveViewId] = useState<string>(() => loadActiveId(activeKey, load(storageKey, defaultView, tableKey)));
   // Flips true once this person's REAL (server-side) views have been
   // fetched -- before that, `views`/`activeViewId` are just the fast local
   // first-paint guess and are about to be overwritten wholesale by
@@ -164,7 +182,7 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
         // whatever's already sitting in this browser's local storage (or
         // the code default if there's nothing there), then push it up so
         // it becomes this person's account-level copy from now on.
-        const legacy = load(storageKey, defaultView);
+        const legacy = load(storageKey, defaultView, tableKey);
         const legacyActiveId = loadActiveId(activeKey, legacy);
         skipNextWriteRef.current = true;
         setViews(legacy);
@@ -230,7 +248,13 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
   const activeView = views.find((v) => v.id === activeViewId) ?? views[0];
 
   function updateActiveView(patch: Partial<TableView>) {
-    setViews((vs) => vs.map((v) => (v.id === activeView.id ? { ...v, ...patch } : v)));
+    setViews((vs) =>
+      vs.map((v) =>
+        v.id === activeView.id
+          ? normalizeTableView(tableKey, { ...v, ...patch })
+          : v
+      )
+    );
   }
 
   function createView(
@@ -243,8 +267,8 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     const id = `view_${Date.now()}`;
     setViews((vs) => [
       ...vs,
-      {
-        ...makeDefault(defaultView),
+      normalizeTableView(tableKey, {
+        ...makeDefault(defaultView, tableKey),
         id,
         name,
         viewType,
@@ -257,7 +281,7 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
         // view (see the "My Projects"/"My Tasks" auto-created views in
         // Projects.tsx for why this matters, 2026-09-21).
         ...extra,
-      },
+      } as TableView),
     ]);
     setActiveViewId(id);
   }
@@ -270,7 +294,7 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     const source = views.find((v) => v.id === id);
     if (!source) return;
     const newId = `view_${Date.now()}`;
-    const copy: TableView = { ...source, id: newId, name: `${source.name} copy` };
+    const copy: TableView = normalizeTableView(tableKey, { ...source, id: newId, name: `${source.name} copy` });
     setViews((vs) => {
       const idx = vs.findIndex((v) => v.id === id);
       const next = [...vs];
