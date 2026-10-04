@@ -2419,6 +2419,22 @@ export default function Projects() {
       projectViews.updateActiveView(patch);
       return;
     }
+    // 2026-10-04 (Sandra): on a System View, layout-only tweaks are fine --
+    // column order, widths, freeze, and flipping asc/desc on the SAME sort
+    // field(s). Hiding/showing columns, a different sort field, filters or
+    // groups change what the view means -> offer "Save as New View".
+    const layoutOnly = Object.keys(patch).every((k) => {
+      if (k === "columnOrder" || k === "columnWidths" || k === "frozenUpTo") return true;
+      if (k === "sorts") {
+        const next = patch.sorts ?? [];
+        return next.length === active.sorts.length && next.every((s, i) => s.key === active.sorts[i]?.key);
+      }
+      return false;
+    });
+    if (layoutOnly) {
+      projectViews.updateActiveView(patch);
+      return;
+    }
     confirm({
       title: "You've modified a System View.",
       message: "Save these changes as a new personal view?",
@@ -5764,13 +5780,7 @@ export default function Projects() {
               rows={filteredProjects}
               rowKey={(p) => p.id}
               view={projectViews.activeView}
-              onViewChange={(patch) => {
-                // Widths and freeze are personal layout tweaks -- allowed on
-                // system views without the "Save as New View" prompt.
-                const keys = Object.keys(patch);
-                if (keys.every((k) => k === "columnWidths" || k === "frozenUpTo")) projectViews.updateActiveView(patch);
-                else updateProjectView(patch);
-              }}
+              onViewChange={updateProjectView}
               groupOptions={projectGroupOptions}
               sortOptions={projectSortOptions}
               collapseAllContainer={projectPillsRowEl}

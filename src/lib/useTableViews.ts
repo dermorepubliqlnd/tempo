@@ -327,7 +327,20 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
         .filter((v, i, arr) => arr.findIndex((x) => x.id === v.id) === i);
       const mergedSystem = normalizedSystemViews.map((sv) => {
         const saved = vs.find((v) => v.id === sv.id);
-        return saved ? { ...sv, columnWidths: saved.columnWidths ?? sv.columnWidths, frozenUpTo: saved.frozenUpTo ?? sv.frozenUpTo, personalDefault: saved.personalDefault } : sv;
+        if (!saved) return sv;
+        // Keep this person's layout-only tweaks on system views: column
+        // order (same set of columns), widths, freeze, and asc/desc on the
+        // same sort fields. Anything else is reset to the system definition.
+        const sameCols = saved.columnOrder.length === sv.columnOrder.length && saved.columnOrder.every((k) => sv.columnOrder.includes(k));
+        const sameSortKeys = saved.sorts.length === sv.sorts.length && saved.sorts.every((s, i) => s.key === sv.sorts[i]?.key);
+        return {
+          ...sv,
+          columnOrder: sameCols ? saved.columnOrder : sv.columnOrder,
+          sorts: sameSortKeys ? saved.sorts : sv.sorts,
+          columnWidths: saved.columnWidths ?? sv.columnWidths,
+          frozenUpTo: saved.frozenUpTo ?? sv.frozenUpTo,
+          personalDefault: saved.personalDefault,
+        };
       });
       // One default: the person's own pick if any, else the system default.
       const merged = [...mergedSystem, ...custom];
