@@ -294,7 +294,17 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     const source = views.find((v) => v.id === id);
     if (!source) return;
     const newId = `view_${Date.now()}`;
-    const copy: TableView = normalizeTableView(tableKey, { ...source, id: newId, name: `${source.name} copy` });
+    // Duplicating a System View gives a personal, fully editable copy that
+    // keeps its scope/columns/sort/group as a starting template.
+    const copy: TableView = normalizeTableView(tableKey, {
+      ...source,
+      id: newId,
+      name: `${source.name} copy`,
+      systemView: false,
+      systemGroup: undefined,
+      isDefaultView: false,
+      personalDefault: undefined,
+    });
     setViews((vs) => {
       const idx = vs.findIndex((v) => v.id === id);
       const next = [...vs];

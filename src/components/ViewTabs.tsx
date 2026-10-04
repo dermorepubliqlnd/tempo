@@ -242,7 +242,7 @@ export default function ViewTabs<T>({
         )
       : VIEW_ICON_SECTIONS;
     return (
-      menuOpenId === v.id && !v.systemView &&
+      menuOpenId === v.id &&
               createPortal(
               <div
                 ref={menuDropdownRef}
@@ -373,14 +373,18 @@ export default function ViewTabs<T>({
                   </>
                 ) : (
                   <>
-                    <button onClick={() => startRename(v)}>
-                      <Pencil size={12} />
-                      Rename
-                    </button>
-                    <button onClick={() => setIconPickerOpenId(v.id)}>
-                      <Icon size={12} color={color} />
-                      Icon &amp; color
-                    </button>
+                    {!v.systemView && (
+                      <>
+                        <button onClick={() => startRename(v)}>
+                          <Pencil size={12} />
+                          Rename
+                        </button>
+                        <button onClick={() => setIconPickerOpenId(v.id)}>
+                          <Icon size={12} color={color} />
+                          Icon &amp; color
+                        </button>
+                      </>
+                    )}
                     <button
                       onClick={() => {
                         setMenuOpenId(null);
@@ -388,9 +392,9 @@ export default function ViewTabs<T>({
                       }}
                     >
                       <Copy size={12} />
-                      Duplicate view
+                      {v.systemView ? "Duplicate as my view" : "Duplicate view"}
                     </button>
-                    {views.length > 1 && (
+                    {views.length > 1 && !v.systemView && (
                       <button
                         className="danger"
                         onClick={async () => {
@@ -627,10 +631,10 @@ export default function ViewTabs<T>({
           <ChevronDown size={13} style={{ color: "var(--muted)", flexShrink: 0 }} />
         </button>
         {active?.isDefaultView && badge("DEFAULT", "accent")}
-        {active && !active.systemView && (
+        {active && (
           <button
             type="button"
-            title="View options"
+            title={active.systemView ? "Duplicate this system view as your own" : "View options"}
             aria-label="View options"
             onClick={(e) => {
               if (menuOpenId === active.id) {
