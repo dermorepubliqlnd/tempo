@@ -74,6 +74,10 @@ function renderInline(text: string): string {
   out = out.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/(?<!\*)\*(?!\*)(.+?)\*(?!\*)/g, "<em>$1</em>");
   out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+  // 2026-10-04: [[Article Title]] -> link to that KB article (resolved by
+  // title on click), and [text](https://...) -> external link.
+  out = out.replace(/\[\[([^\]]+)\]\]/g, '<a href="#" class="kb-ref" data-kb-title="$1">$1</a>');
+  out = out.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   // {tone:Label} -> a colored status pill, reusing the exact same
   // .status-pill classes/colors the rest of the app already uses for
   // this value (Status/Health/Priority/Planning Type/Project Type/
@@ -672,7 +676,6 @@ export default function KnowledgeBase() {
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                   <div style={{ minWidth: 0 }}>
                     <h1 style={{ margin: 0, fontFamily: "var(--font-heading)" }}>{entry.title}</h1>
-                    {summary && <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: "6px 0 0", lineHeight: 1.5 }}>{summary}</p>}
                   </div>
                   {canEdit && (
                     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -697,7 +700,18 @@ export default function KnowledgeBase() {
                   <span>{readMinutes(entry)} min read</span>
                 </div>
                 {entry.content.trim() ? (
-                  <div className="kb-content" dangerouslySetInnerHTML={{ __html: renderMarkdownLite(entry.content) }} />
+                  <div
+                    className="kb-content"
+                    onClick={(e) => {
+                      const a = (e.target as HTMLElement).closest("a.kb-ref") as HTMLAnchorElement | null;
+                      if (!a) return;
+                      e.preventDefault();
+                      const title = (a.getAttribute("data-kb-title") ?? "").trim().toLowerCase();
+                      const target = entries.find((x) => x.title.trim().toLowerCase() === title);
+                      if (target) navigate(`/knowledge-base/article/${target.id}`);
+                    }}
+                    dangerouslySetInnerHTML={{ __html: renderMarkdownLite(entry.content) }}
+                  />
                 ) : (
                   <p style={{ fontSize: 12.5, color: "var(--muted)" }}>This article is empty.{canEdit ? " Click Edit to write it." : ""}</p>
                 )}
