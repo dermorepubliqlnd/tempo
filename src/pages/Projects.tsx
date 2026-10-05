@@ -16,7 +16,6 @@ import CardActionMenu from "../components/CardActionMenu";
 import ViewTabs from "../components/ViewTabs";
 import ViewSettingsMenu, { ViewFilterPills } from "../components/ViewSettingsMenu";
 import Modal from "../components/Modal";
-import AddSessionModal from "../components/AddSessionModal";
 import { PauseProjectModal, ScheduleReviewModal } from "../components/PauseProjectModals";
 import { timingWithPause, type TimingResult } from "../lib/pause";
 import RequestExtensionModal from "../components/RequestExtensionModal";
@@ -1506,8 +1505,7 @@ export default function Projects() {
   const [extensionTask, setExtensionTask] = useState<TaskWithDepth | null>(null);
   const [extensionProject, setExtensionProject] = useState<ProjectRow | null>(null);
   const [extDetailTask, setExtDetailTask] = useState<TaskWithDepth | null>(null);
-  // phase149: Add Session (operational projects) + reschedule a session.
-  const [showAddSession, setShowAddSession] = useState(false);
+  // phase149: operational-session rescheduling.
   const [rescheduleStartDate, setRescheduleStartDate] = useState("");
   const [rescheduleEndDate, setRescheduleEndDate] = useState("");
   const [rescheduleBusy, setRescheduleBusy] = useState(false);
@@ -1780,16 +1778,6 @@ export default function Projects() {
   // the phase-22 lock triggers in phase26_migration.sql.
   const isProjectClosed = (projectId: string) => projects.find((p) => p.id === projectId)?.wbs_status === "closed";
   const isOperationalProject = (projectId: string) => !!projects.find((p) => p.id === projectId)?.is_operational;
-  // phase149: open operational projects the current person can add sessions
-  // to -- started ones for everyone, Draft ones only for owner/Full Access.
-  const sessionProjects = projects.filter(
-    (p) =>
-      p.is_operational &&
-      p.wbs_status !== "closed" &&
-      p.status !== "Completed" &&
-      p.status !== "Cancelled" &&
-      (p.wbs_status !== "draft" || isFullAccess || p.owner_id === me?.id)
-  );
   const canEditTask = (t: TaskRow) => !isProjectClosed(t.project_id) && (canManageTasksIn(t.project_id) || t.assignee_id === me?.id);
   // Once a task's completion has been validated (owner/manager's
   // independent sign-off, see the "Validated" column below), its editable
@@ -5834,16 +5822,6 @@ export default function Projects() {
   return (
     <div>
       {confirmDialog}
-      {showAddSession && me?.id && (
-        <AddSessionModal
-          projects={sessionProjects}
-          people={people}
-          meId={me.id}
-          isFullAccess={isFullAccess}
-          onClose={() => setShowAddSession(false)}
-          onSaved={() => loadAll()}
-        />
-      )}
       {assigneePicker.element}
       {startDatePrompt.element}
       {validatingTask && (
@@ -5923,19 +5901,6 @@ export default function Projects() {
             }}
           >
             <Plus size={14} /> {creatingProject ? "Creating…" : "Add New Project"}
-          </button>
-        )}
-        {pageTab === "tasks" && sessionProjects.length > 0 && (
-          <button
-            onClick={() => setShowAddSession(true)}
-            title="Plot a training session into an operational project (e.g. this quarter's Training Delivery)"
-            style={{
-              display: "inline-flex", alignItems: "center", gap: 6,
-              fontSize: 12.5, fontWeight: 600, color: "#fff", background: "var(--accent)",
-              border: "none", borderRadius: 999, padding: "9px 16px", cursor: "pointer", whiteSpace: "nowrap",
-            }}
-          >
-            <Plus size={14} /> Add Session
           </button>
         )}
       </div>
