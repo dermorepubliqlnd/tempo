@@ -5244,9 +5244,9 @@ export default function WbsPlanning() {
               >
                 {task.status !== "Cancelled" && (
                   <>
-                {task.depth === 0 && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
-                {menuItem("Add task below", <CornerDownRight size={13} />, () => void addTaskBelow(task))}
-                {menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
+                {!project?.is_operational && task.depth === 0 && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
+                {!project?.is_operational && menuItem("Add task below", <CornerDownRight size={13} />, () => void addTaskBelow(task))}
+                {!project?.is_operational && menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
                 {menuItem(wbsNoteCounts.byTask[task.id] ? `Notes (${wbsNoteCounts.byTask[task.id]})` : "Add note", <MessageCircle size={13} />, () => setWbsNotes({ taskId: task.id }))}
                 <div style={{ height: 1, background: "var(--border)", margin: "4px 2px" }} />
                 {menuItem("Move up", <ArrowUp size={13} />, () => void moveTaskDirection(task, -1), { disabled: !canMoveUp })}
@@ -5581,29 +5581,16 @@ export default function WbsPlanning() {
               : "Define the project, add tasks, and review the forecast. Lock the baseline when the plan is ready."}
           </div>
         </div>
-        {project.is_operational && project.wbs_status !== "closed" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-            {canManageWbs && (
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => setShowBulkUploadSessions(true)}
-                title="Temporarily bulk upload Training Delivery sessions from CSV"
-                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-              >
-                <ListPlus size={14} /> Bulk Upload Sessions
-              </button>
-            )}
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => setShowAddSession(true)}
-              title="Add a Training Delivery session to this operational project"
-              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-            >
-              <Plus size={14} /> Add Session
-            </button>
-          </div>
+        {project.is_operational && project.wbs_status !== "closed" && canManageWbs && (
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setShowBulkUploadSessions(true)}
+            title="Temporarily bulk upload Training Delivery sessions from CSV"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}
+          >
+            <ListPlus size={14} /> Bulk Upload Sessions
+          </button>
         )}
       </div>
       <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 6, marginBottom: 8 }}>
@@ -6801,7 +6788,7 @@ export default function WbsPlanning() {
             <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #e5edf6", flexWrap: "wrap" }}>
               <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>2</span>
               <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Work Breakdown Structure</div>
-              <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Break the project into tasks and define the effort, assignee, and schedule.</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)" }}>{project.is_operational ? "Manage scheduled Training Delivery sessions and their status, facilitator, hours, and dates." : "Break the project into tasks and define the effort, assignee, and schedule."}</div>
               <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <button
                   type="button"
@@ -6813,9 +6800,21 @@ export default function WbsPlanning() {
                 </button>
 
                 {canEditWbs && (
-                  <button type="button" className="btn-primary" onClick={addTopLevelTask} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <Plus size={13} /> Add Task
-                  </button>
+                  project.is_operational ? (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => setShowAddSession(true)}
+                      title="Add a Training Delivery session"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                    >
+                      <Plus size={13} /> Add Session
+                    </button>
+                  ) : (
+                    <button type="button" className="btn-primary" onClick={addTopLevelTask} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <Plus size={13} /> Add Task
+                    </button>
+                  )
                 )}
               </div>
             </div>
