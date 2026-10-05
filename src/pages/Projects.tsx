@@ -1508,7 +1508,8 @@ export default function Projects() {
   const [extDetailTask, setExtDetailTask] = useState<TaskWithDepth | null>(null);
   // phase149: Add Session (operational projects) + reschedule a session.
   const [showAddSession, setShowAddSession] = useState(false);
-  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleStartDate, setRescheduleStartDate] = useState("");
+  const [rescheduleEndDate, setRescheduleEndDate] = useState("");
   const [rescheduleBusy, setRescheduleBusy] = useState(false);
 
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
@@ -6737,7 +6738,8 @@ export default function Projects() {
           title={`${isOperationalProject(extDetailTask.project_id) ? "Session date" : "Extension history"} -- ${extDetailTask.name}`}
           onClose={() => {
             setExtDetailTask(null);
-            setRescheduleDate("");
+            setRescheduleStartDate("");
+            setRescheduleEndDate("");
           }}
         >
           {taskExtensionRequests(extDetailTask.id).length === 0 ? (
@@ -6773,35 +6775,67 @@ export default function Projects() {
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
                 <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", marginBottom: 4 }}>Reschedule session</div>
                 <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
-                  Operational project -- moving a session isn't an extension, so no approval is needed.
+                  Operational project -- moving or extending a session range isn't an extension request, so no approval is needed.
                 </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input
-                    type="date"
-                    value={rescheduleDate || extDetailTask.current_due_date?.slice(0, 10) || ""}
-                    onChange={(e) => setRescheduleDate(e.target.value)}
-                    style={{ fontSize: 12.5, padding: "5px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                  />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, alignItems: "end" }}>
+                  <label style={{ display: "grid", gap: 4, fontSize: 11, color: "var(--muted)" }}>
+                    Start Date
+                    <input
+                      type="date"
+                      value={rescheduleStartDate || extDetailTask.start_date?.slice(0, 10) || ""}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setRescheduleStartDate(next);
+                        const currentEnd = rescheduleEndDate || extDetailTask.current_due_date?.slice(0, 10) || "";
+                        if (!currentEnd || currentEnd < next) setRescheduleEndDate(next);
+                      }}
+                      style={{ fontSize: 12.5, padding: "5px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 4, fontSize: 11, color: "var(--muted)" }}>
+                    End Date
+                    <input
+                      type="date"
+                      min={rescheduleStartDate || extDetailTask.start_date?.slice(0, 10) || undefined}
+                      value={rescheduleEndDate || extDetailTask.current_due_date?.slice(0, 10) || ""}
+                      onChange={(e) => setRescheduleEndDate(e.target.value)}
+                      style={{ fontSize: 12.5, padding: "5px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                    />
+                  </label>
                   <button
-                    disabled={rescheduleBusy || !rescheduleDate || rescheduleDate === extDetailTask.current_due_date?.slice(0, 10)}
+                    disabled={
+                      rescheduleBusy ||
+                      !(rescheduleStartDate || extDetailTask.start_date?.slice(0, 10)) ||
+                      !(rescheduleEndDate || extDetailTask.current_due_date?.slice(0, 10)) ||
+                      (rescheduleEndDate || extDetailTask.current_due_date?.slice(0, 10) || "") <
+                        (rescheduleStartDate || extDetailTask.start_date?.slice(0, 10) || "") ||
+                      ((rescheduleStartDate || extDetailTask.start_date?.slice(0, 10) || "") === extDetailTask.start_date?.slice(0, 10) &&
+                        (rescheduleEndDate || extDetailTask.current_due_date?.slice(0, 10) || "") === extDetailTask.current_due_date?.slice(0, 10))
+                    }
                     onClick={async () => {
+                      const nextStart = rescheduleStartDate || extDetailTask.start_date?.slice(0, 10) || "";
+                      const nextEnd = rescheduleEndDate || extDetailTask.current_due_date?.slice(0, 10) || "";
                       setRescheduleBusy(true);
-                      const { error } = await supabase.rpc("reschedule_session", { p_task_id: extDetailTask.id, p_date: rescheduleDate });
+                      const { error } = await supabase.rpc("reschedule_session_range", {
+                        p_task_id: extDetailTask.id,
+                        p_start_date: nextStart,
+                        p_end_date: nextEnd,
+                      });
                       setRescheduleBusy(false);
                       if (error) {
                         await alert(`Couldn't reschedule: ${error.message}`);
                         return;
                       }
-                      setRescheduleDate("");
+                      setRescheduleStartDate("");
+                      setRescheduleEndDate("");
                       setExtDetailTask(null);
                       loadAll();
                     }}
-                    style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 12px", cursor: "pointer", opacity: rescheduleBusy || !rescheduleDate ? 0.55 : 1 }}
+                    style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 12px", cursor: "pointer", opacity: rescheduleBusy ? 0.55 : 1 }}
                   >
-                    {rescheduleBusy ? "Saving…" : "Reschedule"}
+                    {rescheduleBusy ? "Saving…" : "Save dates"}
                   </button>
-                </div>
-              </div>
+                </div>              </div>
             )}
           {isProjectLocked(extDetailTask.project_id) && canEditTask(extDetailTask) && !isOperationalProject(extDetailTask.project_id) && (
             <button
