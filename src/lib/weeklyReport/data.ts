@@ -205,7 +205,9 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   }
   for (const t of doneTasks) if (Number(t.estimated_hours) > 0) doneEst += Number(t.estimated_hours);
 
-  const startingP = live.filter((p) => statusOf(p) !== "Completed" && inWeek(d10(p.start_date), thisWeek));
+  // Sandra 2026-10-05: paused projects stay under Paused, not "Starting this week".
+  const startingP = live.filter((p) => statusOf(p) !== "Completed" && statusOf(p) !== "Paused" && inWeek(d10(p.start_date), thisWeek));
+  const pausedStartingP = live.filter((p) => statusOf(p) === "Paused" && inWeek(d10(p.start_date), thisWeek));
   const intakeP = live.filter((p) => inWeek(localDay(p.created_at), week));
   const pausedNowP = live.filter((p) => statusOf(p) === "Paused");
   const pausedInWeek = live.filter((p) => inWeek(d10(p.paused_at), week)).length;
@@ -546,6 +548,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       "",
       "PIPELINE",
       `Starting this week (${startingP.length}):`, bl(cap(startingNotes, 10)),
+      ...(pausedStartingP.length ? [`Planned to start this week but PAUSED (not counted above): ${pausedStartingP.map((p) => p.name).join(", ")}.`] : []),
       `New intake last week (${intakeP.length}):`, bl(cap(intakeNotes, 10)),
       `Paused last week (${pausedWeekP.length}):`, bl(pausedNotes(pausedWeekP)),
       `All paused projects (${pausedNowP.length}):`, bl(pausedNotes(pausedNowP)),
@@ -577,6 +580,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       `Completed last week (${completedProjects.length}):`, bl(completedNotes),
       `New intake last week (${intakeP.length}):`, bl(intakeNotes),
       `Starting this week (${startingP.length}):`, bl(startingNotes),
+      ...(pausedStartingP.length ? [`Planned to start this week but PAUSED (shown under Paused): ${pausedStartingP.map((p) => p.name).join(", ")}.`] : []),
       `Paused (${pausedNowP.length}):`, bl(pausedNotes(pausedNowP)),
     ].join("\n"),
     util: [

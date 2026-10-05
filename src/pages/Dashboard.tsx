@@ -651,7 +651,9 @@ export default function Dashboard() {
         supabase.from("project_phases").select("id,name,is_active,sort_order").order("sort_order"),
       ]);
       const allProjects = (projectData as ProjectRow[]) ?? [];
-      setProjects(allProjects.filter((p) => !p.is_operational));
+      // Sandra 2026-10-05: Training Delivery projects COUNT in the portfolio;
+      // only the health donut leaves them out. Training Delivery section = drill-down.
+      setProjects(allProjects);
       setOperationalProjects(allProjects.filter((p) => p.is_operational));
       setTasks((taskData as TaskRow[]) ?? []);
       setPeople((peopleData as PersonRow[]) ?? []);
@@ -662,7 +664,7 @@ export default function Dashboard() {
       setExtReqs((extReqData as ExtReqLite[]) ?? []);
       setBaselineReqs((baselineReqData as BaselineReqLite[]) ?? []);
       setCloseouts((closeoutData as CloseoutLite[]) ?? []);
-      setAllProjectStarts(((allStartsData as (ProjectStartLite & { is_operational?: boolean })[]) ?? []).filter((p) => !p.is_operational));
+      setAllProjectStarts((allStartsData as ProjectStartLite[]) ?? []);
       setPlanningTypes((planningTypeData as PlanningTypeRow[]) ?? []);
       setProjectTypes((projectTypeData as ProjectTypeRow[]) ?? []);
       setPhases((phaseData as PhaseRow[]) ?? []);
@@ -727,7 +729,8 @@ export default function Dashboard() {
       if (h === "At risk" || h === "Off track") atRisk++;
       if (h === "Overdue") overdue++;
     }
-    return { total, active, completed, onHold, atRisk, overdue };
+    const activeOperational = filteredProjects.filter((p) => isActiveProject(p) && p.is_operational).length;
+    return { total, active, activeOperational, completed, onHold, atRisk, overdue };
   }, [filteredProjects, tasks, holidayDates]);
 
   const statusDonut = useMemo(() => {
@@ -754,7 +757,7 @@ export default function Dashboard() {
     // Active) -- now scoped to isActiveProject (wbs_status ===
     // "baseline_locked") so its total matches the Active KPI card above.
     const counts: Record<string, number> = {};
-    for (const p of filteredProjects.filter(isActiveProject)) {
+    for (const p of filteredProjects.filter((x) => isActiveProject(x) && !x.is_operational)) {
       const key = healthOf(p, tasks, holidayDates).label;
       counts[key] = (counts[key] ?? 0) + 1;
     }
@@ -1062,7 +1065,7 @@ export default function Dashboard() {
         unvalidated: leaf(p.id).filter((t) => t.status === "Done" && !t.validated_completion_date).length,
       }))
       .sort((a, b) => (b.days ?? 0) - (a.days ?? 0));
-    const workComplete = live.filter((p) => p.status !== "Completed" && p.status !== "Cancelled" && actualProgress(p.id, tasks) === 100);
+    const workComplete = live.filter((p) => !p.is_operational && p.status !== "Completed" && p.status !== "Cancelled" && actualProgress(p.id, tasks) === 100);
     return { openTasks, readyToClose, workComplete };
   }, [filteredProjects, tasks]);
   const completionFlagCount = completionFlags.openTasks.length + completionFlags.readyToClose.length + completionFlags.workComplete.length;
@@ -1172,7 +1175,7 @@ export default function Dashboard() {
           that ambiguity. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
         <StatCard icon={<Folder size={26} />} tone="accent" label="Total Projects" value={stats.total} />
-        <StatCard icon={<Activity size={26} />} tone="accent" label="Active" value={stats.active} />
+        <StatCard icon={<Activity size={26} />} tone="accent" label={stats.activeOperational ? `Active (incl. ${stats.activeOperational} Training Delivery)` : "Active"} value={stats.active} />
         <StatCard icon={<CheckCircle2 size={26} />} tone="teal" label="Completed" value={stats.completed} />
         <StatCard icon={<PauseCircle size={26} />} tone="warning" label="Paused" value={stats.onHold} />
         <StatCard icon={<Clock3 size={26} />} tone="danger" label="Overdue" value={stats.overdue} />
@@ -1253,10 +1256,12 @@ export default function Dashboard() {
           {/* 2026-09-21: caption updated from "Baseline Locked projects
               only" to match isActiveProject's new Status-based
               definition (see that function's own comment for why). */}
-          <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 10 }}>In Progress projects only</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 10 }}>
+            In Progress projects only{stats.activeOperational ? ` · excludes ${stats.activeOperational} Training Delivery (health always “Ongoing”)` : ""}
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <Donut segments={healthDonut} centerLabel="Active" centerValue={stats.active} />
-            <DonutLegend segments={healthDonut} total={stats.active} />
+            <Donut segments={healthDonut} centerLabel="Active" centerValue={stats.active - stats.activeOperational} />
+            <DonutLegend segments={healthDonut} total={stats.active - stats.activeOperational} />
           </div>
         </div>
         <div className="card">
@@ -1587,7 +1592,7 @@ function TrainingDeliverySection({
         </select>
       </div>
       <div style={{ fontSize: 11, color: "var(--muted)", margin: "-4px 0 10px" }}>
-        Sessions in operational projects ({projects.length}) -- kept out of the portfolio numbers above. A session = a task with Output Type
+        Drill-down of the {projects.length} Training Delivery (operational) projects counted in the portfolio above. A session = a task with Output Type
         "Session"; hours = time logged on those sessions.
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 12 }}>

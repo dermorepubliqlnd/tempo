@@ -402,9 +402,6 @@ function ExecutiveDashboard() {
     const notStarted: ProjectRow[] = [];
     const paused: ProjectRow[] = [];
     for (const p of scopedProjects) {
-      // phase149: operational projects (e.g. quarterly Training Delivery) are
-      // summarised on Projects Portfolio › Training Delivery, not counted here.
-      if (p.is_operational) continue;
       const s = statusOf(p);
       if (s === "Cancelled") continue;
       if (s === "Completed") {
@@ -802,7 +799,10 @@ function ExecutiveDashboard() {
   // ======================================================== ACTIVE HEALTH
   // Current state: Status = In Progress today. Ignores the Reporting Period
   // (Population + More Filters still apply).
+  const opActiveCount = useMemo(() => scopedProjects.filter((p) => statusOf(p) === "In Progress" && p.is_operational).length, [scopedProjects]); // eslint-disable-line react-hooks/exhaustive-deps
   const activeHealth = useMemo(() => {
+    // Sandra 2026-10-05: one rule everywhere -- Training Delivery (operational)
+    // projects COUNT in the portfolio; only Health leaves them out ("Ongoing").
     const act = scopedProjects.filter((p) => statusOf(p) === "In Progress" && !p.is_operational);
     const count = (keyOf: (p: ProjectRow) => string) => {
       const m = new Map<string, number>();
@@ -1035,7 +1035,7 @@ function ExecutiveDashboard() {
             <div className="exec-grid exec-grid-3">
               <Kpi to="/projects?tab=projects" tone="blue" icon={<Folder size={18} />} label="Total Projects" value={t} sub="Completed + open in period" title="Completed in period + open projects (In Progress, Not Started, Paused) that started by period end. Cancelled excluded." />
               <Kpi to="/projects?tab=projects" tone="green" icon={<CheckCircle2 size={18} />} label="Completed" share={pctOf(portfolio.completed.length, t)} value={portfolio.completed.length} sub={`${pctOf(portfolio.completed.length, t)}% of total`} trend={trend(completedIn)} title="Projects whose Actual Close Date (or completion stamp) falls in the period." />
-              <Kpi to="/projects?tab=projects" tone="indigo" icon={<Activity size={18} />} label="Active" share={pctOf(portfolio.active.length, t)} value={portfolio.active.length} sub={`${pctOf(portfolio.active.length, t)}% of total`} title="Status = In Progress (current state)." />
+              <Kpi to="/projects?tab=projects" tone="indigo" icon={<Activity size={18} />} label="Active" share={pctOf(portfolio.active.length, t)} value={portfolio.active.length} sub={`${pctOf(portfolio.active.length, t)}% of total${portfolio.active.some((p) => p.is_operational) ? ` · incl. ${portfolio.active.filter((p) => p.is_operational).length} Training Delivery` : ""}`} title="Status = In Progress (current state). Includes Training Delivery (operational) projects." />
               <Kpi to="/projects?tab=projects" tone="slate" icon={<CircleDashed size={18} />} label="Not Started" share={pctOf(portfolio.notStarted.length, t)} value={portfolio.notStarted.length} sub={`${pctOf(portfolio.notStarted.length, t)}% of total`} title="Status = Not Started, or WBS still in Draft." />
               <Kpi to="/projects?tab=projects" tone="orange" icon={<PauseCircle size={18} />} label="Paused" share={pctOf(portfolio.paused.length, t)} value={portfolio.paused.length} sub={`${pctOf(portfolio.paused.length, t)}% of total`} />
               <Kpi to="/projects?tab=projects" tone="red" icon={<Clock3 size={18} />} label="Overdue" value={portfolio.overdue.length} share={pctOf(portfolio.overdue.length, portfolio.active.length)} sub={`${pctOf(portfolio.overdue.length, portfolio.active.length)}% of active`} title="Active projects whose Health is Overdue (past End Date, not complete). Health is separate from Status." />
@@ -1172,7 +1172,7 @@ function ExecutiveDashboard() {
           </section>
 
           <section className="exec-section">
-            <SectionTitle title="Active Projects Health" caption={`Current state · ${activeHealth.total} active (In Progress) project${activeHealth.total === 1 ? "" : "s"} · not affected by the Reporting Period`} />
+            <SectionTitle title="Active Projects Health" caption={`Current state · ${activeHealth.total} active (In Progress) project${activeHealth.total === 1 ? "" : "s"}${opActiveCount ? ` · excludes ${opActiveCount} Training Delivery (health always “Ongoing”)` : ""} · not affected by the Reporting Period`} />
             <div className="exec-grid-4">
               {([
                 ["Health", activeHealth.health],
