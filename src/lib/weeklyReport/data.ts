@@ -35,16 +35,16 @@ export interface WeeklyReportData {
   generatedOn: string;
   week: WeekRange; thisWeek: WeekRange; nextWeek: WeekRange;
   glance: {
-    completedProjects: string[]; tasksDone: number; tasksOnTime: number;
+    completedProjects: string[]; completedDetail: { name: string; date: string; onTime: boolean | null }[]; tasksDone: number; tasksOnTime: number;
     logged: number; expected: number; nonProject: number; doneLogged: number; doneEst: number;
-    utilPct: number; starting: number; intake: number; pausedInWeek: number; pausedNow: number; pausedNoResume: number;
+    utilPct: number; starting: number; awaitingStart: number; intake: number; pausedInWeek: number; pausedNow: number; pausedNoResume: number;
   };
   portfolio: { total: number; completed: number; active: number; operationalActive: number; notStarted: number; paused: number; overdue: number;
     movement: { label: string; started: number; completed: number }[] };
   health: { activeCount: number; operationalActive: number; buckets: { label: string; count: number }[]; overdue: (ProjLine & { daysLate: number })[]; dueThisWeek: ProjLine[]; closePending: number; offTrack: number };
   drivers: { rows: { name: string; type: string; daysLate: number; what: string; signal: string }[]; grewCount: number; overdueCount: number; tasksAdded: number; hoursAdded: number; extRequests: number; notes: number };
   mix: { rows: { label: string; devPlanned: number; devAdHoc: number; trPlanned: number; trAdHoc: number }[]; active: number; dev: number; trainer: number };
-  pipeline: { completed: ProjLine[]; intake: ProjLine[]; starting: ProjLine[]; paused: ProjLine[] };
+  pipeline: { completed: ProjLine[]; intake: ProjLine[]; starting: ProjLine[]; awaitingStart: ProjLine[]; paused: ProjLine[] };
   util: { roles: { label: string; name: string; people: number; last: number; thisW: number; nextW: number }[];
     overloaded: { name: string; pct: number }[]; room: { name: string; pct: number }[];
     thisPlanned: number; thisCap: number; nextPlanned: number; nextCap: number };
@@ -52,7 +52,7 @@ export interface WeeklyReportData {
   // Sandra 2026-10-05: Portfolio overview = YTD totals + monthly movement;
   // Work mix = Scoped Hours YTD by Project Type x Planning Type + active Health/Phase.
   ytd: {
-    start: string; end: string; total: number; completed: number; active: number; operationalActive: number;
+    start: string; end: string; total: number; completed: number; active: number; operationalActive: number; notStartedPaused: number;
     movement: { label: string; started: number; completed: number }[];
     mix: { total: number; projects: number; planTypes: { label: string; value: number }[]; bars: { label: string; total: number; parts: Record<string, number> }[] };
     activeHealth: { total: number; operationalExcluded: number; health: { label: string; count: number }[]; phase: { label: string; count: number }[] };
@@ -214,7 +214,11 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   for (const t of doneTasks) if (Number(t.estimated_hours) > 0) doneEst += Number(t.estimated_hours);
 
   // Sandra 2026-10-05: paused projects stay under Paused, not "Starting this week".
-  const startingP = live.filter((p) => statusOf(p) !== "Completed" && statusOf(p) !== "Paused" && inWeek(d10(p.start_date), thisWeek));
+  // Sandra 2026-10-05: "Starting this week" = Start Project approved (baseline
+  // locked) only. Drafts planned for this week stay in the pipeline as
+  // awaiting confirmation.
+  const startingP = live.filter((p) => p.wbs_status !== "draft" && statusOf(p) !== "Completed" && statusOf(p) !== "Paused" && inWeek(d10(p.start_date), thisWeek));
+  const awaitingStartP = live.filter((p) => p.wbs_status === "draft" && inWeek(d10(p.start_date), thisWeek));
   const pausedStartingP = live.filter((p) => statusOf(p) === "Paused" && inWeek(d10(p.start_date), thisWeek));
   const intakeP = live.filter((p) => inWeek(localDay(p.created_at), week));
   const pausedNowP = live.filter((p) => statusOf(p) === "Paused");
@@ -339,6 +343,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     completed: completedProjects.map((p) => line(p, completionDateOf(p))),
     intake: intakeP.map((p) => line(p, localDay(p.created_at), statusOf(p))),
     starting: startingP.map((p) => line(p, d10(p.start_date))).sort((a, b) => a.date.localeCompare(b.date)),
+    awaitingStart: awaitingStartP.map((p) => line(p, d10(p.start_date))).sort((a, b) => a.date.localeCompare(b.date)),
     paused: pausedNowP.map((p) => {
       const days = p.paused_at ? Math.max(0, daysBetween(d10(p.paused_at), todayIso)) : 0;
       const resume = d10(p.pause_expected_resume);
@@ -470,12 +475,16 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   const isOp = (p: P) => !!(p as { is_operational?: boolean | null }).is_operational;
   const ytdStart = `${week.end.slice(0, 4)}-01-01`;
   const ytdEnd = week.end;
+  // Sandra 2026-10-05: one basis -- open projects counted as of TODAY (same as
+  // the Health donut), completed counted Jan 1 -> report-week Friday.
+  // Active projects (regular) and Training Delivery are shown separately.
   let yCompleted = 0, yActive = 0, yOpActive = 0, yOther = 0;
   for (const p of live) {
     const st = statusOf(p);
     if (st === "Completed") { const cd = completionDateOf(p); if (cd && cd >= ytdStart && cd <= ytdEnd) yCompleted++; continue; }
-    if (p.start_date && d10(p.start_date) > ytdEnd) continue;
-    if (st === "In Progress") { yActive++; if (isOp(p)) yOpActive++; } else yOther++;
+    if (st === "In Progress") { if (isOp(p)) yOpActive++; else yActive++; continue; }
+    if (p.start_date && d10(p.start_date) > todayIso) continue;
+    yOther++;
   }
   const months: { label: string; from: string; to: string }[] = [];
   for (let m = new Date(Number(ytdStart.slice(0, 4)), 0, 1); toISO(m) <= ytdEnd; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
@@ -527,7 +536,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   const pc = new Map<string, number>();
   for (const p of activeP) { const l = p.phase || "Not set"; pc.set(l, (pc.get(l) ?? 0) + 1); }
   const ytd: WeeklyReportData["ytd"] = {
-    start: ytdStart, end: ytdEnd, total: yCompleted + yActive + yOther, completed: yCompleted, active: yActive, operationalActive: yOpActive,
+    start: ytdStart, end: ytdEnd, total: yCompleted + yActive + yOpActive + yOther, completed: yCompleted, active: yActive, operationalActive: yOpActive, notStartedPaused: yOther,
     movement: ytdMovement,
     mix: { total: round1(mixTotal), projects: ytdByProject.size, planTypes, bars: mixBars },
     activeHealth: {
@@ -619,26 +628,20 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     glance: [
       "DELIVERY · LAST WEEK",
       `Projects completed (${completedProjects.length}):`, bl(completedNotes),
-      `Tasks done (${doneTasks.length}) by project:`, bl(cap(tasksByProject, 10)),
-      `Finished after their due date (${lateTasks.length} of ${doneTasks.length}):`, bl(cap(lateNotes, 8)),
-      "",
-      "UTILIZATION · LAST WEEK",
-      `${h1(logged)} logged of ${h1(expected)} expected (finalized time only; expected = each person's capacity minus leave/holidays).`,
-      `People with 2h+ not logged:`, bl(cap(gaps, 10), "Everyone logged within 2h of expected."),
-      `Non-project time (${h1(nonProject)}) by activity:`, bl(npNotes),
-      `Tasks that ran 25%+ over estimate:`, bl(cap(overEst, 6)),
       "",
       "PIPELINE",
-      `Starting this week (${startingP.length}):`, bl(cap(startingNotes, 10)),
+      `Starting this week — Start Project approved (${startingP.length}):`, bl(cap(startingNotes, 10)),
+      `Planned for this week, awaiting Start Project approval (${awaitingStartP.length}) — not counted as starting:`, bl(awaitingStartP.map((p) => `${projLabel(p)} — planned ${md(p.start_date)}`)),
       ...(pausedStartingP.length ? [`Planned to start this week but PAUSED (not counted above): ${pausedStartingP.map((p) => p.name).join(", ")}.`] : []),
       `New intake last week (${intakeP.length}):`, bl(cap(intakeNotes, 10)),
       `Paused last week (${pausedWeekP.length}):`, bl(pausedNotes(pausedWeekP)),
       `All paused projects (${pausedNowP.length}):`, bl(pausedNotes(pausedNowP)),
     ].join("\n"),
     portfolio: [
-      `Year to date = ${md(ytdStart)} – ${md(ytdEnd)} (through the report week). Total = projects completed in that window + open projects (In Progress, Not started, Paused) that had started by ${md(ytdEnd)}; Cancelled excluded.`,
-      `Total YTD ${yCompleted + yActive + yOther}: completed ${yCompleted}, active ${yActive}, not started/paused ${yOther}.`,
-      `Active (${yActive}) includes ${yOpActive} Training Delivery project${yOpActive === 1 ? "" : "s"}${opActive.length ? ` (${opActive.map((p) => p.name).join(", ")})` : ""} — ongoing, session-based work that stays open all quarter; see the Training delivery slide for sessions and hours.`,
+      `Total year to date = projects completed ${md(ytdStart)} – ${md(ytdEnd)} + projects open today (Cancelled excluded).`,
+      `Total ${yCompleted + yActive + yOpActive + yOther} = ${yCompleted} completed + ${yActive} active projects + ${yOpActive} Training Delivery + ${yOther} not started or paused.`,
+      `Active projects (${yActive}) = In Progress project work as of ${md(todayIso)} — the same ${yActive} on the Health donut:`, bl(activeP.map((p) => `${p.name} (owner ${who(p.owner_id)})`)),
+      `Training Delivery (${yOpActive}) = ongoing, session-based training kept open while sessions run; see the Training delivery slide:`, bl(opActive.map((p) => p.name)),
       `Portfolio movement by month (started = Start Project approved and start date in the month; completed = completion date in the month):`,
       bl(ytdMovement.map((m) => `${m.label}: ${m.started} started, ${m.completed} completed`)),
       `Paused now (${pausedNowP.length}):`, bl(pausedNowP.map((p) => `${p.name} — ${pauseWhy(p)}`)),
@@ -666,12 +669,17 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     pipeline: [
       `Completed last week (${completedProjects.length}):`, bl(completedNotes),
       `New intake last week (${intakeP.length}):`, bl(intakeNotes),
-      `Starting this week (${startingP.length}):`, bl(startingNotes),
+      `Starting this week — Start Project approved (${startingP.length}):`, bl(startingNotes),
+      `Awaiting Start Project approval, planned for this week (${awaitingStartP.length}):`, bl(awaitingStartP.map((p) => `${projLabel(p)} — planned ${md(p.start_date)}`)),
       ...(pausedStartingP.length ? [`Planned to start this week but PAUSED (shown under Paused): ${pausedStartingP.map((p) => p.name).join(", ")}.`] : []),
       `Paused (${pausedNowP.length}):`, bl(pausedNotes(pausedNowP)),
     ].join("\n"),
     util: [
       "Last week = actual (finalized logged ÷ expected hours). This and next week = planned (task estimates spread over working days ÷ capacity, leave and holidays removed).",
+      `Last week: ${h1(logged)} logged of ${h1(expected)} expected.`,
+      `People with 2h+ not logged last week:`, bl(cap(gaps, 10), "Everyone logged within 2h of expected."),
+      `Non-project time last week (${h1(nonProject)}) by activity:`, bl(npNotes),
+      `Tasks completed last week that ran 25%+ over estimate:`, bl(cap(overEst, 6)),
       `Over 100% this week:`, bl(overNotes),
       `Under 50% next week (room to take work):`, bl(roomNotes),
       ...roles.map((r) => `- ${r.label}: last week ${Math.round(r.last * 100)}%, this week ${Math.round(r.thisW * 100)}%, next week ${Math.round(r.nextW * 100)}%`),
@@ -689,9 +697,11 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   return {
     generatedOn: todayIso, week, thisWeek, nextWeek, training, notes, ytd,
     glance: {
-      completedProjects: completedProjects.map((p) => p.name), tasksDone: doneTasks.length, tasksOnTime,
+      completedProjects: completedProjects.map((p) => p.name),
+      completedDetail: completedProjects.map((p) => ({ name: p.name, date: completionDateOf(p), onTime: p.end_date ? completionDateOf(p) <= d10(p.end_date) : null })),
+      tasksDone: doneTasks.length, tasksOnTime,
       logged, expected, nonProject, doneLogged, doneEst, utilPct: expected > 0 ? logged / expected : 0,
-      starting: startingP.length, intake: intakeP.length, pausedInWeek, pausedNow: pausedNowP.length,
+      starting: startingP.length, awaitingStart: awaitingStartP.length, intake: intakeP.length, pausedInWeek, pausedNow: pausedNowP.length,
       pausedNoResume: pausedNowP.filter((p) => !p.pause_expected_resume).length,
     },
     portfolio: { total: pfCompleted + pfActive + pfNotStarted + pfPaused, completed: pfCompleted, active: pfActive, operationalActive: activeAll.length - activeP.length, notStarted: pfNotStarted, paused: pfPaused, overdue: overdueP.length, movement },

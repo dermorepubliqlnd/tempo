@@ -95,13 +95,15 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
   // ================================================================ 2 WEEK AT A GLANCE
   {
     const s = content("Week at a glance", t.titles.glance, "glance");
-    t.cards.slice(0, 3).forEach((c, i) => {
-      const x = 0.33 + i * 4.25;
-      box(s, x, 1.55, 4.05, 3.35);
+    const cards = t.cards.slice(0, 3);
+    const gap = 0.2, cw = (12.67 - gap * (cards.length - 1)) / Math.max(1, cards.length);
+    cards.forEach((c, i) => {
+      const x = 0.33 + i * (cw + gap);
+      box(s, x, 1.55, cw, 3.35);
       box(s, x, 1.55, 0.09, 3.35, c.color, null, false);
-      txt(s, x + 0.3, 1.75, 3.6, 0.35, c.tag, { fontFace: FB, fontSize: 11, color: c.color });
-      txt(s, x + 0.3, 2.1, 3.6, 0.5, c.head, { fontFace: FB, fontSize: 20, fit: "shrink" });
-      txt(s, x + 0.3, 2.75, 3.6, 2.05, bullets(c.bullets.filter(Boolean), 12));
+      txt(s, x + 0.3, 1.75, cw - 0.45, 0.35, c.tag, { fontFace: FB, fontSize: 11, color: c.color });
+      txt(s, x + 0.3, 2.1, cw - 0.45, 0.5, c.head, { fontFace: FB, fontSize: 20, fit: "shrink" });
+      txt(s, x + 0.3, 2.75, cw - 0.45, 2.05, bullets(c.bullets.filter(Boolean), 12));
     });
     box(s, 0.33, 5.1, 12.67, 1.45, B.panel, null);
     txt(s, 0.6, 5.22, 4, 0.35, "ASKS FOR BRAD", { fontFace: FB, fontSize: 11, color: B.mahogany });
@@ -121,29 +123,26 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     const y = d.ytd;
     const s = content("Portfolio overview", t.titles.portfolio, "portfolio");
     const range = `${fmtMD(y.start)} – ${fmtMD(y.end)}`;
-    // KPI 1: total YTD
-    box(s, 0.33, 1.55, 3.6, 2.45);
-    box(s, 0.58, 1.83, 0.5, 0.07, B.mahogany, null, false);
-    txt(s, 0.53, 2.0, 3.2, 0.35, "Total projects · year to date", { fontSize: 12, color: B.mahogany });
-    txt(s, 0.53, 2.38, 3.2, 0.9, String(y.total), { fontFace: FB, fontSize: 48 });
-    txt(s, 0.53, 3.35, 3.2, 0.5, `Completed + open, ${range}`, { fontSize: 10, color: B.taupe });
-    // KPI 2: active (+ soft note on Training Delivery)
-    box(s, 0.33, 4.17, 3.6, 2.45);
-    box(s, 0.58, 4.45, 0.5, 0.07, B.hydrate, null, false);
-    txt(s, 0.53, 4.62, 3.2, 0.35, "Active now", { fontSize: 12, color: B.mahogany });
-    txt(s, 0.53, 5.0, 3.2, 0.9, String(y.active), { fontFace: FB, fontSize: 48 });
-    txt(s, 0.53, 5.95, 3.25, 0.6, y.operationalActive
-      ? `${y.total ? pct(y.active / y.total) : "0%"} of total · includes ${y.operationalActive} ongoing Training Delivery project${y.operationalActive === 1 ? "" : "s"} (session-based)`
-      : `${y.total ? pct(y.active / y.total) : "0%"} of total`, { fontSize: 10, color: B.taupe });
+    // Sandra 2026-10-05: clean split -- Active projects vs Training Delivery.
+    const kpi = (yy: number, col: string, label: string, val: number, sub: string) => {
+      box(s, 0.33, yy, 3.6, 1.6);
+      box(s, 0.58, yy + 0.22, 0.5, 0.07, col, null, false);
+      txt(s, 0.53, yy + 0.36, 2.0, 0.3, label, { fontSize: 11.5, color: B.mahogany });
+      txt(s, 2.45, yy + 0.2, 1.3, 0.7, String(val), { fontFace: FB, fontSize: 34, align: "right" });
+      txt(s, 0.53, yy + 0.95, 3.25, 0.55, sub, { fontSize: 9.5, color: B.taupe });
+    };
+    kpi(1.55, B.mahogany, "Total projects · YTD", y.total, `${y.completed} completed (${range}) + ${y.active + y.operationalActive + y.notStartedPaused} open today`);
+    kpi(3.28, B.hydrate, "Active projects", y.active, `In Progress project work as of ${fmtMD(d.generatedOn)} — same ${y.active} as the Health chart`);
+    kpi(5.02, B.clarify, "Training Delivery", y.operationalActive, "Ongoing, session-based training kept open while sessions run — see Training delivery slide");
     // Movement by month
     card(s, 4.15, 1.55, 8.85, 5.07, "Portfolio movement", `Projects started vs. completed per month · ${range}`);
     const labels = y.movement.map((m) => m.label);
     const maxV = Math.max(4, ...y.movement.map((m) => Math.max(m.started, m.completed)));
-    addChart(s, pptx.ChartType.bar, [
+    addChart(s, pptx.ChartType.line, [
       { name: "Started", labels, values: y.movement.map((m) => m.started) },
       { name: "Completed", labels, values: y.movement.map((m) => m.completed) },
-    ], { x: 4.35, y: 2.4, w: 8.45, h: 4.1, barDir: "col", barGrouping: "clustered", barGapWidthPct: 60, chartColors: [B.hydrate, B.calm],
-      showValue: true, dataLabelPosition: "outEnd", dataLabelFontSize: 9, dataLabelColor: B.mahogany, valAxisMaxVal: maxV + 2, valAxisMinVal: 0,
+    ], { x: 4.35, y: 2.4, w: 8.45, h: 4.1, chartColors: [B.hydrate, B.calm], lineSize: 2, lineDataSymbol: "circle", lineDataSymbolSize: 7,
+      showValue: true, dataLabelPosition: "t", dataLabelFontSize: 9, dataLabelColor: B.mahogany, valAxisMaxVal: maxV + 2, valAxisMinVal: 0,
       valGridLine: { color: B.grid, size: 0.5 }, catAxisLabelFontSize: 10, valAxisLabelFontSize: 9, showLegend: true, legendPos: "b", legendFontSize: 9.5 });
   }
 
@@ -255,7 +254,8 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     };
     quad(0.33, 1.5, B.calm, "Completed last week", pl.completed, ["Project", "Type", "Planning", "Completed"], [3.05, 0.9, 0.95, 0.95], (p) => [cut(p.name, 38), p.type, p.planning, fmtMD(p.date)]);
     quad(6.75, 1.5, B.hydrate, "New intake last week", pl.intake, ["Project", "Type", "Planning", "Status"], [2.95, 0.8, 0.9, 1.2], (p) => [cut(p.name, 36), p.type, p.planning, p.extra ?? ""]);
-    quad(0.33, 4.18, B.rewind, "Starting this week", pl.starting, ["Project", "Type", "Planning", "Start"], [3.05, 0.9, 0.95, 0.95], (p) => [cut(p.name, 38), p.type, p.planning, fmtMD(p.date)]);
+    quad(0.33, 4.18, B.rewind, "Starting this week (approved)", pl.starting, ["Project", "Type", "Planning", "Start"], [3.05, 0.9, 0.95, 0.95], (p) => [cut(p.name, 38), p.type, p.planning, fmtMD(p.date)]);
+    if (pl.awaitingStart.length) txt(s, 0.33 + 3.3, 4.18 + (pl.starting.length > 5 ? 0.42 : 0.17), 2.75, 0.3, `+${pl.awaitingStart.length} awaiting Start Project approval`, { fontSize: 9, color: B.hydrate, align: "right" });
     quad(6.75, 4.18, B.clarify, "Paused", pl.paused, ["Project", "Type", "Days paused", "Expected resume"], [2.6, 0.85, 1.05, 1.35], (p) => [cut(p.name, 32), p.type, p.extra ?? "", { text: p.date, color: p.warn ? B.renew : B.onyx }]);
   }
 

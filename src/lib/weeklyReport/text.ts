@@ -44,22 +44,17 @@ export function weekLabel(start: string, end: string): string {
 
 export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña"): DeckText {
   const g = d.glance;
-  const onTimeRate = g.tasksDone ? g.tasksOnTime / g.tasksDone : 1;
-  const unlogged = Math.max(0, g.expected - g.logged);
-  const part1 = g.completedProjects.length || g.tasksDone ? (onTimeRate >= 0.9 ? "Strong delivery last week" : "Delivery moved last week") : "No completions last week";
-  const part2 = g.expected > 0 && unlogged / g.expected > 0.15 ? "time logging needs attention" : g.utilPct > 1 ? "team ran over capacity" : "capacity on track";
-  const deliveryBul: string[] = [];
-  if (g.completedProjects.length) deliveryBul.push(`Closed: ${listNames(g.completedProjects.slice(0, 3))}${g.completedProjects.length > 3 ? ` +${g.completedProjects.length - 3} more` : ""}.`);
-  else deliveryBul.push("No projects were closed out last week.");
-  if (g.tasksDone) deliveryBul.push(`${g.tasksOnTime} of ${g.tasksDone} tasks (${pct(onTimeRate)}) finished on or before their due date.`);
-  if (d.training.delivered) deliveryBul.push(`${plural(d.training.delivered, "training session")} delivered (${h0(d.training.loggedHours)} logged).`);
-  const utilBul = [`${h0(g.logged)} logged of ${h0(g.expected)} expected${unlogged >= 1 ? ` — ${h0(unlogged)} not logged` : ""}.`];
-  if (g.logged > 0) utilBul.push(`${pct(g.nonProject / g.logged)} of logged time (${h0(g.nonProject)}) was non-project work.`);
-  if (g.doneEst > 0) {
-    const r = g.doneLogged / g.doneEst;
-    utilBul.push(`Completed tasks used ${h0(g.doneLogged)} vs ${h0(g.doneEst)} estimated — ${r < 0.85 ? "estimates running high" : r > 1.15 ? "work ran over estimate" : "close to estimate"}.`);
-  }
+  // Sandra 2026-10-05: Delivery = projects only; no Utilization card.
+  const nDone = g.completedDetail.length;
+  const nOnTime = g.completedDetail.filter((c) => c.onTime !== false).length;
+  const part1 = nDone ? `${plural(nDone, "project")} delivered last week${nDone > 1 ? ` (${nOnTime} on time)` : ""}` : "No projects completed last week";
+  const part2 = `${plural(g.starting, "project")} start${g.starting === 1 ? "s" : ""} this week`;
+  const deliveryBul: string[] = g.completedDetail.slice(0, 5).map((c) => `${c.name}${c.onTime === false ? " (late)" : c.onTime ? " (on time)" : ""}`);
+  if (g.completedDetail.length > 5) deliveryBul.push(`+${g.completedDetail.length - 5} more (see notes)`);
+  if (!deliveryBul.length) deliveryBul.push("No projects were completed last week.");
+  if (d.training.delivered) deliveryBul.push(`Plus ${plural(d.training.delivered, "training session")} delivered.`);
   const pipeBul = [`${plural(g.intake, "new project")} ${g.intake === 1 ? "was" : "were"} added last week.`];
+  if (g.awaitingStart) pipeBul.push(`${plural(g.awaitingStart, "more project")} planned for this week ${g.awaitingStart === 1 ? "is" : "are"} awaiting Start Project approval.`);
   pipeBul.push(g.pausedInWeek ? `${plural(g.pausedInWeek, "project")} paused last week; ${g.pausedNow} paused in total.` : `No projects paused last week${g.pausedNow ? `; ${g.pausedNow} remain paused${g.pausedNoResume ? `${g.pausedNoResume === g.pausedNow ? "" : ` (${g.pausedNoResume})`} with no resume date` : ""}` : ""}.`);
 
   const asks: string[] = [];
@@ -77,7 +72,7 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
     coverSubtitle: `Week of ${weekLabel(d.week.start, d.week.end)}  ·  Prepared for ${preparedFor}`,
     titles: {
       glance: `${part1}; ${part2}`,
-      portfolio: `${d.ytd.total} projects year to date; ${d.ytd.active} active now`,
+      portfolio: `${d.ytd.total} projects this year; ${d.ytd.active} active plus ${d.ytd.operationalActive} in Training Delivery`,
       health: h.overdue.length ? `${h.overdue.length} of ${h.activeCount} active projects are overdue${h.offTrack ? `; ${h.offTrack} more off track` : ""}` : `No overdue projects among ${h.activeCount} active`,
       drivers: d.drivers.overdueCount && d.drivers.grewCount === Math.min(5, d.drivers.overdueCount) ? "Every overdue project grew after it started" : `${d.drivers.grewCount} of ${Math.min(5, d.drivers.overdueCount)} overdue projects grew after they started`,
       mix: d.ytd.mix.bars[0] && d.ytd.mix.total ? `${d.ytd.mix.bars[0].label} takes ${pct(d.ytd.mix.bars[0].total / d.ytd.mix.total)} of scoped hours this year` : "Where this year’s effort went",
@@ -91,8 +86,7 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
       appendix: "Overall portfolio mix — all projects to date",
     },
     cards: [
-      { tag: "DELIVERY · LAST WEEK", head: `${plural(g.completedProjects.length, "project")} · ${plural(g.tasksDone, "task")}`, bullets: deliveryBul, color: B.calm },
-      { tag: "UTILIZATION · LAST WEEK", head: `${pct(g.utilPct)} of expected hours`, bullets: utilBul, color: utilColor(g.utilPct) },
+      { tag: "DELIVERY · LAST WEEK", head: `${plural(nDone, "project")} completed`, bullets: deliveryBul, color: B.calm },
       { tag: "PIPELINE", head: `${plural(g.starting, "project")} starting`, bullets: pipeBul, color: B.hydrate },
     ],
     asks,
