@@ -49,6 +49,13 @@ export interface WeeklyReportData {
     overloaded: { name: string; pct: number }[]; room: { name: string; pct: number }[];
     thisPlanned: number; thisCap: number; nextPlanned: number; nextCap: number };
   overall: { rows: { label: string; planned: number; adHoc: number }[]; total: number; untyped: number };
+  // phase151: sessions in operational projects (e.g. quarterly Training Delivery).
+  training: {
+    projects: number;
+    delivered: number; validated: number; cancelled: number; loggedHours: number; scopedHours: number;
+    thisWeek: number; pastNotDone: number; qtdDelivered: number; qtdLabel: string;
+    trainers: { name: string; delivered: number; validated: number; hours: number; thisWeek: number; pastNotDone: number }[];
+  };
 }
 
 // ------------------------------------------------------------------ helpers
@@ -201,6 +208,8 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   const pfCompleted = completedProjects.length;
   let pfActive = 0, pfNotStarted = 0, pfPaused = 0;
   for (const p of live) {
+    // phase149: operational projects have their own Training Delivery slide.
+    if ((p as { is_operational?: boolean | null }).is_operational) continue;
     const s = statusOf(p);
     if (s === "Completed") continue;
     if (p.start_date && d10(p.start_date) > week.end) continue;
@@ -383,8 +392,61 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     untyped: live.filter((p) => typeOf(p) === "No type").length,
   };
 
+  // ------------------------------------------------------------ training delivery (phase151)
+  // Session = leaf task with Output Type "Session" in an operational project.
+  // Delivered = Done with Actual Completion Date in the report week; hours =
+  // finalized time logged on session tasks during the report week.
+  const opIds = new Set(projects.filter((p) => (p as { is_operational?: boolean | null }).is_operational).map((p) => p.id));
+  const { data: otData } = await supabase.from("output_types").select("id,name");
+  const sessionTypeIds = new Set(((otData as Lookup[]) ?? []).filter((o) => o.name.trim().toLowerCase() === "session").map((o) => o.id));
+  const sessions = leaf.filter((t) => opIds.has(t.project_id) && !!t.output_type_id && sessionTypeIds.has(t.output_type_id));
+  const sessionIds = new Set(sessions.map((t) => t.id));
+  const tDone = sessions.filter((t) => t.status === "Done" && inWeek(d10(t.actual_completion_date ?? t.current_due_date), week));
+  const tCancelled = sessions.filter((t) => t.status === "Cancelled" && inWeek(d10(t.current_due_date), week));
+  const tThis = sessions.filter((t) => t.status !== "Done" && t.status !== "Cancelled" && inWeek(d10(t.current_due_date), thisWeek));
+  const tPast = sessions.filter((t) => t.status !== "Done" && t.status !== "Cancelled" && !!t.current_due_date && d10(t.current_due_date) < todayIso);
+  const qStartMonth = Math.floor(parseLocalDate(week.end).getMonth() / 3) * 3;
+  const qYear = parseLocalDate(week.end).getFullYear();
+  const qStart = toISO(new Date(qYear, qStartMonth, 1));
+  const tQtd = sessions.filter((t) => t.status === "Done" && d10(t.actual_completion_date ?? t.current_due_date) >= qStart && d10(t.actual_completion_date ?? t.current_due_date) <= week.end);
+  const sessionHoursBy = new Map<string, number>();
+  let sessionHours = 0;
+  for (const e of entries) {
+    if (!e.task_id || !sessionIds.has(e.task_id)) continue;
+    const d = localDay(e.started_at);
+    if (d < week.start || d > week.end) continue;
+    const h = (e.duration_minutes ?? 0) / 60;
+    sessionHours += h;
+    sessionHoursBy.set(e.person_id, (sessionHoursBy.get(e.person_id) ?? 0) + h);
+  }
+  const trainerIds = new Set<string>([...tDone, ...tThis, ...tPast].map((t) => t.assignee_id ?? "").filter(Boolean));
+  sessionHoursBy.forEach((_, k) => trainerIds.add(k));
+  const trainersRows = Array.from(trainerIds)
+    .map((id) => ({
+      name: personById.get(id)?.name ?? "Unknown",
+      delivered: tDone.filter((t) => t.assignee_id === id).length,
+      validated: tDone.filter((t) => t.assignee_id === id && !!t.validated_completion_date).length,
+      hours: round1(sessionHoursBy.get(id) ?? 0),
+      thisWeek: tThis.filter((t) => t.assignee_id === id).length,
+      pastNotDone: tPast.filter((t) => t.assignee_id === id).length,
+    }))
+    .sort((a, b) => b.delivered - a.delivered || b.hours - a.hours || a.name.localeCompare(b.name));
+  const training: WeeklyReportData["training"] = {
+    projects: opIds.size,
+    delivered: tDone.length,
+    validated: tDone.filter((t) => !!t.validated_completion_date).length,
+    cancelled: tCancelled.length,
+    loggedHours: round1(sessionHours),
+    scopedHours: round1(tDone.reduce((a, t) => a + Number(t.estimated_hours ?? 0), 0)),
+    thisWeek: tThis.length,
+    pastNotDone: tPast.length,
+    qtdDelivered: tQtd.length,
+    qtdLabel: `Q${qStartMonth / 3 + 1} ${qYear}`,
+    trainers: trainersRows,
+  };
+
   return {
-    generatedOn: todayIso, week, thisWeek, nextWeek,
+    generatedOn: todayIso, week, thisWeek, nextWeek, training,
     glance: {
       completedProjects: completedProjects.map((p) => p.name), tasksDone: doneTasks.length, tasksOnTime,
       logged, expected, nonProject, doneLogged, doneEst, utilPct: expected > 0 ? logged / expected : 0,

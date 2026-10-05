@@ -285,6 +285,35 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     if (lines.length) txt(s, 9.0, ty, 3.75, Math.max(0.6, 6.5 - ty), lines, { paraSpaceBefore: 3 });
   }
 
+  // ================================================================ 7b TRAINING DELIVERY (phase151)
+  if (t.include.training) {
+    const tr = d.training;
+    const s = content("Training delivery", t.titles.training);
+    const kpis: [string, string, string, string][] = [
+      ["Sessions delivered", String(tr.delivered), `${fmtMD(d.week.start)} – ${fmtMD(d.week.end)} · ${tr.validated} validated`, B.calm],
+      ["Hours logged", h0(tr.loggedHours), tr.scopedHours ? `on sessions · ${h0(tr.scopedHours)} scoped for delivered` : "on session tasks last week", B.hydrate],
+      ["Scheduled this week", String(tr.thisWeek), `${fmtMD(d.thisWeek.start)} – ${fmtMD(d.thisWeek.end)}`, B.rewind],
+      ["Past date, not Done", String(tr.pastNotDone), tr.pastNotDone ? "Needs trainer update" : "All up to date", tr.pastNotDone ? B.renew : B.taupe],
+    ];
+    kpis.forEach(([lab, val, sub, col], i) => {
+      const x = 0.33 + (i % 2) * 2.85, y = 1.55 + Math.floor(i / 2) * 2.0;
+      box(s, x, y, 2.7, 1.85);
+      box(s, x + 0.25, y + 0.25, 0.5, 0.07, col, null, false);
+      txt(s, x + 0.2, y + 0.4, 2.3, 0.32, lab, { fontSize: 11, color: B.mahogany });
+      txt(s, x + 0.2, y + 0.72, 2.3, 0.6, val, { fontFace: FB, fontSize: 30, color: i === 3 && tr.pastNotDone ? B.renew : B.onyx });
+      txt(s, x + 0.2, y + 1.35, 2.35, 0.42, sub, { fontSize: 9, color: B.taupe });
+    });
+    box(s, 0.33, 5.62, 5.55, 1.0, B.panel, null);
+    txt(s, 0.55, 5.7, 5.15, 0.85, rich([[`${tr.qtdLabel} to date: `, true], [`${plural(tr.qtdDelivered, "session")} delivered. `, false], ["Sessions are tasks with Output Type “Session” in Training Delivery projects; hours count toward utilization.", false, 9.5, B.taupe]], 11));
+    card(s, 6.1, 1.55, 6.9, 5.07, "By trainer", "Last week delivered and hours · this week scheduled · past date still open");
+    if (tr.trainers.length) {
+      const rows: Cell[][] = [["Trainer", "Delivered", "Validated", "Hours", "This wk", "Past date"],
+        ...tr.trainers.slice(0, 10).map((r) => [cut(r.name, 30), String(r.delivered), String(r.validated), h0(r.hours), String(r.thisWeek), { text: String(r.pastNotDone), color: r.pastNotDone ? B.renew : B.onyx }])];
+      table(s, 6.3, 2.4, [2.45, 0.8, 0.8, 0.7, 0.75, 0.8], rows, 10, 0.33);
+      if (tr.trainers.length > 10) txt(s, 6.3, 2.4 + 0.33 * 11 + 0.02, 6.4, 0.28, `+${tr.trainers.length - 10} more in Tempo`, { fontSize: 9, color: B.taupe });
+    } else txt(s, 6.3, 2.5, 6.4, 0.4, "No sessions delivered, logged or scheduled for this period yet.", { fontSize: 11, color: B.mahogany });
+  }
+
   // ================================================================ 8 APPENDIX
   if (t.include.appendix) {
     const o = d.overall;

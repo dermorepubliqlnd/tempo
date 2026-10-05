@@ -11,7 +11,7 @@ import { loadWeeklyReport, defaultReportMonday, weekOf, type WeeklyReportData } 
 import { defaultDeckText, weekLabel, type DeckText, type SlideKey } from "../lib/weeklyReport/text";
 import { toISO, addDays, parseLocalDate } from "../lib/workingDays";
 
-const SLIDES: { key: SlideKey; eyebrow: string; optional?: "drivers" | "appendix" }[] = [
+const SLIDES: { key: SlideKey; eyebrow: string; optional?: "drivers" | "training" | "appendix" }[] = [
   { key: "glance", eyebrow: "Week at a glance" },
   { key: "portfolio", eyebrow: "Portfolio overview" },
   { key: "health", eyebrow: "Active project health" },
@@ -19,6 +19,7 @@ const SLIDES: { key: SlideKey; eyebrow: string; optional?: "drivers" | "appendix
   { key: "mix", eyebrow: "Portfolio mix" },
   { key: "pipeline", eyebrow: "Project pipeline" },
   { key: "util", eyebrow: "Team utilization" },
+  { key: "training", eyebrow: "Training delivery", optional: "training" },
   { key: "appendix", eyebrow: "Appendix", optional: "appendix" },
 ];
 
@@ -160,7 +161,7 @@ export default function Reports() {
                 <input className="rp-input" value={text.titles[s.key]} maxLength={70} onChange={(e) => set((t) => ({ ...t, titles: { ...t.titles, [s.key]: e.target.value } }))} />
                 {s.optional ? (
                   <label className="rp-check"><input type="checkbox" checked={text.include[s.optional]} disabled={s.optional === "drivers" && !data.drivers.rows.length}
-                    onChange={(e) => set((t) => ({ ...t, include: { ...t.include, [s.optional as "drivers" | "appendix"]: e.target.checked } }))} /> Include</label>
+                    onChange={(e) => set((t) => ({ ...t, include: { ...t.include, [s.optional as "drivers" | "training" | "appendix"]: e.target.checked } }))} /> Include</label>
                 ) : <span className="rp-check rp-muted">Always</span>}
               </div>
             ))}

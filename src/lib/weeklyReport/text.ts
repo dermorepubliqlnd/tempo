@@ -12,7 +12,7 @@ export const BRAND = {
 };
 const B = BRAND;
 
-export type SlideKey = "glance" | "portfolio" | "health" | "drivers" | "mix" | "pipeline" | "util" | "appendix";
+export type SlideKey = "glance" | "portfolio" | "health" | "drivers" | "mix" | "pipeline" | "util" | "training" | "appendix";
 export interface GlanceCard { tag: string; head: string; bullets: string[]; color: string }
 export interface DeckText {
   coverTitle: string;
@@ -20,7 +20,7 @@ export interface DeckText {
   titles: Record<SlideKey, string>;
   cards: GlanceCard[];
   asks: string[]; // "Label: text" -- label part rendered bold
-  include: { drivers: boolean; appendix: boolean };
+  include: { drivers: boolean; training: boolean; appendix: boolean };
 }
 
 // ------------------------------------------------------------------ text defaults
@@ -50,6 +50,7 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
   if (g.completedProjects.length) deliveryBul.push(`Closed: ${listNames(g.completedProjects.slice(0, 3))}${g.completedProjects.length > 3 ? ` +${g.completedProjects.length - 3} more` : ""}.`);
   else deliveryBul.push("No projects were closed out last week.");
   if (g.tasksDone) deliveryBul.push(`${g.tasksOnTime} of ${g.tasksDone} tasks (${pct(onTimeRate)}) finished on or before their due date.`);
+  if (d.training.delivered) deliveryBul.push(`${plural(d.training.delivered, "training session")} delivered (${h0(d.training.loggedHours)} logged).`);
   const utilBul = [`${h0(g.logged)} logged of ${h0(g.expected)} expected${unlogged >= 1 ? ` — ${h0(unlogged)} not logged` : ""}.`];
   if (g.logged > 0) utilBul.push(`${pct(g.nonProject / g.logged)} of logged time (${h0(g.nonProject)}) was non-project work.`);
   if (g.doneEst > 0) {
@@ -81,6 +82,11 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
       mix: mixTrainerShare >= 0.3 && mixTrainerShare <= 0.37 ? "A third of active work is Trainer-led BAU" : `Trainer-led work is ${pct(mixTrainerShare)} of active projects`,
       pipeline: `${plural(d.glance.intake, "project")} came in last week; ${d.glance.starting} start this week`,
       util: top ? `${top.name} ${top.people > 1 ? "carry" : "carries"} this week’s overload` : `Team planned at ${pct(d.util.roles[0]?.thisW ?? 0)} this week`,
+      training: d.training.delivered
+        ? `${plural(d.training.delivered, "session")} delivered last week; ${d.training.thisWeek} scheduled this week`
+        : d.training.thisWeek
+        ? `${plural(d.training.thisWeek, "session")} scheduled this week`
+        : "No training sessions logged last week",
       appendix: "Overall portfolio mix — all projects to date",
     },
     cards: [
@@ -89,7 +95,7 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
       { tag: "PIPELINE", head: `${plural(g.starting, "project")} starting`, bullets: pipeBul, color: B.hydrate },
     ],
     asks,
-    include: { drivers: d.drivers.rows.length > 0, appendix: true },
+    include: { drivers: d.drivers.rows.length > 0, training: d.training.projects > 0, appendix: true },
   };
 }
 
