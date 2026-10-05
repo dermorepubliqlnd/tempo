@@ -49,6 +49,14 @@ export interface WeeklyReportData {
     overloaded: { name: string; pct: number }[]; room: { name: string; pct: number }[];
     thisPlanned: number; thisCap: number; nextPlanned: number; nextCap: number };
   overall: { rows: { label: string; planned: number; adHoc: number }[]; total: number; untyped: number };
+  // Sandra 2026-10-05: Portfolio overview = YTD totals + monthly movement;
+  // Work mix = Scoped Hours YTD by Project Type x Planning Type + active Health/Phase.
+  ytd: {
+    start: string; end: string; total: number; completed: number; active: number; operationalActive: number;
+    movement: { label: string; started: number; completed: number }[];
+    mix: { total: number; projects: number; planTypes: { label: string; value: number }[]; bars: { label: string; total: number; parts: Record<string, number> }[] };
+    activeHealth: { total: number; operationalExcluded: number; health: { label: string; count: number }[]; phase: { label: string; count: number }[] };
+  };
   // Speaker notes per slide (plain text; "- " lines are bullets). Editable on the Reports page.
   notes: Record<"cover" | "glance" | "portfolio" | "health" | "drivers" | "mix" | "pipeline" | "util" | "training" | "appendix", string>;
   // phase151: sessions in operational projects (e.g. quarterly Training Delivery).
@@ -455,6 +463,80 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     trainers: trainersRows,
   };
 
+  // ------------------------------------------------------------ YTD portfolio + work mix (Sandra 2026-10-05)
+  // Mirrors the Executive Dashboard (Portfolio Overview YTD, Portfolio Movement
+  // by month, Work Mix & Effort Allocation, Active Projects Health), but as of
+  // the report week's Friday instead of today.
+  const isOp = (p: P) => !!(p as { is_operational?: boolean | null }).is_operational;
+  const ytdStart = `${week.end.slice(0, 4)}-01-01`;
+  const ytdEnd = week.end;
+  let yCompleted = 0, yActive = 0, yOpActive = 0, yOther = 0;
+  for (const p of live) {
+    const st = statusOf(p);
+    if (st === "Completed") { const cd = completionDateOf(p); if (cd && cd >= ytdStart && cd <= ytdEnd) yCompleted++; continue; }
+    if (p.start_date && d10(p.start_date) > ytdEnd) continue;
+    if (st === "In Progress") { yActive++; if (isOp(p)) yOpActive++; } else yOther++;
+  }
+  const months: { label: string; from: string; to: string }[] = [];
+  for (let m = new Date(Number(ytdStart.slice(0, 4)), 0, 1); toISO(m) <= ytdEnd; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
+    const last = toISO(new Date(m.getFullYear(), m.getMonth() + 1, 0));
+    months.push({ label: m.toLocaleDateString("en-US", { month: "short" }), from: toISO(m), to: last > ytdEnd ? ytdEnd : last });
+  }
+  const ytdMovementAll = months.map((b) => ({
+    label: b.label,
+    started: live.filter((p) => p.wbs_status !== "draft" && !!p.start_date && d10(p.start_date) >= b.from && d10(p.start_date) <= b.to).length,
+    completed: live.filter((p) => statusOf(p) === "Completed" && completionDateOf(p) >= b.from && completionDateOf(p) <= b.to).length,
+  }));
+  // Skip the empty months before Tempo has any data (tracking started mid-year).
+  const firstActive = ytdMovementAll.findIndex((m) => m.started || m.completed);
+  const ytdMovement = firstActive > 0 ? ytdMovementAll.slice(Math.max(0, firstActive - 1)) : ytdMovementAll;
+  // Scoped Hours spread over each task's working days, counting only days in YTD.
+  const ytdByProject = new Map<string, number>();
+  for (const t of leaf) {
+    if (!t.assignee_id || !personById.has(t.assignee_id) || !t.estimated_hours) continue;
+    const proj = projects.find((x) => x.id === t.project_id);
+    if (!proj || statusOf(proj) === "Cancelled") continue;
+    const days = engine.taskDays(t.assignee_id, t as unknown as UtilTaskRow);
+    if (!days.size) continue;
+    let inWin = 0;
+    days.forEach((d) => { if (d >= ytdStart && d <= ytdEnd) inWin++; });
+    if (!inWin) continue;
+    ytdByProject.set(t.project_id, (ytdByProject.get(t.project_id) ?? 0) + (Number(t.estimated_hours) * inWin) / days.size);
+  }
+  const planTot = new Map<string, number>();
+  const typeTot = new Map<string, number>();
+  const cell = new Map<string, Map<string, number>>();
+  let mixTotal = 0;
+  ytdByProject.forEach((h, pid) => {
+    const p = projects.find((x) => x.id === pid)!;
+    const pl = p.planning_type_id ? planName.get(p.planning_type_id) ?? "Not set" : "Not set";
+    const ty = typeOf(p) === "No type" ? "Not set" : typeOf(p);
+    planTot.set(pl, (planTot.get(pl) ?? 0) + h);
+    typeTot.set(ty, (typeTot.get(ty) ?? 0) + h);
+    if (!cell.has(ty)) cell.set(ty, new Map());
+    cell.get(ty)!.set(pl, (cell.get(ty)!.get(pl) ?? 0) + h);
+    mixTotal += h;
+  });
+  const planTypes = Array.from(planTot.entries()).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value: round1(value) }));
+  const mixBars = Array.from(typeTot.entries()).sort((a, b) => b[1] - a[1]).map(([label, total]) => ({
+    label, total: round1(total), parts: Object.fromEntries(planTypes.map((pt) => [pt.label, round1(cell.get(label)?.get(pt.label) ?? 0)])),
+  }));
+  const HORDER = ["On track", "Done on time · close pending", "Done late · close pending", "At risk", "Off track", "Overdue", "Schedule review", "Not started", "Health unavailable"];
+  const hc = new Map<string, number>();
+  for (const p of activeP) { const l = healthBy.get(p.id) ?? "Health unavailable"; hc.set(l, (hc.get(l) ?? 0) + 1); }
+  const pc = new Map<string, number>();
+  for (const p of activeP) { const l = p.phase || "Not set"; pc.set(l, (pc.get(l) ?? 0) + 1); }
+  const ytd: WeeklyReportData["ytd"] = {
+    start: ytdStart, end: ytdEnd, total: yCompleted + yActive + yOther, completed: yCompleted, active: yActive, operationalActive: yOpActive,
+    movement: ytdMovement,
+    mix: { total: round1(mixTotal), projects: ytdByProject.size, planTypes, bars: mixBars },
+    activeHealth: {
+      total: activeP.length, operationalExcluded: activeAll.length - activeP.length,
+      health: Array.from(hc.entries()).sort((a, b) => (HORDER.indexOf(a[0]) + 99 * +(HORDER.indexOf(a[0]) < 0)) - (HORDER.indexOf(b[0]) + 99 * +(HORDER.indexOf(b[0]) < 0))).map(([label, count]) => ({ label, count })),
+      phase: Array.from(pc.entries()).sort((a, b) => b[1] - a[1]).map(([label, count]) => ({ label, count })),
+    },
+  };
+
   // ------------------------------------------------------------ speaker notes (Sandra 2026-10-05)
   // "Put in the notes what those are; extract the reason if you can."
   const [allPeopleRes, actTypesRes] = await Promise.all([
@@ -554,12 +636,13 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       `All paused projects (${pausedNowP.length}):`, bl(pausedNotes(pausedNowP)),
     ].join("\n"),
     portfolio: [
-      "How to read: projects relevant to the report week. Completed = closed during the week; Active / Not started / Paused = open projects that had started (or were planned to) by week end. Training Delivery projects are included here.",
-      `Completed (${completedProjects.length}):`, bl(completedProjects.map((p) => `${p.name} — ${md(completionDateOf(p))}`)),
-      `Paused (${pausedNowP.length}):`, bl(pausedNowP.map((p) => `${p.name} — ${pauseWhy(p)}`)),
-      `Overdue (${overdueP.length}):`, bl(overdueLines.map((o) => `${o.name} — ${o.daysLate} days late`)),
-      opActive.length ? `Includes ${opActive.length} active Training Delivery project${opActive.length === 1 ? "" : "s"}: ${opActive.map((p) => p.name).join(", ")}.` : "",
-    ].filter(Boolean).join("\n"),
+      `Year to date = ${md(ytdStart)} – ${md(ytdEnd)} (through the report week). Total = projects completed in that window + open projects (In Progress, Not started, Paused) that had started by ${md(ytdEnd)}; Cancelled excluded.`,
+      `Total YTD ${yCompleted + yActive + yOther}: completed ${yCompleted}, active ${yActive}, not started/paused ${yOther}.`,
+      `Active (${yActive}) includes ${yOpActive} Training Delivery project${yOpActive === 1 ? "" : "s"}${opActive.length ? ` (${opActive.map((p) => p.name).join(", ")})` : ""} — ongoing, session-based work that stays open all quarter; see the Training delivery slide for sessions and hours.`,
+      `Portfolio movement by month (started = Start Project approved and start date in the month; completed = completion date in the month):`,
+      bl(ytdMovement.map((m) => `${m.label}: ${m.started} started, ${m.completed} completed`)),
+      `Paused now (${pausedNowP.length}):`, bl(pausedNowP.map((p) => `${p.name} — ${pauseWhy(p)}`)),
+    ].join("\n"),
     health: [
       `Health of ${activeP.length} of the ${activeAll.length} In Progress projects as of ${md(todayIso)}. The other ${activeAll.length - activeP.length} are Training Delivery projects${opActive.length ? ` (${opActive.map((p) => p.name).join(", ")})` : ""} — counted as Active on the Portfolio slide, but left out here because their health is always "Ongoing".`,
       `Overdue (${overdueP.length}) — past End Date, not complete:`, bl(overdueNotes),
@@ -573,8 +656,12 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       bl(driverRows.map((r) => `${r.name} (${r.daysLate} days late) — ${r.what} Signal: ${r.signal}.`)),
     ].join("\n"),
     mix: [
-      `Active (In Progress) projects by Project Type, split by owner group and Planning Type. Development = owned by anyone who is not a Trainer. Includes Training Delivery projects.`,
-      ...mixRows.map((r) => `- ${r.label}: Development planned ${r.devPlanned}, Development ad hoc ${r.devAdHoc}, Trainer planned ${r.trPlanned}, Trainer ad hoc ${r.trAdHoc}`),
+      `Effort allocation = Scoped Hours (task estimates) spread over each task's working days, counting only days from ${md(ytdStart)} to ${md(ytdEnd)}. ${h1(mixTotal)} across ${ytdByProject.size} projects. Same method as the Executive Dashboard's Work Mix & Effort Allocation.`,
+      `By Project Type (and Planning Type split):`,
+      bl(mixBars.map((b) => `${b.label}: ${h1(b.total)} (${mixTotal ? Math.round((b.total / mixTotal) * 100) : 0}%) — ${planTypes.map((pt) => `${pt.label} ${h1(b.parts[pt.label] ?? 0)}`).join(", ")}`)),
+      `By Planning Type:`, bl(planTypes.map((pt) => `${pt.label}: ${h1(pt.value)} (${mixTotal ? Math.round((pt.value / mixTotal) * 100) : 0}%)`)),
+      `Active projects Health and Phase: ${activeP.length} In Progress projects, current state as of ${md(todayIso)}; ${activeAll.length - activeP.length} Training Delivery projects left out (health always "Ongoing").`,
+      bl(Array.from(pc.entries()).map(([k, v]) => `Phase ${k}: ${v}`)),
     ].join("\n"),
     pipeline: [
       `Completed last week (${completedProjects.length}):`, bl(completedNotes),
@@ -600,7 +687,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   };
 
   return {
-    generatedOn: todayIso, week, thisWeek, nextWeek, training, notes,
+    generatedOn: todayIso, week, thisWeek, nextWeek, training, notes, ytd,
     glance: {
       completedProjects: completedProjects.map((p) => p.name), tasksDone: doneTasks.length, tasksOnTime,
       logged, expected, nonProject, doneLogged, doneEst, utilPct: expected > 0 ? logged / expected : 0,

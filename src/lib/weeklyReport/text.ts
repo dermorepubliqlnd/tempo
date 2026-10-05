@@ -72,16 +72,15 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
   if (!asks.length) asks.push("No decisions needed this week.");
 
   const h = d.health;
-  const mixTrainerShare = d.mix.active ? d.mix.trainer / d.mix.active : 0;
   return {
     coverTitle: "L&D Weekly Report",
     coverSubtitle: `Week of ${weekLabel(d.week.start, d.week.end)}  ·  Prepared for ${preparedFor}`,
     titles: {
       glance: `${part1}; ${part2}`,
-      portfolio: `${d.portfolio.total} projects in play; ${d.portfolio.completed} completed last week`,
+      portfolio: `${d.ytd.total} projects year to date; ${d.ytd.active} active now`,
       health: h.overdue.length ? `${h.overdue.length} of ${h.activeCount} active projects are overdue${h.offTrack ? `; ${h.offTrack} more off track` : ""}` : `No overdue projects among ${h.activeCount} active`,
       drivers: d.drivers.overdueCount && d.drivers.grewCount === Math.min(5, d.drivers.overdueCount) ? "Every overdue project grew after it started" : `${d.drivers.grewCount} of ${Math.min(5, d.drivers.overdueCount)} overdue projects grew after they started`,
-      mix: mixTrainerShare >= 0.3 && mixTrainerShare <= 0.37 ? "A third of active work is Trainer-led BAU" : `Trainer-led work is ${pct(mixTrainerShare)} of active projects`,
+      mix: d.ytd.mix.bars[0] && d.ytd.mix.total ? `${d.ytd.mix.bars[0].label} takes ${pct(d.ytd.mix.bars[0].total / d.ytd.mix.total)} of scoped hours this year` : "Where this year’s effort went",
       pipeline: `${plural(d.glance.intake, "project")} came in last week; ${d.glance.starting} start this week`,
       util: top ? `${top.name} ${top.people > 1 ? "carry" : "carries"} this week’s overload` : `Team planned at ${pct(d.util.roles[0]?.thisW ?? 0)} this week`,
       training: d.training.delivered

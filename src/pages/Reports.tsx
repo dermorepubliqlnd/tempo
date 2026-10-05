@@ -16,7 +16,7 @@ const SLIDES: { key: SlideKey; eyebrow: string; optional?: "drivers" | "training
   { key: "portfolio", eyebrow: "Portfolio overview" },
   { key: "health", eyebrow: "Active project health" },
   { key: "drivers", eyebrow: "Delivery drivers", optional: "drivers" },
-  { key: "mix", eyebrow: "Portfolio mix" },
+  { key: "mix", eyebrow: "Work mix & effort allocation" },
   { key: "pipeline", eyebrow: "Project pipeline" },
   { key: "util", eyebrow: "Team utilization" },
   { key: "training", eyebrow: "Training delivery", optional: "training" },

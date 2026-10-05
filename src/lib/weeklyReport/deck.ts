@@ -116,33 +116,73 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     txt(s, 0.6, 5.58, 12.1, 0.95, runs);
   }
 
-  // ================================================================ 3 PORTFOLIO OVERVIEW
+  // ================================================================ 3 PORTFOLIO OVERVIEW (YTD) -- Sandra 2026-10-05
   {
-    const p = d.portfolio;
+    const y = d.ytd;
     const s = content("Portfolio overview", t.titles.portfolio, "portfolio");
-    const share = (n: number) => (p.total ? `${pct(n / p.total)} of total` : "");
-    const kpis: [string, number, string, string][] = [
-      ["Total projects", p.total, "Completed + open, last week", B.mahogany], ["Completed", p.completed, `Closed ${fmtMD(d.week.start)} – ${fmtMD(d.week.end)}`, B.calm],
-      ["Active", p.active, p.operationalActive ? `${share(p.active)} · incl. ${p.operationalActive} Training Delivery` : share(p.active), B.hydrate], ["Not started", p.notStarted, share(p.notStarted), B.taupe],
-      ["Paused", p.paused, share(p.paused), B.clarify], ["Overdue", p.overdue, `Active, as of ${fmtMD(d.generatedOn)}`, B.renew],
-    ];
-    kpis.forEach(([lab, val, sub, col], i) => {
-      const x = 0.33 + (i % 3) * 2.1, y = 1.55 + Math.floor(i / 3) * 2.62;
-      box(s, x, y, 1.95, 2.45);
-      box(s, x + 0.25, y + 0.28, 0.5, 0.07, col, null, false);
-      txt(s, x + 0.2, y + 0.45, 1.6, 0.35, lab, { fontSize: 11, color: B.mahogany });
-      txt(s, x + 0.2, y + 0.8, 1.6, 0.8, String(val), { fontFace: FB, fontSize: 36 });
-      txt(s, x + 0.2, y + 1.7, 1.6, 0.6, sub, { fontSize: 9.5, color: B.taupe });
-    });
-    card(s, 6.75, 1.55, 6.25, 5.07, "Portfolio movement", "Projects started vs. completed per week (last 8 weeks)");
-    const labels = p.movement.map((m) => m.label);
-    const maxV = Math.max(4, ...p.movement.map((m) => Math.max(m.started, m.completed)));
-    addChart(s, pptx.ChartType.line, [
-      { name: "Started", labels, values: p.movement.map((m) => m.started) },
-      { name: "Completed", labels, values: p.movement.map((m) => m.completed) },
-    ], { x: 6.95, y: 2.4, w: 5.9, h: 4.1, chartColors: [B.hydrate, B.calm], lineSize: 2, lineDataSymbol: "circle", lineDataSymbolSize: 7,
-      showValue: true, dataLabelPosition: "t", dataLabelFontSize: 9, dataLabelColor: B.mahogany, valAxisMaxVal: maxV + 2, valAxisMinVal: 0,
-      valGridLine: { color: B.grid, size: 0.5 }, catAxisLabelFontSize: 9, valAxisLabelFontSize: 9, showLegend: true, legendPos: "b", legendFontSize: 9.5 });
+    const range = `${fmtMD(y.start)} – ${fmtMD(y.end)}`;
+    // KPI 1: total YTD
+    box(s, 0.33, 1.55, 3.6, 2.45);
+    box(s, 0.58, 1.83, 0.5, 0.07, B.mahogany, null, false);
+    txt(s, 0.53, 2.0, 3.2, 0.35, "Total projects · year to date", { fontSize: 12, color: B.mahogany });
+    txt(s, 0.53, 2.38, 3.2, 0.9, String(y.total), { fontFace: FB, fontSize: 48 });
+    txt(s, 0.53, 3.35, 3.2, 0.5, `Completed + open, ${range}`, { fontSize: 10, color: B.taupe });
+    // KPI 2: active (+ soft note on Training Delivery)
+    box(s, 0.33, 4.17, 3.6, 2.45);
+    box(s, 0.58, 4.45, 0.5, 0.07, B.hydrate, null, false);
+    txt(s, 0.53, 4.62, 3.2, 0.35, "Active now", { fontSize: 12, color: B.mahogany });
+    txt(s, 0.53, 5.0, 3.2, 0.9, String(y.active), { fontFace: FB, fontSize: 48 });
+    txt(s, 0.53, 5.95, 3.25, 0.6, y.operationalActive
+      ? `${y.total ? pct(y.active / y.total) : "0%"} of total · includes ${y.operationalActive} ongoing Training Delivery project${y.operationalActive === 1 ? "" : "s"} (session-based)`
+      : `${y.total ? pct(y.active / y.total) : "0%"} of total`, { fontSize: 10, color: B.taupe });
+    // Movement by month
+    card(s, 4.15, 1.55, 8.85, 5.07, "Portfolio movement", `Projects started vs. completed per month · ${range}`);
+    const labels = y.movement.map((m) => m.label);
+    const maxV = Math.max(4, ...y.movement.map((m) => Math.max(m.started, m.completed)));
+    addChart(s, pptx.ChartType.bar, [
+      { name: "Started", labels, values: y.movement.map((m) => m.started) },
+      { name: "Completed", labels, values: y.movement.map((m) => m.completed) },
+    ], { x: 4.35, y: 2.4, w: 8.45, h: 4.1, barDir: "col", barGrouping: "clustered", barGapWidthPct: 60, chartColors: [B.hydrate, B.calm],
+      showValue: true, dataLabelPosition: "outEnd", dataLabelFontSize: 9, dataLabelColor: B.mahogany, valAxisMaxVal: maxV + 2, valAxisMinVal: 0,
+      valGridLine: { color: B.grid, size: 0.5 }, catAxisLabelFontSize: 10, valAxisLabelFontSize: 9, showLegend: true, legendPos: "b", legendFontSize: 9.5 });
+  }
+
+  // ================================================================ 3b WORK MIX & EFFORT ALLOCATION (YTD) + ACTIVE HEALTH / PHASE
+  {
+    const y = d.ytd;
+    const m = y.mix;
+    const s = content("Work mix & effort allocation", t.titles.mix, "mix");
+    card(s, 0.33, 1.55, 7.85, 5.07, "Scoped hours by Project Type, split by Planning Type",
+      `Year to date (${fmtMD(y.start)} – ${fmtMD(y.end)}) · ${h0(m.total)} across ${plural(m.projects, "project")}`);
+    const PT_COLORS = [B.hydrate, B.protect, B.clarify, B.rewind, B.calm, B.taupe];
+    if (m.bars.length) {
+      const labels = m.bars.map((b) => `${b.label} · ${m.total ? pct(b.total / m.total) : "0%"}`);
+      addChart(s, pptx.ChartType.bar, m.planTypes.map((pt) => ({ name: pt.label, labels, values: m.bars.map((b) => b.parts[pt.label] ?? 0) })),
+        { x: 0.45, y: 2.4, w: 7.6, h: 4.1, barDir: "bar", barGrouping: "stacked", barGapWidthPct: 45, chartColors: m.planTypes.map((_, i) => PT_COLORS[i % PT_COLORS.length]),
+          catAxisOrientation: "maxMin", valAxisHidden: true, valGridLine: { style: "none" }, catAxisLineShow: false, catAxisLabelFontFace: FB, catAxisLabelFontSize: 11,
+          showValue: true, dataLabelFormatCode: '0"h";;;', dataLabelPosition: "ctr", dataLabelFontSize: 9.5, dataLabelColor: B.onyx, showLegend: true, legendPos: "b", legendFontSize: 10 });
+    } else txt(s, 0.55, 2.5, 7.3, 0.4, "No scoped hours year to date.", { fontSize: 11, color: B.mahogany });
+    // right column: active Health + Phase
+    const h = y.activeHealth;
+    const HC: Record<string, string> = { "On track": B.calm, "Done on time · close pending": B.hydrate, "Done late · close pending": B.clarify, "At risk": B.protect, "Off track": B.brighten, Overdue: B.renew, "Not started": B.taupe, "Schedule review": B.rewind, "Health unavailable": B.linen };
+    const PH = [B.hydrate, B.calm, B.clarify, B.rewind, B.protect, B.repair, B.taupe, B.brighten];
+    const mini = (yy: number, title: string, sub: string, items: { label: string; count: number }[], colorOf: (l: string, i: number) => string) => {
+      card(s, 8.4, yy, 4.6, 2.45, title, sub);
+      const it = items.length ? items : [{ label: "None", count: 1 }];
+      addChart(s, pptx.ChartType.doughnut, [{ name: title, labels: it.map((x) => x.label), values: it.map((x) => x.count) }],
+        { x: 8.5, y: yy + 0.75, w: 1.6, h: 1.6, holeSize: 60, showLegend: false, showValue: false, showPercent: false, showTitle: false, chartColors: it.map((x, i) => colorOf(x.label, i)), dataBorder: { pt: 1, color: B.white } });
+      txt(s, 8.8, yy + 1.33, 1.0, 0.45, String(h.total), { fontFace: FB, fontSize: 16, align: "center" });
+      items.slice(0, 5).forEach((x, i) => {
+        const ly = yy + 0.8 + i * 0.26;
+        box(s, 10.25, ly + 0.07, 0.14, 0.14, colorOf(x.label, i), null, false);
+        txt(s, 10.45, ly, 1.85, 0.28, cut(x.label, 26), { fontSize: 9, color: B.mahogany });
+        txt(s, 12.25, ly, 0.6, 0.28, String(x.count), { fontFace: FB, fontSize: 9, align: "right" });
+      });
+      if (items.length > 5) txt(s, 10.45, yy + 0.8 + 5 * 0.26, 2.4, 0.26, `+${items.length - 5} more`, { fontSize: 8.5, color: B.taupe });
+    };
+    const excl = h.operationalExcluded ? ` · excl. ${h.operationalExcluded} Training Delivery` : "";
+    mini(1.55, "Active project health", `${h.total} In Progress · as of ${fmtMD(d.generatedOn)}${excl}`, h.health, (l) => HC[l] ?? B.linen);
+    mini(4.17, "Active project phase", `${h.total} In Progress${excl}`, h.phase, (_l, i) => PH[i % PH.length]);
   }
 
   // ================================================================ 4 ACTIVE PROJECT HEALTH
@@ -199,43 +239,6 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     table(s, 0.33, 2.8, [2.75, 0.85, 0.95, 6.62, 1.5], rows, 10, 0.52);
     box(s, 0.33, 6.08, 12.67, 0.62, B.panel, null);
     txt(s, 0.55, 6.15, 12.3, 0.5, rich([["Recommendation: ", true], ["require an extension request (with reason) whenever an End Date passes or tasks are added after Start Project, so the “why” comes from the team, not inferred from edits.", false]], 11));
-  }
-
-  // ================================================================ 5 PORTFOLIO MIX (one chart)
-  {
-    const m = d.mix;
-    const s = content("Portfolio mix", t.titles.mix, "mix");
-    card(s, 0.33, 1.55, 8.6, 5.07, "Active projects by Project Type, split by owner group and Planning Type",
-      `${m.active} active projects · % within each row (count) · Development = owned by anyone who is not a Trainer`);
-    const segs: [string, keyof (typeof m.rows)[0], string, string][] = [
-      ["Development · Planned", "devPlanned", B.hydrate, B.white], ["Development · Ad Hoc", "devAdHoc", B.hydrateLight, B.onyx],
-      ["Trainer · Planned", "trPlanned", B.clarify, B.onyx], ["Trainer · Ad Hoc", "trAdHoc", B.clarifyLight, B.onyx],
-    ];
-    const labels = m.rows.map((r) => r.label);
-    const lab = segs.map(([, k]) => m.rows.map((r) => {
-      const n = r[k] as number;
-      const tot = r.devPlanned + r.devAdHoc + r.trPlanned + r.trAdHoc;
-      return n && tot ? `${Math.round((n / tot) * 100)}% (${n})` : null;
-    }));
-    addChart(s, pptx.ChartType.bar, segs.map(([name, k]) => ({ name, labels, values: m.rows.map((r) => r[k] as number) })),
-      { x: 0.45, y: 2.4, w: 8.35, h: 4.1, barDir: "bar", barGrouping: "percentStacked", barGapWidthPct: 45, chartColors: segs.map((x) => x[2]),
-        catAxisOrientation: "maxMin", valAxisHidden: true, valGridLine: { style: "none" }, catAxisLineShow: false, catAxisLabelFontFace: FB, catAxisLabelFontSize: 11,
-        showValue: true, dataLabelFontSize: 10, dataLabelColor: B.onyx, showLegend: true, legendPos: "b", legendFontSize: 10 },
-      { labels: lab, labelColors: segs.map((x) => x[3]) });
-    box(s, 9.15, 1.55, 3.85, 5.07, B.panel, null);
-    txt(s, 9.4, 1.75, 3.4, 0.35, "Read-out", { fontFace: FB, fontSize: 14 });
-    const all = m.rows[0];
-    const ro: string[] = [];
-    if (m.active) ro.push(`Development owns ${m.dev} of ${m.active} active projects (${pct(m.dev / m.active)}); Trainers own ${m.trainer} (${pct(m.trainer / m.active)}).`);
-    m.rows.slice(1).forEach((r) => {
-      const tot = r.devPlanned + r.devAdHoc + r.trPlanned + r.trAdHoc;
-      const tr = r.trPlanned + r.trAdHoc;
-      const name = r.label.replace(/ \(\d+\)$/, "");
-      if (tot && tr) ro.push(`Trainers lead ${tr} of ${tot} ${name} projects (${pct(tr / tot)}).`);
-      else if (tot) ro.push(`${name} work is 100% development-led${r.devAdHoc ? `; ${r.devAdHoc} of ${tot} is Ad Hoc` : ""}.`);
-    });
-    if (all) { const ah = all.devAdHoc + all.trAdHoc; ro.push(`Ad Hoc is ${ah} of ${m.active} (${pct(ah / Math.max(1, m.active))}) of active work.`); }
-    txt(s, 9.4, 2.2, 3.4, 4.3, bullets(ro.slice(0, 5), 11));
   }
 
   // ================================================================ 6 PROJECT PIPELINE
