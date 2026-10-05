@@ -402,6 +402,9 @@ function ExecutiveDashboard() {
     const notStarted: ProjectRow[] = [];
     const paused: ProjectRow[] = [];
     for (const p of scopedProjects) {
+      // phase149: operational projects (e.g. quarterly Training Delivery) are
+      // summarised on Projects Portfolio › Training Delivery, not counted here.
+      if (p.is_operational) continue;
       const s = statusOf(p);
       if (s === "Cancelled") continue;
       if (s === "Completed") {
@@ -800,7 +803,7 @@ function ExecutiveDashboard() {
   // Current state: Status = In Progress today. Ignores the Reporting Period
   // (Population + More Filters still apply).
   const activeHealth = useMemo(() => {
-    const act = scopedProjects.filter((p) => statusOf(p) === "In Progress");
+    const act = scopedProjects.filter((p) => statusOf(p) === "In Progress" && !p.is_operational);
     const count = (keyOf: (p: ProjectRow) => string) => {
       const m = new Map<string, number>();
       for (const p of act) m.set(keyOf(p), (m.get(keyOf(p)) ?? 0) + 1);
