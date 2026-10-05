@@ -100,7 +100,7 @@ export default function Reports() {
       <p className="subtitle">Generate PowerPoint decks from live Tempo data, on the Dermorepubliq template.</p>
 
       <div className="card rp-head">
-        <div className="rp-title"><Presentation size={18} /> <strong>L&amp;D Weekly Report</strong> <span className="rp-muted">· for Brad · 8 slides</span></div>
+        <div className="rp-title"><Presentation size={18} /> <strong>L&amp;D Weekly Report</strong> <span className="rp-muted">· for Brad · {text ? 7 + (text.include.drivers && data?.drivers.rows.length ? 1 : 0) + (text.include.training ? 1 : 0) + (text.include.appendix ? 1 : 0) : 10} slides</span></div>
         <div className="rp-row">
           <label className="rp-field">
             <span><CalendarRange size={13} /> Report week (Mon–Fri)</span>
