@@ -38,6 +38,7 @@ import { colorForPerson, UNASSIGNED_BAR_COLOR } from "../lib/personColors";
 import { WBS_STATUS_META, wbsStatusMetaFor, type WbsStatus } from "../lib/wbsStatus";
 import { useUnsavedChangesGuard } from "../lib/useUnsavedChangesGuard";
 import UtilPersonFilterButton from "../components/UtilPersonFilterButton";
+import AddSessionModal from "../components/AddSessionModal";
 
 interface ProjectRow {
   id: string;
@@ -4017,6 +4018,8 @@ export default function WbsPlanning() {
   // "Untitled" project behind. HashRouter has no useBlocker, so in-app links
   // are intercepted in the capture phase; the browser Back button and closed
   // tabs fall through to the 24h server-side purge of unsaved projects.
+  // Preview: operational / Training Delivery projects can add sessions directly from WBS.
+  const [showAddSession, setShowAddSession] = useState(false);
   const [leaveTarget, setLeaveTarget] = useState<string | null>(null);
   const [leaveBusy, setLeaveBusy] = useState(false);
   const isUnsavedProject = !!project?.is_unsaved;
@@ -5166,6 +5169,22 @@ export default function WbsPlanning() {
       {dialog}
       {assigneePicker.element}
       {startDatePrompt.element}
+      {showAddSession && project?.is_operational && me?.id && (
+        <AddSessionModal
+          projects={[{
+            id: project.id,
+            name: project.name,
+            project_number: project.project_number,
+            owner_id: project.owner_id,
+            wbs_status: project.wbs_status,
+          }]}
+          people={people.map((p) => ({ id: p.id, name: p.name }))}
+          meId={me.id}
+          isFullAccess={isFullAccess}
+          onClose={() => setShowAddSession(false)}
+          onSaved={() => void loadAll(true)}
+        />
+      )}
       {rowActionsMenu &&
         (() => {
           const task = orderedTasks.find((x) => x.id === rowActionsMenu.taskId);
@@ -5541,9 +5560,22 @@ export default function WbsPlanning() {
             </span>
           </div>
           <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
-            Define the project, add tasks, and review the forecast. Lock the baseline when the plan is ready.
+            {project.is_operational
+              ? "Manage this operational project and plot Training Delivery sessions as they are scheduled."
+              : "Define the project, add tasks, and review the forecast. Lock the baseline when the plan is ready."}
           </div>
         </div>
+        {project.is_operational && project.wbs_status !== "closed" && (
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => setShowAddSession(true)}
+            title="Add a Training Delivery session to this operational project"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}
+          >
+            <Plus size={14} /> Add Session
+          </button>
+        )}
       </div>
       <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 6, marginBottom: 8 }}>
         <Link
