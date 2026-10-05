@@ -594,6 +594,10 @@ function AttentionChip({
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
+  // phase149: operational projects (Project Type flagged Operational, e.g.
+  // quarterly Training Delivery) are kept out of the portfolio KPIs/health
+  // and summarised in their own Training Delivery section instead.
+  const [operationalProjects, setOperationalProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [sources, setSources] = useState<SourceRow[]>([]);
@@ -641,12 +645,14 @@ export default function Dashboard() {
         supabase.from("extension_requests").select("id,status"),
         supabase.from("project_baseline_requests").select("id,status,project_id"),
         supabase.from("project_closeouts").select("closed_at"),
-        supabase.from("projects").select("start_date"),
+        supabase.from("projects").select("start_date,is_operational"),
         supabase.from("project_planning_types").select("id,name,is_active,sort_order").order("sort_order"),
         supabase.from("project_types").select("id,name,is_active,sort_order").order("sort_order"),
         supabase.from("project_phases").select("id,name,is_active,sort_order").order("sort_order"),
       ]);
-      setProjects((projectData as ProjectRow[]) ?? []);
+      const allProjects = (projectData as ProjectRow[]) ?? [];
+      setProjects(allProjects.filter((p) => !p.is_operational));
+      setOperationalProjects(allProjects.filter((p) => p.is_operational));
       setTasks((taskData as TaskRow[]) ?? []);
       setPeople((peopleData as PersonRow[]) ?? []);
       setSources((sourceData as SourceRow[]) ?? []);
@@ -656,7 +662,7 @@ export default function Dashboard() {
       setExtReqs((extReqData as ExtReqLite[]) ?? []);
       setBaselineReqs((baselineReqData as BaselineReqLite[]) ?? []);
       setCloseouts((closeoutData as CloseoutLite[]) ?? []);
-      setAllProjectStarts((allStartsData as ProjectStartLite[]) ?? []);
+      setAllProjectStarts(((allStartsData as (ProjectStartLite & { is_operational?: boolean })[]) ?? []).filter((p) => !p.is_operational));
       setPlanningTypes((planningTypeData as PlanningTypeRow[]) ?? []);
       setProjectTypes((projectTypeData as ProjectTypeRow[]) ?? []);
       setPhases((phaseData as PhaseRow[]) ?? []);
@@ -1473,6 +1479,170 @@ export default function Dashboard() {
                 </tr>
               );
             })}
+          </tbody>
+        </table>
+      </div>
+
+      {operationalProjects.length > 0 && (
+        <TrainingDeliverySection projects={operationalProjects} tasks={tasks} people={people} outputTypes={outputTypes} />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// phase149 (Sandra 2026-10-05): Training Delivery summary. A session = a
+// leaf task with Output Type "Session" in an operational project. Sessions
+// count and hours both come from those tasks (trainers log time on them as
+// usual); Done = delivered, Validated = owner/manager confirmed.
+function TrainingDeliverySection({
+  projects,
+  tasks,
+  people,
+  outputTypes,
+}: {
+  projects: ProjectRow[];
+  tasks: TaskRow[];
+  people: PersonRow[];
+  outputTypes: OutputTypeRow[];
+}) {
+  const [period, setPeriod] = useState<"month" | "quarter" | "year" | "all">("quarter");
+  const sessionTypeIds = useMemo(() => new Set(outputTypes.filter((o) => o.name.trim().toLowerCase() === "session").map((o) => o.id)), [outputTypes]);
+  const projectIds = useMemo(() => new Set(projects.map((p) => p.id)), [projects]);
+  const range = useMemo(() => {
+    const y = TODAY.getFullYear();
+    const m = TODAY.getMonth();
+    const iso = (d: Date) => toLocalISODate(d);
+    if (period === "month") return { start: iso(new Date(y, m, 1)), end: iso(new Date(y, m + 1, 0)) };
+    if (period === "quarter") {
+      const q = Math.floor(m / 3) * 3;
+      return { start: iso(new Date(y, q, 1)), end: iso(new Date(y, q + 3, 0)) };
+    }
+    if (period === "year") return { start: `${y}-01-01`, end: `${y}-12-31` };
+    return { start: "0000-01-01", end: "9999-12-31" };
+  }, [period]);
+
+  const rows = useMemo(() => {
+    const parentIds = new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
+    const sessions = tasks.filter(
+      (t) =>
+        projectIds.has(t.project_id) &&
+        !t.is_archived &&
+        !parentIds.has(t.id) &&
+        !!t.output_type_id &&
+        sessionTypeIds.has(t.output_type_id)
+    );
+    const dateOf = (t: TaskRow) =>
+      (t.status === "Done" ? t.actual_completion_date ?? t.current_due_date : t.current_due_date)?.slice(0, 10) ?? null;
+    const inRange = sessions.filter((t) => {
+      const d = dateOf(t);
+      return !!d && d >= range.start && d <= range.end;
+    });
+    type Row = { id: string; name: string; delivered: number; validated: number; upcoming: number; notMarked: number; cancelled: number; scoped: number; logged: number };
+    const byPerson = new Map<string, Row>();
+    for (const t of inRange) {
+      const key = t.assignee_id ?? "unassigned";
+      const r =
+        byPerson.get(key) ??
+        { id: key, name: people.find((p) => p.id === t.assignee_id)?.name ?? "Unassigned", delivered: 0, validated: 0, upcoming: 0, notMarked: 0, cancelled: 0, scoped: 0, logged: 0 };
+      const d = dateOf(t) ?? "";
+      if (t.status === "Done") {
+        r.delivered++;
+        if (t.validated_completion_date) r.validated++;
+      } else if (t.status === "Cancelled") r.cancelled++;
+      else if (d < TODAY_ISO) r.notMarked++;
+      else r.upcoming++;
+      if (t.status !== "Cancelled") r.scoped += Number(t.estimated_hours ?? 0);
+      r.logged += Number(t.time_spent_hours ?? 0);
+      byPerson.set(key, r);
+    }
+    return Array.from(byPerson.values()).sort((a, b) => b.delivered - a.delivered || a.name.localeCompare(b.name));
+  }, [tasks, projectIds, sessionTypeIds, range, people]);
+
+  const total = rows.reduce(
+    (acc, r) => ({
+      delivered: acc.delivered + r.delivered,
+      validated: acc.validated + r.validated,
+      upcoming: acc.upcoming + r.upcoming,
+      notMarked: acc.notMarked + r.notMarked,
+      cancelled: acc.cancelled + r.cancelled,
+      scoped: acc.scoped + r.scoped,
+      logged: acc.logged + r.logged,
+    }),
+    { delivered: 0, validated: 0, upcoming: 0, notMarked: 0, cancelled: 0, scoped: 0, logged: 0 }
+  );
+  const fmtH = (n: number) => (Math.round(n * 10) / 10).toLocaleString();
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <SectionHeader>Training Delivery</SectionHeader>
+        </div>
+        <select value={period} onChange={(e) => setPeriod(e.target.value as typeof period)} style={{ ...selectStyle, marginBottom: 10 }}>
+          <option value="month">This Month</option>
+          <option value="quarter">This Quarter</option>
+          <option value="year">This Year</option>
+          <option value="all">All Time</option>
+        </select>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--muted)", margin: "-4px 0 10px" }}>
+        Sessions in operational projects ({projects.length}) -- kept out of the portfolio numbers above. A session = a task with Output Type
+        "Session"; hours = time logged on those sessions.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 12 }}>
+        <StatCard icon={<CheckCircle2 size={26} />} tone="teal" label="Sessions delivered" value={total.delivered} />
+        <StatCard icon={<Activity size={26} />} tone="accent" label="Upcoming" value={total.upcoming} />
+        <StatCard icon={<Clock3 size={26} />} tone="warning" label="Past date, not Done" value={total.notMarked} />
+        <StatCard icon={<Folder size={26} />} tone="neutral" label="Hours logged" value={fmtH(total.logged)} />
+      </div>
+      <div className="card" style={{ padding: 0, overflowX: "auto" }}>
+        <table style={{ width: "100%" }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left" }}>Trainer</th>
+              <th style={{ textAlign: "right" }}>Delivered</th>
+              <th style={{ textAlign: "right" }}>Validated</th>
+              <th style={{ textAlign: "right" }}>Upcoming</th>
+              <th style={{ textAlign: "right" }}>Past date, not Done</th>
+              <th style={{ textAlign: "right" }}>Cancelled</th>
+              <th style={{ textAlign: "right" }}>Scoped hrs</th>
+              <th style={{ textAlign: "right" }}>Logged hrs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={8} style={{ fontSize: 12, color: "var(--muted)", padding: 14 }}>
+                  No sessions in this period yet.
+                </td>
+              </tr>
+            ) : (
+              rows.map((r) => (
+                <tr key={r.id}>
+                  <td style={{ fontSize: 12, fontWeight: 600 }}>{r.name}</td>
+                  <td style={{ textAlign: "right" }}>{r.delivered}</td>
+                  <td style={{ textAlign: "right" }}>{r.validated}</td>
+                  <td style={{ textAlign: "right" }}>{r.upcoming}</td>
+                  <td style={{ textAlign: "right", color: r.notMarked ? "var(--warning-text, #b45309)" : undefined }}>{r.notMarked}</td>
+                  <td style={{ textAlign: "right", color: "var(--muted)" }}>{r.cancelled}</td>
+                  <td style={{ textAlign: "right" }}>{fmtH(r.scoped)}</td>
+                  <td style={{ textAlign: "right" }}>{fmtH(r.logged)}</td>
+                </tr>
+              ))
+            )}
+            {rows.length > 1 && (
+              <tr style={{ fontWeight: 700 }}>
+                <td style={{ fontSize: 12 }}>Total</td>
+                <td style={{ textAlign: "right" }}>{total.delivered}</td>
+                <td style={{ textAlign: "right" }}>{total.validated}</td>
+                <td style={{ textAlign: "right" }}>{total.upcoming}</td>
+                <td style={{ textAlign: "right" }}>{total.notMarked}</td>
+                <td style={{ textAlign: "right" }}>{total.cancelled}</td>
+                <td style={{ textAlign: "right" }}>{fmtH(total.scoped)}</td>
+                <td style={{ textAlign: "right" }}>{fmtH(total.logged)}</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

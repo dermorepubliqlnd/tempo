@@ -51,6 +51,8 @@ interface ProjectRow {
   pause_reason?: string | null;
   pause_expected_resume?: string | null;
   schedule_review_required?: boolean | null;
+  // phase149: Operational project (Project Type flag, mirrored by trigger).
+  is_operational?: boolean | null;
   start_date: string | null;
   end_date: string | null;
   timelines_locked: boolean;
@@ -1103,7 +1105,7 @@ export default function WbsPlanning() {
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
     const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }, { data: planningTypes }, { data: ptypes }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,planning_type_id,project_type_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required").eq("id", projectId).single(),
+      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,planning_type_id,project_type_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required,is_operational").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -3996,6 +3998,8 @@ export default function WbsPlanning() {
                 .slice(0, 12)
                 .map((k) => `• ${k.name}: plan says ${formatDate(k.plan)}, kept ${formatDate(k.kept)}`)
                 .join("\n")}${keptDue.length > 12 ? `\n…and ${keptDue.length - 12} more` : ""}\n\nIf a task needs more time, request an extension.`
+            : project.is_operational
+            ? "Changes saved."
             : "Changes saved. This project is already started, so the update is tracked as variance against its Baseline."
         );
       }
@@ -4081,8 +4085,10 @@ export default function WbsPlanning() {
     project.wbs_status,
     !!pendingBaselineRequest,
     !pendingBaselineRequest && !!declinedBaselineRequest,
-    declinedBaselineRequest?.decline_reason
+    declinedBaselineRequest?.decline_reason,
+    !!project.is_operational
   );
+  const isOperationalStarted = !!project.is_operational && project.wbs_status !== "draft" && project.wbs_status !== "closed";
 
   // Phase 2/3 authorization -- mirrors can_manage_wbs()/can_decide_closure()
   // on the DB side (flat tiering, Sandra 2026-07-28): Full Access or the
@@ -7745,8 +7751,9 @@ export default function WbsPlanning() {
           {project.wbs_status === "draft" && !pendingBaselineRequest && !declinedBaselineRequest && "Start Project once scoping is final to start tracking against it."}
           {project.wbs_status === "draft" && !!pendingBaselineRequest && "Waiting on an approver to lock this in as the Baseline."}
           {project.wbs_status === "draft" && !pendingBaselineRequest && !!declinedBaselineRequest && wbsMeta.hint}
-          {project.wbs_status === "baseline_locked" && "This is the official commitment. You can keep editing -- close the project once work is complete."}
-          {project.wbs_status === "changed_after_baseline" &&
+          {isOperationalStarted && "Operational project -- trainers add their own sessions from Projects & Tasks › Tasks › Add Session. No baseline variance is tracked; close it at the end of the quarter."}
+          {!isOperationalStarted && project.wbs_status === "baseline_locked" && "This is the official commitment. You can keep editing -- close the project once work is complete."}
+          {!isOperationalStarted && project.wbs_status === "changed_after_baseline" &&
             "This plan differs from the original baseline. Baselines are locked once by design -- variance tracking measures against the original. Close the project once work is complete."}
           {project.wbs_status === "revision_in_progress" && "This project has a legacy revision in progress -- view the audit trail for its history."}
           {project.wbs_status === "closed" && "Final Scope is locked. View the audit trail for a full history of every change."}

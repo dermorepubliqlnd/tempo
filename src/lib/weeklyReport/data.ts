@@ -208,7 +208,9 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     else if (s === "Paused") pfPaused++;
     else pfNotStarted++;
   }
-  const activeP = live.filter((p) => statusOf(p) === "In Progress");
+  // phase149: operational projects (e.g. quarterly Training Delivery) have no
+  // date-based health -- keep them out of the health/overdue/due-this-week slides.
+  const activeP = live.filter((p) => statusOf(p) === "In Progress" && !(p as { is_operational?: boolean | null }).is_operational);
   const healthBy = new Map(activeP.map((p) => [p.id, healthOf(p as ProjectRow, tasks as TaskRow[], holidayDates).label]));
   const overdueP = activeP.filter((p) => healthBy.get(p.id) === "Overdue");
   const movement: WeeklyReportData["portfolio"]["movement"] = [];

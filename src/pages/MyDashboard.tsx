@@ -1215,7 +1215,7 @@ export default function MyDashboard() {
                 const baselinePending = baselineRequests.some((r) => r.project_id === p.id);
                 const wbsMeta = closureRequested
                   ? { label: "Closure Requested", hint: "Closure has been requested and is waiting for approval.", color: "var(--warning-text, #b45309)", bg: "var(--warning-bg, #fff7ed)", border: "#f3dfb8" }
-                  : wbsStatusMetaFor(p.wbs_status, baselinePending);
+                  : wbsStatusMetaFor(p.wbs_status, baselinePending, false, null, !!p.is_operational);
                 const cell: CSSProperties = { padding: "9px 16px 9px 0", borderBottom: "1px solid var(--border)", cursor: "pointer", minWidth: 0, alignSelf: "stretch", display: "flex", alignItems: "center" };
                 const go = () => navigate(`/projects/${p.id}/wbs`);
                 return (

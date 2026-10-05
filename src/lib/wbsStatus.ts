@@ -83,8 +83,15 @@ export function wbsStatusMetaFor(
   status: WbsStatus,
   hasPendingBaselineRequest: boolean,
   hasDeclinedBaselineRequest?: boolean,
-  declineReason?: string | null
+  declineReason?: string | null,
+  isOperational?: boolean
 ) {
+  // phase149 (Sandra 2026-10-05): operational projects (Project Type flagged
+  // Operational, e.g. Training Delivery) are open, cumulative containers --
+  // tasks are added as work happens, so "Changed After Baseline" is noise.
+  if (isOperational && (status === "baseline_locked" || status === "changed_after_baseline" || status === "revision_in_progress")) {
+    return OPERATIONAL_WBS_META;
+  }
   if (status === "draft" && hasPendingBaselineRequest) {
     return {
       label: "Awaiting Baseline Approval",
@@ -105,3 +112,12 @@ export function wbsStatusMetaFor(
   }
   return WBS_STATUS_META[status];
 }
+
+// phase149: display-only label for started operational projects.
+export const OPERATIONAL_WBS_META = {
+  label: "Ongoing",
+  hint: "Operational project -- sessions/tasks are added as work happens, so no baseline variance is tracked.",
+  color: "#0f766e",
+  bg: "#e6f6f3",
+  border: "#c3e9e1",
+};

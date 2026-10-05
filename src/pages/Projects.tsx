@@ -16,6 +16,7 @@ import CardActionMenu from "../components/CardActionMenu";
 import ViewTabs from "../components/ViewTabs";
 import ViewSettingsMenu, { ViewFilterPills } from "../components/ViewSettingsMenu";
 import Modal from "../components/Modal";
+import AddSessionModal from "../components/AddSessionModal";
 import { PauseProjectModal, ScheduleReviewModal } from "../components/PauseProjectModals";
 import { timingWithPause, type TimingResult } from "../lib/pause";
 import RequestExtensionModal from "../components/RequestExtensionModal";
@@ -236,6 +237,8 @@ export interface ProjectRow {
   pause_expected_resume?: string | null;
   resumed_at?: string | null;
   schedule_review_required?: boolean | null;
+  // phase149: mirrors the Project Type's Operational flag (DB trigger).
+  is_operational?: boolean | null;
 }
 
 export interface TaskRow {
@@ -650,6 +653,10 @@ export function healthOf(
     return done <= due ? { label: "Completed on time", tone: "success" } : { label: "Completed late", tone: "gold" };
   }
   if (status === "Paused") return { label: "Paused", tone: "purple" };
+  // phase149 (Sandra 2026-10-05): operational projects (e.g. Training
+  // Delivery, one per quarter) are open and cumulative -- tasks are added as
+  // sessions happen, so date-based health would always mislead.
+  if (p.is_operational) return p.wbs_status === "draft" ? { label: "Not started", tone: "neutral" } : { label: "Ongoing", tone: "slate" };
   // phase118: resumed but the owner hasn't confirmed the schedule yet --
   // don't judge it Overdue/At risk off dates that may be about to change.
   if (p.schedule_review_required) return { label: "Schedule review", tone: "gold" };
@@ -940,6 +947,7 @@ const HEALTH_BOARD_COLUMNS: BoardColumnDef[] = [
   { value: "Overdue", label: "Overdue", tone: "danger" },
   { value: "Schedule review", label: "Schedule review", tone: "gold" },
   { value: "Paused", label: "Paused", tone: "purple" },
+  { value: "Ongoing", label: "Ongoing", tone: "slate" },
   { value: "Not started", label: "Not started", tone: "neutral" },
   { value: "Health unavailable", label: "Health unavailable", tone: "slate" },
   { value: "Done · close pending", label: "Done · close pending", tone: "success" },
@@ -1498,6 +1506,10 @@ export default function Projects() {
   const [extensionTask, setExtensionTask] = useState<TaskWithDepth | null>(null);
   const [extensionProject, setExtensionProject] = useState<ProjectRow | null>(null);
   const [extDetailTask, setExtDetailTask] = useState<TaskWithDepth | null>(null);
+  // phase149: Add Session (operational projects) + reschedule a session.
+  const [showAddSession, setShowAddSession] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
 
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   // phase118: Pause dialog targets + post-resume schedule review prompt.
@@ -1766,6 +1778,17 @@ export default function Projects() {
   // enforce_closed_project_lock / delete_tasks_and_dependents /
   // the phase-22 lock triggers in phase26_migration.sql.
   const isProjectClosed = (projectId: string) => projects.find((p) => p.id === projectId)?.wbs_status === "closed";
+  const isOperationalProject = (projectId: string) => !!projects.find((p) => p.id === projectId)?.is_operational;
+  // phase149: open operational projects the current person can add sessions
+  // to -- started ones for everyone, Draft ones only for owner/Full Access.
+  const sessionProjects = projects.filter(
+    (p) =>
+      p.is_operational &&
+      p.wbs_status !== "closed" &&
+      p.status !== "Completed" &&
+      p.status !== "Cancelled" &&
+      (p.wbs_status !== "draft" || isFullAccess || p.owner_id === me?.id)
+  );
   const canEditTask = (t: TaskRow) => !isProjectClosed(t.project_id) && (canManageTasksIn(t.project_id) || t.assignee_id === me?.id);
   // Once a task's completion has been validated (owner/manager's
   // independent sign-off, see the "Validated" column below), its editable
@@ -3328,7 +3351,7 @@ export default function Projects() {
         defaultWidth: 210,
         maxWidth: 260,
         render: (p) => {
-          const meta = wbsStatusMetaFor(p.wbs_status, pendingBaselineProjectIds.has(p.id), !pendingBaselineProjectIds.has(p.id) && p.id in declinedBaselineByProjectId, declinedBaselineByProjectId[p.id]);
+          const meta = wbsStatusMetaFor(p.wbs_status, pendingBaselineProjectIds.has(p.id), !pendingBaselineProjectIds.has(p.id) && p.id in declinedBaselineByProjectId, declinedBaselineByProjectId[p.id], !!p.is_operational);
           return (
             <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <span
@@ -3635,13 +3658,15 @@ export default function Projects() {
       // project actually has one pending), same as any other
       // encountered-but-not-canonical value elsewhere in this file.
       getGroup: (p) =>
-        wbsStatusMetaFor(p.wbs_status, pendingBaselineProjectIds.has(p.id), !pendingBaselineProjectIds.has(p.id) && p.id in declinedBaselineByProjectId, declinedBaselineByProjectId[p.id])
+        wbsStatusMetaFor(p.wbs_status, pendingBaselineProjectIds.has(p.id), !pendingBaselineProjectIds.has(p.id) && p.id in declinedBaselineByProjectId, declinedBaselineByProjectId[p.id], !!p.is_operational)
           .label,
       getTone: (p) =>
         p.wbs_status === "draft" && pendingBaselineProjectIds.has(p.id)
           ? "warning"
           : p.wbs_status === "draft" && p.id in declinedBaselineByProjectId
           ? "danger"
+          : p.is_operational && p.wbs_status !== "draft" && p.wbs_status !== "closed"
+          ? "success"
           : WBS_STATUS_TONES[p.wbs_status] ?? "neutral",
       allGroups: () => (Object.keys(WBS_STATUS_META) as WbsStatus[]).map((s) => WBS_STATUS_META[s].label),
     },
@@ -5808,6 +5833,16 @@ export default function Projects() {
   return (
     <div>
       {confirmDialog}
+      {showAddSession && me?.id && (
+        <AddSessionModal
+          projects={sessionProjects}
+          people={people}
+          meId={me.id}
+          isFullAccess={isFullAccess}
+          onClose={() => setShowAddSession(false)}
+          onSaved={() => loadAll()}
+        />
+      )}
       {assigneePicker.element}
       {startDatePrompt.element}
       {validatingTask && (
@@ -5887,6 +5922,19 @@ export default function Projects() {
             }}
           >
             <Plus size={14} /> {creatingProject ? "Creating…" : "Add New Project"}
+          </button>
+        )}
+        {pageTab === "tasks" && sessionProjects.length > 0 && (
+          <button
+            onClick={() => setShowAddSession(true)}
+            title="Plot a training session into an operational project (e.g. this quarter's Training Delivery)"
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              fontSize: 12.5, fontWeight: 600, color: "#fff", background: "var(--accent)",
+              border: "none", borderRadius: 999, padding: "9px 16px", cursor: "pointer", whiteSpace: "nowrap",
+            }}
+          >
+            <Plus size={14} /> Add Session
           </button>
         )}
       </div>
@@ -6685,7 +6733,13 @@ export default function Projects() {
       })()}
 
       {extDetailTask && (
-        <Modal title={`Extension history -- ${extDetailTask.name}`} onClose={() => setExtDetailTask(null)}>
+        <Modal
+          title={`${isOperationalProject(extDetailTask.project_id) ? "Session date" : "Extension history"} -- ${extDetailTask.name}`}
+          onClose={() => {
+            setExtDetailTask(null);
+            setRescheduleDate("");
+          }}
+        >
           {taskExtensionRequests(extDetailTask.id).length === 0 ? (
             <p style={{ fontSize: 12, color: "var(--muted)" }}>No extension requests have been made for this task yet.</p>
           ) : (
@@ -6711,7 +6765,45 @@ export default function Projects() {
               </div>
             ))
           )}
-          {isProjectLocked(extDetailTask.project_id) && canEditTask(extDetailTask) && (
+          {isOperationalProject(extDetailTask.project_id) &&
+            canEditTask(extDetailTask) &&
+            extDetailTask.status !== "Done" &&
+            extDetailTask.status !== "Cancelled" &&
+            !hasChildren(extDetailTask.id) && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", marginBottom: 4 }}>Reschedule session</div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+                  Operational project -- moving a session isn't an extension, so no approval is needed.
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    type="date"
+                    value={rescheduleDate || extDetailTask.current_due_date?.slice(0, 10) || ""}
+                    onChange={(e) => setRescheduleDate(e.target.value)}
+                    style={{ fontSize: 12.5, padding: "5px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
+                  />
+                  <button
+                    disabled={rescheduleBusy || !rescheduleDate || rescheduleDate === extDetailTask.current_due_date?.slice(0, 10)}
+                    onClick={async () => {
+                      setRescheduleBusy(true);
+                      const { error } = await supabase.rpc("reschedule_session", { p_task_id: extDetailTask.id, p_date: rescheduleDate });
+                      setRescheduleBusy(false);
+                      if (error) {
+                        await alert(`Couldn't reschedule: ${error.message}`);
+                        return;
+                      }
+                      setRescheduleDate("");
+                      setExtDetailTask(null);
+                      loadAll();
+                    }}
+                    style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 12px", cursor: "pointer", opacity: rescheduleBusy || !rescheduleDate ? 0.55 : 1 }}
+                  >
+                    {rescheduleBusy ? "Saving…" : "Reschedule"}
+                  </button>
+                </div>
+              </div>
+            )}
+          {isProjectLocked(extDetailTask.project_id) && canEditTask(extDetailTask) && !isOperationalProject(extDetailTask.project_id) && (
             <button
               onClick={() => {
                 setExtDetailTask(null);

@@ -168,12 +168,13 @@ export default function ProjectOverview() {
   const baselineStart = project?.original_start_date ?? project?.start_date ?? null;
   const baselineEnd = project?.original_due_date ?? project?.end_date ?? null;
   // Working days (Mon-Fri minus holidays), same convention as extensions.
-  const varianceDays = baselineEnd && forecastEnd
+  const varianceDays = !project?.is_operational && baselineEnd && forecastEnd
     ? workingDayDelta(baselineEnd.slice(0, 10), forecastEnd.slice(0, 10), holidaySet)
     : 0;
 
   const overdueTasks = openTasks.filter((t) => t.current_due_date && t.current_due_date.slice(0, 10) < toISO(new Date())).length;
-  const changedAfterBaseline = project?.wbs_status === "changed_after_baseline";
+  // phase149: operational projects grow by design -- never "changed after baseline".
+  const changedAfterBaseline = project?.wbs_status === "changed_after_baseline" && !project?.is_operational;
   const pendingExtensions = extensions.filter((e) => e.status === "Pending").length;
   const unassignedTasks = openTasks.filter((t) => !t.assignee_id).length;
 

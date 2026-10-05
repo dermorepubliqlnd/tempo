@@ -5,6 +5,7 @@ import { supabase } from "../lib/supabaseClient";
 import { archiveItem } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import ListColorPicker from "../components/ListColorPicker";
+import { useConfirm } from "../lib/useConfirm";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_ICON_NAMES, CATEGORY_TONE_NAMES, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 
 function AccessDenied() {
@@ -120,6 +121,7 @@ interface ProjectTypeRow {
   sort_order: number;
   is_active: boolean;
   color?: string | null;
+  is_operational?: boolean;
 }
 
 // Time Logging Reason -- admin-configurable lookup (Phase 37,
@@ -221,6 +223,7 @@ interface OutputTypeRow {
 }
 
 export default function SiteSettings() {
+  const { confirm: confirmDlg, dialog: confirmDialogEl } = useConfirm();
   const { person: me, loading: sessionLoading } = useSession();
 
   // Work Types (Phase 12, 2026-08-20): admin-configurable lookup backing
@@ -777,7 +780,7 @@ export default function SiteSettings() {
 
   async function loadProjectTypes() {
     setProjectTypesLoading(true);
-    const { data } = await supabase.from("project_types").select("id,name,sort_order,is_active,color").eq("is_archived", false).order("sort_order");
+    const { data } = await supabase.from("project_types").select("id,name,sort_order,is_active,color,is_operational").eq("is_archived", false).order("sort_order");
     setProjectTypes((data as ProjectTypeRow[]) ?? []);
     setProjectTypesLoading(false);
   }
@@ -824,6 +827,28 @@ export default function SiteSettings() {
   async function toggleProjectTypeActive(t: ProjectTypeRow) {
     setProjectTypeBusy(true);
     const { error } = await supabase.from("project_types").update({ is_active: !t.is_active }).eq("id", t.id);
+    setProjectTypeBusy(false);
+    if (error) {
+      window.alert(`Couldn't update: ${error.message}`);
+      return;
+    }
+    loadProjectTypes();
+  }
+
+  // phase149: Operational flag -- every project of this type becomes an open,
+  // cumulative container (Health/WBS "Ongoing", trainers add sessions).
+  async function toggleProjectTypeOperational(t: ProjectTypeRow) {
+    const turningOn = !t.is_operational;
+    const ok = await confirmDlg({
+      title: turningOn ? "Make this an Operational project type?" : "Turn off Operational?",
+      confirmLabel: turningOn ? "Make Operational" : "Turn off",
+      message: turningOn
+        ? `Every project with this type will show Health and WBS Status as "Ongoing" (no date-based health or baseline variance), and anyone can add their own sessions to it once it's started. Task validation stays the same.`
+        : `"${t.name}" projects go back to normal Health and baseline tracking.`,
+    });
+    if (!ok) return;
+    setProjectTypeBusy(true);
+    const { error } = await supabase.from("project_types").update({ is_operational: turningOn }).eq("id", t.id);
     setProjectTypeBusy(false);
     if (error) {
       window.alert(`Couldn't update: ${error.message}`);
@@ -1843,6 +1868,7 @@ export default function SiteSettings() {
 
   return (
     <div>
+      {confirmDialogEl}
       <div>
         <h1>Site settings</h1>
         <p className="subtitle">Full Access only. Configure options shared across the whole app.</p>
@@ -3040,7 +3066,10 @@ export default function SiteSettings() {
                 </div>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 14 }}>
                   Drag the grip handle to reorder. Deactivating keeps a project type's label on any project that
-                  already has it set -- it just disappears from the picker on new projects.
+                  already has it set -- it just disappears from the picker on new projects. Click Standard /
+                  Operational to switch a type: Operational projects are open, cumulative containers (e.g. one
+                  Training Delivery project per quarter) -- Health and WBS Status show "Ongoing" and anyone can
+                  add their own sessions once it's started.
                 </div>
 
                 <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
@@ -3127,6 +3156,15 @@ export default function SiteSettings() {
                             {t.name}
                           </span>
                         )}
+                        <button
+                          onClick={() => toggleProjectTypeOperational(t)}
+                          disabled={projectTypeBusy}
+                          title={t.is_operational ? "Operational: open, cumulative projects (Health/WBS show Ongoing; anyone can add their own sessions). Click to turn off." : "Click to make this an Operational project type (open, cumulative -- e.g. quarterly Training Delivery)"}
+                          className={`status-pill ${t.is_operational ? "success" : "neutral"}`}
+                          style={{ fontSize: 10, border: t.is_operational ? undefined : "1px dashed var(--border)", cursor: "pointer", opacity: t.is_operational ? 1 : 0.75 }}
+                        >
+                          {t.is_operational ? "Operational" : "Standard"}
+                        </button>
                         <span className={`status-pill ${t.is_active ? "success" : "neutral"}`} style={{ fontSize: 10 }}>
                           {t.is_active ? "Active" : "Off"}
                         </span>
