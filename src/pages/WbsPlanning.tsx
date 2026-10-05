@@ -39,6 +39,7 @@ import { WBS_STATUS_META, wbsStatusMetaFor, type WbsStatus } from "../lib/wbsSta
 import { useUnsavedChangesGuard } from "../lib/useUnsavedChangesGuard";
 import UtilPersonFilterButton from "../components/UtilPersonFilterButton";
 import AddSessionModal from "../components/AddSessionModal";
+import BulkUploadSessionsModal from "../components/BulkUploadSessionsModal";
 
 interface ProjectRow {
   id: string;
@@ -4020,6 +4021,7 @@ export default function WbsPlanning() {
   // tabs fall through to the 24h server-side purge of unsaved projects.
   // Preview: operational / Training Delivery projects can add sessions directly from WBS.
   const [showAddSession, setShowAddSession] = useState(false);
+  const [showBulkUploadSessions, setShowBulkUploadSessions] = useState(false);
   const [leaveTarget, setLeaveTarget] = useState<string | null>(null);
   const [leaveBusy, setLeaveBusy] = useState(false);
   const isUnsavedProject = !!project?.is_unsaved;
@@ -5185,6 +5187,20 @@ export default function WbsPlanning() {
           onSaved={() => void loadAll(true)}
         />
       )}
+      {showBulkUploadSessions && project?.is_operational && canManageWbs && (
+        <BulkUploadSessionsModal
+          projectId={project.id}
+          projectName={project.name}
+          people={people.map((p) => ({ id: p.id, name: p.name }))}
+          existingSessions={tasks.map((t) => ({
+            name: t.name,
+            start_date: t.start_date,
+            assignee_id: t.assignee_id,
+          }))}
+          onClose={() => setShowBulkUploadSessions(false)}
+          onImported={() => void loadAll(true)}
+        />
+      )}
       {rowActionsMenu &&
         (() => {
           const task = orderedTasks.find((x) => x.id === rowActionsMenu.taskId);
@@ -5566,15 +5582,28 @@ export default function WbsPlanning() {
           </div>
         </div>
         {project.is_operational && project.wbs_status !== "closed" && (
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => setShowAddSession(true)}
-            title="Add a Training Delivery session to this operational project"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}
-          >
-            <Plus size={14} /> Add Session
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            {canManageWbs && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowBulkUploadSessions(true)}
+                title="Temporarily bulk upload Training Delivery sessions from CSV"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              >
+                <ListPlus size={14} /> Bulk Upload Sessions
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => setShowAddSession(true)}
+              title="Add a Training Delivery session to this operational project"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <Plus size={14} /> Add Session
+            </button>
+          </div>
         )}
       </div>
       <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 6, marginBottom: 8 }}>
