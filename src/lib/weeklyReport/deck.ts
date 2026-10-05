@@ -53,9 +53,20 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     );
     s.addTable(body as never, { x, y, colW, rowH, margin: [0.03, 0.08, 0.03, 0.08], border: { type: "none" } as never, autoPage: false });
   };
-  const content = (eyebrow: string, title: string) => {
+  // Speaker notes (Sandra 2026-10-05): every slide carries the names and
+  // reasons behind its numbers; the Asks are explained on Week at a glance.
+  const notesFor = (key: "cover" | SlideKey) => {
+    let n = (t.notes?.[key] ?? "").trim();
+    if (key === "glance") {
+      const asks = t.asks.filter(Boolean);
+      if (asks.length) n += `${n ? "\n\n" : ""}ASKS FOR BRAD\n${asks.map((a) => `- ${a}`).join("\n")}`;
+    }
+    return n;
+  };
+  const content = (eyebrow: string, title: string, key?: SlideKey) => {
     const s = pptx.addSlide();
     kinds.push("content");
+    if (key) { const n = notesFor(key); if (n) s.addNotes(n); }
     s.addText(eyebrow.toUpperCase(), { objectName: "ph-eyebrow", x: 0.33, y: 0.3, w: 12.67, h: 0.42, fontFace: F, fontSize: 20, color: B.calm, charSpacing: 3, valign: "top", margin: 0 });
     s.addText(title, { objectName: "ph-title", x: 0.33, y: 0.74, w: 12.67, h: 0.55, fontFace: FB, fontSize: 26, color: B.onyx, valign: "top", margin: 0, fit: "shrink" });
     return s;
@@ -76,13 +87,14 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
   {
     const s = pptx.addSlide();
     kinds.push("cover");
+    { const n = notesFor("cover"); if (n) s.addNotes(n); }
     s.addText(t.coverTitle, { objectName: "ph-ctrTitle", x: 0.88, y: 2.57, w: 10.0, h: 1.97, fontFace: FB, fontSize: 54, color: B.onyx, valign: "bottom", margin: 0 });
     s.addText(t.coverSubtitle, { objectName: "ph-subTitle", x: 0.88, y: 4.55, w: 10.0, h: 0.8, fontFace: F, fontSize: 20, color: B.mahogany, valign: "top", margin: 0 });
   }
 
   // ================================================================ 2 WEEK AT A GLANCE
   {
-    const s = content("Week at a glance", t.titles.glance);
+    const s = content("Week at a glance", t.titles.glance, "glance");
     t.cards.slice(0, 3).forEach((c, i) => {
       const x = 0.33 + i * 4.25;
       box(s, x, 1.55, 4.05, 3.35);
@@ -107,11 +119,11 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
   // ================================================================ 3 PORTFOLIO OVERVIEW
   {
     const p = d.portfolio;
-    const s = content("Portfolio overview", t.titles.portfolio);
+    const s = content("Portfolio overview", t.titles.portfolio, "portfolio");
     const share = (n: number) => (p.total ? `${pct(n / p.total)} of total` : "");
     const kpis: [string, number, string, string][] = [
       ["Total projects", p.total, "Completed + open, last week", B.mahogany], ["Completed", p.completed, `Closed ${fmtMD(d.week.start)} – ${fmtMD(d.week.end)}`, B.calm],
-      ["Active", p.active, share(p.active), B.hydrate], ["Not started", p.notStarted, share(p.notStarted), B.taupe],
+      ["Active", p.active, p.operationalActive ? `${share(p.active)} · incl. ${p.operationalActive} Training Delivery` : share(p.active), B.hydrate], ["Not started", p.notStarted, share(p.notStarted), B.taupe],
       ["Paused", p.paused, share(p.paused), B.clarify], ["Overdue", p.overdue, `Active, as of ${fmtMD(d.generatedOn)}`, B.renew],
     ];
     kpis.forEach(([lab, val, sub, col], i) => {
@@ -136,8 +148,8 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
   // ================================================================ 4 ACTIVE PROJECT HEALTH
   {
     const h = d.health;
-    const s = content("Active project health", t.titles.health);
-    card(s, 0.33, 1.55, 5.3, 5.07, `Health of ${h.activeCount} active projects`, `Current state as of ${fmtMD(d.generatedOn)}`);
+    const s = content("Active project health", t.titles.health, "health");
+    card(s, 0.33, 1.55, 5.3, 5.07, `Health of ${h.activeCount} active projects`, h.operationalActive ? `As of ${fmtMD(d.generatedOn)} · excludes ${h.operationalActive} Training Delivery (always “Ongoing”)` : `Current state as of ${fmtMD(d.generatedOn)}`);
     const HC: Record<string, string> = { "On track": B.calm, "Done on time · close pending": B.hydrate, "Done late · close pending": B.clarify, "At risk": B.protect, "Off track": B.brighten, Overdue: B.renew, "Not started": B.taupe, "Schedule review": B.rewind, "Health unavailable": B.linen };
     const bk = h.buckets.length ? h.buckets : [{ label: "None", count: 1 }];
     addChart(s, pptx.ChartType.doughnut, [{ name: "Projects", labels: bk.map((b) => b.label), values: bk.map((b) => b.count) }],
@@ -167,7 +179,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
   // ================================================================ 4b DELIVERY DRIVERS
   if (t.include.drivers && d.drivers.rows.length) {
     const dr = d.drivers;
-    const s = content("Delivery drivers", t.titles.drivers);
+    const s = content("Delivery drivers", t.titles.drivers, "drivers");
     const n = Math.min(5, dr.overdueCount);
     const pats: [string, string, string][] = [
       [`${dr.grewCount} of ${n}`, "had tasks added after Start Project", B.renew],
@@ -192,7 +204,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
   // ================================================================ 5 PORTFOLIO MIX (one chart)
   {
     const m = d.mix;
-    const s = content("Portfolio mix", t.titles.mix);
+    const s = content("Portfolio mix", t.titles.mix, "mix");
     card(s, 0.33, 1.55, 8.6, 5.07, "Active projects by Project Type, split by owner group and Planning Type",
       `${m.active} active projects · % within each row (count) · Development = owned by anyone who is not a Trainer`);
     const segs: [string, keyof (typeof m.rows)[0], string, string][] = [
@@ -229,7 +241,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
   // ================================================================ 6 PROJECT PIPELINE
   {
     const pl = d.pipeline;
-    const s = content("Project pipeline", t.titles.pipeline);
+    const s = content("Project pipeline", t.titles.pipeline, "pipeline");
     const quad = (x: number, y: number, col: string, head: string, items: ProjLine[], cols: string[], colW: number[], row: (p: ProjLine) => Cell[]) => {
       box(s, x, y, 6.25, 2.5);
       box(s, x, y, 6.25, 0.07, col, null, false);
@@ -247,7 +259,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
   // ================================================================ 7 TEAM UTILIZATION (by role)
   {
     const u = d.util;
-    const s = content("Team utilization", t.titles.util);
+    const s = content("Team utilization", t.titles.util, "util");
     card(s, 0.33, 1.55, 8.2, 5.07, "Utilization by role · last week, this week, next week",
       "Last week = actual (logged ÷ expected) · This & next week = planned (task estimates ÷ capacity) · red = over 100%");
     const labels = u.roles.map((r) => r.label);
@@ -288,7 +300,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
   // ================================================================ 7b TRAINING DELIVERY (phase151)
   if (t.include.training) {
     const tr = d.training;
-    const s = content("Training delivery", t.titles.training);
+    const s = content("Training delivery", t.titles.training, "training");
     const kpis: [string, string, string, string][] = [
       ["Sessions delivered", String(tr.delivered), `${fmtMD(d.week.start)} – ${fmtMD(d.week.end)} · ${tr.validated} validated`, B.calm],
       ["Hours logged", h0(tr.loggedHours), tr.scopedHours ? `on sessions · ${h0(tr.scopedHours)} scoped for delivered` : "on session tasks last week", B.hydrate],
@@ -317,7 +329,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
   // ================================================================ 8 APPENDIX
   if (t.include.appendix) {
     const o = d.overall;
-    const s = content("Appendix", t.titles.appendix);
+    const s = content("Appendix", t.titles.appendix, "appendix");
     box(s, 0.33, 1.55, 8.0, 5.07);
     const labels = o.rows.map((r) => r.label);
     const lab = [o.rows.map((r) => (r.planned ? `${Math.round((r.planned / (r.planned + r.adHoc)) * 100)}% (${r.planned})` : null)), o.rows.map((r) => (r.adHoc ? `${Math.round((r.adHoc / (r.planned + r.adHoc)) * 100)}% (${r.adHoc})` : null))];
@@ -416,13 +428,29 @@ async function transplant(genBuf: ArrayBuffer, tplBuf: ArrayBuffer, kinds: ("cov
     tpl.file(`ppt/slides/slide${n}.xml`, xml);
     let rels = await gen.file(`ppt/slides/_rels/slide${n}.xml.rels`)!.async("string");
     rels = rels
-      .replace(/<Relationship[^>]*notesSlide[^>]*\/>/g, "")
       .replace(/Target="\.\.\/slideLayouts\/slideLayout\d+\.xml"/, `Target="../slideLayouts/${kinds[i] === "cover" ? coverLayout : contentLayout}"`);
     tpl.file(`ppt/slides/_rels/slide${n}.xml.rels`, rels);
     overrides.push(`<Override PartName="/ppt/slides/slide${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`);
     const r = `rId${rid++}`;
     presRels = presRels.replace("</Relationships>", `<Relationship Id="${r}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${n}.xml"/></Relationships>`);
     sldIds.push(`<p:sldId id="${256 + i}" r:id="${r}"/>`);
+  }
+  // speaker notes: pptxgenjs writes ppt/notesSlides/notesSlideN.xml pointing at
+  // ../notesMasters/notesMaster1.xml -- the template ships its own notes master
+  // at that same path, so only the notes slides + content types are copied.
+  const hasNotesMaster = !!tpl.file("ppt/notesMasters/notesMaster1.xml");
+  for (const f of Object.keys(gen.files)) {
+    if (gen.files[f].dir || !/^ppt\/notesSlides\//.test(f)) continue;
+    if (!hasNotesMaster) continue;
+    tpl.file(f, await gen.file(f)!.async("string"));
+    if (/^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(f)) overrides.push(`<Override PartName="/${f}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>`);
+  }
+  if (!hasNotesMaster) {
+    for (let i = 0; i < slideFiles.length; i++) {
+      const n = slideFiles[i].match(/(\d+)\.xml$/)![1];
+      const rp = `ppt/slides/_rels/slide${n}.xml.rels`;
+      tpl.file(rp, (await tpl.file(rp)!.async("string")).replace(/<Relationship[^>]*notesSlide[^>]*\/>/g, ""));
+    }
   }
   // charts + embedded workbooks
   const chartFiles = Object.keys(gen.files).filter((f) => /^ppt\/charts\/chart\d+\.xml$/.test(f)).sort((a, b) => +a.match(/(\d+)\.xml$/)![1] - +b.match(/(\d+)\.xml$/)![1]);

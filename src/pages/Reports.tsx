@@ -167,6 +167,24 @@ export default function Reports() {
             ))}
             <div className="rp-hint">Keep titles to one line (about 60 characters).</div>
           </Section>
+
+          <Section id="notes" title="Speaker notes — names and reasons behind each slide's numbers" open={open} setOpen={setOpen}>
+            <div className="rp-hint" style={{ marginBottom: 8 }}>
+              Drafted from Tempo and added to each slide's Notes in PowerPoint. Edit freely; lines starting with "- " are bullets. The Asks for Brad are added to the Week at a Glance notes automatically.
+            </div>
+            {([{ key: "cover", eyebrow: "Cover" }, ...SLIDES] as { key: "cover" | SlideKey; eyebrow: string }[]).map((s) => (
+              <label key={s.key} className="rp-field" style={{ marginTop: 8 }}>
+                <span>{s.eyebrow}</span>
+                <textarea
+                  className="rp-input"
+                  rows={Math.min(14, Math.max(3, (text.notes[s.key] ?? "").split("\n").length + 1))}
+                  value={text.notes[s.key] ?? ""}
+                  onChange={(e) => set((t) => ({ ...t, notes: { ...t.notes, [s.key]: e.target.value } }))}
+                  style={{ fontFamily: "inherit", fontSize: 12 }}
+                />
+              </label>
+            ))}
+          </Section>
         </>
       )}
     </div>

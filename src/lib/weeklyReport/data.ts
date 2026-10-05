@@ -24,7 +24,7 @@ export interface Person {
 }
 interface Lookup { id: string; name: string }
 interface Avail { person_id: string; date: string; status: "off" | "half_day" }
-interface Entry { person_id: string; task_id: string | null; started_at: string; duration_minutes: number | null }
+interface Entry { person_id: string; task_id: string | null; activity_type_id?: string | null; started_at: string; duration_minutes: number | null }
 type P = ProjectRow & { actual_close_date?: string | null; is_unsaved?: boolean | null };
 type T = TaskRow & { created_at?: string | null; actual_completion_date?: string | null; is_archived?: boolean | null };
 
@@ -39,9 +39,9 @@ export interface WeeklyReportData {
     logged: number; expected: number; nonProject: number; doneLogged: number; doneEst: number;
     utilPct: number; starting: number; intake: number; pausedInWeek: number; pausedNow: number; pausedNoResume: number;
   };
-  portfolio: { total: number; completed: number; active: number; notStarted: number; paused: number; overdue: number;
+  portfolio: { total: number; completed: number; active: number; operationalActive: number; notStarted: number; paused: number; overdue: number;
     movement: { label: string; started: number; completed: number }[] };
-  health: { activeCount: number; buckets: { label: string; count: number }[]; overdue: (ProjLine & { daysLate: number })[]; dueThisWeek: ProjLine[]; closePending: number; offTrack: number };
+  health: { activeCount: number; operationalActive: number; buckets: { label: string; count: number }[]; overdue: (ProjLine & { daysLate: number })[]; dueThisWeek: ProjLine[]; closePending: number; offTrack: number };
   drivers: { rows: { name: string; type: string; daysLate: number; what: string; signal: string }[]; grewCount: number; overdueCount: number; tasksAdded: number; hoursAdded: number; extRequests: number; notes: number };
   mix: { rows: { label: string; devPlanned: number; devAdHoc: number; trPlanned: number; trAdHoc: number }[]; active: number; dev: number; trainer: number };
   pipeline: { completed: ProjLine[]; intake: ProjLine[]; starting: ProjLine[]; paused: ProjLine[] };
@@ -49,6 +49,8 @@ export interface WeeklyReportData {
     overloaded: { name: string; pct: number }[]; room: { name: string; pct: number }[];
     thisPlanned: number; thisCap: number; nextPlanned: number; nextCap: number };
   overall: { rows: { label: string; planned: number; adHoc: number }[]; total: number; untyped: number };
+  // Speaker notes per slide (plain text; "- " lines are bullets). Editable on the Reports page.
+  notes: Record<"cover" | "glance" | "portfolio" | "health" | "drivers" | "mix" | "pipeline" | "util" | "training" | "appendix", string>;
   // phase151: sessions in operational projects (e.g. quarterly Training Delivery).
   training: {
     projects: number;
@@ -146,7 +148,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   const fromTs = parseLocalDate(week.start).toISOString();
   const toTs = addDays(parseLocalDate(nextWeek.end), 1).toISOString();
   const entries = await fetchAll<Entry>((f, t) =>
-    supabase.from("time_entries").select("person_id,task_id,started_at,duration_minutes")
+    supabase.from("time_entries").select("person_id,task_id,activity_type_id,started_at,duration_minutes")
       .in("status", ["confirmed", "approved"]).eq("is_archived", false)
       .gte("started_at", fromTs).lt("started_at", toTs).order("started_at").range(f, t)
   );
@@ -190,12 +192,16 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   const nonProject = loggedFor(loggerIds, week, true);
   // Productivity: hours logged (all time, finalized) vs estimate on tasks completed last week.
   let doneLogged = 0;
+  const loggedByTask = new Map<string, number>();
   let doneEst = 0;
   const doneIds = doneTasks.filter((t) => Number(t.estimated_hours) > 0).map((t) => t.id);
   for (let i = 0; i < doneIds.length; i += 150) {
     const chunk = doneIds.slice(i, i + 150);
     const { data } = await supabase.from("time_entries").select("task_id,duration_minutes").in("status", ["confirmed", "approved"]).eq("is_archived", false).in("task_id", chunk);
-    for (const e of (data as { duration_minutes: number | null }[]) ?? []) doneLogged += (e.duration_minutes ?? 0) / 60;
+    for (const e of (data as { task_id: string; duration_minutes: number | null }[]) ?? []) {
+      doneLogged += (e.duration_minutes ?? 0) / 60;
+      loggedByTask.set(e.task_id, (loggedByTask.get(e.task_id) ?? 0) + (e.duration_minutes ?? 0) / 60);
+    }
   }
   for (const t of doneTasks) if (Number(t.estimated_hours) > 0) doneEst += Number(t.estimated_hours);
 
@@ -447,16 +453,158 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     trainers: trainersRows,
   };
 
+  // ------------------------------------------------------------ speaker notes (Sandra 2026-10-05)
+  // "Put in the notes what those are; extract the reason if you can."
+  const [allPeopleRes, actTypesRes] = await Promise.all([
+    supabase.from("people").select("id,name"),
+    supabase.from("non_project_activity_types").select("id,name"),
+  ]);
+  const nameOf = new Map(((allPeopleRes.data as Lookup[]) ?? []).map((x) => [x.id, x.name]));
+  const actName = new Map(((actTypesRes.data as Lookup[]) ?? []).map((x) => [x.id, x.name]));
+  const projById = new Map(projects.map((p) => [p.id, p]));
+  const who = (id: string | null | undefined) => (id && nameOf.get(id)) || "Unassigned";
+  const md = (d: string | null | undefined) => (d ? fmtMD(d.slice(0, 10)) : "no date");
+  const h1 = (n: number) => `${round1(n)}h`;
+  const bl = (items: string[], empty = "None.") => (items.length ? items.map((x) => `- ${x}`).join("\n") : `- ${empty}`);
+  const cap = (items: string[], max: number) => (items.length > max ? [...items.slice(0, max), `…and ${items.length - max} more (see Tempo)`] : items);
+  const projLabel = (p: P) => `${p.name} (P-${String(p.project_number).padStart(4, "0")}, ${typeOf(p)} · ${planOf(p)}, owner ${who(p.owner_id)})`;
+  const pauseWhy = (p: P) => [p.pause_category, p.pause_reason].filter((x) => x && String(x).trim()).join(" — ") || "no reason recorded";
+
+  // Delivery
+  const completedNotes = completedProjects.map((p) => {
+    const done = completionDateOf(p), end = d10(p.end_date);
+    return `${projLabel(p)} — completed ${md(done)}${end ? (done <= end ? " (on time)" : ` (late vs End Date ${md(end)})`) : ""}`;
+  });
+  const lateTasks = doneTasks.filter((t) => t.current_due_date && d10(t.actual_completion_date) > d10(t.current_due_date));
+  const byProj = new Map<string, number>();
+  for (const t of doneTasks) byProj.set(t.project_id, (byProj.get(t.project_id) ?? 0) + 1);
+  const tasksByProject = Array.from(byProj.entries()).sort((a, b) => b[1] - a[1]).map(([pid, n]) => `${projById.get(pid)?.name ?? "Unknown project"}: ${n}`);
+  const lateNotes = lateTasks.map((t) => `${t.name} (${projById.get(t.project_id)?.name ?? "—"}, ${who(t.assignee_id)}) — due ${md(t.current_due_date)}, done ${md(t.actual_completion_date)}`);
+  const overEst = doneTasks
+    .filter((t) => Number(t.estimated_hours) > 0 && (loggedByTask.get(t.id) ?? 0) > Number(t.estimated_hours) * 1.25 + 0.5)
+    .map((t) => ({ t, over: (loggedByTask.get(t.id) ?? 0) - Number(t.estimated_hours) }))
+    .sort((a, b) => b.over - a.over)
+    .map(({ t }) => `${t.name} (${projById.get(t.project_id)?.name ?? "—"}) — ${h1(loggedByTask.get(t.id) ?? 0)} logged vs ${h1(Number(t.estimated_hours))} estimated`);
+
+  // Utilization (last week)
+  const perLogger = loggers.map((p) => {
+    const ids = new Set([p.id]);
+    const exp = expectedFor([p], week), lg = loggedFor(ids, week);
+    return { name: p.name, exp, lg, gap: exp - lg };
+  });
+  const gaps = perLogger.filter((x) => x.gap >= 2).sort((a, b) => b.gap - a.gap).map((x) => `${x.name}: ${h1(x.lg)} of ${h1(x.exp)} (${h1(x.gap)} not logged)`);
+  const npBy = new Map<string, number>();
+  for (const e of entries) {
+    if (e.task_id || !loggerIds.has(e.person_id)) continue;
+    const d = localDay(e.started_at);
+    if (d < week.start || d > week.end || d < trackingStart) continue;
+    const k = (e.activity_type_id && actName.get(e.activity_type_id)) || "Other";
+    npBy.set(k, (npBy.get(k) ?? 0) + (e.duration_minutes ?? 0) / 60);
+  }
+  const npNotes = Array.from(npBy.entries()).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}: ${h1(v)}`);
+
+  // Pipeline
+  const startingNotes = startingP.sort((a, b) => d10(a.start_date).localeCompare(d10(b.start_date))).map((p) => `${projLabel(p)} — starts ${md(p.start_date)}`);
+  const intakeNotes = intakeP.map((p) => `${projLabel(p)} — added ${md(localDay(p.created_at))}, now ${statusOf(p)}`);
+  const pausedWeekP = live.filter((p) => inWeek(d10(p.paused_at), week));
+  const pausedNotes = (list: P[]) =>
+    list.map((p) => {
+      const days = p.paused_at ? Math.max(0, daysBetween(d10(p.paused_at), todayIso)) : 0;
+      return `${projLabel(p)} — paused ${md(p.paused_at)} (${days} days); reason: ${pauseWhy(p)}; expected resume: ${p.pause_expected_resume ? md(p.pause_expected_resume) : "not set"}`;
+    });
+
+  // Health
+  const overdueNotes = overdueLines.map((o) => {
+    const p = overdueP.find((x) => x.name === o.name) as P | undefined;
+    const dr = driverRows.find((r) => r.name === o.name);
+    return `${o.name}${p ? ` (owner ${who(p.owner_id)})` : ""} — End Date ${md(o.date)}, ${o.daysLate} days late${dr ? `. Why: ${dr.what}` : ""}`;
+  });
+  const healthList = (label: string) => activeP.filter((p) => healthBy.get(p.id) === label).map((p) => `${p.name} (owner ${who(p.owner_id)}, End Date ${md(p.end_date)})`);
+  const closePendingNotes = activeP.filter((p) => (healthBy.get(p.id) ?? "").includes("close pending")).map((p) => `${p.name} (owner ${who(p.owner_id)})`);
+  const opActive = activeAll.filter((p) => (p as { is_operational?: boolean | null }).is_operational);
+
+  // Utilization (this/next week)
+  const overNotes = perPerson.filter((x) => x.thisPct > 1.005).sort((a, b) => b.thisPct - a.thisPct).map((x) => `${x.name}: ${Math.round(x.thisPct * 100)}% planned this week, ${Math.round(x.nextPct * 100)}% next week`);
+  const roomNotes = perPerson.filter((x) => x.nextPct < 0.5).sort((a, b) => a.nextPct - b.nextPct).map((x) => `${x.name}: ${Math.round(x.thisPct * 100)}% this week, ${Math.round(x.nextPct * 100)}% next week`);
+
+  // Training
+  const sessionLine = (t: T) => `${t.name} — ${who(t.assignee_id)}, ${md(t.status === "Done" ? t.actual_completion_date ?? t.current_due_date : t.current_due_date)}${t.status === "Done" ? (t.validated_completion_date ? ", validated" : ", awaiting validation") : ""}`;
+
+  const notes: WeeklyReportData["notes"] = {
+    cover: `Report week: ${md(week.start)} – ${md(week.end)} (Mon–Fri). "This week" = ${md(thisWeek.start)} – ${md(thisWeek.end)}. Generated ${md(todayIso)} from Tempo; health and paused figures are as of the generation date.`,
+    glance: [
+      "DELIVERY · LAST WEEK",
+      `Projects completed (${completedProjects.length}):`, bl(completedNotes),
+      `Tasks done (${doneTasks.length}) by project:`, bl(cap(tasksByProject, 10)),
+      `Finished after their due date (${lateTasks.length} of ${doneTasks.length}):`, bl(cap(lateNotes, 8)),
+      "",
+      "UTILIZATION · LAST WEEK",
+      `${h1(logged)} logged of ${h1(expected)} expected (finalized time only; expected = each person's capacity minus leave/holidays).`,
+      `People with 2h+ not logged:`, bl(cap(gaps, 10), "Everyone logged within 2h of expected."),
+      `Non-project time (${h1(nonProject)}) by activity:`, bl(npNotes),
+      `Tasks that ran 25%+ over estimate:`, bl(cap(overEst, 6)),
+      "",
+      "PIPELINE",
+      `Starting this week (${startingP.length}):`, bl(cap(startingNotes, 10)),
+      `New intake last week (${intakeP.length}):`, bl(cap(intakeNotes, 10)),
+      `Paused last week (${pausedWeekP.length}):`, bl(pausedNotes(pausedWeekP)),
+      `All paused projects (${pausedNowP.length}):`, bl(pausedNotes(pausedNowP)),
+    ].join("\n"),
+    portfolio: [
+      "How to read: projects relevant to the report week. Completed = closed during the week; Active / Not started / Paused = open projects that had started (or were planned to) by week end. Training Delivery projects are included here.",
+      `Completed (${completedProjects.length}):`, bl(completedProjects.map((p) => `${p.name} — ${md(completionDateOf(p))}`)),
+      `Paused (${pausedNowP.length}):`, bl(pausedNowP.map((p) => `${p.name} — ${pauseWhy(p)}`)),
+      `Overdue (${overdueP.length}):`, bl(overdueLines.map((o) => `${o.name} — ${o.daysLate} days late`)),
+      opActive.length ? `Includes ${opActive.length} active Training Delivery project${opActive.length === 1 ? "" : "s"}: ${opActive.map((p) => p.name).join(", ")}.` : "",
+    ].filter(Boolean).join("\n"),
+    health: [
+      `Health of ${activeP.length} of the ${activeAll.length} In Progress projects as of ${md(todayIso)}. The other ${activeAll.length - activeP.length} are Training Delivery projects${opActive.length ? ` (${opActive.map((p) => p.name).join(", ")})` : ""} — counted as Active on the Portfolio slide, but left out here because their health is always "Ongoing".`,
+      `Overdue (${overdueP.length}) — past End Date, not complete:`, bl(overdueNotes),
+      `Off track:`, bl(healthList("Off track")),
+      `At risk:`, bl(healthList("At risk")),
+      `Close pending (100% done, still In Progress — owner should mark Completed):`, bl(closePendingNotes),
+      `Due this week:`, bl(dueThisWeek.map((x) => `${x.name} — ${md(x.date)}`)),
+    ].join("\n"),
+    drivers: [
+      "Why overdue projects slipped, from Tempo history (tasks added after Start Project, date changes, extension requests, project notes):",
+      bl(driverRows.map((r) => `${r.name} (${r.daysLate} days late) — ${r.what} Signal: ${r.signal}.`)),
+    ].join("\n"),
+    mix: [
+      `Active (In Progress) projects by Project Type, split by owner group and Planning Type. Development = owned by anyone who is not a Trainer. Includes Training Delivery projects.`,
+      ...mixRows.map((r) => `- ${r.label}: Development planned ${r.devPlanned}, Development ad hoc ${r.devAdHoc}, Trainer planned ${r.trPlanned}, Trainer ad hoc ${r.trAdHoc}`),
+    ].join("\n"),
+    pipeline: [
+      `Completed last week (${completedProjects.length}):`, bl(completedNotes),
+      `New intake last week (${intakeP.length}):`, bl(intakeNotes),
+      `Starting this week (${startingP.length}):`, bl(startingNotes),
+      `Paused (${pausedNowP.length}):`, bl(pausedNotes(pausedNowP)),
+    ].join("\n"),
+    util: [
+      "Last week = actual (finalized logged ÷ expected hours). This and next week = planned (task estimates spread over working days ÷ capacity, leave and holidays removed).",
+      `Over 100% this week:`, bl(overNotes),
+      `Under 50% next week (room to take work):`, bl(roomNotes),
+      ...roles.map((r) => `- ${r.label}: last week ${Math.round(r.last * 100)}%, this week ${Math.round(r.thisW * 100)}%, next week ${Math.round(r.nextW * 100)}%`),
+    ].join("\n"),
+    training: [
+      "Drill-down of Training Delivery projects (already counted in the portfolio). A session = a task with Output Type \"Session\"; hours = finalized time logged on sessions in the report week.",
+      `Delivered last week (${tDone.length}):`, bl(cap(tDone.map(sessionLine), 15)),
+      `Scheduled this week (${tThis.length}):`, bl(cap(tThis.map(sessionLine), 15)),
+      `Past date, not marked Done (${tPast.length}) — trainers to update:`, bl(cap(tPast.map(sessionLine), 15)),
+      tCancelled.length ? `Cancelled last week (${tCancelled.length}):\n${bl(tCancelled.map((t) => `${t.name} — ${who(t.assignee_id)}${t.cancellation_reason ? `; reason: ${t.cancellation_reason}` : ""}`))}` : "",
+    ].filter(Boolean).join("\n"),
+    appendix: `All projects to date (excluding Cancelled) by Project Type, Planned vs Ad Hoc.${overall.untyped ? ` ${overall.untyped} project(s) have no Project Type yet: ${live.filter((p) => typeOf(p) === "No type").map((p) => p.name).slice(0, 8).join(", ")}.` : ""}`,
+  };
+
   return {
-    generatedOn: todayIso, week, thisWeek, nextWeek, training,
+    generatedOn: todayIso, week, thisWeek, nextWeek, training, notes,
     glance: {
       completedProjects: completedProjects.map((p) => p.name), tasksDone: doneTasks.length, tasksOnTime,
       logged, expected, nonProject, doneLogged, doneEst, utilPct: expected > 0 ? logged / expected : 0,
       starting: startingP.length, intake: intakeP.length, pausedInWeek, pausedNow: pausedNowP.length,
       pausedNoResume: pausedNowP.filter((p) => !p.pause_expected_resume).length,
     },
-    portfolio: { total: pfCompleted + pfActive + pfNotStarted + pfPaused, completed: pfCompleted, active: pfActive, notStarted: pfNotStarted, paused: pfPaused, overdue: overdueP.length, movement },
-    health: { activeCount: activeP.length, buckets, overdue: overdueLines, dueThisWeek, closePending: (counts.get("Done on time · close pending") ?? 0) + (counts.get("Done late · close pending") ?? 0), offTrack: counts.get("Off track") ?? 0 },
+    portfolio: { total: pfCompleted + pfActive + pfNotStarted + pfPaused, completed: pfCompleted, active: pfActive, operationalActive: activeAll.length - activeP.length, notStarted: pfNotStarted, paused: pfPaused, overdue: overdueP.length, movement },
+    health: { activeCount: activeP.length, operationalActive: activeAll.length - activeP.length, buckets, overdue: overdueLines, dueThisWeek, closePending: (counts.get("Done on time · close pending") ?? 0) + (counts.get("Done late · close pending") ?? 0), offTrack: counts.get("Off track") ?? 0 },
     drivers: { rows: driverRows, grewCount: grew, overdueCount: overdueP.length, tasksAdded, hoursAdded, extRequests: extCount, notes: noteCount },
     mix: { rows: mixRows, active: activeAll.length, dev: activeAll.length - trainerActive, trainer: trainerActive },
     pipeline,

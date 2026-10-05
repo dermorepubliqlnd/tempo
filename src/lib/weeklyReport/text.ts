@@ -21,6 +21,8 @@ export interface DeckText {
   cards: GlanceCard[];
   asks: string[]; // "Label: text" -- label part rendered bold
   include: { drivers: boolean; training: boolean; appendix: boolean };
+  // Speaker notes per slide (from the data; editable on the Reports page).
+  notes: Record<"cover" | SlideKey, string>;
 }
 
 // ------------------------------------------------------------------ text defaults
@@ -96,6 +98,7 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
     ],
     asks,
     include: { drivers: d.drivers.rows.length > 0, training: d.training.projects > 0, appendix: true },
+    notes: { ...d.notes },
   };
 }
 
