@@ -41,7 +41,9 @@ export default function AddSessionModal({ projects, people, meId, isFullAccess, 
   const sorted = useMemo(() => [...projects].sort((a, b) => b.project_number - a.project_number), [projects]);
   const [projectId, setProjectId] = useState(sorted[0]?.id ?? "");
   const [name, setName] = useState("");
-  const [date, setDate] = useState(toISO(new Date()));
+  const today = toISO(new Date());
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(today);
   const [hours, setHours] = useState("2");
   const [assigneeId, setAssigneeId] = useState(meId);
   const [busy, setBusy] = useState(false);
@@ -51,16 +53,24 @@ export default function AddSessionModal({ projects, people, meId, isFullAccess, 
   const project = sorted.find((p) => p.id === projectId);
   const canPickAssignee = isFullAccess || project?.owner_id === meId;
   const hoursNum = Number(hours);
-  const valid = !!projectId && name.trim().length > 0 && !!date && hoursNum > 0 && hoursNum <= 12;
+  const valid =
+    !!projectId &&
+    name.trim().length > 0 &&
+    !!startDate &&
+    !!endDate &&
+    endDate >= startDate &&
+    hoursNum > 0 &&
+    hoursNum <= 12;
 
   async function save(addAnother: boolean) {
     if (!valid || busy) return;
     setBusy(true);
     setError(null);
-    const { error: err } = await supabase.rpc("add_session_task", {
+    const { error: err } = await supabase.rpc("add_session_task_range", {
       p_project_id: projectId,
       p_name: name.trim(),
-      p_date: date,
+      p_start_date: startDate,
+      p_end_date: endDate,
       p_hours: hoursNum,
       p_assignee: canPickAssignee ? assigneeId : meId,
     });
@@ -79,7 +89,7 @@ export default function AddSessionModal({ projects, people, meId, isFullAccess, 
   }
 
   return (
-    <Modal title="Add Session" onClose={onClose} width={440}>
+    <Modal title="Add Session" onClose={onClose} width={620}>
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
           Each session is its own task. Log your time on it as usual (timer or Add Time), then mark it Done for validation.
@@ -115,16 +125,40 @@ export default function AddSessionModal({ projects, people, meId, isFullAccess, 
                 }}
               />
             </div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <div style={{ flex: 1 }}>
-                <div style={labelStyle}>Date</div>
-                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={fieldStyle} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 120px", gap: 10 }}>
+              <div>
+                <div style={labelStyle}>Session Start Date</div>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setStartDate(next);
+                    if (!endDate || endDate < next) setEndDate(next);
+                  }}
+                  style={fieldStyle}
+                />
               </div>
-              <div style={{ width: 120 }}>
+              <div>
+                <div style={labelStyle}>Session End Date</div>
+                <input
+                  type="date"
+                  value={endDate}
+                  min={startDate || undefined}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  style={fieldStyle}
+                />
+              </div>
+              <div>
                 <div style={labelStyle}>Scoped hours</div>
                 <input type="number" min={0.25} max={12} step={0.25} value={hours} onChange={(e) => setHours(e.target.value)} style={fieldStyle} />
               </div>
             </div>
+            {startDate && endDate && endDate < startDate && (
+              <div style={{ fontSize: 11, color: "var(--danger-text)" }}>
+                Session End Date cannot be earlier than Session Start Date.
+              </div>
+            )}
             {canPickAssignee && (
               <div>
                 <div style={labelStyle}>Trainer</div>
