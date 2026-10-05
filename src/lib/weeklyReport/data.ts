@@ -208,8 +208,6 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   const pfCompleted = completedProjects.length;
   let pfActive = 0, pfNotStarted = 0, pfPaused = 0;
   for (const p of live) {
-    // phase149: operational projects have their own Training Delivery slide.
-    if ((p as { is_operational?: boolean | null }).is_operational) continue;
     const s = statusOf(p);
     if (s === "Completed") continue;
     if (p.start_date && d10(p.start_date) > week.end) continue;
@@ -219,7 +217,11 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   }
   // phase149: operational projects (e.g. quarterly Training Delivery) have no
   // date-based health -- keep them out of the health/overdue/due-this-week slides.
-  const activeP = live.filter((p) => statusOf(p) === "In Progress" && !(p as { is_operational?: boolean | null }).is_operational);
+  // Sandra 2026-10-05: operational projects (Training Delivery) STAY in the
+  // portfolio counts and mix; only date-based health/overdue/due-this-week
+  // leave them out. The Training delivery slide is the drill-down.
+  const activeAll = live.filter((p) => statusOf(p) === "In Progress");
+  const activeP = activeAll.filter((p) => !(p as { is_operational?: boolean | null }).is_operational);
   const healthBy = new Map(activeP.map((p) => [p.id, healthOf(p as ProjectRow, tasks as TaskRow[], holidayDates).label]));
   const overdueP = activeP.filter((p) => healthBy.get(p.id) === "Overdue");
   const movement: WeeklyReportData["portfolio"]["movement"] = [];
@@ -312,9 +314,9 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     trPlanned: list.filter((p) => isTrainer(p) && !isAdHoc(p)).length,
     trAdHoc: list.filter((p) => isTrainer(p) && isAdHoc(p)).length,
   });
-  const typesActive = Array.from(new Set(activeP.map(typeOf))).sort((a, b) => activeP.filter((p) => typeOf(p) === b).length - activeP.filter((p) => typeOf(p) === a).length);
-  const mixRows = [mixRow("All active", activeP), ...typesActive.map((t) => mixRow(t, activeP.filter((p) => typeOf(p) === t)))];
-  const trainerActive = activeP.filter(isTrainer).length;
+  const typesActive = Array.from(new Set(activeAll.map(typeOf))).sort((a, b) => activeAll.filter((p) => typeOf(p) === b).length - activeAll.filter((p) => typeOf(p) === a).length);
+  const mixRows = [mixRow("All active", activeAll), ...typesActive.map((t) => mixRow(t, activeAll.filter((p) => typeOf(p) === t)))];
+  const trainerActive = activeAll.filter(isTrainer).length;
 
   // ------------------------------------------------------------ pipeline
   const pipeline = {
@@ -456,7 +458,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     portfolio: { total: pfCompleted + pfActive + pfNotStarted + pfPaused, completed: pfCompleted, active: pfActive, notStarted: pfNotStarted, paused: pfPaused, overdue: overdueP.length, movement },
     health: { activeCount: activeP.length, buckets, overdue: overdueLines, dueThisWeek, closePending: (counts.get("Done on time · close pending") ?? 0) + (counts.get("Done late · close pending") ?? 0), offTrack: counts.get("Off track") ?? 0 },
     drivers: { rows: driverRows, grewCount: grew, overdueCount: overdueP.length, tasksAdded, hoursAdded, extRequests: extCount, notes: noteCount },
-    mix: { rows: mixRows, active: activeP.length, dev: activeP.length - trainerActive, trainer: trainerActive },
+    mix: { rows: mixRows, active: activeAll.length, dev: activeAll.length - trainerActive, trainer: trainerActive },
     pipeline,
     util: {
       roles,

@@ -304,7 +304,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
       txt(s, x + 0.2, y + 1.35, 2.35, 0.42, sub, { fontSize: 9, color: B.taupe });
     });
     box(s, 0.33, 5.62, 5.55, 1.0, B.panel, null);
-    txt(s, 0.55, 5.7, 5.15, 0.85, rich([[`${tr.qtdLabel} to date: `, true], [`${plural(tr.qtdDelivered, "session")} delivered. `, false], ["Sessions are tasks with Output Type “Session” in Training Delivery projects; hours count toward utilization.", false, 9.5, B.taupe]], 11));
+    txt(s, 0.55, 5.7, 5.15, 0.85, rich([[`${tr.qtdLabel} to date: `, true], [`${plural(tr.qtdDelivered, "session")} delivered. `, false], ["Drill-down of the Training Delivery projects counted in the portfolio. Sessions = tasks with Output Type “Session”; hours count toward utilization.", false, 9.5, B.taupe]], 11));
     card(s, 6.1, 1.55, 6.9, 5.07, "By trainer", "Last week delivered and hours · this week scheduled · past date still open");
     if (tr.trainers.length) {
       const rows: Cell[][] = [["Trainer", "Delivered", "Validated", "Hours", "This wk", "Past date"],
