@@ -227,7 +227,13 @@ export interface TableView {
   // hiddenColumns, so tidying a board never hides table columns.
   cardPrimary?: string[];
   cardSecondary?: string[];
-  // Tasks page system views (2026-10-04): which task set the view covers.
+  // phase157c (2026-10-06, Sandra): no hidden scopes -- every view's row set
+  // comes from visible Filters. These extra filters replace the old
+  // projectScope/taskScope (kept below only to migrate saved views).
+  filterMyRole?: ("owner" | "contributor")[];
+  filterProjectOwnerIds?: string[];
+  filterFlags?: "at_risk"[];
+  // DEPRECATED (migrated to filters on load): which task set the view covers.
   taskScope?: "my_open" | "my_done" | "owner_open" | "owner_at_risk" | "org_open" | "org_all";
   projectScope?: "my_active_owned" | "my_active_portfolio" | "my_owned_all" | "my_full_portfolio" | "org_active" | "org_all";
   // Which layout this view renders as. Only "table" is actually built right

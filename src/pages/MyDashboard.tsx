@@ -21,11 +21,13 @@ import {
   Minus,
   Circle,
   TrendingUp,
+  Sparkles,
 } from "lucide-react";
 import { tierOf, displayPct, UTIL_LEGEND } from "../lib/utilizationBands";
 import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { supabase } from "../lib/supabaseClient";
 import Modal from "../components/Modal";
+import ApprovalCenter from "./ApprovalCenter";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import { loadMyRequests, type MyRequestRow } from "../lib/myRequests";
 import NonProjectTimerQuickStart from "../components/NonProjectTimerQuickStart";
@@ -248,7 +250,7 @@ export default function MyDashboard() {
   const [hiddenToday, setHiddenToday] = useState<{ task_id: string; hidden_date: string }[]>([]);
   // 2026-09-23 (Sandra: lightbox for Tasks due today / Overdue tasks --
   // see AttentionPill below) -- which list is open, or null when closed.
-  const [attentionModal, setAttentionModal] = useState<"due_today" | "overdue" | "ready_to_close" | "completed_open" | "work_done" | null>(null);
+  const [attentionModal, setAttentionModal] = useState<"due_today" | "overdue" | "ready_to_close" | "completed_open" | "work_done" | "draft_planning" | "new_assignments" | "planned" | null>(null);
   // 2026-09-23 (My Work Today "Logged" column, Sandra: "show logged
   // hours against the tasks") -- same confirmed/approved, not-archived
   // definition Projects.tsx's own Spent Hrs column uses, just scoped to
@@ -387,6 +389,20 @@ export default function MyDashboard() {
   useEffect(() => {
     if (me?.id) loadMyRequests(me.id, 30).then(setMyReqs);
   }, [me?.id]);
+  // phase158 (2026-10-06): planning-lifecycle extras -- last planning
+  // activity per project (idle Drafts) and project-level "planned
+  // involvement" for contributors on Drafts they can't see yet.
+  const [activityByProject, setActivityByProject] = useState<Map<string, string>>(new Map());
+  const [plannedInvolvement, setPlannedInvolvement] = useState<{ project_id: string; project_number: number; project_name: string; owner_name: string | null }[]>([]);
+  useEffect(() => {
+    if (!me?.id) return;
+    supabase
+      .from("project_activity")
+      .select("project_id,last_activity_at")
+      .then(({ data }) => setActivityByProject(new Map(((data as { project_id: string; last_activity_at: string }[]) ?? []).map((r) => [r.project_id, r.last_activity_at]))));
+    supabase.rpc("my_planned_involvement").then(({ data }) => setPlannedInvolvement((data as typeof plannedInvolvement) ?? []));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.id]);
   // 2026-10-02 (Sandra): My Requests card = pending + decided in last 7 days.
   const recentReqs = myReqs.filter((r) => r.status === "pending" || (r.decidedAt && Date.now() - new Date(r.decidedAt).getTime() <= 7 * 86400000));
 
@@ -406,7 +422,6 @@ export default function MyDashboard() {
       .sort((a, b) => (a.current_due_date ?? "9999").localeCompare(b.current_due_date ?? "9999"));
   }, [tasks, me, projectById]);
   const hasConfirmedBaseline = (t: { project?: ProjectRow | null }) => !!t.project && t.project.wbs_status !== "draft" && t.project.timelines_locked;
-  const draftTimelineTasks = myOpenTasks.filter((t) => !hasConfirmedBaseline(t) && t.current_due_date);
   // phase118: paused projects' tasks (and dates that passed during a pause,
   // until the schedule review is confirmed) don't count as overdue.
   const overdueTasks = myOpenTasks.filter(
@@ -639,11 +654,18 @@ export default function MyDashboard() {
   // shared allocation engine Utilization.tsx/HoursOverview.tsx/
   // WbsPlanning.tsx use -- so this number never disagrees with the real
   // Utilization page. ---------------------------------------------------
+  const committedProjectIds = useMemo(
+    () => new Set(projects.filter((p) => !!p.wbs_status && p.wbs_status !== "draft").map((p) => p.id)),
+    [projects]
+  );
   const engine = useMemo(
     () =>
       createAllocationEngine({
-        tasks: tasks as unknown as UtilTaskRow[],
-        projects: projects as unknown as UtilProjectRow[],
+        // phase157 (2026-10-06): committed load only -- Draft projects are
+        // Planned / Pipeline, not an operational assignment (Utilization
+        // page "Include Planned / Pipeline" shows them separately).
+        tasks: tasks.filter((t) => committedProjectIds.has(t.project_id)) as unknown as UtilTaskRow[],
+        projects: projects.filter((p) => committedProjectIds.has(p.id)) as unknown as UtilProjectRow[],
         holidays: holidaySet,
         availability,
         assigneeHistory,
@@ -652,7 +674,7 @@ export default function MyDashboard() {
         deletedHours,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tasks, projects, holidaySet, availability, assigneeHistory, ownerHistory, deletedHours]
+    [tasks, projects, committedProjectIds, holidaySet, availability, assigneeHistory, ownerHistory, deletedHours]
   );
 
   const dailyStats = useMemo(() => {
@@ -802,6 +824,47 @@ export default function MyDashboard() {
     .map((p) => ({ p, open: leafTasksOf(p.id).filter((t) => t.status !== "Done" && t.status !== "Cancelled") }))
     .filter((x) => x.open.length > 0);
   // phase118: resumed projects waiting for the owner's schedule review.
+  // phase157 (2026-10-06, Sandra -- "Draft = Planning"): a project-level
+  // planning reminder for the Owner and everyone above the Owner in the
+  // reporting line. Deliberately NOT a date warning: Draft dates are
+  // tentative, so Draft tasks never count as overdue/due.
+  const myDownline = useMemo(() => {
+    const out = new Set<string>();
+    if (!me?.id) return out;
+    for (const person of people) {
+      let cur = person.reports_to;
+      let depth = 0;
+      while (cur && depth < 20) {
+        if (cur === me.id) { out.add(person.id); break; }
+        cur = people.find((x) => x.id === cur)?.reports_to ?? null;
+        depth++;
+      }
+    }
+    return out;
+  }, [people, me?.id]);
+  const draftPlanningProjects = projects.filter(
+    (p) =>
+      (p.wbs_status ?? "draft") === "draft" &&
+      !(p as { is_unsaved?: boolean }).is_unsaved &&
+      p.status !== "Cancelled" &&
+      !!p.owner_id &&
+      (p.owner_id === me?.id || myDownline.has(p.owner_id))
+  );
+  const idleDaysOf = (projectId: string): number | null => {
+    const at = activityByProject.get(projectId);
+    return at ? Math.max(0, Math.floor((Date.now() - new Date(at).getTime()) / 86400000)) : null;
+  };
+  const idleDraftCount = draftPlanningProjects.filter((p) => (idleDaysOf(p.id) ?? 0) >= 14).length;
+  // Contributors: projects started in the last 7 days where I have open tasks
+  // (Draft tasks were hidden from me until Start Project).
+  const newAssignmentProjects = projects
+    .filter((p) => {
+      const startedAt = (p as { started_at?: string | null }).started_at;
+      return !!startedAt && p.owner_id !== me?.id && Date.now() - new Date(startedAt).getTime() <= 7 * 86400000;
+    })
+    .map((p) => ({ p, tasks: myOpenTasks.filter((t) => t.project_id === p.id) }))
+    .filter((x) => x.tasks.length > 0);
+  const newAssignmentCount = newAssignmentProjects.reduce((n, x) => n + x.tasks.length, 0);
   const scheduleReviewProjects = projects.filter((p) => p.owner_id === me?.id && (p as { schedule_review_required?: boolean }).schedule_review_required);
   const readyToCloseProjects = myCompletedProjects
     .filter((p) => !completedOpenProjects.some((x) => x.p.id === p.id))
@@ -919,7 +982,11 @@ export default function MyDashboard() {
         <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={notTrackingTime ? "Not expected to log time" : `of ${weekExpectedTotal.toFixed(1)}h expected`} />
       </div>
 
-      {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || draftTimelineTasks.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
+      {/* 2026-10-06 (Sandra): approvers see their queue without leaving the
+          dashboard -- same numbers as Approval Center > Mine to approve. */}
+      {hasApprovalAuthority && <ApprovalCenter summaryOnly />}
+
+      {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || draftPlanningProjects.length > 0 || newAssignmentCount > 0 || plannedInvolvement.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
           {/* 2026-09-23 (Sandra: "Pending approvals, remove and use the
@@ -954,13 +1021,31 @@ export default function MyDashboard() {
           {overdueTasks.length > 0 && (
             <AttentionPill tone="danger" icon={<AlertTriangle size={12} />} value={overdueTasks.length} label={overdueTasks.length === 1 ? "Overdue task" : "Overdue tasks"} onClick={() => setAttentionModal("overdue")} />
           )}
-          {draftTimelineTasks.length > 0 && (
+          {draftPlanningProjects.length > 0 && (
             <AttentionPill
-              tone="warning"
+              tone="neutral"
               icon={<CalendarClock size={12} />}
-              value={draftTimelineTasks.length}
-              label={draftTimelineTasks.length === 1 ? "Draft timeline to review" : "Draft timelines to review"}
-              to="/projects?assignee=me"
+              value={draftPlanningProjects.length}
+              label={`${draftPlanningProjects.length === 1 ? "Draft project · Start Project pending" : "Draft projects · Start Project pending"}${idleDraftCount ? ` (${idleDraftCount} idle)` : ""}`}
+              onClick={() => setAttentionModal("draft_planning")}
+            />
+          )}
+          {newAssignmentCount > 0 && (
+            <AttentionPill
+              tone="accent"
+              icon={<Sparkles size={12} />}
+              value={newAssignmentCount}
+              label={newAssignmentCount === 1 ? "New assignment" : "New assignments"}
+              onClick={() => setAttentionModal("new_assignments")}
+            />
+          )}
+          {plannedInvolvement.length > 0 && (
+            <AttentionPill
+              tone="neutral"
+              icon={<CalendarClock size={12} />}
+              value={plannedInvolvement.length}
+              label={plannedInvolvement.length === 1 ? "Planned project (Draft)" : "Planned projects (Draft)"}
+              onClick={() => setAttentionModal("planned")}
             />
           )}
           {missingLogHours > 0.1 && (
@@ -1023,6 +1108,97 @@ export default function MyDashboard() {
               <Link to={`/projects/${x.p.id}/wbs`} style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
                 Review WBS →
               </Link>
+            </div>
+          ))}
+        </Modal>
+      )}
+
+      {attentionModal === "draft_planning" && (
+        <Modal title="Draft projects — Start Project pending" onClose={() => setAttentionModal(null)} width={600}>
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 0 }}>
+            Planning, not delivery: dates on Draft tasks are tentative and don't count as due or overdue. Contributors don't see these tasks until
+            the project is started. Review the WBS, then Start Project (or coach the owner) to commit the plan.
+          </p>
+          {draftPlanningProjects.map((p) => (
+            <div
+              key={p.id}
+              style={{ display: "grid", gridTemplateColumns: "60px minmax(0, 1fr) auto", alignItems: "center", columnGap: 12, padding: "9px 4px", borderBottom: "1px solid var(--border)", fontSize: 12 }}
+            >
+              <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+                {p.project_number ? `P-${String(p.project_number).padStart(4, "0")}` : "—"}
+              </span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: "block", fontWeight: 600, color: "var(--navy)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>
+                  {p.name}
+                </span>
+                <span style={{ display: "block", fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                  {p.owner_id === me?.id ? "Your project" : `Owner: ${people.find((x) => x.id === p.owner_id)?.name ?? "—"}`}
+                  {" · "}
+                  {leafTasksOf(p.id).length} task{leafTasksOf(p.id).length === 1 ? "" : "s"}
+                  {(() => {
+                    const d = idleDaysOf(p.id);
+                    if (d === null) return null;
+                    return d >= 14 ? (
+                      <span style={{ color: "var(--danger-text)", fontWeight: 600 }}>{` · Idle ${d} days`}</span>
+                    ) : (
+                      ` · Last updated ${d === 0 ? "today" : `${d}d ago`}`
+                    );
+                  })()}
+                </span>
+              </span>
+              <Link to={`/projects/${p.id}/wbs`} style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none", whiteSpace: "nowrap" }}>
+                Review Draft →
+              </Link>
+            </div>
+          ))}
+        </Modal>
+      )}
+
+      {attentionModal === "new_assignments" && (
+        <Modal title="New assignments" onClose={() => setAttentionModal(null)} width={600}>
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 0 }}>
+            These projects were started in the last 7 days, so their tasks are now yours to deliver. Check the dates and scoped hours, and raise anything
+            that doesn't fit with the project owner early.
+          </p>
+          {newAssignmentProjects.map((x) => (
+            <div key={x.p.id} style={{ padding: "9px 4px", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums", flex: "0 0 60px" }}>
+                  {x.p.project_number ? `P-${String(x.p.project_number).padStart(4, "0")}` : "—"}
+                </span>
+                <span style={{ fontWeight: 600, color: "var(--navy)", flex: "1 1 auto", minWidth: 0 }}>{x.p.name}</span>
+                <Link to="/projects?tab=tasks&assignee=me" style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none", whiteSpace: "nowrap" }}>
+                  My tasks →
+                </Link>
+              </div>
+              <div style={{ marginLeft: 70, marginTop: 4, color: "var(--text-secondary)", fontSize: 11.5 }}>
+                {x.tasks.slice(0, 5).map((t) => (
+                  <div key={t.id}>
+                    • {t.name}
+                    {t.current_due_date ? ` — due ${parseLocalDate(t.current_due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
+                  </div>
+                ))}
+                {x.tasks.length > 5 && <div>…and {x.tasks.length - 5} more</div>}
+              </div>
+            </div>
+          ))}
+        </Modal>
+      )}
+
+      {attentionModal === "planned" && (
+        <Modal title="Planned projects (Draft)" onClose={() => setAttentionModal(null)} width={560}>
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 0 }}>
+            You're included in the plan for these projects, but they haven't started yet. Tasks, dates and hours are still tentative and will show in
+            My Tasks once the owner starts the project — nothing to do yet.
+          </p>
+          {plannedInvolvement.map((x) => (
+            <div
+              key={x.project_id}
+              style={{ display: "grid", gridTemplateColumns: "60px minmax(0, 1fr) auto", alignItems: "center", columnGap: 12, padding: "9px 4px", borderBottom: "1px solid var(--border)", fontSize: 12 }}
+            >
+              <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{`P-${String(x.project_number).padStart(4, "0")}`}</span>
+              <span style={{ fontWeight: 600, color: "var(--navy)", minWidth: 0 }}>{x.project_name}</span>
+              <span style={{ fontSize: 11, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>Owner: {x.owner_name ?? "—"} · Draft</span>
             </div>
           ))}
         </Modal>

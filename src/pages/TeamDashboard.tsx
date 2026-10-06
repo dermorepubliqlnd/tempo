@@ -421,11 +421,18 @@ function ExecutiveDashboard() {
   const portfolio = useMemo(() => portfolioFor(range.start, range.end), [scopedProjects, range, tasks, holidayDates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ======================================================== SECTION 2
+  const committedProjectIds = useMemo(
+    () => new Set(projects.filter((p) => !!p.wbs_status && p.wbs_status !== "draft").map((p) => p.id)),
+    [projects]
+  );
   const engine = useMemo(
     () =>
       createAllocationEngine({
-        tasks: tasks as unknown as UtilTaskRow[],
-        projects: projects as unknown as UtilProjectRow[],
+        // phase157 (2026-10-06): committed load only -- Draft projects are
+        // Planned / Pipeline, not an operational assignment (Utilization
+        // page "Include Planned / Pipeline" shows them separately).
+        tasks: tasks.filter((t) => committedProjectIds.has(t.project_id)) as unknown as UtilTaskRow[],
+        projects: projects.filter((p) => committedProjectIds.has(p.id)) as unknown as UtilProjectRow[],
         holidays: holidaySet,
         availability,
         assigneeHistory,
@@ -433,7 +440,7 @@ function ExecutiveDashboard() {
         todayStr: todayIso,
         deletedHours,
       }),
-    [tasks, projects, holidaySet, availability, assigneeHistory, ownerHistory, todayIso, deletedHours]
+    [tasks, projects, committedProjectIds, holidaySet, availability, assigneeHistory, ownerHistory, todayIso, deletedHours]
   );
   const taskProject = useMemo(() => new Map(tasks.map((t) => [t.id, t.project_id])), [tasks]);
   const availStatus = useMemo(() => {

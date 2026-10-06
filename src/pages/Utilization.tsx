@@ -1494,9 +1494,9 @@ export default function Utilization() {
                       <div style={{ fontSize: 9.5, fontWeight: 600, color: "var(--muted)", marginBottom: 5 }}>Projects</div>
                       <MultiSelectFilter options={projects.map((p) => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name))} selected={projectFilter} onChange={setProjectFilter} noun="projects" singular="Project" />
                     </div>
-                    <label title="Draft and Awaiting Baseline Approval projects are excluded by default" style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "var(--navy)", cursor: "pointer" }}>
+                    <label title="Committed load = started projects only. Tick to add Draft / Awaiting Start Project approval projects as Planned / Pipeline load (not yet an assignment)." style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "var(--navy)", cursor: "pointer" }}>
                       <input type="checkbox" checked={includePending} onChange={(e) => toggleIncludePending(e.target.checked)} />
-                      Include pending projects
+                      Include Planned / Pipeline (Draft projects)
                     </label>
                     <label title="Inactive team members are hidden by default but retained for historical analysis" style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "var(--navy)", cursor: "pointer" }}>
                       <input type="checkbox" checked={showAllPeople} onChange={(e) => setShowAllPeople(e.target.checked)} />
@@ -1514,6 +1514,16 @@ export default function Utilization() {
                 style={{ border: "1px solid var(--border)", background: "var(--surface)", color: "var(--navy)", fontSize: 10.5, fontWeight: 600, cursor: "pointer", padding: "4px 9px", borderRadius: 999 }}
               >
                 Role: {roleFilter} ×
+              </button>
+            )}
+            {includePending && (
+              <button
+                onClick={() => toggleIncludePending(false)}
+                title="Draft projects' scoped hours are included as Planned / Pipeline load -- tentative, not yet assigned. Click to show committed load only."
+                className="status-pill warning"
+                style={{ border: "1px dashed currentColor", cursor: "pointer", fontSize: 10.5, fontWeight: 600, padding: "5px 10px" }}
+              >
+                Incl. Planned / Pipeline (Draft) ×
               </button>
             )}
             {(personFilter !== null || projectFilter.length > 0 || includePending || showAllPeople || roleFilter !== null) && (

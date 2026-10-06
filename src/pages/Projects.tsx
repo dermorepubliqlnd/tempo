@@ -7,13 +7,14 @@ import { FolderKanban, UserCheck, Users, Activity, ListTodo, BadgeCheck, Clock, 
 import { supabase } from "../lib/supabaseClient";
 import { splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { useSession } from "../lib/useSession";
-import { useTableViews } from "../lib/useTableViews";
+import { useTableViews, SYSTEM_VIEW_PERSONAL_KEYS } from "../lib/useTableViews";
 import DataTable from "../components/DataTable";
 import BoardView, { type BoardColumnDef } from "../components/BoardView";
 import TimelineView, { TimelineControls } from "../components/TimelineView";
 import CalendarView from "../components/CalendarView";
 import CardActionMenu from "../components/CardActionMenu";
 import ViewTabs from "../components/ViewTabs";
+import { ViewLayoutSwitch } from "../components/ViewLayoutSwitch";
 import ViewSettingsMenu, { ViewFilterPills } from "../components/ViewSettingsMenu";
 import Modal from "../components/Modal";
 import { PauseProjectModal, ScheduleReviewModal } from "../components/PauseProjectModals";
@@ -366,6 +367,67 @@ const PROJECT_ACTIVE_PORTFOLIO_VISIBLE = new Set(["project_number", "name", "own
 const PROJECT_FULL_PORTFOLIO_VISIBLE = new Set([...PROJECT_ACTIVE_PORTFOLIO_VISIBLE, "status"]);
 const PROJECT_ORG_VISIBLE = new Set([...PROJECT_OWNER_VISIBLE, "owner", "category", "planning_type", "project_type"]);
 
+// phase157c (2026-10-06, Sandra): no hidden scopes. A view's row set comes
+// only from its visible Filters; these translate the old scopes.
+type ProjectScope = NonNullable<TableView["projectScope"]>;
+type TaskScope = NonNullable<TableView["taskScope"]>;
+function scopeToProjectFilters(scope: ProjectScope): Partial<TableView> {
+  const active = scope === "my_active_owned" || scope === "my_active_portfolio" || scope === "org_active";
+  const role: TableView["filterMyRole"] =
+    scope === "my_active_owned" || scope === "my_owned_all" ? ["owner"] : scope === "my_active_portfolio" || scope === "my_full_portfolio" ? ["owner", "contributor"] : [];
+  return { filterStatuses: active ? ["In Progress"] : [], filterMyRole: role, filterPersonIds: [] };
+}
+const TASK_OPEN_STATUSES = ["Not Started", "In Progress"];
+function scopeToTaskFilters(scope: TaskScope): Partial<TableView> {
+  switch (scope) {
+    case "my_open":
+      return { filterPersonIds: ["me"], filterStatuses: TASK_OPEN_STATUSES, filterProjectOwnerIds: [], filterFlags: [] };
+    case "my_done":
+      return { filterPersonIds: ["me"], filterStatuses: ["Done"], filterProjectOwnerIds: [], filterFlags: [] };
+    case "owner_open":
+      return { filterPersonIds: [], filterStatuses: TASK_OPEN_STATUSES, filterProjectOwnerIds: ["me"], filterFlags: [] };
+    case "owner_at_risk":
+      return { filterPersonIds: [], filterStatuses: [], filterProjectOwnerIds: ["me"], filterFlags: ["at_risk"] };
+    case "org_open":
+      return { filterPersonIds: [], filterStatuses: TASK_OPEN_STATUSES, filterProjectOwnerIds: [], filterFlags: [] };
+    default:
+      return { filterPersonIds: [], filterStatuses: [], filterProjectOwnerIds: [], filterFlags: [] };
+  }
+}
+// Saved personal views that still carry a scope (e.g. a copy of "Active
+// Project Portfolio") get it turned into the same visible filters, ANDed
+// with any filters the view already had.
+function andList(existing: string[] | undefined, fromScope: string[] | undefined): string[] {
+  const e = existing ?? [];
+  const f = fromScope ?? [];
+  if (!e.length) return f;
+  if (!f.length) return e;
+  const both = e.filter((x) => f.includes(x));
+  return both.length ? both : f;
+}
+function migrateProjectScope(v: TableView): TableView {
+  if (!v.projectScope) return v;
+  const f = scopeToProjectFilters(v.projectScope);
+  return {
+    ...v,
+    projectScope: undefined,
+    filterStatuses: andList(v.filterStatuses, f.filterStatuses),
+    filterMyRole: andList(v.filterMyRole, f.filterMyRole) as TableView["filterMyRole"],
+  };
+}
+function migrateTaskScope(v: TableView): TableView {
+  if (!v.taskScope) return v;
+  const f = scopeToTaskFilters(v.taskScope);
+  return {
+    ...v,
+    taskScope: undefined,
+    filterPersonIds: andList(v.filterPersonIds, f.filterPersonIds),
+    filterStatuses: andList(v.filterStatuses, f.filterStatuses),
+    filterProjectOwnerIds: andList(v.filterProjectOwnerIds, f.filterProjectOwnerIds),
+    filterFlags: andList(v.filterFlags, f.filterFlags) as TableView["filterFlags"],
+  };
+}
+
 function projectSystemView(
   id: string,
   name: string,
@@ -381,7 +443,7 @@ function projectSystemView(
     systemView: true,
     systemGroup: group,
     isDefaultView,
-    projectScope: scope,
+    ...scopeToProjectFilters(scope),
     columnOrder: PROJECT_SYSTEM_COLUMN_ORDER,
     hiddenColumns: PROJECT_SYSTEM_COLUMN_ORDER.filter((key) => !visible.has(key)),
     columnWidths: {},
@@ -456,7 +518,7 @@ function taskSystemView(
     systemView: true,
     systemGroup: group,
     isDefaultView: !!opts.isDefault,
-    taskScope: scope,
+    ...scopeToTaskFilters(scope),
     columnOrder: TASK_SYSTEM_COLUMN_ORDER,
     hiddenColumns: TASK_SYSTEM_COLUMN_ORDER.filter((key) => !visible.has(key)),
     columnWidths: {},
@@ -1201,6 +1263,34 @@ function reorderedSortValue(list: { id: string; sort_order: number | null }[], d
 // condition) and clears extension_requests, task_effort_changes,
 // time_entries, and task_collaborators with elevated privileges before
 // deleting the tasks -- so RLS can't silently swallow the cleanup again.
+
+// phase157b: which System View changes are personal layout tweaks (kept on
+// the System View for this person) vs structural (need a personal view).
+const QUIET_SYSTEM_KEYS = new Set<string>(["columnOrder", "columnWidths", "frozenUpTo"]);
+function classifySystemViewPatch(active: TableView, patch: Partial<TableView>, isTask: boolean): "quiet" | "personal" | "structural" {
+  const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((x) => b.includes(x));
+  let kind: "quiet" | "personal" = "quiet";
+  for (const k of Object.keys(patch) as (keyof TableView)[]) {
+    if (k === "columnOrder") {
+      if (!sameSet(patch.columnOrder ?? [], active.columnOrder)) return "structural";
+      continue;
+    }
+    if (k === "cardPrimary" || k === "cardSecondary") {
+      const cur = k === "cardPrimary" ? active.cardPrimary : active.cardSecondary;
+      const fallback = k === "cardPrimary" ? (isTask ? TASK_CARD_DEFAULT.primary : PROJECT_CARD_DEFAULT.primary) : (isTask ? TASK_CARD_DEFAULT.secondary : PROJECT_CARD_DEFAULT.secondary);
+      if (!sameSet((patch[k] as string[] | undefined) ?? [], cur ?? fallback)) return "structural";
+      kind = "personal";
+      continue;
+    }
+    if (QUIET_SYSTEM_KEYS.has(k as string)) continue;
+    if ((SYSTEM_VIEW_PERSONAL_KEYS as string[]).includes(k as string)) {
+      kind = "personal";
+      continue;
+    }
+    return "structural";
+  }
+  return kind;
+}
 
 export default function Projects() {
   const navigate = useNavigate();
@@ -2546,7 +2636,7 @@ export default function Projects() {
 
   useEffect(() => {
     if (!projectViews.loaded) return;
-    projectViews.installSystemViews(PROJECT_SYSTEM_VIEWS, "system_my_active_projects");
+    projectViews.installSystemViews(PROJECT_SYSTEM_VIEWS, "system_my_active_projects", migrateProjectScope);
     // installSystemViews is intentionally idempotent; PROJECT_SYSTEM_VIEWS is
     // module-level and stable so this only changes state when the saved set
     // actually differs.
@@ -2559,65 +2649,36 @@ export default function Projects() {
       projectViews.updateActiveView(patch);
       return;
     }
-    // 2026-10-06 (Sandra): System Views keep their required columns, but
-    // users may still make the working layout useful -- sort, group,
-    // rearrange, resize/freeze, and switch view type. Hiding/showing
-    // columns, filters, or card property visibility changes should become
-    // a personal view instead.
-    const allowedSystemPatch = Object.keys(patch).every((k) => {
-      if (k === "columnOrder" || k === "columnWidths" || k === "frozenUpTo" || k === "sorts" || k === "groupBy" || k === "groupBy2" || k === "hiddenGroups" || k === "hideEmptyGroups" || k === "showCount" || k === "viewType" || k === "timelineScale" || k === "timelineDateMode" || k === "timelineLabelWidth") return true;
-      if (k === "cardPrimary" || k === "cardSecondary") {
-        const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((x) => b.includes(x));
-        const cur = k === "cardPrimary" ? active.cardPrimary : active.cardSecondary;
-        const fallback = k === "cardPrimary" ? (active.taskScope ? TASK_CARD_DEFAULT.primary : PROJECT_CARD_DEFAULT.primary) : (active.taskScope ? TASK_CARD_DEFAULT.secondary : PROJECT_CARD_DEFAULT.secondary);
-        return sameSet(patch[k] ?? [], cur ?? fallback);
-      }
-      return false;
-    });
-    if (allowedSystemPatch) {
+    const kind = classifySystemViewPatch(active, patch, false);
+    if (kind === "quiet") {
       projectViews.updateActiveView(patch);
       return;
     }
-    confirm({
-      title: "You've modified a System View.",
-      message: "Save these changes as a new personal view?",
-      confirmLabel: "Save as New View",
-      cancelLabel: "Discard Changes",
-    }).then((saveAsNew) => {
-      if (!saveAsNew) return;
-      projectViews.createView(
-        `${active.name} - Personal`,
-        (patch.viewType ?? active.viewType) as TableView["viewType"],
-        (patch.groupBy ?? active.groupBy) ?? undefined,
-        (patch.hiddenColumns ?? active.hiddenColumns),
-        {
-          columnOrder: patch.columnOrder ?? active.columnOrder,
-          hiddenColumns: patch.hiddenColumns ?? active.hiddenColumns,
-          columnWidths: patch.columnWidths ?? active.columnWidths,
-          groupBy2: patch.groupBy2 ?? active.groupBy2,
-          hiddenGroups: patch.hiddenGroups ?? active.hiddenGroups,
-          hideEmptyGroups: patch.hideEmptyGroups ?? active.hideEmptyGroups,
-          color: patch.color ?? active.color,
-          showCount: patch.showCount ?? active.showCount,
-          sorts: patch.sorts ?? active.sorts,
-          progressDisplay: patch.progressDisplay ?? active.progressDisplay,
-          priorityDisplay: patch.priorityDisplay ?? active.priorityDisplay,
-          complexityDisplay: patch.complexityDisplay ?? active.complexityDisplay,
-          timelineScale: patch.timelineScale ?? active.timelineScale,
-          timelineDateMode: patch.timelineDateMode ?? active.timelineDateMode,
-          timelineLabelWidth: patch.timelineLabelWidth ?? active.timelineLabelWidth,
-          filterPersonIds: patch.filterPersonIds ?? active.filterPersonIds,
-          filterStatuses: patch.filterStatuses ?? active.filterStatuses,
-          boardShowPropertyLabels: patch.boardShowPropertyLabels ?? active.boardShowPropertyLabels,
-          frozenUpTo: patch.frozenUpTo ?? active.frozenUpTo,
-          cardPrimary: patch.cardPrimary ?? active.cardPrimary,
-          cardSecondary: patch.cardSecondary ?? active.cardSecondary,
-          systemView: false,
-          systemGroup: undefined,
-          isDefaultView: false,
-          projectScope: active.projectScope,
-        }
-      );
+    if (kind === "personal") {
+      // First personal change on this System View -> one confirmation.
+      if (!projectViews.isSystemViewCustomized()) {
+        void confirm({
+          title: "Modify this System View?",
+          message: `Your changes to "${active.name}" are kept for you only. Everyone else keeps the standard layout, and you can switch back any time with Restore default.`,
+          confirmLabel: "Yes, keep my changes",
+          cancelLabel: "Cancel",
+        }).then((ok) => {
+          if (ok) projectViews.updateActiveView(patch);
+        });
+        return;
+      }
+      projectViews.updateActiveView(patch);
+      return;
+    }
+    void confirm({
+      title: "Not available on a System View",
+      message: patch.viewType
+        ? `Switching "${active.name}" to ${patch.viewType === "board" ? "Board" : patch.viewType === "timeline" ? "Timeline" : patch.viewType === "calendar" ? "Calendar" : "Table"} creates your own personal view. Save it as a personal view?`
+        : `Filters, shown columns and card fields are fixed on System Views. Save "${active.name}" with this change as your own personal view?`,
+      confirmLabel: "Save as Personal View",
+      cancelLabel: "Cancel",
+    }).then((ok) => {
+      if (ok) projectViews.saveActiveViewAsPersonal(`${active.name} - Personal`, patch);
     });
   }
 
@@ -2644,24 +2705,17 @@ export default function Projects() {
     const isContribution = (p: ProjectRow) => !isMine(p) && contributedProjectIds.has(p.id);
     const isActive = (p: ProjectRow) => projectStatusOf(p) === "In Progress";
 
-    switch (view.projectScope) {
-      case "my_active_owned":
-        out = out.filter((p) => isMine(p) && isActive(p));
-        break;
-      case "my_active_portfolio":
-        out = out.filter((p) => (isMine(p) || isContribution(p)) && isActive(p));
-        break;
-      case "my_owned_all":
-        out = out.filter(isMine);
-        break;
-      case "my_full_portfolio":
-        out = out.filter((p) => isMine(p) || isContribution(p));
-        break;
-      case "org_active":
-        out = out.filter(isActive);
-        break;
-      case "org_all":
-        break;
+    // phase157c: "My role" filter (Owner / Contributor) -- replaces the old
+    // hidden portfolio scopes. A legacy scope still on the view (not yet
+    // migrated) is honoured through the same filters.
+    const legacy = view.projectScope ? scopeToProjectFilters(view.projectScope) : {};
+    const roles = andList(view.filterMyRole, legacy.filterMyRole);
+    if (roles.length > 0) {
+      out = out.filter((p) => (roles.includes("owner") && isMine(p)) || (roles.includes("contributor") && isContribution(p)));
+    }
+    if (legacy.filterStatuses && legacy.filterStatuses.length > 0) {
+      const st = legacy.filterStatuses;
+      out = out.filter((p) => st.includes(projectStatusOf(p) ?? ""));
     }
     // 2026-10-04: person/status filters apply on top of any scope, so a
     // personal copy of a system view honours the filters its pills show.
@@ -2679,7 +2733,7 @@ export default function Projects() {
     // System portfolio views intentionally show owned projects first, then
     // projects the person contributes to; each section is ordered by Project ID.
     // Only for the system views themselves -- personal copies sort freely.
-    if (view.systemView && view.sorts.length === 0 && (view.projectScope === "my_active_portfolio" || view.projectScope === "my_full_portfolio")) {
+    if (view.systemView && view.sorts.length === 0 && (view.filterMyRole ?? []).includes("contributor")) {
       out.sort((a, b) => {
         const ownerRankA = isMine(a) ? 0 : 1;
         const ownerRankB = isMine(b) ? 0 : 1;
@@ -4379,6 +4433,10 @@ export default function Projects() {
               </span>
             );
           }
+          // phase157: Draft dates are tentative -- no late/early variance.
+          if (!projectHasConfirmedBaseline(t.project_id)) {
+            return <span style={{ color: "var(--muted)" }} title="Draft project -- dates are tentative until Start Project">—</span>;
+          }
           const days = timingVarianceDays(t, statusGroupOf(TASK_STATUS_GROUPED, t.status));
           if (days === null) return <span style={{ color: "var(--muted)" }}>—</span>;
           if (days === 0) return <span className="status-pill success">On time</span>;
@@ -5419,7 +5477,7 @@ export default function Projects() {
 
   useEffect(() => {
     if (!taskViews.loaded) return;
-    taskViews.installSystemViews(TASK_SYSTEM_VIEWS, "system_tasks_my_open");
+    taskViews.installSystemViews(TASK_SYSTEM_VIEWS, "system_tasks_my_open", migrateTaskScope);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskViews.loaded]);
 
@@ -5432,36 +5490,36 @@ export default function Projects() {
       taskViews.updateActiveView(patch);
       return;
     }
-    const allowedSystemPatch = Object.keys(patch).every((k) => {
-      if (k === "columnOrder" || k === "columnWidths" || k === "frozenUpTo" || k === "sorts" || k === "groupBy" || k === "groupBy2" || k === "hiddenGroups" || k === "hideEmptyGroups" || k === "showCount" || k === "viewType" || k === "timelineScale" || k === "timelineDateMode" || k === "timelineLabelWidth") return true;
-      if (k === "cardPrimary" || k === "cardSecondary") {
-        const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((x) => b.includes(x));
-        const cur = k === "cardPrimary" ? active.cardPrimary : active.cardSecondary;
-        const fallback = k === "cardPrimary" ? (active.taskScope ? TASK_CARD_DEFAULT.primary : PROJECT_CARD_DEFAULT.primary) : (active.taskScope ? TASK_CARD_DEFAULT.secondary : PROJECT_CARD_DEFAULT.secondary);
-        return sameSet(patch[k] ?? [], cur ?? fallback);
-      }
-      return false;
-    });
-    if (allowedSystemPatch) {
+    const kind = classifySystemViewPatch(active, patch, true);
+    if (kind === "quiet") {
       taskViews.updateActiveView(patch);
       return;
     }
-    confirm({
-      title: "You've modified a System View.",
-      message: "Save these changes as a new personal view?",
-      confirmLabel: "Save as New View",
-      cancelLabel: "Discard Changes",
-    }).then((saveAsNew) => {
-      if (!saveAsNew) return;
-      const { id: _sysId, name: _sysName, ...merged } = { ...active, ...patch };
-      void _sysId; void _sysName;
-      taskViews.createView(`${active.name} - Personal`, merged.viewType, merged.groupBy ?? undefined, merged.hiddenColumns, {
-        ...merged,
-        systemView: false,
-        systemGroup: undefined,
-        isDefaultView: false,
-        personalDefault: undefined,
-      });
+    if (kind === "personal") {
+      // First personal change on this System View -> one confirmation.
+      if (!taskViews.isSystemViewCustomized()) {
+        void confirm({
+          title: "Modify this System View?",
+          message: `Your changes to "${active.name}" are kept for you only. Everyone else keeps the standard layout, and you can switch back any time with Restore default.`,
+          confirmLabel: "Yes, keep my changes",
+          cancelLabel: "Cancel",
+        }).then((ok) => {
+          if (ok) taskViews.updateActiveView(patch);
+        });
+        return;
+      }
+      taskViews.updateActiveView(patch);
+      return;
+    }
+    void confirm({
+      title: "Not available on a System View",
+      message: patch.viewType
+        ? `Switching "${active.name}" to ${patch.viewType === "board" ? "Board" : patch.viewType === "timeline" ? "Timeline" : patch.viewType === "calendar" ? "Calendar" : "Table"} creates your own personal view. Save it as a personal view?`
+        : `Filters, shown columns and card fields are fixed on System Views. Save "${active.name}" with this change as your own personal view?`,
+      confirmLabel: "Save as Personal View",
+      cancelLabel: "Cancel",
+    }).then((ok) => {
+      if (ok) taskViews.saveActiveViewAsPersonal(`${active.name} - Personal`, patch);
     });
   }
   // 2026-10-04 (Sandra): Tasks KPI cards. Clicking a card opens a temporary
@@ -5568,10 +5626,13 @@ export default function Projects() {
     const view = taskActiveView;
     let out = visibleTasks;
     if (quickList) return out.filter((t) => quickMatch(quickList, t, myOwnedProjectIds));
-    if (view.taskScope) {
+    // phase157c: visible filters only (Assigned to / Status / Project owner /
+    // Attention). A legacy taskScope still on the view is applied through the
+    // same filters until the view is migrated on load.
+    {
+      const legacy = view.taskScope ? scopeToTaskFilters(view.taskScope) : {};
       const group = (t: TaskRow) => statusGroupOf(TASK_STATUS_GROUPED, t.status);
       const isOpen = (t: TaskRow) => group(t) !== "complete" && group(t) !== "cancelled";
-      const ownedIds = new Set(projects.filter((p) => p.owner_id === me?.id).map((p) => p.id));
       const isLeaf = (t: TaskRow) => !tasks.some((x) => x.parent_task_id === t.id);
       const atRisk = (t: TaskRow) => {
         if (!projectHasConfirmedBaseline(t.project_id) || !isOpen(t) || !isLeaf(t)) return false;
@@ -5579,25 +5640,17 @@ export default function Projects() {
         const label = taskTiming(t).label;
         return label === "Overdue" || label === "Paused · Overdue" || label === "Due soon";
       };
-      switch (view.taskScope) {
-        case "my_open":
-          out = out.filter((t) => t.assignee_id === me?.id && isOpen(t));
-          break;
-        case "my_done":
-          out = out.filter((t) => t.assignee_id === me?.id && group(t) === "complete");
-          break;
-        case "owner_open":
-          out = out.filter((t) => ownedIds.has(t.project_id) && isOpen(t));
-          break;
-        case "owner_at_risk":
-          out = out.filter((t) => ownedIds.has(t.project_id) && atRisk(t));
-          break;
-        case "org_open":
-          out = out.filter(isOpen);
-          break;
-        case "org_all":
-          break;
+      const ownerIds = andList(view.filterProjectOwnerIds, legacy.filterProjectOwnerIds).map((id) => (id === "me" ? me?.id ?? "" : id));
+      if (ownerIds.length > 0) {
+        const pids = new Set(projects.filter((p) => p.owner_id && ownerIds.includes(p.owner_id)).map((p) => p.id));
+        out = out.filter((t) => pids.has(t.project_id));
       }
+      const flags = andList(view.filterFlags, legacy.filterFlags);
+      if (flags.includes("at_risk")) out = out.filter(atRisk);
+      const lp = legacy.filterPersonIds ?? [];
+      if (lp.length > 0) out = out.filter((t) => lp.some((id) => (id === "me" ? t.assignee_id === me?.id : t.assignee_id === id)));
+      const ls = legacy.filterStatuses ?? [];
+      if (ls.length > 0) out = out.filter((t) => ls.includes(t.status ?? ""));
     }
     const personIds = resolveFilterPersonIds(view);
     if (personIds.length > 0) {
@@ -5983,6 +6036,17 @@ export default function Projects() {
             onReorder={projectViews.reorderViews}
             confirm={confirm}
           />
+          <ViewLayoutSwitch
+            value={projectViews.activeView.viewType}
+            onChange={(viewType) =>
+              updateProjectView(viewType === "board" && !projectViews.activeView.groupBy ? { viewType, groupBy: "phase" } : { viewType })
+            }
+          />
+          {projectViews.activeView.systemView && projectViews.isSystemViewCustomized() && (
+            <button type="button" onClick={() => projectViews.restoreSystemViewDefault()} title="Undo your layout changes to this System View" style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+              ↺ Restore default
+            </button>
+          )}
           <div className="toolbar-actions">
             <ViewSettingsMenu
               rows={filteredProjects}
@@ -6012,6 +6076,19 @@ export default function Projects() {
               statusOptions={PROJECT_STATUS_OPTIONS}
               filterStatuses={projectViews.activeView.filterStatuses ?? []}
               onFilterStatusesChange={(filterStatuses) => updateProjectView({ filterStatuses })}
+              personFilterLabel="Owner"
+              extraFilters={[
+                {
+                  key: "my_role",
+                  label: "My role",
+                  options: [
+                    { value: "owner", label: "Owner" },
+                    { value: "contributor", label: "Contributor (I have tasks)" },
+                  ],
+                  selected: projectViews.activeView.filterMyRole ?? [],
+                  onChange: (next) => updateProjectView({ filterMyRole: next as TableView["filterMyRole"] }),
+                },
+              ]}
               propertyLockInfo={projectTimelinePropertyLockInfo}
               hideGroupBy={projectViews.activeView.viewType === "calendar"}
               boardLabelToggle={
@@ -6062,7 +6139,8 @@ export default function Projects() {
           people={people}
           filterPersonIds={resolveFilterPersonIds(projectViews.activeView)}
           filterStatuses={projectViews.activeView.filterStatuses ?? []}
-          onClearFilter={() => updateProjectView({ filterPersonIds: [], filterStatuses: [] })}
+          extraFilterParts={(projectViews.activeView.filterMyRole ?? []).length ? [`My role: ${(projectViews.activeView.filterMyRole ?? []).map((r) => (r === "owner" ? "Owner" : "Contributor")).join(", ")}`] : []}
+          onClearFilter={() => updateProjectView({ filterPersonIds: [], filterStatuses: [], filterMyRole: [] })}
           containerRef={setProjectPillsRowEl}
         />
         {projectViews.activeView.viewType !== "board" && projectViews.activeView.viewType !== "timeline" && selectedProjectIds.length > 0 && (
@@ -6334,6 +6412,19 @@ export default function Projects() {
             onReorder={taskViews.reorderViews}
             confirm={confirm}
           />
+          {!quickList && (
+            <ViewLayoutSwitch
+              value={taskActiveView.viewType}
+              onChange={(viewType) =>
+                updateTaskView(viewType === "board" && !taskActiveView.groupBy ? { viewType, groupBy: "status" } : { viewType })
+              }
+            />
+          )}
+          {!quickList && taskViews.activeView.systemView && taskViews.isSystemViewCustomized() && (
+            <button type="button" onClick={() => taskViews.restoreSystemViewDefault()} title="Undo your layout changes to this System View" style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+              ↺ Restore default
+            </button>
+          )}
           <div className="toolbar-actions">
             <ViewSettingsMenu
               rows={filteredVisibleTasks}
@@ -6363,6 +6454,22 @@ export default function Projects() {
               statusOptions={TASK_STATUS_OPTIONS}
               filterStatuses={taskActiveView.filterStatuses ?? []}
               onFilterStatusesChange={(filterStatuses) => updateTaskView({ filterStatuses })}
+              extraFilters={[
+                {
+                  key: "project_owner",
+                  label: "Project owner",
+                  options: [{ value: "me", label: "Me" }, ...people.map((p) => ({ value: p.id, label: p.name }))],
+                  selected: taskActiveView.filterProjectOwnerIds ?? [],
+                  onChange: (next) => updateTaskView({ filterProjectOwnerIds: next }),
+                },
+                {
+                  key: "attention",
+                  label: "Attention",
+                  options: [{ value: "at_risk", label: "At risk (overdue, due soon or unassigned)" }],
+                  selected: taskActiveView.filterFlags ?? [],
+                  onChange: (next) => updateTaskView({ filterFlags: next as TableView["filterFlags"] }),
+                },
+              ]}
               propertyLockInfo={taskTimelinePropertyLockInfo}
               hideGroupBy={taskActiveView.viewType === "calendar"}
               boardLabelToggle={
@@ -6413,7 +6520,13 @@ export default function Projects() {
           people={people}
           filterPersonIds={resolveFilterPersonIds(taskActiveView)}
           filterStatuses={taskActiveView.filterStatuses ?? []}
-          onClearFilter={() => updateTaskView({ filterPersonIds: [], filterStatuses: [] })}
+          extraFilterParts={[
+            ...((taskActiveView.filterProjectOwnerIds ?? []).length
+              ? [`Project owner: ${(taskActiveView.filterProjectOwnerIds ?? []).map((id) => (id === "me" ? "Me" : people.find((p) => p.id === id)?.name ?? "Unknown")).join(", ")}`]
+              : []),
+            ...((taskActiveView.filterFlags ?? []).includes("at_risk") ? ["At risk"] : []),
+          ]}
+          onClearFilter={() => updateTaskView({ filterPersonIds: [], filterStatuses: [], filterProjectOwnerIds: [], filterFlags: [] })}
           containerRef={setTaskPillsRowEl}
         />
         {taskActiveView.viewType !== "board" && taskActiveView.viewType !== "timeline" && selectedTaskIds.length > 0 && (

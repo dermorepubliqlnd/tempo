@@ -435,7 +435,10 @@ function ValidateActionCells({ row, busy, onValidate }: { row: TaskCompletionRow
   );
 }
 
-export default function ApprovalCenter() {
+// 2026-10-06 (Sandra): summaryOnly renders just the "Awaiting My Approval"
+// cards for My Dashboard -- same rows/routing as the Mine to approve tab, so
+// the numbers always match the Approval Center.
+export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: boolean } = {}) {
   const { person: me } = useSession();
   const { alert, dialog: confirmDialog } = useConfirm();
 
@@ -468,7 +471,10 @@ export default function ApprovalCenter() {
   // Type filter -- clicking a summary card sets this to that kind; click
   // the same card again (or there's nothing else to clear to) resets it
   // to null, meaning "All".
-  const [kindFilter, setKindFilter] = useState<ApprovalKind | null>(null);
+  const [kindFilter, setKindFilter] = useState<ApprovalKind | null>(() => {
+    const k = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("kind");
+    return k && ["extension", "time", "correction", "baseline", "closure", "task_completion"].includes(k) ? (k as ApprovalKind) : null;
+  });
   const [search, setSearch] = useState("");
   const [personFilter, setPersonFilter] = useState<string[]>([]);
   const [projectFilter, setProjectFilter] = useState<string[]>([]);
@@ -1875,6 +1881,61 @@ export default function ApprovalCenter() {
             })}
           </Fragment>
         ))}
+      </div>
+    );
+  }
+
+  if (summaryOnly) {
+    if (loading) return null;
+    const mineRows = allRows.filter((r) => r.route === "mine" || r.route === "acting");
+    const kinds = (["extension", "time", "correction", "baseline", "closure", "task_completion"] as ApprovalKind[])
+      .map((k) => ({ k, n: mineRows.filter((r) => r.kind === k).length }))
+      .filter((x) => x.n > 0);
+    const oldest = mineRows.reduce<string | null>((o, r) => (!o || r.requestedAt < o ? r.requestedAt : o), null);
+    const oldestDays = oldest ? Math.floor((Date.now() - new Date(oldest).getTime()) / 86400000) : 0;
+    const cardStyle: CSSProperties = {
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+      padding: "12px 14px",
+      borderRadius: "var(--radius)",
+      border: "1px solid var(--border)",
+      background: "var(--surface)",
+      textDecoration: "none",
+      minWidth: 0,
+    };
+    return (
+      <div className="dash-card" style={{ padding: "14px 20px" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: mineRows.length ? 10 : 0, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)" }}>Awaiting My Approval</span>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>
+            {mineRows.length
+              ? `${mineRows.length} request${mineRows.length === 1 ? "" : "s"} · oldest ${oldestDays === 0 ? "today" : `${oldestDays} day${oldestDays === 1 ? "" : "s"} ago`}`
+              : "You're all caught up — nothing waiting for you."}
+          </span>
+          <Link to="/approval-center" style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+            Open Approval Center →
+          </Link>
+        </div>
+        {kinds.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 10 }}>
+            {kinds.map(({ k, n }) => {
+              const meta = KIND_META[k];
+              return (
+                <Link key={k} to={`/approval-center?kind=${k}`} style={cardStyle} title={`Open ${meta.pluralLabel} in Mine to approve`}>
+                  <span className={`status-pill ${meta.tone}`} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: 10, flexShrink: 0 }}>
+                    {meta.icon}
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--navy)" }}>{meta.pluralLabel}</span>
+                    <span style={{ display: "block", fontSize: 20, fontWeight: 700, color: "var(--navy)", lineHeight: 1.15 }}>{n}</span>
+                  </span>
+                  <ChevronRight size={15} style={{ marginLeft: "auto", color: "var(--muted)", flexShrink: 0 }} />
+                </Link>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }
