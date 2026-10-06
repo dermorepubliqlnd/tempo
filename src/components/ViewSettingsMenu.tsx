@@ -67,6 +67,10 @@ interface ViewControlsProps<T> {
   statusOptions: string[];
   filterStatuses: string[];
   onFilterStatusesChange: (statuses: string[]) => void;
+  // phase157c: label for the person section ("Assigned to" / "Owner") and
+  // extra checkbox filter sections (My role, Project owner, Attention).
+  personFilterLabel?: string;
+  extraFilters?: ExtraFilter[];
   // Some columns are structurally excluded from ever rendering as a
   // Timeline chip regardless of hiddenColumns (see
   // PROJECT_TIMELINE_EXCLUDED_KEYS in Projects.tsx -- e.g. Name is always
@@ -273,6 +277,8 @@ export default function ViewSettingsMenu<T>({
   statusOptions,
   filterStatuses,
   onFilterStatusesChange,
+  personFilterLabel = "Assigned to",
+  extraFilters = [],
   propertyLockInfo,
   hideGroupBy,
   boardLabelToggle,
@@ -338,12 +344,12 @@ export default function ViewSettingsMenu<T>({
 
   return (
     <>
-      <IconPopoverButton icon={<Filter size={13} />} label="Filter" active={filterPersonIds.length > 0 || filterStatuses.length > 0} width={220}>
+      <IconPopoverButton icon={<Filter size={13} />} label="Filter" active={filterPersonIds.length > 0 || filterStatuses.length > 0 || extraFilters.some((f) => f.selected.length > 0)} width={240}>
         {(close) => (
           <>
             <PopoverHeader label="Filter" onClose={close} />
             <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3, color: "var(--muted)", marginBottom: 4 }}>
-              Assigned to
+              {personFilterLabel}
             </div>
             <div style={{ maxHeight: 160, overflowY: "auto", marginBottom: 6 }}>
               {/* "Me" is pinned first and kept visually separate (its own
@@ -376,6 +382,23 @@ export default function ViewSettingsMenu<T>({
                 </label>
               ))}
             </div>
+            {extraFilters.map((f) => (
+              <div key={f.key} style={{ marginTop: 6 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3, color: "var(--muted)", marginBottom: 4 }}>{f.label}</div>
+                <div style={{ maxHeight: 160, overflowY: "auto" }}>
+                  {f.options.map((o) => (
+                    <label key={o.value} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "3px 2px", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={f.selected.includes(o.value)}
+                        onChange={() => f.onChange(f.selected.includes(o.value) ? f.selected.filter((x) => x !== o.value) : [...f.selected, o.value])}
+                      />
+                      {o.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
           </>
         )}
       </IconPopoverButton>
@@ -840,6 +863,7 @@ export function ViewFilterPills<T>({
   people,
   filterPersonIds,
   filterStatuses,
+  extraFilterParts = [],
   onClearFilter,
   containerRef,
 }: {
@@ -857,6 +881,7 @@ export function ViewFilterPills<T>({
   people: { id: string; name: string }[];
   filterPersonIds: string[];
   filterStatuses: string[];
+  extraFilterParts?: string[];
   onClearFilter: () => void;
   // Sandra ("what i meant was the collapse and expand in the projects and
   // list groupings"): DataTable's own "Collapse all/Expand all" group
@@ -869,7 +894,7 @@ export function ViewFilterPills<T>({
   containerRef?: (el: HTMLDivElement | null) => void;
 }) {
   const activeOption = groupOptions.find((g) => g.key === groupBy);
-  const hasFilter = filterPersonIds.length > 0 || filterStatuses.length > 0;
+  const hasFilter = filterPersonIds.length > 0 || filterStatuses.length > 0 || extraFilterParts.length > 0;
   if (!activeOption && sorts.length === 0 && !hasFilter) return null;
 
   const filterParts: string[] = [];
@@ -882,6 +907,7 @@ export function ViewFilterPills<T>({
     filterParts.push(names.join(", "));
   }
   if (filterStatuses.length > 0) filterParts.push(`Status: ${filterStatuses.join(", ")}`);
+  filterParts.push(...extraFilterParts);
 
   return (
     <div className="view-filter-pills" ref={containerRef}>
@@ -943,4 +969,12 @@ export function ViewFilterPills<T>({
       })}
     </div>
   );
+}
+
+export interface ExtraFilter {
+  key: string;
+  label: string;
+  options: { value: string; label: string }[];
+  selected: string[];
+  onChange: (next: string[]) => void;
 }

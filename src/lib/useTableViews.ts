@@ -384,7 +384,7 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     setViews((vs) => vs.map((v) => (v.id === id && !v.systemView ? { ...v, icon } : v)));
   }
 
-  function installSystemViews(systemViews: TableView[], defaultSystemViewId: string) {
+  function installSystemViews(systemViews: TableView[], defaultSystemViewId: string, migrate?: (v: TableView) => TableView) {
     const normalizedSystemViews = systemViews.map((v) => normalizeTableView(tableKey, v));
     systemDefaultsRef.current = new Map(normalizedSystemViews.map((v) => [v.id, v]));
     setViews((vs) => {
@@ -397,7 +397,8 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
       const custom = vs
         .filter((v) => !v.systemView && !systemIds.has(v.id))
         .map((v) => (v.id === "default" ? { ...v, id: "legacy_default", name: v.name === "All" ? "My saved layout" : v.name } : v))
-        .filter((v, i, arr) => arr.findIndex((x) => x.id === v.id) === i);
+        .filter((v, i, arr) => arr.findIndex((x) => x.id === v.id) === i)
+        .map((v) => (migrate ? normalizeTableView(tableKey, migrate(v)) : v));
       const mergedSystem = normalizedSystemViews.map((sv) => {
         const saved = vs.find((v) => v.id === sv.id);
         if (!saved) return sv;
