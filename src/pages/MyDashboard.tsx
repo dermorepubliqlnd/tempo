@@ -27,6 +27,7 @@ import { tierOf, displayPct, UTIL_LEGEND } from "../lib/utilizationBands";
 import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { supabase } from "../lib/supabaseClient";
 import Modal from "../components/Modal";
+import ApprovalCenter from "./ApprovalCenter";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import { loadMyRequests, type MyRequestRow } from "../lib/myRequests";
 import NonProjectTimerQuickStart from "../components/NonProjectTimerQuickStart";
@@ -980,6 +981,10 @@ export default function MyDashboard() {
         <MetricCard icon={<BarChart3 size={16} />} colors={METRIC_COLORS.teal} label="Utilization This Week" value={`${Math.round(weekUtilPct)}%`} sub={`of ${weekCapacityTotal.toFixed(1)}h capacity`} />
         <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={notTrackingTime ? "Not expected to log time" : `of ${weekExpectedTotal.toFixed(1)}h expected`} />
       </div>
+
+      {/* 2026-10-06 (Sandra): approvers see their queue without leaving the
+          dashboard -- same numbers as Approval Center > Mine to approve. */}
+      {hasApprovalAuthority && <ApprovalCenter summaryOnly />}
 
       {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || draftPlanningProjects.length > 0 || newAssignmentCount > 0 || plannedInvolvement.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
