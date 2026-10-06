@@ -21,7 +21,7 @@ import {
   MessageSquarePlus,
   type LucideIcon,
 } from "lucide-react";
-import { supabase } from "../lib/supabaseClient";
+import { supabase, IS_PREVIEW } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useApprovalAuthority } from "../lib/useApprovalAuthority";
 import TimeTrackerBar from "./TimeTrackerBar";
@@ -228,6 +228,11 @@ export default function AppLayout() {
           >
             <TempoMark size={20} />
             {!collapsed && "Tempo"}
+            {IS_PREVIEW && (
+              <span title="Preview build -- same live data. Changes you make here are real." style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.6, color: "#7a4a00", background: "#ffd166", borderRadius: 999, padding: "2px 7px", marginLeft: 6 }}>
+                PREVIEW
+              </span>
+            )}
           </div>
         </div>
 

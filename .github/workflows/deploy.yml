@@ -1,8 +1,11 @@
 name: Build and deploy to GitHub Pages
 
+# Live site = main at /tempo/. Preview = the `preview` branch (if it exists)
+# at /tempo/preview/ -- same database; the preview build sends
+# x-tempo-channel: preview so DB rules staged "preview-only" apply there.
 on:
   push:
-    branches: [main]
+    branches: [main, preview]
   workflow_dispatch:
 
 permissions:
@@ -19,6 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -27,6 +33,23 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      - name: Build preview branch into dist/preview
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_TEMPO_CHANNEL: preview
+        run: |
+          if git ls-remote --exit-code --heads origin preview >/dev/null; then
+            git worktree add ../pv origin/preview
+            cd ../pv
+            npm install
+            npm run build
+            mkdir -p "$GITHUB_WORKSPACE/dist/preview"
+            cp -r dist/. "$GITHUB_WORKSPACE/dist/preview/"
+            echo "Preview built from $(git rev-parse --short HEAD)"
+          else
+            echo "No preview branch -- live only"
+          fi
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
