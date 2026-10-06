@@ -1661,7 +1661,7 @@ export default function Projects() {
       // immediately flips it to approved/rejected).
       supabase.from("project_baseline_requests").select("project_id").eq("status", "pending"),
       supabase.from("project_planning_types").select("id,name,is_active,sort_order,color").order("sort_order"),
-      supabase.from("project_types").select("id,name,is_active,sort_order,color").order("sort_order"),
+      supabase.from("project_types").select("id,name,is_active,sort_order,color,uses_sessions").order("sort_order"),
       // 2026-09-07 (Sandra: Sign Off Date) -- see closedAtByProjectId above.
       supabase.from("project_closeouts").select("project_id,closed_at"),
       // 2026-09-08 (Sandra: "I want baseline approvals be captured like
@@ -1873,6 +1873,12 @@ export default function Projects() {
   // the phase-22 lock triggers in phase26_migration.sql.
   const isProjectClosed = (projectId: string) => projects.find((p) => p.id === projectId)?.wbs_status === "closed";
   const isOperationalProject = (projectId: string) => !!projects.find((p) => p.id === projectId)?.is_operational;
+  // phase161: only session-based types (Training Delivery) reschedule without
+  // an extension; an "Ongoing container" project keeps extension requests.
+  const isSessionProject = (projectId: string) => {
+    const p = projects.find((x) => x.id === projectId);
+    return !!p?.is_operational && !!(projectTypes.find((t) => t.id === p.project_type_id) as { uses_sessions?: boolean } | undefined)?.uses_sessions;
+  };
   const canEditTask = (t: TaskRow) => !isProjectClosed(t.project_id) && (canManageTasksIn(t.project_id) || t.assignee_id === me?.id);
   // Once a task's completion has been validated (owner/manager's
   // independent sign-off, see the "Validated" column below), its editable
@@ -6813,7 +6819,7 @@ export default function Projects() {
 
       {extDetailTask && (
         <Modal
-          title={`${isOperationalProject(extDetailTask.project_id) ? "Session date" : "Extension history"} -- ${extDetailTask.name}`}
+          title={`${isSessionProject(extDetailTask.project_id) ? "Session date" : "Extension history"} -- ${extDetailTask.name}`}
           onClose={() => {
             setExtDetailTask(null);
             setRescheduleStartDate("");
@@ -6845,7 +6851,7 @@ export default function Projects() {
               </div>
             ))
           )}
-          {isOperationalProject(extDetailTask.project_id) &&
+          {isSessionProject(extDetailTask.project_id) &&
             canEditTask(extDetailTask) &&
             extDetailTask.status !== "Done" &&
             extDetailTask.status !== "Cancelled" &&
@@ -6915,7 +6921,7 @@ export default function Projects() {
                   </button>
                 </div>              </div>
             )}
-          {isProjectLocked(extDetailTask.project_id) && canEditTask(extDetailTask) && !isOperationalProject(extDetailTask.project_id) && (
+          {isProjectLocked(extDetailTask.project_id) && canEditTask(extDetailTask) && !isSessionProject(extDetailTask.project_id) && (
             <button
               onClick={() => {
                 setExtDetailTask(null);

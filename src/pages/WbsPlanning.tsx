@@ -55,6 +55,7 @@ interface ProjectRow {
   schedule_review_required?: boolean | null;
   // phase149: Operational project (Project Type flag, mirrored by trigger).
   is_operational?: boolean | null;
+  is_ongoing_container?: boolean | null;
   start_date: string | null;
   end_date: string | null;
   timelines_locked: boolean;
@@ -595,7 +596,7 @@ export default function WbsPlanning() {
   const [projectCategoryOptions, setProjectCategoryOptions] = useState<{ name: string; is_active: boolean }[]>([]);
   const [projectSourceOptions, setProjectSourceOptions] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
   const [projectPlanningTypeOptions, setProjectPlanningTypeOptions] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
-  const [projectTypeOptions, setProjectTypeOptions] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
+  const [projectTypeOptions, setProjectTypeOptions] = useState<{ id: string; name: string; is_active: boolean; is_operational?: boolean; uses_sessions?: boolean }[]>([]);
   // Task Type <-> Output Type conditional mapping (Phase 23, 2026-08-25) --
   // Sandra: "I want the output be conditional based on task type." Filters
   // the Output Type picker below to only what's allowed for the task's
@@ -1107,7 +1108,7 @@ export default function WbsPlanning() {
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
     const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }, { data: planningTypes }, { data: ptypes }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,planning_type_id,project_type_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required,is_operational").eq("id", projectId).single(),
+      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,planning_type_id,project_type_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required,is_operational,is_ongoing_container").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -1136,7 +1137,7 @@ export default function WbsPlanning() {
       supabase.from("project_categories").select("name,is_active").order("sort_order"),
       supabase.from("project_sources").select("id,name,is_active").order("sort_order"),
       supabase.from("project_planning_types").select("id,name,is_active").order("sort_order"),
-      supabase.from("project_types").select("id,name,is_active").order("sort_order"),
+      supabase.from("project_types").select("id,name,is_active,is_operational,uses_sessions").order("sort_order"),
     ]);
     setProject((proj as ProjectRow) ?? null);
     // Phase 21 (2026-08-24): activeMode is now a fixed constant
@@ -1158,7 +1159,7 @@ export default function WbsPlanning() {
     setProjectCategoryOptions((cats as { name: string; is_active: boolean }[]) ?? []);
     setProjectSourceOptions((srcs as { id: string; name: string; is_active: boolean }[]) ?? []);
     setProjectPlanningTypeOptions((planningTypes as { id: string; name: string; is_active: boolean }[]) ?? []);
-    setProjectTypeOptions((ptypes as { id: string; name: string; is_active: boolean }[]) ?? []);
+    setProjectTypeOptions((ptypes as { id: string; name: string; is_active: boolean; is_operational?: boolean; uses_sessions?: boolean }[]) ?? []);
 
     // Dependencies are same-project only (v1), so fetched as a follow-up
     // query scoped to this project's own task ids, once they're known --
@@ -4122,6 +4123,12 @@ export default function WbsPlanning() {
     !!project.is_operational
   );
   const isOperationalStarted = !!project.is_operational && project.wbs_status !== "draft" && project.wbs_status !== "closed";
+  // phase161: session behaviour (Add Session, bulk upload, reschedule without
+  // approval) is a Project Type feature (Training Delivery). An "Ongoing
+  // container" BAU project is operational for Health but keeps normal tasks.
+  const projectTypeRow = projectTypeOptions.find((t) => t.id === project.project_type_id);
+  const isSessionProject = !!project.is_operational && !!projectTypeRow?.uses_sessions;
+  const typeIsOperational = !!projectTypeRow?.is_operational;
 
   // Phase 2/3 authorization -- mirrors can_manage_wbs()/can_decide_closure()
   // on the DB side (flat tiering, Sandra 2026-07-28): Full Access or the
@@ -5199,7 +5206,7 @@ export default function WbsPlanning() {
       {dialog}
       {assigneePicker.element}
       {startDatePrompt.element}
-      {showAddSession && project?.is_operational && me?.id && (
+      {showAddSession && isSessionProject && me?.id && (
         <AddSessionModal
           projects={[{
             id: project.id,
@@ -5215,7 +5222,7 @@ export default function WbsPlanning() {
           onSaved={() => void loadAll(true)}
         />
       )}
-      {showBulkUploadSessions && project?.is_operational && canManageWbs && (
+      {showBulkUploadSessions && isSessionProject && canManageWbs && (
         <BulkUploadSessionsModal
           projectId={project.id}
           projectName={project.name}
@@ -5272,9 +5279,9 @@ export default function WbsPlanning() {
               >
                 {task.status !== "Cancelled" && (
                   <>
-                {!project?.is_operational && task.depth === 0 && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
-                {!project?.is_operational && menuItem("Add task below", <CornerDownRight size={13} />, () => void addTaskBelow(task))}
-                {!project?.is_operational && menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
+                {!isSessionProject && task.depth === 0 && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
+                {!isSessionProject && menuItem("Add task below", <CornerDownRight size={13} />, () => void addTaskBelow(task))}
+                {!isSessionProject && menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
                 {menuItem(wbsNoteCounts.byTask[task.id] ? `Notes (${wbsNoteCounts.byTask[task.id]})` : "Add note", <MessageCircle size={13} />, () => setWbsNotes({ taskId: task.id }))}
                 <div style={{ height: 1, background: "var(--border)", margin: "4px 2px" }} />
                 {menuItem("Move up", <ArrowUp size={13} />, () => void moveTaskDirection(task, -1), { disabled: !canMoveUp })}
@@ -5604,12 +5611,14 @@ export default function WbsPlanning() {
             </span>
           </div>
           <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
-            {project.is_operational
+            {isSessionProject
               ? "Manage this operational project and plot Training Delivery sessions as they are scheduled."
+              : project.is_operational
+              ? "Ongoing container: add tasks as requests come in. Task due dates, Overdue and extension requests work as usual."
               : "Define the project, add tasks, and review the forecast. Lock the baseline when the plan is ready."}
           </div>
         </div>
-        {project.is_operational && project.wbs_status !== "closed" && canManageWbs && (
+        {isSessionProject && project.wbs_status !== "closed" && canManageWbs && (
           <button
             type="button"
             className="btn-secondary"
@@ -6041,6 +6050,27 @@ export default function WbsPlanning() {
                   </div>
                 </div>
               </label>
+
+              {/* phase161 (Sandra 2026-10-07): per-project "Ongoing container"
+                  (e.g. a BAU "Content Revisions" bucket). Project Health shows
+                  Ongoing; tasks keep due dates, Overdue and extensions. */}
+              {!typeIsOperational && (
+                <label
+                  title="For an open bucket of small requests (e.g. quick content revisions) rather than a project with an end deliverable. Project Health shows Ongoing and no baseline variance is tracked; tasks keep due dates, Overdue and extension requests."
+                  style={{ display: "flex", alignItems: "center", gap: 8, alignSelf: "end", padding: "8px 2px", fontSize: 11.5, color: "#304963", cursor: canManageWbs && canEditWbs ? "pointer" : "default" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!project.is_ongoing_container}
+                    disabled={!canManageWbs || !canEditWbs}
+                    onChange={(e) => saveProjectField({ is_ongoing_container: e.target.checked, is_operational: e.target.checked })}
+                  />
+                  <span>
+                    <strong>Ongoing container</strong>
+                    <span style={{ display: "block", fontSize: 10.5, color: "var(--muted)" }}>Health shows Ongoing; tasks still track due dates</span>
+                  </span>
+                </label>
+              )}
 
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Complexity <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
@@ -6825,7 +6855,7 @@ export default function WbsPlanning() {
             <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #e5edf6", flexWrap: "wrap" }}>
               <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>2</span>
               <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Work Breakdown Structure</div>
-              <div style={{ fontSize: 10.5, color: "var(--muted)" }}>{project.is_operational ? "Manage scheduled Training Delivery sessions and their status, facilitator, hours, and dates." : "Break the project into tasks and define the effort, assignee, and schedule."}</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)" }}>{isSessionProject ? "Manage scheduled Training Delivery sessions and their status, facilitator, hours, and dates." : "Break the project into tasks and define the effort, assignee, and schedule."}</div>
               <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <button
                   type="button"
@@ -6837,7 +6867,7 @@ export default function WbsPlanning() {
                 </button>
 
                 {canEditWbs && (
-                  project.is_operational ? (
+                  isSessionProject ? (
                     <button
                       type="button"
                       className="btn-primary"
@@ -7848,7 +7878,7 @@ export default function WbsPlanning() {
           {project.wbs_status === "draft" && !pendingBaselineRequest && !declinedBaselineRequest && "Start Project once scoping is final to start tracking against it."}
           {project.wbs_status === "draft" && !!pendingBaselineRequest && "Waiting on an approver to lock this in as the Baseline."}
           {project.wbs_status === "draft" && !pendingBaselineRequest && !!declinedBaselineRequest && wbsMeta.hint}
-          {isOperationalStarted && "Operational project -- trainers add their own sessions from Projects & Tasks › Tasks › Add Session. No baseline variance is tracked; close it at the end of the quarter."}
+          {isOperationalStarted && (isSessionProject ? "Operational project -- trainers add their own sessions here with Add Session. No baseline variance is tracked; close it at the end of the quarter." : "Ongoing container -- add tasks as requests come in. Tasks keep due dates, Overdue and extension requests; no baseline variance is tracked at project level. Close it at the end of the period.")}
           {!isOperationalStarted && project.wbs_status === "baseline_locked" && "This is the official commitment. You can keep editing -- close the project once work is complete."}
           {!isOperationalStarted && project.wbs_status === "changed_after_baseline" &&
             "This plan differs from the original baseline. Baselines are locked once by design -- variance tracking measures against the original. Close the project once work is complete."}

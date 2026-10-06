@@ -32,6 +32,8 @@ export interface WeekRange { start: string; end: string }
 export interface ProjLine { name: string; type: string; planning: string; date: string; extra?: string; warn?: boolean }
 
 export interface WeeklyReportData {
+  /** "Training Delivery", or "Ongoing" when ongoing containers exist too (phase161). */
+  opLabel: string;
   generatedOn: string;
   week: WeekRange; thisWeek: WeekRange; nextWeek: WeekRange;
   glance: {
@@ -133,7 +135,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to"),
     supabase.from("deleted_person_day_hours").select("person_id,date,hours"),
     supabase.from("app_settings").select("historical_locking_enabled,time_tracking_start_date").eq("id", true).single(),
-    supabase.from("project_types").select("id,name"),
+    supabase.from("project_types").select("id,name,uses_sessions"),
     supabase.from("project_planning_types").select("id,name"),
   ]);
   const people = (pe.data as Person[]) ?? [];
@@ -146,6 +148,12 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   const hist = sd?.historical_locking_enabled ?? false;
   const trackingStart = d10(sd?.time_tracking_start_date) || "2026-08-03";
   const typeName = new Map(((ptypes.data as Lookup[]) ?? []).map((l) => [l.id, l.name]));
+  // phase161: ongoing (operational) projects are Training Delivery unless an
+  // "Ongoing container" project (e.g. a BAU revisions bucket) is in play.
+  const sessionTypeIdsPT = new Set(((ptypes.data as (Lookup & { uses_sessions?: boolean })[]) ?? []).filter((l) => l.uses_sessions).map((l) => l.id));
+  const opLabel = projects.some((p) => (p as { is_operational?: boolean | null }).is_operational && !(p.project_type_id && sessionTypeIdsPT.has(p.project_type_id)) && p.status !== "Completed" && p.status !== "Cancelled" && p.wbs_status !== "closed")
+    ? "Ongoing"
+    : "Training Delivery";
   const planName = new Map(((plans.data as Lookup[]) ?? []).map((l) => [l.id, l.name]));
   const personById = new Map(people.map((p) => [p.id, p]));
   const typeOf = (p: P) => (p.project_type_id && typeName.get(p.project_type_id)) || "No type";
@@ -419,7 +427,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   // Session = leaf task with Output Type "Session" in an operational project.
   // Delivered = Done with Actual Completion Date in the report week; hours =
   // finalized time logged on session tasks during the report week.
-  const opIds = new Set(projects.filter((p) => (p as { is_operational?: boolean | null }).is_operational).map((p) => p.id));
+  const opIds = new Set(projects.filter((p) => (p as { is_operational?: boolean | null }).is_operational && !(p as { is_ongoing_container?: boolean | null }).is_ongoing_container).map((p) => p.id));
   const { data: otData } = await supabase.from("output_types").select("id,name");
   const sessionTypeIds = new Set(((otData as Lookup[]) ?? []).filter((o) => o.name.trim().toLowerCase() === "session").map((o) => o.id));
   const sessions = leaf.filter((t) => opIds.has(t.project_id) && !!t.output_type_id && sessionTypeIds.has(t.output_type_id));
@@ -641,13 +649,13 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       `Total year to date = projects completed ${md(ytdStart)} – ${md(ytdEnd)} + projects open today (Cancelled excluded).`,
       `Total ${yCompleted + yActive + yOpActive + yOther} = ${yCompleted} completed + ${yActive} active projects + ${yOpActive} Training Delivery + ${yOther} not started or paused.`,
       `Active projects (${yActive}) = In Progress project work as of ${md(todayIso)} — the same ${yActive} on the Health donut:`, bl(activeP.map((p) => `${p.name} (owner ${who(p.owner_id)})`)),
-      `Training Delivery (${yOpActive}) = ongoing, session-based training kept open while sessions run; see the Training delivery slide:`, bl(opActive.map((p) => p.name)),
+      `${opLabel} (${yOpActive}) = ongoing projects kept open while work comes in (Training Delivery sessions${opLabel === "Ongoing" ? " and ongoing containers such as revision buckets" : ""}); health is always "Ongoing":`, bl(opActive.map((p) => p.name)),
       `Portfolio movement by month (started = Start Project approved and start date in the month; completed = completion date in the month):`,
       bl(ytdMovement.map((m) => `${m.label}: ${m.started} started, ${m.completed} completed`)),
       `Paused now (${pausedNowP.length}):`, bl(pausedNowP.map((p) => `${p.name} — ${pauseWhy(p)}`)),
     ].join("\n"),
     health: [
-      `Health of ${activeP.length} of the ${activeAll.length} In Progress projects as of ${md(todayIso)}. The other ${activeAll.length - activeP.length} are Training Delivery projects${opActive.length ? ` (${opActive.map((p) => p.name).join(", ")})` : ""} — counted as Active on the Portfolio slide, but left out here because their health is always "Ongoing".`,
+      `Health of ${activeP.length} of the ${activeAll.length} In Progress projects as of ${md(todayIso)}. The other ${activeAll.length - activeP.length} are ongoing ${opLabel === "Ongoing" ? "" : "Training Delivery "}projects${opActive.length ? ` (${opActive.map((p) => p.name).join(", ")})` : ""} — counted as Active on the Portfolio slide, but left out here because their health is always "Ongoing".`,
       `Overdue (${overdueP.length}) — past End Date, not complete:`, bl(overdueNotes),
       `Off track:`, bl(healthList("Off track")),
       `At risk:`, bl(healthList("At risk")),
@@ -695,6 +703,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   };
 
   return {
+    opLabel,
     generatedOn: todayIso, week, thisWeek, nextWeek, training, notes, ytd,
     glance: {
       completedProjects: completedProjects.map((p) => p.name),

@@ -133,7 +133,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     };
     kpi(1.55, B.mahogany, "Total projects · YTD", y.total, `${y.completed} completed (${range}) + ${y.active + y.operationalActive + y.notStartedPaused} open today`);
     kpi(3.28, B.hydrate, "Active projects", y.active, `In Progress project work as of ${fmtMD(d.generatedOn)} — same ${y.active} as the Health chart`);
-    kpi(5.02, B.clarify, "Training Delivery", y.operationalActive, "Ongoing, session-based training kept open while sessions run — see Training delivery slide");
+    kpi(5.02, B.clarify, d.opLabel, y.operationalActive, d.opLabel === "Ongoing" ? "Training Delivery and ongoing containers (e.g. revision buckets), kept open while work comes in" : "Ongoing, session-based training kept open while sessions run — see Training delivery slide");
     // Movement by month
     card(s, 4.15, 1.55, 8.85, 5.07, "Portfolio movement", `Projects started vs. completed per month · ${range}`);
     const labels = y.movement.map((m) => m.label);
@@ -179,7 +179,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
       });
       if (items.length > 5) txt(s, 10.45, yy + 0.8 + 5 * 0.26, 2.4, 0.26, `+${items.length - 5} more`, { fontSize: 8.5, color: B.taupe });
     };
-    const excl = h.operationalExcluded ? ` · excl. ${h.operationalExcluded} Training Delivery` : "";
+    const excl = h.operationalExcluded ? ` · excl. ${h.operationalExcluded} ${d.opLabel === "Ongoing" ? "ongoing" : "Training Delivery"}` : "";
     mini(1.55, "Active project health", `${h.total} In Progress · as of ${fmtMD(d.generatedOn)}${excl}`, h.health, (l) => HC[l] ?? B.linen);
     mini(4.17, "Active project phase", `${h.total} In Progress${excl}`, h.phase, (_l, i) => PH[i % PH.length]);
   }
@@ -188,7 +188,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
   {
     const h = d.health;
     const s = content("Active project health", t.titles.health, "health");
-    card(s, 0.33, 1.55, 5.3, 5.07, `Health of ${h.activeCount} active projects`, h.operationalActive ? `As of ${fmtMD(d.generatedOn)} · excludes ${h.operationalActive} Training Delivery (always “Ongoing”)` : `Current state as of ${fmtMD(d.generatedOn)}`);
+    card(s, 0.33, 1.55, 5.3, 5.07, `Health of ${h.activeCount} active projects`, h.operationalActive ? `As of ${fmtMD(d.generatedOn)} · excludes ${h.operationalActive} ${d.opLabel === "Ongoing" ? "ongoing" : "Training Delivery"} (always “Ongoing”)` : `Current state as of ${fmtMD(d.generatedOn)}`);
     const HC: Record<string, string> = { "On track": B.calm, "Done on time · close pending": B.hydrate, "Done late · close pending": B.clarify, "At risk": B.protect, "Off track": B.brighten, Overdue: B.renew, "Not started": B.taupe, "Schedule review": B.rewind, "Health unavailable": B.linen };
     const bk = h.buckets.length ? h.buckets : [{ label: "None", count: 1 }];
     addChart(s, pptx.ChartType.doughnut, [{ name: "Projects", labels: bk.map((b) => b.label), values: bk.map((b) => b.count) }],
