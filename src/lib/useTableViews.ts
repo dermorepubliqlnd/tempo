@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabaseClient";
 import type { TableView, DefaultView, ViewType } from "./tableTypes";
 
@@ -116,6 +116,26 @@ function loadActiveId(activeKey: string, views: TableView[]): string {
 // row loads this hook, whatever's sitting in their browser's localStorage
 // (their pre-this-feature layout) is read once and pushed up as that row,
 // so nobody's current customization is silently lost in the changeover.
+// Keys a person may change on a System View and keep (phase157b).
+export const SYSTEM_VIEW_PERSONAL_KEYS: (keyof TableView)[] = [
+  "sorts",
+  "groupBy",
+  "groupBy2",
+  "hiddenGroups",
+  "hideEmptyGroups",
+  "showCount",
+  "columnOrder",
+  "columnWidths",
+  "frozenUpTo",
+  "progressDisplay",
+  "priorityDisplay",
+  "complexityDisplay",
+  "timelineScale",
+  "timelineDateMode",
+  "timelineLabelWidth",
+  "boardShowPropertyLabels",
+];
+
 export function useTableViews(tableKey: string, personId: string | undefined, defaultView: DefaultView) {
   const storageKey = `${STORAGE_PREFIX}_${tableKey}_${personId ?? "anon"}`;
   const activeKey = `${storageKey}_active`;
@@ -245,43 +265,39 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     };
   }, [views, activeViewId, personId, tableKey]);
 
-  // phase157 (2026-10-06, Sandra -- View Management): changes on a System
-  // View are TEMPORARY. They apply immediately but live only in memory until
-  // the person chooses "Save as Personal View" (new personal view) or
-  // "Discard Changes". Switching views discards them. Only pure ergonomics
-  // (column order within the same set, widths, freeze) are kept silently --
-  // the page decides that split and calls updateActiveView for those.
-  const [tempPatch, setTempPatch] = useState<{ viewId: string; patch: Partial<TableView> } | null>(null);
-  const baseActiveView = views.find((v) => v.id === activeViewId) ?? views[0];
-  const activeView: TableView = useMemo(
-    () =>
-      tempPatch && tempPatch.viewId === baseActiveView.id
-        ? normalizeTableView(tableKey, { ...baseActiveView, ...tempPatch.patch })
-        : baseActiveView,
-    [tempPatch, baseActiveView, tableKey]
-  );
-  const isActiveViewModified = !!tempPatch && tempPatch.viewId === baseActiveView.id && Object.keys(tempPatch.patch).length > 0;
+  // phase157b (2026-10-06, Sandra -- View Management v2): a System View can be
+  // personalised IN PLACE for layout changes (sort, group, sub-group, column
+  // order/width/freeze, group visibility, counts, display formats, timeline
+  // settings). Those are kept for this person until "Restore default".
+  // Structural changes (filters, columns shown, card fields, view type) are
+  // not allowed on a System View -- the page offers "Save as Personal View".
+  const systemDefaultsRef = useRef<Map<string, TableView>>(new Map());
+  const activeView: TableView = views.find((v) => v.id === activeViewId) ?? views[0];
 
-  function updateActiveViewTemporarily(patch: Partial<TableView>) {
-    const id = baseActiveView.id;
-    setTempPatch((cur) => ({ viewId: id, patch: { ...(cur && cur.viewId === id ? cur.patch : {}), ...patch } }));
+  function isSystemViewCustomized(view: TableView = activeView): boolean {
+    if (!view.systemView) return false;
+    const def = systemDefaultsRef.current.get(view.id);
+    if (!def) return false;
+    return SYSTEM_VIEW_PERSONAL_KEYS.some((k) => JSON.stringify(view[k] ?? null) !== JSON.stringify(def[k] ?? null));
   }
 
-  function discardActiveViewChanges() {
-    setTempPatch(null);
+  function restoreSystemViewDefault(id: string = activeView.id) {
+    const def = systemDefaultsRef.current.get(id);
+    if (!def) return;
+    setViews((vs) => vs.map((v) => (v.id === id ? { ...def, personalDefault: v.personalDefault, isDefaultView: v.isDefaultView } : v)));
   }
 
   function selectView(id: string) {
-    setTempPatch(null);
     setActiveViewId(id);
   }
 
-  // Save the System View + its temporary changes as a new personal view.
-  function saveActiveViewAsPersonal(name: string) {
+  // Copy the active view (+ an optional change) into a new personal view.
+  function saveActiveViewAsPersonal(name: string, extra: Partial<TableView> = {}) {
     const source = activeView;
     const newId = `view_${Date.now()}`;
     const copy: TableView = normalizeTableView(tableKey, {
       ...source,
+      ...extra,
       id: newId,
       name,
       systemView: false,
@@ -290,14 +306,13 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
       personalDefault: undefined,
     });
     setViews((vs) => [...vs, copy]);
-    setTempPatch(null);
     setActiveViewId(newId);
   }
 
   function updateActiveView(patch: Partial<TableView>) {
     setViews((vs) =>
       vs.map((v) =>
-        v.id === baseActiveView.id
+        v.id === activeView.id
           ? normalizeTableView(tableKey, { ...v, ...patch })
           : v
       )
@@ -371,6 +386,7 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
 
   function installSystemViews(systemViews: TableView[], defaultSystemViewId: string) {
     const normalizedSystemViews = systemViews.map((v) => normalizeTableView(tableKey, v));
+    systemDefaultsRef.current = new Map(normalizedSystemViews.map((v) => [v.id, v]));
     setViews((vs) => {
       const systemIds = new Set(normalizedSystemViews.map((v) => v.id));
       // 2026-10-04 hotfix: never drop a person's own "default" ("All") view --
@@ -385,15 +401,18 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
       const mergedSystem = normalizedSystemViews.map((sv) => {
         const saved = vs.find((v) => v.id === sv.id);
         if (!saved) return sv;
-        // phase157 (2026-10-06): only ergonomics carry over on System Views
-        // -- column order (same set), widths, freeze. Sort, group, view type,
-        // filters and columns are temporary (Save as Personal View).
+        // phase157b: this person's in-place layout changes carry over
+        // (columns kept only if the set is unchanged).
         const sameCols = saved.columnOrder.length === sv.columnOrder.length && saved.columnOrder.every((k) => sv.columnOrder.includes(k));
+        const carried: Partial<TableView> = {};
+        for (const k of SYSTEM_VIEW_PERSONAL_KEYS) {
+          if (k === "columnOrder") continue;
+          if (saved[k] !== undefined) (carried as Record<string, unknown>)[k] = saved[k];
+        }
         return {
           ...sv,
+          ...carried,
           columnOrder: sameCols ? saved.columnOrder : sv.columnOrder,
-          columnWidths: saved.columnWidths ?? sv.columnWidths,
-          frozenUpTo: saved.frozenUpTo ?? sv.frozenUpTo,
           personalDefault: saved.personalDefault,
         };
       });
@@ -448,5 +467,5 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     });
   }
 
-  return { views, activeView, activeViewId, setActiveViewId: selectView, updateActiveView, updateActiveViewTemporarily, discardActiveViewChanges, saveActiveViewAsPersonal, isActiveViewModified, createView, renameView, duplicateView, setViewColor, setViewIcon, deleteView, reorderViews, installSystemViews, setDefaultView, loaded };
+  return { views, activeView, activeViewId, setActiveViewId: selectView, updateActiveView, saveActiveViewAsPersonal, isSystemViewCustomized, restoreSystemViewDefault, createView, renameView, duplicateView, setViewColor, setViewIcon, deleteView, reorderViews, installSystemViews, setDefaultView, loaded };
 }

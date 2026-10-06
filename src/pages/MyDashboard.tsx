@@ -1061,23 +1061,30 @@ export default function MyDashboard() {
       )}
 
       {attentionModal === "draft_planning" && (
-        <Modal title="Draft projects — Start Project pending" onClose={() => setAttentionModal(null)}>
+        <Modal title="Draft projects — Start Project pending" onClose={() => setAttentionModal(null)} width={600}>
           <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 0 }}>
             Planning, not delivery: dates on Draft tasks are tentative and don't count as due or overdue. Contributors don't see these tasks until
             the project is started. Review the WBS, then Start Project (or coach the owner) to commit the plan.
           </p>
           {draftPlanningProjects.map((p) => (
-            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 4px", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
-              <span style={{ flex: "0 0 64px", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+            <div
+              key={p.id}
+              style={{ display: "grid", gridTemplateColumns: "60px minmax(0, 1fr) auto", alignItems: "center", columnGap: 12, padding: "9px 4px", borderBottom: "1px solid var(--border)", fontSize: 12 }}
+            >
+              <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
                 {p.project_number ? `P-${String(p.project_number).padStart(4, "0")}` : "—"}
               </span>
-              <span style={{ flex: "1 1 auto", fontWeight: 600, color: "var(--navy)" }}>{p.name}</span>
-              <span style={{ flex: "0 0 auto", color: "var(--text-secondary)" }}>
-                {p.owner_id === me?.id ? "Your project" : `Owner: ${people.find((x) => x.id === p.owner_id)?.name ?? "—"}`}
-                {" · "}
-                {leafTasksOf(p.id).length} task{leafTasksOf(p.id).length === 1 ? "" : "s"}
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: "block", fontWeight: 600, color: "var(--navy)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>
+                  {p.name}
+                </span>
+                <span style={{ display: "block", fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                  {p.owner_id === me?.id ? "Your project" : `Owner: ${people.find((x) => x.id === p.owner_id)?.name ?? "—"}`}
+                  {" · "}
+                  {leafTasksOf(p.id).length} task{leafTasksOf(p.id).length === 1 ? "" : "s"}
+                </span>
               </span>
-              <Link to={`/projects/${p.id}/wbs`} style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+              <Link to={`/projects/${p.id}/wbs`} style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none", whiteSpace: "nowrap" }}>
                 Review Draft →
               </Link>
             </div>

@@ -7,14 +7,14 @@ import { FolderKanban, UserCheck, Users, Activity, ListTodo, BadgeCheck, Clock, 
 import { supabase } from "../lib/supabaseClient";
 import { splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { useSession } from "../lib/useSession";
-import { useTableViews } from "../lib/useTableViews";
+import { useTableViews, SYSTEM_VIEW_PERSONAL_KEYS } from "../lib/useTableViews";
 import DataTable from "../components/DataTable";
 import BoardView, { type BoardColumnDef } from "../components/BoardView";
 import TimelineView, { TimelineControls } from "../components/TimelineView";
 import CalendarView from "../components/CalendarView";
 import CardActionMenu from "../components/CardActionMenu";
 import ViewTabs from "../components/ViewTabs";
-import { ViewLayoutSwitch, ViewModifiedBar } from "../components/ViewLayoutSwitch";
+import { ViewLayoutSwitch } from "../components/ViewLayoutSwitch";
 import ViewSettingsMenu, { ViewFilterPills } from "../components/ViewSettingsMenu";
 import Modal from "../components/Modal";
 import { PauseProjectModal, ScheduleReviewModal } from "../components/PauseProjectModals";
@@ -1203,24 +1203,32 @@ function reorderedSortValue(list: { id: string; sort_order: number | null }[], d
 // time_entries, and task_collaborators with elevated privileges before
 // deleting the tasks -- so RLS can't silently swallow the cleanup again.
 
-// phase157: split a System View patch into silently-kept ergonomics and
-// temporary changes (see updateProjectView/updateTaskView).
-function splitSystemViewPatch(active: TableView, patch: Partial<TableView>): { silent: Partial<TableView>; temp: Partial<TableView> } {
-  const silent: Partial<TableView> = {};
-  const temp: Partial<TableView> = {};
+// phase157b: which System View changes are personal layout tweaks (kept on
+// the System View for this person) vs structural (need a personal view).
+const QUIET_SYSTEM_KEYS = new Set<string>(["columnOrder", "columnWidths", "frozenUpTo"]);
+function classifySystemViewPatch(active: TableView, patch: Partial<TableView>): "quiet" | "personal" | "structural" {
   const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((x) => b.includes(x));
+  let kind: "quiet" | "personal" = "quiet";
   for (const k of Object.keys(patch) as (keyof TableView)[]) {
-    let keep = false;
-    if (k === "columnWidths" || k === "frozenUpTo") keep = true;
-    else if (k === "columnOrder") keep = sameSet(patch.columnOrder ?? [], active.columnOrder);
-    else if (k === "cardPrimary" || k === "cardSecondary") {
+    if (k === "columnOrder") {
+      if (!sameSet(patch.columnOrder ?? [], active.columnOrder)) return "structural";
+      continue;
+    }
+    if (k === "cardPrimary" || k === "cardSecondary") {
       const cur = k === "cardPrimary" ? active.cardPrimary : active.cardSecondary;
       const fallback = k === "cardPrimary" ? (active.taskScope ? TASK_CARD_DEFAULT.primary : PROJECT_CARD_DEFAULT.primary) : (active.taskScope ? TASK_CARD_DEFAULT.secondary : PROJECT_CARD_DEFAULT.secondary);
-      keep = sameSet((patch[k] as string[] | undefined) ?? [], cur ?? fallback);
+      if (!sameSet((patch[k] as string[] | undefined) ?? [], cur ?? fallback)) return "structural";
+      kind = "personal";
+      continue;
     }
-    ((keep ? silent : temp) as Record<string, unknown>)[k as string] = patch[k];
+    if (QUIET_SYSTEM_KEYS.has(k as string)) continue;
+    if ((SYSTEM_VIEW_PERSONAL_KEYS as string[]).includes(k as string)) {
+      kind = "personal";
+      continue;
+    }
+    return "structural";
   }
-  return { silent, temp };
+  return kind;
 }
 
 export default function Projects() {
@@ -2580,14 +2588,37 @@ export default function Projects() {
       projectViews.updateActiveView(patch);
       return;
     }
-    // phase157 (2026-10-06, Sandra -- View Management): on a System View
-    // ergonomics (column order within the same set, widths, freeze, card
-    // reorder within the same sets) are kept silently; everything else
-    // (filters, sort, group, columns shown, properties, view type) applies
-    // TEMPORARILY until "Save as Personal View" / "Discard Changes".
-    const { silent, temp } = splitSystemViewPatch(active, patch);
-    if (Object.keys(silent).length) projectViews.updateActiveView(silent);
-    if (Object.keys(temp).length) projectViews.updateActiveViewTemporarily(temp);
+    const kind = classifySystemViewPatch(active, patch);
+    if (kind === "quiet") {
+      projectViews.updateActiveView(patch);
+      return;
+    }
+    if (kind === "personal") {
+      // First personal change on this System View -> one confirmation.
+      if (!projectViews.isSystemViewCustomized()) {
+        void confirm({
+          title: "Modify this System View?",
+          message: `Your changes to "${active.name}" are kept for you only. Everyone else keeps the standard layout, and you can switch back any time with Restore default.`,
+          confirmLabel: "Yes, keep my changes",
+          cancelLabel: "Cancel",
+        }).then((ok) => {
+          if (ok) projectViews.updateActiveView(patch);
+        });
+        return;
+      }
+      projectViews.updateActiveView(patch);
+      return;
+    }
+    void confirm({
+      title: "Not available on a System View",
+      message: patch.viewType
+        ? `Switching "${active.name}" to ${patch.viewType === "board" ? "Board" : patch.viewType === "timeline" ? "Timeline" : patch.viewType === "calendar" ? "Calendar" : "Table"} creates your own personal view. Save it as a personal view?`
+        : `Filters, shown columns and card fields are fixed on System Views. Save "${active.name}" with this change as your own personal view?`,
+      confirmLabel: "Save as Personal View",
+      cancelLabel: "Cancel",
+    }).then((ok) => {
+      if (ok) projectViews.saveActiveViewAsPersonal(`${active.name} - Personal`, patch);
+    });
   }
 
   // Row-level Filter applied upstream of sort/group/render so it covers
@@ -5405,9 +5436,37 @@ export default function Projects() {
       taskViews.updateActiveView(patch);
       return;
     }
-    const { silent, temp } = splitSystemViewPatch(active, patch);
-    if (Object.keys(silent).length) taskViews.updateActiveView(silent);
-    if (Object.keys(temp).length) taskViews.updateActiveViewTemporarily(temp);
+    const kind = classifySystemViewPatch(active, patch);
+    if (kind === "quiet") {
+      taskViews.updateActiveView(patch);
+      return;
+    }
+    if (kind === "personal") {
+      // First personal change on this System View -> one confirmation.
+      if (!taskViews.isSystemViewCustomized()) {
+        void confirm({
+          title: "Modify this System View?",
+          message: `Your changes to "${active.name}" are kept for you only. Everyone else keeps the standard layout, and you can switch back any time with Restore default.`,
+          confirmLabel: "Yes, keep my changes",
+          cancelLabel: "Cancel",
+        }).then((ok) => {
+          if (ok) taskViews.updateActiveView(patch);
+        });
+        return;
+      }
+      taskViews.updateActiveView(patch);
+      return;
+    }
+    void confirm({
+      title: "Not available on a System View",
+      message: patch.viewType
+        ? `Switching "${active.name}" to ${patch.viewType === "board" ? "Board" : patch.viewType === "timeline" ? "Timeline" : patch.viewType === "calendar" ? "Calendar" : "Table"} creates your own personal view. Save it as a personal view?`
+        : `Filters, shown columns and card fields are fixed on System Views. Save "${active.name}" with this change as your own personal view?`,
+      confirmLabel: "Save as Personal View",
+      cancelLabel: "Cancel",
+    }).then((ok) => {
+      if (ok) taskViews.saveActiveViewAsPersonal(`${active.name} - Personal`, patch);
+    });
   }
   // 2026-10-04 (Sandra): Tasks KPI cards. Clicking a card opens a temporary
   // "Quick List" of exactly those tasks with a layout suited to them --
@@ -5907,13 +5966,6 @@ export default function Projects() {
 
       <div className="card" style={{ padding: 0, marginBottom: 20 }}>
         <div className="sticky-toolbar-cluster" ref={projectClusterRef}>
-        {projectViews.isActiveViewModified && (
-          <ViewModifiedBar
-            viewName={projectViews.activeView.name}
-            onDiscard={projectViews.discardActiveViewChanges}
-            onSave={() => projectViews.saveActiveViewAsPersonal(`${projectViews.activeView.name} - Personal`)}
-          />
-        )}
         <div className="table-toolbar">
           <ViewTabs
             mode="dropdown"
@@ -5941,6 +5993,11 @@ export default function Projects() {
               updateProjectView(viewType === "board" && !projectViews.activeView.groupBy ? { viewType, groupBy: "phase" } : { viewType })
             }
           />
+          {projectViews.activeView.systemView && projectViews.isSystemViewCustomized() && (
+            <button type="button" onClick={() => projectViews.restoreSystemViewDefault()} title="Undo your layout changes to this System View" style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+              ↺ Restore default
+            </button>
+          )}
           <div className="toolbar-actions">
             <ViewSettingsMenu
               rows={filteredProjects}
@@ -6005,6 +6062,26 @@ export default function Projects() {
             />
           </div>
         )}
+        {/* phase157b (2026-10-06): a view's project scope used to be invisible
+            -- a personal copy of "Active Project Portfolio" silently showed
+            In Progress projects only (Sandra's "Queued Projects": Draft and
+            Closed groups at 0). Now it's shown and editable. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px 0", fontSize: 11, color: "var(--muted)" }}>
+          <span>Showing</span>
+          <select
+            value={projectViews.activeView.projectScope ?? "org_all"}
+            onChange={(e) => updateProjectView({ projectScope: e.target.value as NonNullable<TableView["projectScope"]> })}
+            title={projectViews.activeView.systemView ? "Scope is fixed on System Views -- changing it saves a personal view" : "Which projects this view includes"}
+            style={{ fontSize: 11, fontWeight: 600, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: 999, padding: "3px 8px", background: "var(--surface, #fff)", cursor: "pointer" }}
+          >
+            <option value="org_all">All projects</option>
+            <option value="org_active">Active projects only (In Progress)</option>
+            <option value="my_owned_all">All projects I own</option>
+            <option value="my_active_owned">Active projects I own</option>
+            <option value="my_full_portfolio">All my projects (owned + contributing)</option>
+            <option value="my_active_portfolio">My active projects (owned + contributing)</option>
+          </select>
+        </div>
         <ViewFilterPills
           groupOptions={projectGroupModeOptions}
           groupBy={projectResolvedGroupBy}
@@ -6267,13 +6344,6 @@ export default function Projects() {
 
       <div className="card" style={{ padding: 0 }}>
         <div className="sticky-toolbar-cluster" ref={taskClusterRef}>
-        {!quickList && taskViews.isActiveViewModified && (
-          <ViewModifiedBar
-            viewName={taskViews.activeView.name}
-            onDiscard={taskViews.discardActiveViewChanges}
-            onSave={() => taskViews.saveActiveViewAsPersonal(`${taskViews.activeView.name} - Personal`)}
-          />
-        )}
         <div className="table-toolbar">
           <ViewTabs
             mode="dropdown"
@@ -6306,6 +6376,11 @@ export default function Projects() {
                 updateTaskView(viewType === "board" && !taskActiveView.groupBy ? { viewType, groupBy: "status" } : { viewType })
               }
             />
+          )}
+          {!quickList && taskViews.activeView.systemView && taskViews.isSystemViewCustomized() && (
+            <button type="button" onClick={() => taskViews.restoreSystemViewDefault()} title="Undo your layout changes to this System View" style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+              ↺ Restore default
+            </button>
           )}
           <div className="toolbar-actions">
             <ViewSettingsMenu
