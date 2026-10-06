@@ -1,0 +1,13 @@
+name: Preview pushed
+
+# Signals "Build and deploy to GitHub Pages" (on main) to rebuild the site
+# including /tempo/preview/ from the tempo-preview branch.
+on:
+  push:
+    branches: [tempo-preview]
+
+jobs:
+  signal:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "tempo-preview updated -> deploy workflow will rebuild /tempo/preview/"

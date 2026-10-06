@@ -3,10 +3,16 @@ name: Build and deploy to GitHub Pages
 # Live site = main at /tempo/. Preview = the `tempo-preview` branch (if it exists)
 # at /tempo/preview/ -- same database; the preview build sends
 # x-tempo-channel: preview so DB rules staged "preview-only" apply there.
+# The github-pages environment only accepts deployments from main, so a push
+# to tempo-preview runs "Preview pushed" (no-op), which triggers this
+# workflow on main via workflow_run.
 on:
   push:
-    branches: [main, tempo-preview]
+    branches: [main]
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Preview pushed"]
+    types: [completed]
 
 permissions:
   contents: read
