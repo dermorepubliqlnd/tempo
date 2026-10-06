@@ -1207,7 +1207,12 @@ export default function Projects() {
   // phase118: pause-aware Timing (Paused / Paused · Overdue / Review pending).
   // Declared as a function so it can read `projects` state declared below.
   function taskTiming(t: TaskRow): TimingResult {
+    if (!projectHasConfirmedBaseline(t.project_id)) return { label: "Draft timeline", tone: "neutral" };
     return timingWithPause(t, statusGroupOf(TASK_STATUS_GROUPED, t.status), projects.find((p) => p.id === t.project_id));
+  }
+  function projectHasConfirmedBaseline(projectId: string): boolean {
+    const project = projects.find((p) => p.id === projectId);
+    return !!project && project.wbs_status !== "draft" && project.timelines_locked;
   }
   const { person: me } = useSession();
   // URL-driven "My Dashboard" quick links (2026-09-21, Sandra: "let's try
@@ -2554,25 +2559,22 @@ export default function Projects() {
       projectViews.updateActiveView(patch);
       return;
     }
-    // 2026-10-04 (Sandra): on a System View, layout-only tweaks are fine --
-    // column order, widths, freeze, and flipping asc/desc on the SAME sort
-    // field(s). Hiding/showing columns, a different sort field, filters or
-    // groups change what the view means -> offer "Save as New View".
-    const layoutOnly = Object.keys(patch).every((k) => {
-      if (k === "columnOrder" || k === "columnWidths" || k === "frozenUpTo") return true;
+    // 2026-10-06 (Sandra): System Views keep their required columns, but
+    // users may still make the working layout useful -- sort, group,
+    // rearrange, resize/freeze, and switch view type. Hiding/showing
+    // columns, filters, or card property visibility changes should become
+    // a personal view instead.
+    const allowedSystemPatch = Object.keys(patch).every((k) => {
+      if (k === "columnOrder" || k === "columnWidths" || k === "frozenUpTo" || k === "sorts" || k === "groupBy" || k === "groupBy2" || k === "hiddenGroups" || k === "hideEmptyGroups" || k === "showCount" || k === "viewType" || k === "timelineScale" || k === "timelineDateMode" || k === "timelineLabelWidth") return true;
       if (k === "cardPrimary" || k === "cardSecondary") {
         const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((x) => b.includes(x));
         const cur = k === "cardPrimary" ? active.cardPrimary : active.cardSecondary;
         const fallback = k === "cardPrimary" ? (active.taskScope ? TASK_CARD_DEFAULT.primary : PROJECT_CARD_DEFAULT.primary) : (active.taskScope ? TASK_CARD_DEFAULT.secondary : PROJECT_CARD_DEFAULT.secondary);
         return sameSet(patch[k] ?? [], cur ?? fallback);
       }
-      if (k === "sorts") {
-        const next = patch.sorts ?? [];
-        return next.length === active.sorts.length && next.every((s, i) => s.key === active.sorts[i]?.key);
-      }
       return false;
     });
-    if (layoutOnly) {
+    if (allowedSystemPatch) {
       projectViews.updateActiveView(patch);
       return;
     }
@@ -5097,6 +5099,7 @@ export default function Projects() {
 
   // 2026-10-04: Due window / Validation groupings for the Tasks system views.
   function dueWindowOf(t: TaskRow): string {
+    if (!projectHasConfirmedBaseline(t.project_id)) return "Draft timeline";
     const d = t.current_due_date?.slice(0, 10);
     if (!d) return "No due date";
     const today = new Date();
@@ -5116,7 +5119,7 @@ export default function Projects() {
       label: "Due Window",
       getGroup: (t) => dueWindowOf(t),
       getTone: (t) => ({ Overdue: "danger", Today: "warning", "This week": "accent" } as Record<string, string>)[dueWindowOf(t)] ?? "neutral",
-      allGroups: () => ["Overdue", "Today", "This week", "Next week", "Later", "No due date"],
+      allGroups: () => ["Overdue", "Today", "This week", "Next week", "Later", "Draft timeline", "No due date"],
     },
     {
       key: "validation",
@@ -5429,21 +5432,17 @@ export default function Projects() {
       taskViews.updateActiveView(patch);
       return;
     }
-    const layoutOnly = Object.keys(patch).every((k) => {
-      if (k === "columnOrder" || k === "columnWidths" || k === "frozenUpTo") return true;
+    const allowedSystemPatch = Object.keys(patch).every((k) => {
+      if (k === "columnOrder" || k === "columnWidths" || k === "frozenUpTo" || k === "sorts" || k === "groupBy" || k === "groupBy2" || k === "hiddenGroups" || k === "hideEmptyGroups" || k === "showCount" || k === "viewType" || k === "timelineScale" || k === "timelineDateMode" || k === "timelineLabelWidth") return true;
       if (k === "cardPrimary" || k === "cardSecondary") {
         const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((x) => b.includes(x));
         const cur = k === "cardPrimary" ? active.cardPrimary : active.cardSecondary;
         const fallback = k === "cardPrimary" ? (active.taskScope ? TASK_CARD_DEFAULT.primary : PROJECT_CARD_DEFAULT.primary) : (active.taskScope ? TASK_CARD_DEFAULT.secondary : PROJECT_CARD_DEFAULT.secondary);
         return sameSet(patch[k] ?? [], cur ?? fallback);
       }
-      if (k === "sorts") {
-        const next = patch.sorts ?? [];
-        return next.length === active.sorts.length && next.every((s, i) => s.key === active.sorts[i]?.key);
-      }
       return false;
     });
-    if (layoutOnly) {
+    if (allowedSystemPatch) {
       taskViews.updateActiveView(patch);
       return;
     }
@@ -5477,19 +5476,20 @@ export default function Projects() {
   }
   function quickMatch(key: QuickListKey, t: TaskRow, ownedIds: Set<string>): boolean {
     const mine = t.assignee_id === me?.id;
+    const accountable = projectHasConfirmedBaseline(t.project_id);
     switch (key) {
       case "open":
         return mine && taskIsOpen(t);
       case "overdue":
-        return mine && taskIsOpen(t) && dueWindowOf(t) === "Overdue";
+        return accountable && mine && taskIsOpen(t) && dueWindowOf(t) === "Overdue";
       case "due_week": {
         const w = dueWindowOf(t);
-        return mine && taskIsOpen(t) && (w === "Today" || w === "This week");
+        return accountable && mine && taskIsOpen(t) && (w === "Today" || w === "This week");
       }
       case "awaiting":
         return mine && statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete" && !t.validated_completion_date;
       case "at_risk": {
-        if (!ownedIds.has(t.project_id) || !taskIsOpen(t) || tasks.some((x) => x.parent_task_id === t.id)) return false;
+        if (!accountable || !ownedIds.has(t.project_id) || !taskIsOpen(t) || tasks.some((x) => x.parent_task_id === t.id)) return false;
         if (!t.assignee_id) return true;
         const label = taskTiming(t).label;
         return label === "Overdue" || label === "Paused · Overdue" || label === "Due soon";
@@ -5574,7 +5574,7 @@ export default function Projects() {
       const ownedIds = new Set(projects.filter((p) => p.owner_id === me?.id).map((p) => p.id));
       const isLeaf = (t: TaskRow) => !tasks.some((x) => x.parent_task_id === t.id);
       const atRisk = (t: TaskRow) => {
-        if (!isOpen(t) || !isLeaf(t)) return false;
+        if (!projectHasConfirmedBaseline(t.project_id) || !isOpen(t) || !isLeaf(t)) return false;
         if (!t.assignee_id) return true;
         const label = taskTiming(t).label;
         return label === "Overdue" || label === "Paused · Overdue" || label === "Due soon";

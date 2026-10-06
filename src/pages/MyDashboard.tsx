@@ -405,13 +405,15 @@ export default function MyDashboard() {
       .map((t) => ({ ...t, project: projectById.get(t.project_id) ?? null }))
       .sort((a, b) => (a.current_due_date ?? "9999").localeCompare(b.current_due_date ?? "9999"));
   }, [tasks, me, projectById]);
+  const hasConfirmedBaseline = (t: { project?: ProjectRow | null }) => !!t.project && t.project.wbs_status !== "draft" && t.project.timelines_locked;
+  const draftTimelineTasks = myOpenTasks.filter((t) => !hasConfirmedBaseline(t) && t.current_due_date);
   // phase118: paused projects' tasks (and dates that passed during a pause,
   // until the schedule review is confirmed) don't count as overdue.
   const overdueTasks = myOpenTasks.filter(
-    (t) => t.current_due_date && t.current_due_date.slice(0, 10) < todayIso && !isOverdueSuppressed(t, t.project as PauseProjectInfo | null)
+    (t) => hasConfirmedBaseline(t) && t.current_due_date && t.current_due_date.slice(0, 10) < todayIso && !isOverdueSuppressed(t, t.project as PauseProjectInfo | null)
   );
   const isPausedTask = (t: { project?: unknown }) => (t.project as PauseProjectInfo | null)?.status === "Paused";
-  const tasksDueToday = myOpenTasks.filter((t) => t.current_due_date && t.current_due_date.slice(0, 10) === todayIso);
+  const tasksDueToday = myOpenTasks.filter((t) => hasConfirmedBaseline(t) && t.current_due_date && t.current_due_date.slice(0, 10) === todayIso);
 
   // ---- My Work Today (2026-09-23) ------------------------------------
   // NOT the same as "due today"/"due this week" -- tasks whose SCHEDULE
@@ -454,7 +456,8 @@ export default function MyDashboard() {
   // isOpenTask already excludes Done/Cancelled -- so this only needs
   // timingOf's to-do/in-progress branch (due-date-vs-today), not the
   // completed/cancelled ones.
-  function workTodayTiming(t: (typeof myWorkTodayAll)[number]): { label: string; tone: "success" | "warning" | "danger" } {
+  function workTodayTiming(t: (typeof myWorkTodayAll)[number]): { label: string; tone: "success" | "warning" | "danger" | "neutral" } {
+    if (!hasConfirmedBaseline(t)) return { label: "Draft timeline", tone: "neutral" };
     const due = parseLocalDate(t.current_due_date);
     const daysLeft = calendarDaysBetween(due, new Date());
     if (daysLeft < 0) return { label: "Overdue", tone: "danger" };
@@ -605,7 +608,7 @@ export default function MyDashboard() {
   }, [justHidden]);
   const weekEndIso = toISO(weekDays[4]);
   const weekStartIso = toISO(weekDays[0]);
-  const tasksThisWeek = myOpenTasks.filter((t) => !isPausedTask(t) && t.current_due_date && t.current_due_date.slice(0, 10) >= weekStartIso && t.current_due_date.slice(0, 10) <= weekEndIso);
+  const tasksThisWeek = myOpenTasks.filter((t) => hasConfirmedBaseline(t) && !isPausedTask(t) && t.current_due_date && t.current_due_date.slice(0, 10) >= weekStartIso && t.current_due_date.slice(0, 10) <= weekEndIso);
   // 2026-10-02 (Sandra): full-width deadline card -- overdue first, then
   // the rest of this week (today onward; past days this week are overdue).
   const dueRestOfWeek = tasksThisWeek.filter((t) => (t.current_due_date ?? "").slice(0, 10) >= todayIso);
@@ -916,7 +919,7 @@ export default function MyDashboard() {
         <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={notTrackingTime ? "Not expected to log time" : `of ${weekExpectedTotal.toFixed(1)}h expected`} />
       </div>
 
-      {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
+      {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || draftTimelineTasks.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
           {/* 2026-09-23 (Sandra: "Pending approvals, remove and use the
@@ -950,6 +953,15 @@ export default function MyDashboard() {
           )}
           {overdueTasks.length > 0 && (
             <AttentionPill tone="danger" icon={<AlertTriangle size={12} />} value={overdueTasks.length} label={overdueTasks.length === 1 ? "Overdue task" : "Overdue tasks"} onClick={() => setAttentionModal("overdue")} />
+          )}
+          {draftTimelineTasks.length > 0 && (
+            <AttentionPill
+              tone="warning"
+              icon={<CalendarClock size={12} />}
+              value={draftTimelineTasks.length}
+              label={draftTimelineTasks.length === 1 ? "Draft timeline to review" : "Draft timelines to review"}
+              to="/projects?assignee=me"
+            />
           )}
           {missingLogHours > 0.1 && (
             <AttentionPill tone="accent" icon={<Clock3 size={12} />} value={`${missingLogHours.toFixed(1)}h`} label="Missing hours this week" to="/time-tracking?scope=mine" />

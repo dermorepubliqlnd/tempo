@@ -338,15 +338,25 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
       const mergedSystem = normalizedSystemViews.map((sv) => {
         const saved = vs.find((v) => v.id === sv.id);
         if (!saved) return sv;
-        // Keep this person's layout-only tweaks on system views: column
-        // order (same set of columns), widths, freeze, and asc/desc on the
-        // same sort fields. Anything else is reset to the system definition.
+        // Keep this person's allowed working tweaks on system views:
+        // column order (same set), widths, freeze, sort/group, and view
+        // type. Required system columns stay locked, so hiddenColumns and
+        // structural filters still reset to the system definition unless
+        // the user saves a personal view.
         const sameCols = saved.columnOrder.length === sv.columnOrder.length && saved.columnOrder.every((k) => sv.columnOrder.includes(k));
-        const sameSortKeys = saved.sorts.length === sv.sorts.length && saved.sorts.every((s, i) => s.key === sv.sorts[i]?.key);
         return {
           ...sv,
+          viewType: saved.viewType ?? sv.viewType,
           columnOrder: sameCols ? saved.columnOrder : sv.columnOrder,
-          sorts: sameSortKeys ? saved.sorts : sv.sorts,
+          sorts: saved.sorts ?? sv.sorts,
+          groupBy: saved.groupBy !== undefined ? saved.groupBy : sv.groupBy,
+          groupBy2: saved.groupBy2 !== undefined ? saved.groupBy2 : sv.groupBy2,
+          hiddenGroups: saved.hiddenGroups ?? sv.hiddenGroups,
+          hideEmptyGroups: saved.hideEmptyGroups ?? sv.hideEmptyGroups,
+          showCount: saved.showCount ?? sv.showCount,
+          timelineScale: saved.timelineScale ?? sv.timelineScale,
+          timelineDateMode: saved.timelineDateMode ?? sv.timelineDateMode,
+          timelineLabelWidth: saved.timelineLabelWidth ?? sv.timelineLabelWidth,
           columnWidths: saved.columnWidths ?? sv.columnWidths,
           frozenUpTo: saved.frozenUpTo ?? sv.frozenUpTo,
           personalDefault: saved.personalDefault,
