@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabaseClient";
 import type { TableView, DefaultView, ViewType } from "./tableTypes";
 
@@ -245,12 +245,59 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     };
   }, [views, activeViewId, personId, tableKey]);
 
-  const activeView = views.find((v) => v.id === activeViewId) ?? views[0];
+  // phase157 (2026-10-06, Sandra -- View Management): changes on a System
+  // View are TEMPORARY. They apply immediately but live only in memory until
+  // the person chooses "Save as Personal View" (new personal view) or
+  // "Discard Changes". Switching views discards them. Only pure ergonomics
+  // (column order within the same set, widths, freeze) are kept silently --
+  // the page decides that split and calls updateActiveView for those.
+  const [tempPatch, setTempPatch] = useState<{ viewId: string; patch: Partial<TableView> } | null>(null);
+  const baseActiveView = views.find((v) => v.id === activeViewId) ?? views[0];
+  const activeView: TableView = useMemo(
+    () =>
+      tempPatch && tempPatch.viewId === baseActiveView.id
+        ? normalizeTableView(tableKey, { ...baseActiveView, ...tempPatch.patch })
+        : baseActiveView,
+    [tempPatch, baseActiveView, tableKey]
+  );
+  const isActiveViewModified = !!tempPatch && tempPatch.viewId === baseActiveView.id && Object.keys(tempPatch.patch).length > 0;
+
+  function updateActiveViewTemporarily(patch: Partial<TableView>) {
+    const id = baseActiveView.id;
+    setTempPatch((cur) => ({ viewId: id, patch: { ...(cur && cur.viewId === id ? cur.patch : {}), ...patch } }));
+  }
+
+  function discardActiveViewChanges() {
+    setTempPatch(null);
+  }
+
+  function selectView(id: string) {
+    setTempPatch(null);
+    setActiveViewId(id);
+  }
+
+  // Save the System View + its temporary changes as a new personal view.
+  function saveActiveViewAsPersonal(name: string) {
+    const source = activeView;
+    const newId = `view_${Date.now()}`;
+    const copy: TableView = normalizeTableView(tableKey, {
+      ...source,
+      id: newId,
+      name,
+      systemView: false,
+      systemGroup: undefined,
+      isDefaultView: false,
+      personalDefault: undefined,
+    });
+    setViews((vs) => [...vs, copy]);
+    setTempPatch(null);
+    setActiveViewId(newId);
+  }
 
   function updateActiveView(patch: Partial<TableView>) {
     setViews((vs) =>
       vs.map((v) =>
-        v.id === activeView.id
+        v.id === baseActiveView.id
           ? normalizeTableView(tableKey, { ...v, ...patch })
           : v
       )
@@ -338,25 +385,13 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
       const mergedSystem = normalizedSystemViews.map((sv) => {
         const saved = vs.find((v) => v.id === sv.id);
         if (!saved) return sv;
-        // Keep this person's allowed working tweaks on system views:
-        // column order (same set), widths, freeze, sort/group, and view
-        // type. Required system columns stay locked, so hiddenColumns and
-        // structural filters still reset to the system definition unless
-        // the user saves a personal view.
+        // phase157 (2026-10-06): only ergonomics carry over on System Views
+        // -- column order (same set), widths, freeze. Sort, group, view type,
+        // filters and columns are temporary (Save as Personal View).
         const sameCols = saved.columnOrder.length === sv.columnOrder.length && saved.columnOrder.every((k) => sv.columnOrder.includes(k));
         return {
           ...sv,
-          viewType: saved.viewType ?? sv.viewType,
           columnOrder: sameCols ? saved.columnOrder : sv.columnOrder,
-          sorts: saved.sorts ?? sv.sorts,
-          groupBy: saved.groupBy !== undefined ? saved.groupBy : sv.groupBy,
-          groupBy2: saved.groupBy2 !== undefined ? saved.groupBy2 : sv.groupBy2,
-          hiddenGroups: saved.hiddenGroups ?? sv.hiddenGroups,
-          hideEmptyGroups: saved.hideEmptyGroups ?? sv.hideEmptyGroups,
-          showCount: saved.showCount ?? sv.showCount,
-          timelineScale: saved.timelineScale ?? sv.timelineScale,
-          timelineDateMode: saved.timelineDateMode ?? sv.timelineDateMode,
-          timelineLabelWidth: saved.timelineLabelWidth ?? sv.timelineLabelWidth,
           columnWidths: saved.columnWidths ?? sv.columnWidths,
           frozenUpTo: saved.frozenUpTo ?? sv.frozenUpTo,
           personalDefault: saved.personalDefault,
@@ -413,5 +448,5 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     });
   }
 
-  return { views, activeView, activeViewId, setActiveViewId, updateActiveView, createView, renameView, duplicateView, setViewColor, setViewIcon, deleteView, reorderViews, installSystemViews, setDefaultView, loaded };
+  return { views, activeView, activeViewId, setActiveViewId: selectView, updateActiveView, updateActiveViewTemporarily, discardActiveViewChanges, saveActiveViewAsPersonal, isActiveViewModified, createView, renameView, duplicateView, setViewColor, setViewIcon, deleteView, reorderViews, installSystemViews, setDefaultView, loaded };
 }

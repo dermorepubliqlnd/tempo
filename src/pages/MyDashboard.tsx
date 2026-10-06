@@ -248,7 +248,7 @@ export default function MyDashboard() {
   const [hiddenToday, setHiddenToday] = useState<{ task_id: string; hidden_date: string }[]>([]);
   // 2026-09-23 (Sandra: lightbox for Tasks due today / Overdue tasks --
   // see AttentionPill below) -- which list is open, or null when closed.
-  const [attentionModal, setAttentionModal] = useState<"due_today" | "overdue" | "ready_to_close" | "completed_open" | "work_done" | null>(null);
+  const [attentionModal, setAttentionModal] = useState<"due_today" | "overdue" | "ready_to_close" | "completed_open" | "work_done" | "draft_planning" | null>(null);
   // 2026-09-23 (My Work Today "Logged" column, Sandra: "show logged
   // hours against the tasks") -- same confirmed/approved, not-archived
   // definition Projects.tsx's own Spent Hrs column uses, just scoped to
@@ -406,7 +406,6 @@ export default function MyDashboard() {
       .sort((a, b) => (a.current_due_date ?? "9999").localeCompare(b.current_due_date ?? "9999"));
   }, [tasks, me, projectById]);
   const hasConfirmedBaseline = (t: { project?: ProjectRow | null }) => !!t.project && t.project.wbs_status !== "draft" && t.project.timelines_locked;
-  const draftTimelineTasks = myOpenTasks.filter((t) => !hasConfirmedBaseline(t) && t.current_due_date);
   // phase118: paused projects' tasks (and dates that passed during a pause,
   // until the schedule review is confirmed) don't count as overdue.
   const overdueTasks = myOpenTasks.filter(
@@ -639,11 +638,18 @@ export default function MyDashboard() {
   // shared allocation engine Utilization.tsx/HoursOverview.tsx/
   // WbsPlanning.tsx use -- so this number never disagrees with the real
   // Utilization page. ---------------------------------------------------
+  const committedProjectIds = useMemo(
+    () => new Set(projects.filter((p) => !!p.wbs_status && p.wbs_status !== "draft").map((p) => p.id)),
+    [projects]
+  );
   const engine = useMemo(
     () =>
       createAllocationEngine({
-        tasks: tasks as unknown as UtilTaskRow[],
-        projects: projects as unknown as UtilProjectRow[],
+        // phase157 (2026-10-06): committed load only -- Draft projects are
+        // Planned / Pipeline, not an operational assignment (Utilization
+        // page "Include Planned / Pipeline" shows them separately).
+        tasks: tasks.filter((t) => committedProjectIds.has(t.project_id)) as unknown as UtilTaskRow[],
+        projects: projects.filter((p) => committedProjectIds.has(p.id)) as unknown as UtilProjectRow[],
         holidays: holidaySet,
         availability,
         assigneeHistory,
@@ -652,7 +658,7 @@ export default function MyDashboard() {
         deletedHours,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tasks, projects, holidaySet, availability, assigneeHistory, ownerHistory, deletedHours]
+    [tasks, projects, committedProjectIds, holidaySet, availability, assigneeHistory, ownerHistory, deletedHours]
   );
 
   const dailyStats = useMemo(() => {
@@ -802,6 +808,32 @@ export default function MyDashboard() {
     .map((p) => ({ p, open: leafTasksOf(p.id).filter((t) => t.status !== "Done" && t.status !== "Cancelled") }))
     .filter((x) => x.open.length > 0);
   // phase118: resumed projects waiting for the owner's schedule review.
+  // phase157 (2026-10-06, Sandra -- "Draft = Planning"): a project-level
+  // planning reminder for the Owner and everyone above the Owner in the
+  // reporting line. Deliberately NOT a date warning: Draft dates are
+  // tentative, so Draft tasks never count as overdue/due.
+  const myDownline = useMemo(() => {
+    const out = new Set<string>();
+    if (!me?.id) return out;
+    for (const person of people) {
+      let cur = person.reports_to;
+      let depth = 0;
+      while (cur && depth < 20) {
+        if (cur === me.id) { out.add(person.id); break; }
+        cur = people.find((x) => x.id === cur)?.reports_to ?? null;
+        depth++;
+      }
+    }
+    return out;
+  }, [people, me?.id]);
+  const draftPlanningProjects = projects.filter(
+    (p) =>
+      (p.wbs_status ?? "draft") === "draft" &&
+      !(p as { is_unsaved?: boolean }).is_unsaved &&
+      p.status !== "Cancelled" &&
+      !!p.owner_id &&
+      (p.owner_id === me?.id || myDownline.has(p.owner_id))
+  );
   const scheduleReviewProjects = projects.filter((p) => p.owner_id === me?.id && (p as { schedule_review_required?: boolean }).schedule_review_required);
   const readyToCloseProjects = myCompletedProjects
     .filter((p) => !completedOpenProjects.some((x) => x.p.id === p.id))
@@ -919,7 +951,7 @@ export default function MyDashboard() {
         <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={notTrackingTime ? "Not expected to log time" : `of ${weekExpectedTotal.toFixed(1)}h expected`} />
       </div>
 
-      {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || draftTimelineTasks.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
+      {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || draftPlanningProjects.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
           {/* 2026-09-23 (Sandra: "Pending approvals, remove and use the
@@ -954,13 +986,13 @@ export default function MyDashboard() {
           {overdueTasks.length > 0 && (
             <AttentionPill tone="danger" icon={<AlertTriangle size={12} />} value={overdueTasks.length} label={overdueTasks.length === 1 ? "Overdue task" : "Overdue tasks"} onClick={() => setAttentionModal("overdue")} />
           )}
-          {draftTimelineTasks.length > 0 && (
+          {draftPlanningProjects.length > 0 && (
             <AttentionPill
-              tone="warning"
+              tone="neutral"
               icon={<CalendarClock size={12} />}
-              value={draftTimelineTasks.length}
-              label={draftTimelineTasks.length === 1 ? "Draft timeline to review" : "Draft timelines to review"}
-              to="/projects?assignee=me"
+              value={draftPlanningProjects.length}
+              label={draftPlanningProjects.length === 1 ? "Draft project · Start Project pending" : "Draft projects · Start Project pending"}
+              onClick={() => setAttentionModal("draft_planning")}
             />
           )}
           {missingLogHours > 0.1 && (
@@ -1022,6 +1054,31 @@ export default function MyDashboard() {
               </span>
               <Link to={`/projects/${x.p.id}/wbs`} style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
                 Review WBS →
+              </Link>
+            </div>
+          ))}
+        </Modal>
+      )}
+
+      {attentionModal === "draft_planning" && (
+        <Modal title="Draft projects — Start Project pending" onClose={() => setAttentionModal(null)}>
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 0 }}>
+            Planning, not delivery: dates on Draft tasks are tentative and don't count as due or overdue. Contributors don't see these tasks until
+            the project is started. Review the WBS, then Start Project (or coach the owner) to commit the plan.
+          </p>
+          {draftPlanningProjects.map((p) => (
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 4px", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+              <span style={{ flex: "0 0 64px", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+                {p.project_number ? `P-${String(p.project_number).padStart(4, "0")}` : "—"}
+              </span>
+              <span style={{ flex: "1 1 auto", fontWeight: 600, color: "var(--navy)" }}>{p.name}</span>
+              <span style={{ flex: "0 0 auto", color: "var(--text-secondary)" }}>
+                {p.owner_id === me?.id ? "Your project" : `Owner: ${people.find((x) => x.id === p.owner_id)?.name ?? "—"}`}
+                {" · "}
+                {leafTasksOf(p.id).length} task{leafTasksOf(p.id).length === 1 ? "" : "s"}
+              </span>
+              <Link to={`/projects/${p.id}/wbs`} style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+                Review Draft →
               </Link>
             </div>
           ))}

@@ -5593,6 +5593,15 @@ export default function WbsPlanning() {
           </button>
         )}
       </div>
+      {/* phase157 (2026-10-06): Draft = Planning -- the plan is visible only
+          to the Owner, the Owner's reporting line and Full Access until Start
+          Project, so a contributor opening a Draft WBS sees no tasks. */}
+      {(project.wbs_status ?? "draft") === "draft" && !canManageWbs && tasks.length === 0 && (
+        <div style={{ margin: "8px 0", padding: "10px 14px", borderRadius: "var(--radius-sm)", background: "var(--surface-2, #f4f6fa)", border: "1px dashed var(--border)", fontSize: 12, color: "var(--text-secondary)" }}>
+          <strong style={{ color: "var(--navy)" }}>Draft — not yet started.</strong> The task plan is visible only to the Project Owner and their reporting line until the
+          project is started. Any tasks planned for you will appear in My Tasks once it starts.
+        </div>
+      )}
       <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--border)", marginTop: 6, marginBottom: 8 }}>
         <Link
           to={`/projects/${projectId}`}

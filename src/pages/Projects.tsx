@@ -14,6 +14,7 @@ import TimelineView, { TimelineControls } from "../components/TimelineView";
 import CalendarView from "../components/CalendarView";
 import CardActionMenu from "../components/CardActionMenu";
 import ViewTabs from "../components/ViewTabs";
+import { ViewLayoutSwitch, ViewModifiedBar } from "../components/ViewLayoutSwitch";
 import ViewSettingsMenu, { ViewFilterPills } from "../components/ViewSettingsMenu";
 import Modal from "../components/Modal";
 import { PauseProjectModal, ScheduleReviewModal } from "../components/PauseProjectModals";
@@ -1201,6 +1202,26 @@ function reorderedSortValue(list: { id: string; sort_order: number | null }[], d
 // condition) and clears extension_requests, task_effort_changes,
 // time_entries, and task_collaborators with elevated privileges before
 // deleting the tasks -- so RLS can't silently swallow the cleanup again.
+
+// phase157: split a System View patch into silently-kept ergonomics and
+// temporary changes (see updateProjectView/updateTaskView).
+function splitSystemViewPatch(active: TableView, patch: Partial<TableView>): { silent: Partial<TableView>; temp: Partial<TableView> } {
+  const silent: Partial<TableView> = {};
+  const temp: Partial<TableView> = {};
+  const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((x) => b.includes(x));
+  for (const k of Object.keys(patch) as (keyof TableView)[]) {
+    let keep = false;
+    if (k === "columnWidths" || k === "frozenUpTo") keep = true;
+    else if (k === "columnOrder") keep = sameSet(patch.columnOrder ?? [], active.columnOrder);
+    else if (k === "cardPrimary" || k === "cardSecondary") {
+      const cur = k === "cardPrimary" ? active.cardPrimary : active.cardSecondary;
+      const fallback = k === "cardPrimary" ? (active.taskScope ? TASK_CARD_DEFAULT.primary : PROJECT_CARD_DEFAULT.primary) : (active.taskScope ? TASK_CARD_DEFAULT.secondary : PROJECT_CARD_DEFAULT.secondary);
+      keep = sameSet((patch[k] as string[] | undefined) ?? [], cur ?? fallback);
+    }
+    ((keep ? silent : temp) as Record<string, unknown>)[k as string] = patch[k];
+  }
+  return { silent, temp };
+}
 
 export default function Projects() {
   const navigate = useNavigate();
@@ -2559,66 +2580,14 @@ export default function Projects() {
       projectViews.updateActiveView(patch);
       return;
     }
-    // 2026-10-06 (Sandra): System Views keep their required columns, but
-    // users may still make the working layout useful -- sort, group,
-    // rearrange, resize/freeze, and switch view type. Hiding/showing
-    // columns, filters, or card property visibility changes should become
-    // a personal view instead.
-    const allowedSystemPatch = Object.keys(patch).every((k) => {
-      if (k === "columnOrder" || k === "columnWidths" || k === "frozenUpTo" || k === "sorts" || k === "groupBy" || k === "groupBy2" || k === "hiddenGroups" || k === "hideEmptyGroups" || k === "showCount" || k === "viewType" || k === "timelineScale" || k === "timelineDateMode" || k === "timelineLabelWidth") return true;
-      if (k === "cardPrimary" || k === "cardSecondary") {
-        const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((x) => b.includes(x));
-        const cur = k === "cardPrimary" ? active.cardPrimary : active.cardSecondary;
-        const fallback = k === "cardPrimary" ? (active.taskScope ? TASK_CARD_DEFAULT.primary : PROJECT_CARD_DEFAULT.primary) : (active.taskScope ? TASK_CARD_DEFAULT.secondary : PROJECT_CARD_DEFAULT.secondary);
-        return sameSet(patch[k] ?? [], cur ?? fallback);
-      }
-      return false;
-    });
-    if (allowedSystemPatch) {
-      projectViews.updateActiveView(patch);
-      return;
-    }
-    confirm({
-      title: "You've modified a System View.",
-      message: "Save these changes as a new personal view?",
-      confirmLabel: "Save as New View",
-      cancelLabel: "Discard Changes",
-    }).then((saveAsNew) => {
-      if (!saveAsNew) return;
-      projectViews.createView(
-        `${active.name} - Personal`,
-        (patch.viewType ?? active.viewType) as TableView["viewType"],
-        (patch.groupBy ?? active.groupBy) ?? undefined,
-        (patch.hiddenColumns ?? active.hiddenColumns),
-        {
-          columnOrder: patch.columnOrder ?? active.columnOrder,
-          hiddenColumns: patch.hiddenColumns ?? active.hiddenColumns,
-          columnWidths: patch.columnWidths ?? active.columnWidths,
-          groupBy2: patch.groupBy2 ?? active.groupBy2,
-          hiddenGroups: patch.hiddenGroups ?? active.hiddenGroups,
-          hideEmptyGroups: patch.hideEmptyGroups ?? active.hideEmptyGroups,
-          color: patch.color ?? active.color,
-          showCount: patch.showCount ?? active.showCount,
-          sorts: patch.sorts ?? active.sorts,
-          progressDisplay: patch.progressDisplay ?? active.progressDisplay,
-          priorityDisplay: patch.priorityDisplay ?? active.priorityDisplay,
-          complexityDisplay: patch.complexityDisplay ?? active.complexityDisplay,
-          timelineScale: patch.timelineScale ?? active.timelineScale,
-          timelineDateMode: patch.timelineDateMode ?? active.timelineDateMode,
-          timelineLabelWidth: patch.timelineLabelWidth ?? active.timelineLabelWidth,
-          filterPersonIds: patch.filterPersonIds ?? active.filterPersonIds,
-          filterStatuses: patch.filterStatuses ?? active.filterStatuses,
-          boardShowPropertyLabels: patch.boardShowPropertyLabels ?? active.boardShowPropertyLabels,
-          frozenUpTo: patch.frozenUpTo ?? active.frozenUpTo,
-          cardPrimary: patch.cardPrimary ?? active.cardPrimary,
-          cardSecondary: patch.cardSecondary ?? active.cardSecondary,
-          systemView: false,
-          systemGroup: undefined,
-          isDefaultView: false,
-          projectScope: active.projectScope,
-        }
-      );
-    });
+    // phase157 (2026-10-06, Sandra -- View Management): on a System View
+    // ergonomics (column order within the same set, widths, freeze, card
+    // reorder within the same sets) are kept silently; everything else
+    // (filters, sort, group, columns shown, properties, view type) applies
+    // TEMPORARILY until "Save as Personal View" / "Discard Changes".
+    const { silent, temp } = splitSystemViewPatch(active, patch);
+    if (Object.keys(silent).length) projectViews.updateActiveView(silent);
+    if (Object.keys(temp).length) projectViews.updateActiveViewTemporarily(temp);
   }
 
   // Row-level Filter applied upstream of sort/group/render so it covers
@@ -4379,6 +4348,10 @@ export default function Projects() {
               </span>
             );
           }
+          // phase157: Draft dates are tentative -- no late/early variance.
+          if (!projectHasConfirmedBaseline(t.project_id)) {
+            return <span style={{ color: "var(--muted)" }} title="Draft project -- dates are tentative until Start Project">—</span>;
+          }
           const days = timingVarianceDays(t, statusGroupOf(TASK_STATUS_GROUPED, t.status));
           if (days === null) return <span style={{ color: "var(--muted)" }}>—</span>;
           if (days === 0) return <span className="status-pill success">On time</span>;
@@ -5432,37 +5405,9 @@ export default function Projects() {
       taskViews.updateActiveView(patch);
       return;
     }
-    const allowedSystemPatch = Object.keys(patch).every((k) => {
-      if (k === "columnOrder" || k === "columnWidths" || k === "frozenUpTo" || k === "sorts" || k === "groupBy" || k === "groupBy2" || k === "hiddenGroups" || k === "hideEmptyGroups" || k === "showCount" || k === "viewType" || k === "timelineScale" || k === "timelineDateMode" || k === "timelineLabelWidth") return true;
-      if (k === "cardPrimary" || k === "cardSecondary") {
-        const sameSet = (a: string[] = [], b: string[] = []) => a.length === b.length && a.every((x) => b.includes(x));
-        const cur = k === "cardPrimary" ? active.cardPrimary : active.cardSecondary;
-        const fallback = k === "cardPrimary" ? (active.taskScope ? TASK_CARD_DEFAULT.primary : PROJECT_CARD_DEFAULT.primary) : (active.taskScope ? TASK_CARD_DEFAULT.secondary : PROJECT_CARD_DEFAULT.secondary);
-        return sameSet(patch[k] ?? [], cur ?? fallback);
-      }
-      return false;
-    });
-    if (allowedSystemPatch) {
-      taskViews.updateActiveView(patch);
-      return;
-    }
-    confirm({
-      title: "You've modified a System View.",
-      message: "Save these changes as a new personal view?",
-      confirmLabel: "Save as New View",
-      cancelLabel: "Discard Changes",
-    }).then((saveAsNew) => {
-      if (!saveAsNew) return;
-      const { id: _sysId, name: _sysName, ...merged } = { ...active, ...patch };
-      void _sysId; void _sysName;
-      taskViews.createView(`${active.name} - Personal`, merged.viewType, merged.groupBy ?? undefined, merged.hiddenColumns, {
-        ...merged,
-        systemView: false,
-        systemGroup: undefined,
-        isDefaultView: false,
-        personalDefault: undefined,
-      });
-    });
+    const { silent, temp } = splitSystemViewPatch(active, patch);
+    if (Object.keys(silent).length) taskViews.updateActiveView(silent);
+    if (Object.keys(temp).length) taskViews.updateActiveViewTemporarily(temp);
   }
   // 2026-10-04 (Sandra): Tasks KPI cards. Clicking a card opens a temporary
   // "Quick List" of exactly those tasks with a layout suited to them --
@@ -5962,6 +5907,13 @@ export default function Projects() {
 
       <div className="card" style={{ padding: 0, marginBottom: 20 }}>
         <div className="sticky-toolbar-cluster" ref={projectClusterRef}>
+        {projectViews.isActiveViewModified && (
+          <ViewModifiedBar
+            viewName={projectViews.activeView.name}
+            onDiscard={projectViews.discardActiveViewChanges}
+            onSave={() => projectViews.saveActiveViewAsPersonal(`${projectViews.activeView.name} - Personal`)}
+          />
+        )}
         <div className="table-toolbar">
           <ViewTabs
             mode="dropdown"
@@ -5982,6 +5934,12 @@ export default function Projects() {
             onDuplicate={projectViews.duplicateView}
             onReorder={projectViews.reorderViews}
             confirm={confirm}
+          />
+          <ViewLayoutSwitch
+            value={projectViews.activeView.viewType}
+            onChange={(viewType) =>
+              updateProjectView(viewType === "board" && !projectViews.activeView.groupBy ? { viewType, groupBy: "phase" } : { viewType })
+            }
           />
           <div className="toolbar-actions">
             <ViewSettingsMenu
@@ -6309,6 +6267,13 @@ export default function Projects() {
 
       <div className="card" style={{ padding: 0 }}>
         <div className="sticky-toolbar-cluster" ref={taskClusterRef}>
+        {!quickList && taskViews.isActiveViewModified && (
+          <ViewModifiedBar
+            viewName={taskViews.activeView.name}
+            onDiscard={taskViews.discardActiveViewChanges}
+            onSave={() => taskViews.saveActiveViewAsPersonal(`${taskViews.activeView.name} - Personal`)}
+          />
+        )}
         <div className="table-toolbar">
           <ViewTabs
             mode="dropdown"
@@ -6334,6 +6299,14 @@ export default function Projects() {
             onReorder={taskViews.reorderViews}
             confirm={confirm}
           />
+          {!quickList && (
+            <ViewLayoutSwitch
+              value={taskActiveView.viewType}
+              onChange={(viewType) =>
+                updateTaskView(viewType === "board" && !taskActiveView.groupBy ? { viewType, groupBy: "status" } : { viewType })
+              }
+            />
+          )}
           <div className="toolbar-actions">
             <ViewSettingsMenu
               rows={filteredVisibleTasks}
