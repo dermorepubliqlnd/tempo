@@ -2329,6 +2329,32 @@ export default function WbsPlanning() {
   // snapshot taken at approval time (built by whoever clicks Approve, see
   // handleDecideBaselineRequest below), not at request time, same pattern
   // Close's request/decide split already uses.
+  // phase157d (2026-10-06, Sandra): Draft dates are tentative, but once the
+  // project starts they become commitments. Warn (owner can override) when
+  // open tasks would start life already past their date.
+  function pastDatedOpenTasks() {
+    const modeChain = activeMode === "manual" ? manualChain : standardChain;
+    const today = toISO(new Date());
+    return orderedTasks.filter((t) => {
+      if (hasChildren(t.id) || t.status === "Done" || t.status === "Cancelled") return false;
+      const end = modeChain.get(t.id)?.end ?? t.current_due_date?.slice(0, 10) ?? null;
+      return !!end && end < today;
+    });
+  }
+  async function confirmPastDates(verb: string): Promise<boolean> {
+    const past = pastDatedOpenTasks();
+    if (!past.length) return true;
+    return confirm({
+      title: `${past.length} task${past.length === 1 ? " has a date" : "s have dates"} in the past`,
+      message: `${past
+        .slice(0, 6)
+        .map((t) => `• ${t.name || "Untitled task"}`)
+        .join("\n")}${past.length > 6 ? `\n…and ${past.length - 6} more` : ""}\n\nOnce the project starts these show as Overdue for the people assigned. Re-plan the dates first, or ${verb} anyway.`,
+      confirmLabel: `${verb[0].toUpperCase()}${verb.slice(1)} anyway`,
+      cancelLabel: "Re-plan dates",
+    });
+  }
+
   async function handleRequestBaseline() {
     if (!project) return;
     if (project.wbs_status === "draft" && orderedTasks.length === 0) {
@@ -2416,6 +2442,7 @@ export default function WbsPlanning() {
     // Re-baseline): this action is now only ever reachable from Draft
     // (see canRequestBaseline above), so the old isFirstBaseline branch
     // that handled a second/later re-baseline request no longer applies.
+    if (!(await confirmPastDates("request start"))) return;
     if (
       !(await confirm({
         title: "Start Project",
@@ -2477,6 +2504,7 @@ export default function WbsPlanning() {
       );
       return;
     }
+    if (!(await confirmPastDates("approve"))) return;
     if (
       !(await confirm({
         title: "Start Project",
