@@ -1,11 +1,11 @@
 name: Build and deploy to GitHub Pages
 
-# Live site = main at /tempo/. Preview = the `preview` branch (if it exists)
+# Live site = main at /tempo/. Preview = the `tempo-preview` branch (if it exists)
 # at /tempo/preview/ -- same database; the preview build sends
 # x-tempo-channel: preview so DB rules staged "preview-only" apply there.
 on:
   push:
-    branches: [main, preview]
+    branches: [main, tempo-preview]
   workflow_dispatch:
 
 permissions:
@@ -39,8 +39,8 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_TEMPO_CHANNEL: preview
         run: |
-          if git ls-remote --exit-code --heads origin preview >/dev/null; then
-            git worktree add ../pv origin/preview
+          if git ls-remote --exit-code --heads origin tempo-preview >/dev/null; then
+            git worktree add ../pv origin/tempo-preview
             cd ../pv
             npm install
             npm run build
