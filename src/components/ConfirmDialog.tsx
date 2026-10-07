@@ -1,10 +1,14 @@
 import { AlertTriangle } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { createPortal } from "react-dom";
 
 interface ConfirmDialogProps {
   title?: string;
   message: string;
+  /** 2026-10-07 prompt standard: short list under the message (max 5 shown, then "and N more"). */
+  items?: string[];
+  /** Technical text (e.g. the raw database error), hidden behind "Show details". */
+  details?: string;
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
@@ -93,6 +97,8 @@ function renderMessage(message: string) {
 export default function ConfirmDialog({
   title,
   message,
+  items,
+  details,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   danger = false,
@@ -101,6 +107,9 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const [showDetails, setShowDetails] = useState(false);
+  const shown = (items ?? []).slice(0, 5);
+  const more = (items ?? []).length - shown.length;
   // Portaled + above Modal (1100) so confirms opened from a modal stay on top.
   return createPortal(
     <div
@@ -122,7 +131,7 @@ export default function ConfirmDialog({
           borderRadius: "var(--radius-md)",
           boxShadow: "0 12px 32px rgba(15,41,66,0.24)",
           padding: 20,
-          width: 340,
+          width: 380,
           maxWidth: "calc(100vw - 32px)",
         }}
       >
@@ -135,6 +144,20 @@ export default function ConfirmDialog({
           <div>
             {title && <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--navy)", marginBottom: 4 }}>{title}</div>}
             <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>{renderMessage(message)}</div>
+            {shown.length > 0 && (
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                {shown.map((it, i) => <li key={i}>{renderInlineBold(it)}</li>)}
+                {more > 0 && <li style={{ listStyle: "none", marginLeft: -18, color: "var(--muted)" }}>and {more} more</li>}
+              </ul>
+            )}
+            {details && (
+              <div style={{ marginTop: 8 }}>
+                <button onClick={() => setShowDetails((v) => !v)} style={{ fontSize: 11, color: "var(--muted)", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
+                  {showDetails ? "Hide details" : "Show details"}
+                </button>
+                {showDetails && <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted)", fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{details}</div>}
+              </div>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>

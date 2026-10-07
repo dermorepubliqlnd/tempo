@@ -4,6 +4,8 @@ import ConfirmDialog from "../components/ConfirmDialog";
 interface ConfirmOptions {
   title?: string;
   message: string;
+  items?: string[];
+  details?: string;
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
@@ -12,9 +14,11 @@ interface ConfirmOptions {
   emphasizeCancel?: boolean;
 }
 
-interface AlertOptions {
+export interface AlertOptions {
   title?: string;
   message: string;
+  items?: string[];
+  details?: string;
   confirmLabel?: string;
 }
 
@@ -52,6 +56,8 @@ export function useConfirm() {
     <ConfirmDialog
       title={pending.title}
       message={pending.message}
+      items={pending.items}
+      details={pending.details}
       confirmLabel={pending.confirmLabel ?? (pending.alertOnly ? "OK" : undefined)}
       cancelLabel={pending.cancelLabel}
       danger={pending.danger}
