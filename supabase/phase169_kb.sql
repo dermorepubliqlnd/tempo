@@ -64,7 +64,7 @@ where not exists (select 1 from kb_entries where title = 'Auto-Approvals: What T
 
 -- DRAFT release note --------------------------------------------------------
 insert into kb_entries (category_id, title, content, sort_order, is_active, created_by, updated_by)
-select 'bc5dda9d-1b96-472d-a1ac-72f8b8ccc150', 'Upcoming Release: Auto-Approvals (draft)', $md$**At a glance:** Tempo now approves small, low-risk items on its own, so approvers spend their time on what needs judgement. Short manual time entries, on-time and late task completions, and small first extensions go through automatically. Approvers keep control: every auto-approval is listed in a new **Auto-approved** tab, most can be reversed within 7 days, and on-the-due-date completions can be held for review.
+select 'bc5dda9d-1b96-472d-a1ac-72f8b8ccc150', 'Upcoming Release (draft)', $md$**At a glance:** Tempo is simpler this week. It approves small, low-risk items on its own, so approvers spend their time on what needs judgement; each role sees only the pages and views it uses; and words, pop-ups and messages are now consistent and shorter. Short manual time entries, on-time and late task completions, and small first extensions go through automatically. Approvers keep control: every auto-approval is listed in a new **Auto-approved** tab, most can be reversed within 7 days, and on-the-due-date completions can be held for review.
 
 ### Short manual time entries are approved automatically
 Manual entries of **2 hrs or less**, logged within **2 working days** of the work and not overlapping other entries, are approved straight away (up to 5 hrs a week per person). Longer or older entries still go to your approver.
@@ -88,8 +88,29 @@ When an extended task pushes the tasks after it, those tasks now show **Shifted*
 
 ### Clearer messages when you submit
 After you log manual time or request an extension, Tempo now says whether it was approved automatically or sent to your approver (and why). The time-entry message now correctly says it goes to your supervisor.
+
+### Each role sees only what it uses
+The sidebar and the ready-made (System) views now follow your role. **Members** see My Dashboard, Projects & Tasks, Time Tracking, Approval Center (My Requests), Time Off & Holidays, Knowledge Base and Feedback, with 6 System Views. **Project owners** also get views for the tasks in their projects. **Leads** also see Team Dashboard, Utilization and Productivity. Your own personal views don't change. Full Access can adjust any person, or a whole role, in **User Management**.
+**Related article:** [[Projects & Tasks: Tabs and Views]]
+
+### Archive is now the Recycle bin
+Archive left the sidebar for most people. Use the **Recycle bin** link on Projects & Tasks or Time Tracking to restore anything moved to Archive in the last 90 days.
+
+### One word for each thing
+Tempo now uses the same words everywhere: **Logged hours**, **Estimated hours**, **% of estimate**, **Approve / Reject**, **Validate** and **Validated date**, **Start Project request** and **Awaiting Start**, **Close Project**, **Extension**, and time statuses **Running · Needs confirming · Awaiting approval · Final · Rejected**. Deleting now says **Move to Archive**.
+**Related article:** [[Glossary]]
+
+### Shorter, clearer pop-ups
+Every pop-up now has a short title, one sentence, a short list when needed, and buttons that say what they do. Error messages say what went wrong in plain words; the technical text is under **Show details**.
+
+### Timers stop at the 10 PM sign-out
+A timer still running at 10 PM now stops at 10:00 PM and waits in **Needs confirming** for you the next morning. Check the end time and confirm. The confirm pop-up can no longer be closed by accident: choose **Continue work** or **Confirm**.
+**Related article:** [[Correcting Time Logs]]
+
+### Done always goes through Reported Completion
+Dragging a card to **Done** on a board now asks you to confirm the logged hours and Output Count, the same as setting **Reported Completion**. Dragging to **Cancelled** asks for the reason. Done can't be set in bulk.
 $md$, 0, false, 'e7e52a30-4c13-449b-889d-280dc0ca16c6', 'e7e52a30-4c13-449b-889d-280dc0ca16c6'
-where not exists (select 1 from kb_entries where title = 'Upcoming Release: Auto-Approvals (draft)');
+where not exists (select 1 from kb_entries where title = 'Upcoming Release (draft)');
 
 select article_number, title, is_active from kb_entries
- where title in ('Auto-Approvals: What Tempo Approves Automatically', 'Upcoming Release: Auto-Approvals (draft)');
+ where title in ('Auto-Approvals: What Tempo Approves Automatically', 'Upcoming Release (draft)');
