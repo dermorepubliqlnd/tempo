@@ -647,7 +647,7 @@ export default function Dashboard() {
         supabase.from("project_closeouts").select("closed_at"),
         supabase.from("projects").select("start_date,is_operational"),
         supabase.from("project_planning_types").select("id,name,is_active,sort_order").order("sort_order"),
-        supabase.from("project_types").select("id,name,is_active,sort_order").order("sort_order"),
+        supabase.from("project_types").select("id,name,is_active,sort_order,uses_sessions").order("sort_order"),
         supabase.from("project_phases").select("id,name,is_active,sort_order").order("sort_order"),
       ]);
       const allProjects = (projectData as ProjectRow[]) ?? [];
@@ -730,8 +730,11 @@ export default function Dashboard() {
       if (h === "Overdue") overdue++;
     }
     const activeOperational = filteredProjects.filter((p) => isActiveProject(p) && p.is_operational).length;
-    return { total, active, activeOperational, completed, onHold, atRisk, overdue };
-  }, [filteredProjects, tasks, holidayDates]);
+    // phase161: "Training Delivery" unless an Ongoing container is active too.
+    const sessionTypeIds = new Set(projectTypes.filter((t) => (t as { uses_sessions?: boolean }).uses_sessions).map((t) => t.id));
+    const opLabel = filteredProjects.some((p) => isActiveProject(p) && p.is_operational && !(p.project_type_id && sessionTypeIds.has(p.project_type_id))) ? "ongoing" : "Training Delivery";
+    return { total, active, activeOperational, opLabel, completed, onHold, atRisk, overdue };
+  }, [filteredProjects, tasks, holidayDates, projectTypes]);
 
   const statusDonut = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -1175,7 +1178,7 @@ export default function Dashboard() {
           that ambiguity. */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 16 }}>
         <StatCard icon={<Folder size={26} />} tone="accent" label="Total Projects" value={stats.total} />
-        <StatCard icon={<Activity size={26} />} tone="accent" label={stats.activeOperational ? `Active (incl. ${stats.activeOperational} Training Delivery)` : "Active"} value={stats.active} />
+        <StatCard icon={<Activity size={26} />} tone="accent" label={stats.activeOperational ? `Active (incl. ${stats.activeOperational} ${stats.opLabel})` : "Active"} value={stats.active} />
         <StatCard icon={<CheckCircle2 size={26} />} tone="teal" label="Completed" value={stats.completed} />
         <StatCard icon={<PauseCircle size={26} />} tone="warning" label="Paused" value={stats.onHold} />
         <StatCard icon={<Clock3 size={26} />} tone="danger" label="Overdue" value={stats.overdue} />
@@ -1257,7 +1260,7 @@ export default function Dashboard() {
               only" to match isActiveProject's new Status-based
               definition (see that function's own comment for why). */}
           <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 10 }}>
-            In Progress projects only{stats.activeOperational ? ` · excludes ${stats.activeOperational} Training Delivery (health always “Ongoing”)` : ""}
+            In Progress projects only{stats.activeOperational ? ` · excludes ${stats.activeOperational} ${stats.opLabel} (health always “Ongoing”)` : ""}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <Donut segments={healthDonut} centerLabel="Active" centerValue={stats.active - stats.activeOperational} />
@@ -1488,8 +1491,8 @@ export default function Dashboard() {
         </table>
       </div>
 
-      {operationalProjects.length > 0 && (
-        <TrainingDeliverySection projects={operationalProjects} tasks={tasks} people={people} outputTypes={outputTypes} />
+      {operationalProjects.some((p) => !(p as { is_ongoing_container?: boolean }).is_ongoing_container) && (
+        <TrainingDeliverySection projects={operationalProjects.filter((p) => !(p as { is_ongoing_container?: boolean }).is_ongoing_container)} tasks={tasks} people={people} outputTypes={outputTypes} />
       )}
     </div>
   );
