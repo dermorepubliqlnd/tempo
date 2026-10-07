@@ -6,7 +6,7 @@
 
 -- NEW topic article (draft) -------------------------------------------------
 insert into kb_entries (category_id, title, content, sort_order, is_active, created_by, updated_by)
-select coalesce((select id from kb_categories where name ilike '%approv%' order by sort_order limit 1), 'bc5dda9d-1b96-472d-a1ac-72f8b8ccc150'),
+select coalesce((select id from kb_categories where name = 'Access & Permissions' limit 1), 'bc5dda9d-1b96-472d-a1ac-72f8b8ccc150'),
 'Auto-Approvals: What Tempo Approves Automatically', $md$Tempo approves small, low-risk items on its own, so approvers only review what needs a person's judgement. Everything approved automatically is tagged **Auto-approved** and listed in **Approval Center › Auto-approved** for the approver.
 
 ### Manual time
@@ -58,7 +58,7 @@ When an extended task pushes the tasks that depend on it, those tasks show **Shi
 - **Follow-up time** on Done tasks.
 - Anything that doesn't meet the rules above.
 
-**Related articles:** [[Approval Rights & Permissions Matrix]] · [[Correcting Time Logs]]
+**Related articles:** [[Approval Rights & Permissions Matrix]] · [[Validating Task Completion]] · [[Due Dates & Extensions After Project Start]] · [[Correcting Time Logs]]
 $md$, 50, false, 'e7e52a30-4c13-449b-889d-280dc0ca16c6', 'e7e52a30-4c13-449b-889d-280dc0ca16c6'
 where not exists (select 1 from kb_entries where title = 'Auto-Approvals: What Tempo Approves Automatically');
 
@@ -98,7 +98,7 @@ Archive left the sidebar for most people. Use the **Recycle bin** link on Projec
 
 ### One word for each thing
 Tempo now uses the same words everywhere: **Logged hours**, **Estimated hours**, **% of estimate**, **Approve / Reject**, **Validate** and **Validated date**, **Start Project request** and **Awaiting Start**, **Close Project**, **Extension**, and time statuses **Running · Needs confirming · Awaiting approval · Final · Rejected**. Deleting now says **Move to Archive**.
-**Related article:** [[Glossary]]
+See the **Glossary** section of the Knowledge Base.
 
 ### Shorter, clearer pop-ups
 Every pop-up now has a short title, one sentence, a short list when needed, and buttons that say what they do. Error messages say what went wrong in plain words; the technical text is under **Show details**.
