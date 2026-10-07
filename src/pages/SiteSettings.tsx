@@ -1,3 +1,5 @@
+import RolesPermissions from "../components/RolesPermissions";
+import { useAutoApprovalsOn } from "../lib/autoApprovals";
 import { canAccessPage } from "../lib/pageAccess";
 import { useEffect, useState, type CSSProperties } from "react";
 import { ShieldCheck, ShieldOff, Pencil, Check, X, Plus, ArrowUp, ArrowDown, Trash2, CalendarClock, CalendarDays, GripVertical, ChevronRight } from "lucide-react";
@@ -241,6 +243,7 @@ interface OutputTypeRow {
 export default function SiteSettings() {
   const { confirm: confirmDlg, alert: alertDlg, dialog: confirmDialogEl } = useConfirm();
   const { person: me, loading: sessionLoading } = useSession();
+  const autoApprovalsOn = useAutoApprovalsOn();
 
   // Work Types (Phase 12, 2026-08-20): admin-configurable lookup backing
   // the new task-level "Work Type" field on Projects/WBS Planning, so
@@ -2001,6 +2004,9 @@ export default function SiteSettings() {
         <h1>Site settings</h1>
         <p className="subtitle">Full Access only. Configure options shared across the whole app.</p>
       </div>
+
+      {/* 2026-10-08 (Sandra): Roles & Permissions -- staging only until go-live. */}
+      {autoApprovalsOn && <RolesPermissions meRoleId={(me as { role_id?: string | null }).role_id ?? null} />}
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ marginBottom: 10 }}>

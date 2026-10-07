@@ -1,5 +1,4 @@
-import NavAccessSection from "./NavAccessSection";
-import type { NavPage, NavRole } from "../lib/navAccess";
+import RoleSection from "./RoleSection";
 import { createPortal } from "react-dom";
 import { X, Pencil } from "lucide-react";
 import type { CSSProperties } from "react";
@@ -63,8 +62,8 @@ export interface UserDrawerProps {
   meId?: string;
   onSaveColor: (hex: string | null) => void;
   onToggleTracksTime: (value: boolean) => void;
-  // 2026-10-07 (item E): role + sidebar pages + System Views.
-  onUpdateNav?: (patch: { nav_role?: NavRole | null; page_access?: Partial<Record<NavPage, boolean>> | null; system_views?: string[] | null }) => void;
+  // 2026-10-08: one role per person (Roles & Permissions).
+  onChangeRole?: (roleId: string) => void;
 }
 
 function initialsFor(name: string): string {
@@ -143,7 +142,7 @@ export default function UserDrawer({
   onToggleApprovalFlag,
   onSaveColor,
   onToggleTracksTime,
-  onUpdateNav,
+  onChangeRole,
 }: UserDrawerProps) {
   const { alert, dialog } = useConfirm();
   const manager = people.find((x) => x.id === person.reports_to);
@@ -317,97 +316,12 @@ export default function UserDrawer({
             </Field>
           </Section>
 
-          <Section title="System access">
-            <Field label="Access level">
-              {isEdit ? (
-                <select
-                  value={person.access_level}
-                  onChange={(e) => onChangeAccessLevel(e.target.value as "limited" | "full")}
-                  style={{ ...inputStyle, width: 140 }}
-                >
-                  <option value="limited">Limited</option>
-                  <option value="full">Full</option>
-                </select>
-              ) : (
-                <span className={`status-pill ${person.access_level === "full" ? "success" : "neutral"}`}>
-                  {person.access_level === "full" ? "Full" : "Limited"}
-                </span>
-              )}
-            </Field>
-          </Section>
-
-          <Section title="Approval rights">
-            {isEdit ? (
-              <>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }} title="Approve or decline Start Project requests (locks the project baseline)">
-                  <input
-                    type="checkbox"
-                    checked={person.can_approve_rebaseline}
-                    onChange={(e) => onToggleApprovalFlag("can_approve_rebaseline", e.target.checked)}
-                  />
-                  Can approve Start Project
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }} title="Approve or reject Close Project requests (Full Access can too)">
-                  <input
-                    type="checkbox"
-                    checked={person.can_approve_closures}
-                    onChange={(e) => onToggleApprovalFlag("can_approve_closures", e.target.checked)}
-                  />
-                  Project Close
-                </label>
-              </>
-            ) : (
-              <>
-                <Field label="Can approve Start Project">{person.can_approve_rebaseline ? "Yes" : "No"}</Field>
-                <Field label="Project Close">{person.can_approve_closures ? "Yes" : "No"}</Field>
-                {approvalCount === 0 && <div style={{ fontSize: 11, color: "var(--muted)" }}>No approval permissions granted.</div>}
-              </>
-            )}
-          </Section>
-
-          <Section title="Role, sidebar and views">
-            <NavAccessSection person={person} isEdit={isEdit && !!onUpdateNav} onUpdate={(patch) => onUpdateNav?.(patch)} />
-          </Section>
-
-          {/* phase132 (Sandra): per-user page access. Admin pages also need Full Access. */}
-          <Section title="Admin page access">
-            {(() => {
-              const isFull = person.access_level === "full";
-              const items: { field: "can_view_team_dashboard" | "can_access_user_management" | "can_access_reports" | "can_access_site_settings"; label: string; admin: boolean }[] = [
-                { field: "can_access_user_management", label: "User Management", admin: true },
-                { field: "can_access_reports", label: "Reports", admin: true },
-                { field: "can_access_site_settings", label: "Site Settings", admin: true },
-              ];
-              const valueOf = (f: (typeof items)[number]["field"], admin: boolean) => (admin ? isFull && person[f] !== false : person[f] !== false);
-              if (!isEdit) {
-                return (
-                  <>
-                    {items.map((it) => (
-                      <Field key={it.field} label={it.label}>{valueOf(it.field, it.admin) ? "Yes" : "No"}</Field>
-                    ))}
-                  </>
-                );
-              }
-              return (
-                <>
-                  {items.map((it) => {
-                    const lockedSelf = it.field === "can_access_user_management" && meId === person.id;
-                    const disabled = (it.admin && !isFull) || lockedSelf;
-                    return (
-                      <label
-                        key={it.field}
-                        style={{ display: "flex", alignItems: "center", gap: 8, cursor: disabled ? "not-allowed" : "pointer", fontSize: 13, opacity: it.admin && !isFull ? 0.55 : 1 }}
-                        title={it.admin && !isFull ? "Requires Full Access" : lockedSelf ? "You can't remove your own User Management access" : undefined}
-                      >
-                        <input type="checkbox" disabled={disabled} checked={valueOf(it.field, it.admin)} onChange={(e) => onToggleApprovalFlag(it.field, e.target.checked)} />
-                        {it.label}
-                      </label>
-                    );
-                  })}
-                  {!isFull && <div style={{ fontSize: 11, color: "var(--muted)" }}>Admin pages require Full Access.</div>}
-                </>
-              );
-            })()}
+          {/* 2026-10-08 (Sandra): one Role decides access level, approval rights,
+              admin pages, sidebar pages and System Views (Site Settings >
+              Roles & Permissions). Replaces the separate access/approval/page
+              controls that used to be here. */}
+          <Section title="Role">
+            <RoleSection person={person} isEdit={isEdit && !!onChangeRole} onChangeRole={(id) => onChangeRole?.(id)} />
           </Section>
         </div>
 

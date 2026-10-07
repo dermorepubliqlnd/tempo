@@ -2789,7 +2789,7 @@ export default function Projects() {
     if (!projectViews.loaded || !navAccess.loaded) return;
     const allowed = PROJECT_SYSTEM_VIEWS.filter((v) => navAccess.views.has(v.id));
     const list = allowed.length ? allowed : PROJECT_SYSTEM_VIEWS.filter((v) => v.id === "system_my_active_portfolio");
-    const def = list.find((v) => v.id === "system_my_active_projects" && navAccess.role !== "member") ?? list.find((v) => v.id === "system_my_active_portfolio") ?? list[0];
+    const def = list.find((v) => v.id === "system_my_active_portfolio") ?? list[0];
     projectViews.installSystemViews(list, def.id, migrateProjectScope);
     // installSystemViews is intentionally idempotent; PROJECT_SYSTEM_VIEWS is
     // module-level and stable so this only changes state when the saved set

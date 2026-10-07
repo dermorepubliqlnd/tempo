@@ -1,4 +1,4 @@
-import RoleDefaultsModal from "../components/RoleDefaultsModal";
+import { clearRolesCache, loadRoles } from "../lib/navAccess";
 import { canAccessPage } from "../lib/pageAccess";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type CSSProperties } from "react";
 import { UserPlus, Upload, Download, Copy, Search } from "lucide-react";
@@ -103,7 +103,8 @@ export default function Admin() {
   const { confirm, alert, dialog } = useConfirm();
   const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
-  const [roleDefaultsOpen, setRoleDefaultsOpen] = useState(false);
+  const [roleNames, setRoleNames] = useState<Record<string, string>>({});
+  useEffect(() => { loadRoles(true).then((rs) => setRoleNames(Object.fromEntries(rs.map((r) => [r.id, r.name])))); }, [people.length]);
   const [formOpen, setFormOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -385,14 +386,20 @@ export default function Admin() {
     }
   }
 
-  // 2026-10-07 (item E): role / sidebar pages / System Views per person.
-  async function updateNav(p: Person, patch: Record<string, unknown>) {
-    setPeople((prev) => prev.map((x) => (x.id === p.id ? { ...x, ...patch } : x)));
-    const { error } = await supabase.from("people").update(patch).eq("id", p.id);
-    if (error) {
-      alert(friendlyError("save this setting", error));
-      loadPeople();
+  // 2026-10-08 (Sandra): one role per person. The database copies the role's
+  // access level, approval rights and admin pages onto the person.
+  async function changeRole(p: Person, roleId: string) {
+    if (me?.id === p.id) {
+      const ok = await confirm({ title: "Change your own role?", message: "If the new role has no User Management access, you'll lose access to this page.", confirmLabel: "Change my role", danger: true });
+      if (!ok) return;
     }
+    const { error } = await supabase.from("people").update({ role_id: roleId }).eq("id", p.id);
+    if (error) {
+      alert(friendlyError("change the role", error));
+      return;
+    }
+    clearRolesCache();
+    loadPeople();
   }
 
   // phase126d (Sandra 2026-09-30): "Expected to log time" tag.
@@ -696,9 +703,6 @@ export default function Admin() {
           <p className="subtitle">Manage team members, their capacity, system access, and approval rights.</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setRoleDefaultsOpen(true)} title="Set the sidebar pages and System Views each role sees" style={secondaryBtnStyle}>
-            Role defaults
-          </button>
           <button
             onClick={downloadTemplate}
             title="Download a CSV template with the expected column headers"
@@ -838,10 +842,10 @@ export default function Admin() {
           <thead>
             <tr>
               <th>User</th>
-              <th>Role</th>
+              <th>Job title</th>
               <th>Manager</th>
               <th>Capacity/day</th>
-              <th>Access</th>
+              <th>Tempo role</th>
               <th title="Flat authorization flags -- not tiered yet. Re-baselining and Closed-project decisions aren't tiered further than this, this is just the designation. Task reopening is now a manager-chain check, not a flag -- see canReopenTask in Projects.tsx.">Approvals</th>
               <th>Status</th>
               <th></th>
@@ -902,8 +906,8 @@ export default function Admin() {
                     )}
                   </td>
                   <td>
-                    <span className={`status-pill ${p.access_level === "full" ? "success" : "neutral"}`}>
-                      {p.access_level === "full" ? "Full" : "Limited"}
+                    <span className={`status-pill ${p.access_level === "full" ? "success" : "neutral"}`} title={p.access_level === "full" ? "Full Access" : "Standard access"}>
+                      {roleNames[(p as Person & { role_id?: string | null }).role_id ?? ""] ?? "No role"}
                     </span>
                   </td>
                   <td>{approvalSummary(p)}</td>
@@ -954,12 +958,10 @@ export default function Admin() {
           onToggleApprovalFlag={(field, value) => toggleApprovalFlag(selectedPerson, field, value)}
           meId={me?.id}
           onToggleTracksTime={(value) => toggleTracksTime(selectedPerson, value)}
-          onUpdateNav={(patch) => updateNav(selectedPerson, patch)}
+          onChangeRole={(roleId) => changeRole(selectedPerson, roleId)}
           onSaveColor={(hex) => saveColor(selectedPerson, hex)}
         />
       )}
-
-      {roleDefaultsOpen && <RoleDefaultsModal onClose={() => setRoleDefaultsOpen(false)} />}
 
       {csvResults && (
         <Modal title={csvResults.length === 1 ? "Login details" : "CSV import results"} onClose={() => setCsvResults(null)} width={620}>
