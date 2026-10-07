@@ -130,6 +130,7 @@ begin
   if e.decided_at < now() - interval '7 days' then raise exception 'auto-approvals can only be reversed within 7 days'; end if;
   if v_note is null then raise exception 'a reason is required to reverse an auto-approval'; end if;
   if not public.can_decide_time_entry(p_entry_id) then raise exception 'not authorized to reverse this entry'; end if;
+  perform set_config('app.bypass_time_entry_lock', 'on', true);
   update time_entries set
     status = 'pending_approval',
     auto_approved = false,
@@ -288,6 +289,7 @@ declare
   v_today date := (now() at time zone 'Asia/Manila')::date;
   v_wd int;
   v_note text := null;
+  v_max_before date;
 begin
   if NEW.task_id is null or NEW.status <> 'Pending' or coalesce(NEW.is_manager_initiated, false)
      or coalesce(NEW.request_type, 'due_date') <> 'due_date' or not public.auto_approvals_enabled() then
@@ -308,16 +310,22 @@ begin
   end if;
 
   if v_note is null then
+    select max(x.current_due_date)::date into v_max_before from tasks x
+     where x.project_id = t.project_id and not x.is_archived and coalesce(x.status, '') <> 'Cancelled';
     begin
       perform set_config('app.auto_approval', 'on', true);
       perform public.decide_extension_request(NEW.id, 'Approved',
         'Auto-approved: ' || v_wd || ' working day' || case when v_wd = 1 then '' else 's' end ||
         ' (' || to_char(t.due, 'Mon DD') || ' -> ' || to_char(NEW.requested_new_due_date::date, 'Mon DD') || ')');
+      -- "Impacts the project end" = after the move (dependents included) the
+      -- latest task finishes later than both the project end date and the
+      -- latest finish before this request (a project already running past
+      -- its end date isn't blocked by a slip that doesn't push it further).
       if v_end is not null and exists (
            select 1 from tasks x
             where x.project_id = t.project_id and not x.is_archived
               and coalesce(x.status, '') <> 'Cancelled'
-              and x.current_due_date::date > v_end) then
+              and x.current_due_date::date > greatest(v_end, coalesce(v_max_before, v_end))) then
         raise exception using errcode = 'P0169', message = 'past project end';
       end if;
       update extension_requests set auto_approved = true, decided_by = null where id = NEW.id;

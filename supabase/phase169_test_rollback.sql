@@ -31,7 +31,7 @@ begin
   select current_due_date into v_due from tasks where id = v_t513;
   select current_due_date into v_dep_due_after from tasks where id = v_dep;
   out := out || ' | T3 ext 1WD: ' || v_st || '/' || v_auto || ' note=' || v_note || ' due=' || v_due || ' dep ' || coalesce(v_dep_due_before::text,'-') || '->' || coalesce(v_dep_due_after::text,'-')
-             || ' revchg=' || (select count(*) from project_revision_changes where created_at > now() - interval '1 minute');
+             || ' revchg=' || (select count(*) from project_revision_changes);
   -- T3b second request on same task -> pending (not first)
   insert into extension_requests (task_id, requested_by, requested_new_due_date, reason_category, reason_notes)
   values (v_t513, (select id from people where auth_user_id = v_member_auth), '2026-10-15', 'Other', 'dry run') returning id into v_id;
