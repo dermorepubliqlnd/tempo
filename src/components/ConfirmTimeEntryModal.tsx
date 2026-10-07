@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { friendlyError } from "../lib/prompts";
 import Modal from "./Modal";
 import { confirmTimeEntry, resumeTimer, discardTimerEntry, formatDuration, DISCARD_TIMER_MAX_SECONDS } from "../lib/timeTracking";
 
@@ -88,7 +89,9 @@ export default function ConfirmTimeEntryModal({
     });
     setSaving(false);
     if (res.error) {
-      setError(res.error);
+      // 2026-10-08 (Sandra, item H): the DB time guard (phase173) can reject a
+      // confirm with changed times (future, overlap, end before start).
+      setError(friendlyError("confirm this time", res.error).message);
       return;
     }
     onDone();

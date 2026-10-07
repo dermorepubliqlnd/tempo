@@ -1,5 +1,4 @@
 import RecycleBinLink from "../components/RecycleBinLink";
-import { timeEntryOutcomeMessage } from "../lib/autoApprovals";
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ShieldCheck, ChevronRight, ChevronLeft, ChevronDown, Pencil, Timer, Trash2, Archive, RotateCcw, Plus, Search, X, CalendarDays, AlertCircle, ListChecks, Radio, FilePen, Download } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -8,7 +7,7 @@ import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { friendlyError } from "../lib/prompts";
 import { formatDate } from "../lib/formatDate";
-import { FOLLOW_UP_REASON_LABEL, type FollowUpReason, timeLogId, formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, requestTimeEntryCorrection, cancelTimeEntryCorrection, editPendingManualTimeEntry } from "../lib/timeTracking";
+import { FOLLOW_UP_REASON_LABEL, type FollowUpReason, timeLogId, formatDuration, correctTimeEntry, requestTimeEntryCorrection, cancelTimeEntryCorrection, editPendingManualTimeEntry } from "../lib/timeTracking";
 import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { loggedHoursTier } from "../lib/loggedHoursBands";
 import { expectedHoursForDay } from "../lib/dailyAllocation";
@@ -16,7 +15,7 @@ import { buildHolidayNameMap, nonWorkingDayConfirmMessage, type HolidayNameMap }
 import { useSearchParams } from "react-router-dom";
 import NonProjectTimerQuickStart from "../components/NonProjectTimerQuickStart";
 import MultiSelectFilter from "../components/MultiSelectFilter";
-import Modal from "../components/Modal";
+import LogTimeModal from "../components/LogTimeModal";
 import { toCsv } from "../lib/csv";
 
 interface PersonLite {
@@ -341,98 +340,6 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-// Small searchable combobox (Sandra, 2026-08-26: "allow project selection
-// in the time tracker then next will be task... allow search too for both
-// options") -- a plain <select> got unwieldy once Project became its own
-// step ahead of Task. Filters options client-side as you type; click a row
-// or the input's current match to select. Local to this file since Task
-// Tracking is the only place a project-then-task cascade like this exists
-// so far.
-function SearchSelect({
-  options,
-  value,
-  onChange,
-  placeholder,
-  disabled,
-}: {
-  options: { id: string; label: string }[];
-  value: string;
-  onChange: (id: string) => void;
-  placeholder: string;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-  const selected = options.find((o) => o.id === value);
-
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
-
-  const filtered = options.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase()));
-
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <input
-        disabled={disabled}
-        value={open ? query : selected?.label ?? ""}
-        placeholder={placeholder}
-        onFocus={() => {
-          setOpen(true);
-          setQuery("");
-        }}
-        onChange={(e) => setQuery(e.target.value)}
-        style={{
-          width: "100%",
-          fontSize: 12,
-          padding: "6px 8px",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-sm)",
-          boxSizing: "border-box",
-          background: disabled ? "var(--bg)" : "var(--surface)",
-        }}
-      />
-      {open && !disabled && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 2px)",
-            left: 0,
-            right: 0,
-            maxHeight: 180,
-            overflowY: "auto",
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-sm)",
-            boxShadow: "0 4px 16px rgba(15,41,66,0.14)",
-            zIndex: 50,
-          }}
-        >
-          {filtered.length === 0 && <div style={{ padding: "6px 8px", fontSize: 11.5, color: "var(--muted)" }}>No matches</div>}
-          {filtered.map((o) => (
-            <button
-              key={o.id}
-              onClick={() => {
-                onChange(o.id);
-                setOpen(false);
-                setQuery("");
-              }}
-              style={{ display: "block", width: "100%", textAlign: "left", fontSize: 12, padding: "6px 8px", background: "none", border: "none", cursor: "pointer" }}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // Separate date + time fields rather than <input type="datetime-local">:
 // that control's displayed time format is rendered per the OS locale,
 // which on some systems shows a period instead of a colon between hours
@@ -741,7 +648,6 @@ export default function TimeTracking() {
   const { confirm, alert, dialog: confirmDialog } = useConfirm();
   const [entries, setEntries] = useState<EntryRow[]>([]);
   const [people, setPeople] = useState<PersonLite[]>([]);
-  const [myTasks, setMyTasks] = useState<TaskLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [correctingId, setCorrectingId] = useState<string | null>(null);
   // 2026-09-23 (phase102, phase 2): owner-initiated correction requests.
@@ -864,12 +770,6 @@ export default function TimeTracking() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [nonProjectActivityTypes, setNonProjectActivityTypes] = useState<NonProjectActivityTypeRow[]>([]);
-  const [logActivityTypeId, setLogActivityTypeId] = useState("");
-  const [logProjectId, setLogProjectId] = useState("");
-  const [logTaskId, setLogTaskId] = useState("");
-  const [logStartDate, setLogStartDate] = useState(toDateInputValue());
-  const [logStartTime, setLogStartTime] = useState(toTimeInputValue());
-  const [logEndTime, setLogEndTime] = useState(toTimeInputValue());
   const [reasonOptions, setReasonOptions] = useState<TimeEntryReasonRow[]>([]);
   // 2026-09-23 (dynamic expected hours): my own approved half-day/off
   // days + holidays, so Today's Logs/This Week's "of Xh target" caption
@@ -902,20 +802,10 @@ export default function TimeTracking() {
   // just the indicator). Defaults open since it's usually a short list
   // and is the most time-sensitive info on the page.
   const [workingNowExpanded, setWorkingNowExpanded] = useState(true);
-  const [logReasonCategory, setLogReasonCategory] = useState("");
-  const [logNotes, setLogNotes] = useState("");
-  const [logError, setLogError] = useState<string | null>(null);
-  // 2026-09-23 (Sandra: overlap flagging) -- holds the conflicting entry
-  // so the Add Time modal can render her exact "Time overlap detected"
-  // message format (bold heading + field lines) instead of a plain string.
-  const [logOverlapEntry, setLogOverlapEntry] = useState<EntryRow | null>(null);
-  // 2026-09-23 (Sandra: hard gate on future-dated manual entries).
-  const [logFutureBlocked, setLogFutureBlocked] = useState(false);
-  const [logSaving, setLogSaving] = useState(false);
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: entryData }, { data: peopleData }, { data: taskData }, { data: reasonData }, { data: activityTypeData }, { data: availabilityData }, { data: holidayData }, { data: correctionRequestData }] = await Promise.all([
+    const [{ data: entryData }, { data: peopleData }, { data: reasonData }, { data: activityTypeData }, { data: availabilityData }, { data: holidayData }, { data: correctionRequestData }] = await Promise.all([
       fetchAllRows((f, t) => supabase
         .from("time_entries")
         .select(
@@ -931,7 +821,6 @@ export default function TimeTracking() {
         .order("id")
         .range(f, t)),
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
-      supabase.from("tasks").select("id,name,assignee_id,project_id,current_due_date,status,task_number,project:projects(id,name,owner_id,timelines_locked,wbs_status)").eq("is_archived", false),
       supabase.from("time_entry_reasons").select("id,name,is_active").order("sort_order"),
       supabase.from("non_project_activity_types").select("id,name,is_active").order("sort_order"),
       me?.id
@@ -943,7 +832,6 @@ export default function TimeTracking() {
     setCorrectionRequests((correctionRequestData as CorrectionRequestRow[] | null) ?? []);
     setEntries(((entryData as unknown as EntryRow[]) ?? []));
     setPeople((peopleData as PersonLite[]) ?? []);
-    setMyTasks((((taskData as unknown as TaskLite[]) ?? [])).filter((t) => t.assignee_id === me?.id));
     setMyAvailability((availabilityData as { date: string; status: "off" | "half_day" }[] | null) ?? []);
     setHolidayDates(new Set(((holidayData as { date: string }[] | null) ?? []).map((h) => h.date)));
     setHolidayNames(buildHolidayNameMap((holidayData as { date: string; name: string }[] | null) ?? []));
@@ -951,11 +839,6 @@ export default function TimeTracking() {
     setReasonOptions(reasons);
     const activityTypes = (activityTypeData as NonProjectActivityTypeRow[]) ?? [];
     setNonProjectActivityTypes(activityTypes);
-    setLogActivityTypeId((current) => current || activityTypes.find((a) => a.is_active)?.id || "");
-    // Default the manual-entry form to the first active reason -- only set
-    // once (on first successful load, or if the field's still blank), so
-    // it doesn't stomp on a choice already made mid-edit.
-    setLogReasonCategory((current) => current || reasons.find((r) => r.is_active)?.name || "");
     setLoading(false);
   }
 
@@ -1208,137 +1091,6 @@ export default function TimeTracking() {
     }
     loadAll();
   }
-
-  async function handleSubmitManual() {
-    setLogError(null);
-    setLogOverlapEntry(null);
-    setLogFutureBlocked(false);
-    if (logMode === "non_project") {
-      // 2026-09-22 (Sandra: "notes be optional except when Others is
-      // selected, where they will be required to specify"). Reason
-      // (Time Logging Reasons) doesn't apply here -- that field answers
-      // "why a manual entry instead of the timer", which isn't relevant
-      // to logging non-project time in the first place.
-      if (!logActivityTypeId) {
-        setLogError("Choose an activity type.");
-        return;
-      }
-      const activityType = nonProjectActivityTypes.find((a) => a.id === logActivityTypeId);
-      if (activityType?.name === "Others" && !logNotes.trim()) {
-        setLogError('Please add a note specifying what this was when "Others" is selected.');
-        return;
-      }
-      const start = new Date(`${logStartDate}T${logStartTime}`);
-      let end = new Date(`${logStartDate}T${logEndTime}`);
-      let clampedAtMidnight = false;
-      if (end <= start) {
-        end = new Date(`${logStartDate}T23:59:59`);
-        clampedAtMidnight = true;
-      }
-      if (isFutureTimeEntry(start.toISOString(), end.toISOString())) {
-        setLogFutureBlocked(true);
-        return;
-      }
-      const overlap = findOverlappingEntry(entries, me?.id ?? "", start.toISOString(), end.toISOString());
-      if (overlap) {
-        setLogOverlapEntry(overlap);
-        return;
-      }
-      // 2026-09-23 (Sandra: weekend/holiday soft check, fires every time,
-      // never blocks -- "you're trying to log on a Saturday/weekend/
-      // holiday, are you sure?") -- checked against the date TYPED into
-      // the form, since a manual entry is often backdated rather than
-      // logged for today.
-      const npWarnMsg = nonWorkingDayConfirmMessage(logStartDate, holidayNames);
-      if (npWarnMsg && !(await confirm({ title: "Log time on a day off?", message: npWarnMsg, confirmLabel: "Log anyway" }))) return;
-      setLogSaving(true);
-      const res = await submitNonProjectTimeEntry(me?.id ?? "", logActivityTypeId, start.toISOString(), end.toISOString(), logNotes.trim());
-      setLogSaving(false);
-      if (res.error) {
-        setLogError(res.error);
-        return;
-      }
-      setLogMode(null);
-      setLogNotes("");
-      await alert(await timeEntryOutcomeMessage(res.id, clampedAtMidnight ? "Your end time was before the start time, so it was set to 11:59 PM the same day." : ""));
-      loadAll();
-      return;
-    }
-    if (!logTaskId) {
-      setLogError("Choose a task.");
-      return;
-    }
-    if (!logReasonCategory) {
-      setLogError("Choose a reason.");
-      return;
-    }
-    if (logReasonCategory === "Other" && !logNotes.trim()) {
-      setLogError('Please specify a reason when "Other" is selected.');
-      return;
-    }
-    const start = new Date(`${logStartDate}T${logStartTime}`);
-    let end = new Date(`${logStartDate}T${logEndTime}`);
-    // Manual entries are assumed same-day (Sandra, 2026-08-26: "the
-    // assumption is that it's been worked in the same day, just date and
-    // start and end time") -- there's no separate End date field anymore.
-    // If the end time reads as before/equal to the start time, that means
-    // the session ran past midnight; per Sandra's confirmed choice
-    // ("Clamp/split at midnight"), clamp the logged entry to end of the
-    // start day rather than reject the entry outright or silently wrap
-    // it to the next day.
-    let clampedAtMidnight = false;
-    if (end <= start) {
-      end = new Date(`${logStartDate}T23:59:59`);
-      clampedAtMidnight = true;
-    }
-    if (isFutureTimeEntry(start.toISOString(), end.toISOString())) {
-      setLogFutureBlocked(true);
-      return;
-    }
-    const overlap = findOverlappingEntry(entries, me?.id ?? "", start.toISOString(), end.toISOString());
-    if (overlap) {
-      setLogOverlapEntry(overlap);
-      return;
-    }
-    // 2026-09-23 (Sandra: weekend/holiday soft check -- see the matching
-    // comment in the non-project branch above) -- same treatment for
-    // project time.
-    const warnMsg = nonWorkingDayConfirmMessage(logStartDate, holidayNames);
-    if (warnMsg && !(await confirm({ title: "Log time on a day off?", message: warnMsg, confirmLabel: "Log anyway" }))) return;
-    setLogSaving(true);
-    const res = await submitManualTimeEntry(logTaskId, start.toISOString(), end.toISOString(), logReasonCategory, logNotes.trim() || logReasonCategory);
-    setLogSaving(false);
-    if (res.error) {
-      setLogError(res.error);
-      return;
-    }
-    setLogMode(null);
-    setLogProjectId("");
-    setLogTaskId("");
-    setLogNotes("");
-    setLogReasonCategory(reasonOptions.find((r) => r.is_active)?.name || "");
-    // phase169: the DB may auto-approve it; also fixes the old "project owner" wording (approvals follow the reporting line).
-    await alert(await timeEntryOutcomeMessage(res.id, clampedAtMidnight ? "Your end time was before the start time, so it was set to 11:59 PM the same day." : ""));
-    loadAll();
-  }
-
-  // Sandra, 2026-08-26: a Done task shouldn't accept more logged time --
-  // it's already gated the other direction too (marking Done requires
-  // logged hours, see [[project_capaciq_wbs_batch_2026_08_26_part2]]), so
-  // once it's Done, time tracking against it is finished.
-  // Phase 26 (2026-08-28): ...and neither should a task whose project has
-  // already been closed -- its Final Scope snapshot is frozen, so hours
-  // logged after close-out would never show up anywhere. Mirrors
-  // enforce_time_entry_baseline_lock's new closed-project branch.
-  const loggableTasks = myTasks.filter((t) => t.project?.timelines_locked && t.project?.wbs_status !== "closed" && t.status !== "Done");
-  const loggableProjectOptions = (() => {
-    const seen = new Map<string, string>();
-    for (const t of loggableTasks) {
-      if (t.project && !seen.has(t.project.id)) seen.set(t.project.id, t.project.name);
-    }
-    return Array.from(seen, ([id, label]) => ({ id, label }));
-  })();
-  const loggableTasksForProject = loggableTasks.filter((t) => t.project_id === logProjectId).map((t) => ({ id: t.id, label: t.name }));
 
   const personName = (id: string | null) => people.find((p) => p.id === id)?.name ?? "—";
 
@@ -2056,278 +1808,18 @@ export default function TimeTracking() {
         </div>
       </div>
 
-      {logMode && (
-        <Modal
-          title={logMode === "project" ? "Log time — Project task" : "Log time — Non-project"}
-          onClose={() => {
+      {/* 2026-10-08 (Sandra, item H): the shared Log time form (components/LogTimeModal). */}
+      {logMode && me && (
+        <LogTimeModal
+          personId={me.id}
+          isFullAccess={me.access_level === "full"}
+          initialMode={logMode}
+          onClose={() => setLogMode(null)}
+          onSaved={() => {
             setLogMode(null);
-            setLogProjectId("");
-            setLogTaskId("");
+            loadAll();
           }}
-          width={480}
-        >
-            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-              {(["project", "non_project"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setLogMode(mode)}
-                  style={{
-                    flex: 1,
-                    textAlign: "center",
-                    padding: "8px 0",
-                    borderRadius: "var(--radius-sm)",
-                    border: `1px solid ${logMode === mode ? "var(--accent)" : "var(--border)"}`,
-                    background: logMode === mode ? "var(--accent-bg, #eaf2fb)" : "transparent",
-                    fontSize: 12,
-                    fontWeight: logMode === mode ? 600 : 500,
-                    color: logMode === mode ? "var(--accent)" : "var(--text-secondary)",
-                    cursor: "pointer",
-                  }}
-                >
-                  {mode === "project" ? "Project task" : "Non-project"}
-                </button>
-              ))}
-            </div>
-            {logMode && (
-              <>
-            {logMode === "non_project" ? (
-              <label style={{ display: "block", marginBottom: 8 }}>
-                <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Activity type</span>
-                <select
-                  value={logActivityTypeId}
-                  onChange={(e) => setLogActivityTypeId(e.target.value)}
-                  style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                >
-                  {nonProjectActivityTypes
-                    .filter((a) => a.is_active || a.id === logActivityTypeId)
-                    .map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            ) : (
-              <>
-                {/* Sandra, 2026-08-26: "allow project selection in the time
-                    tracker then next will be task" -- Project first narrows
-                    down which tasks show, then Task, both searchable. */}
-                <label style={{ display: "block", marginBottom: 8 }}>
-                  <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Project</span>
-                  <SearchSelect
-                    placeholder="Choose a project…"
-                    value={logProjectId}
-                    onChange={(id) => {
-                      setLogProjectId(id);
-                      setLogTaskId("");
-                    }}
-                    options={loggableProjectOptions}
-                  />
-                </label>
-                <label style={{ display: "block", marginBottom: 8 }}>
-                  <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Task (assigned to you)</span>
-                  <SearchSelect
-                    placeholder={logProjectId ? "Choose a task…" : "Choose a project first"}
-                    value={logTaskId}
-                    onChange={setLogTaskId}
-                    disabled={!logProjectId}
-                    options={loggableTasksForProject}
-                  />
-                  {loggableProjectOptions.length === 0 && (
-                    <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-                      None of your tasks are loggable right now -- either their project's baseline hasn't been locked in WBS Planning, or they're already marked Done.
-                    </span>
-                  )}
-                </label>
-              </>
-            )}
-            {/* Sandra, 2026-08-26: "add in the time tracker a view for the
-                user to see logged hours for the task selected, and due
-                date" -- context while filling out the form, so someone
-                logging time can see at a glance how much is already on
-                the task and when it's due, without leaving this page.
-                Logged hours only counts Confirmed/Approved entries (same
-                rule Logged hrs uses elsewhere -- see ownHoursFor). */}
-            {logMode === "project" && logTaskId &&
-              (() => {
-                const selectedTask = myTasks.find((t) => t.id === logTaskId);
-                const loggedMinutes = entries
-                  .filter((e) => e.task_id === logTaskId && (e.status === "confirmed" || e.status === "approved") && !e.is_archived)
-                  .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
-                const loggedHours = Math.round((loggedMinutes / 60) * 100) / 100;
-                return (
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 16,
-                      fontSize: 11.5,
-                      color: "var(--navy)",
-                      background: "var(--surface-2, #f5f6f8)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius-sm)",
-                      padding: "7px 10px",
-                      marginBottom: 10,
-                    }}
-                  >
-                    <span>
-                      <strong>Logged so far:</strong> {loggedHours}h
-                    </span>
-                    <span>
-                      <strong>Due:</strong> {selectedTask?.current_due_date ? formatDate(selectedTask.current_due_date) : "—"}
-                    </span>
-                  </div>
-                );
-              })()}
-            {/* Sandra, 2026-08-26: "Start date" read as if it defaulted
-                to today rather than the day the work actually happened --
-                relabeled to "Log date" (the date being logged for) and
-                collapsed Date/Start time/End time into one row so it
-                reads as one work session rather than a start-day/end-day
-                pair. */}
-            <div style={{ display: "flex", gap: 8 }}>
-              <label style={{ display: "block", marginBottom: 4, flex: 1.3 }}>
-                <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Log date</span>
-                <input
-                  type="date"
-                  value={logStartDate}
-                  onChange={(e) => setLogStartDate(e.target.value)}
-                  style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
-                />
-              </label>
-              <label style={{ display: "block", marginBottom: 4, flex: 1 }}>
-                <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Start time</span>
-                <input
-                  type="time"
-                  value={logStartTime}
-                  onChange={(e) => setLogStartTime(e.target.value)}
-                  style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
-                />
-              </label>
-              <label style={{ display: "block", marginBottom: 4, flex: 1 }}>
-                <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>End time</span>
-                <input
-                  type="time"
-                  value={logEndTime}
-                  onChange={(e) => setLogEndTime(e.target.value)}
-                  style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
-                />
-              </label>
-            </div>
-            <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 8 }}>Ends past midnight? It'll be clamped to 11:59 PM the same day.</div>
-            {logMode === "project" && (
-              <>
-                <label style={{ display: "block", marginBottom: 8 }}>
-                  <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Reason</span>
-                  <select
-                    value={logReasonCategory}
-                    onChange={(e) => setLogReasonCategory(e.target.value)}
-                    style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}
-                  >
-                    {reasonOptions
-                      .filter((r) => r.is_active || r.name === logReasonCategory)
-                      .map((r) => (
-                        <option key={r.id} value={r.name}>
-                          {r.name}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-                {logReasonCategory === "Other" && (
-                  <label style={{ display: "block", marginBottom: 10 }}>
-                    <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Specify</span>
-                    <input
-                      type="text"
-                      value={logNotes}
-                      onChange={(e) => setLogNotes(e.target.value)}
-                      placeholder="What happened?"
-                      style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
-                    />
-                  </label>
-                )}
-                {logReasonCategory !== "Other" && (
-                  <label style={{ display: "block", marginBottom: 10 }}>
-                    <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Additional details (optional)</span>
-                    <input
-                      type="text"
-                      value={logNotes}
-                      onChange={(e) => setLogNotes(e.target.value)}
-                      style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
-                    />
-                  </label>
-                )}
-              </>
-            )}
-            {logMode === "non_project" &&
-              (() => {
-                const activityType = nonProjectActivityTypes.find((a) => a.id === logActivityTypeId);
-                const notesRequired = activityType?.name === "Others";
-                return (
-                  <label style={{ display: "block", marginBottom: 10 }}>
-                    <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>
-                      Notes {notesRequired ? "(required for Others)" : "(optional)"}
-                    </span>
-                    <input
-                      type="text"
-                      value={logNotes}
-                      onChange={(e) => setLogNotes(e.target.value)}
-                      placeholder={notesRequired ? "What was this?" : "e.g. Weekly team sync"}
-                      style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
-                    />
-                  </label>
-                );
-              })()}
-            {logError && <div style={{ color: "var(--danger-text)", fontSize: 11.5, marginBottom: 8 }}>{logError}</div>}
-            {logFutureBlocked && (
-              <div
-                style={{
-                  color: "var(--danger-text)", fontSize: 11.5, marginBottom: 8, padding: "8px 10px",
-                  background: "var(--danger-bg)", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)",
-                }}
-              >
-                <div style={{ fontWeight: 700, marginBottom: 4 }}>Future time entry not allowed</div>
-                <div>Time entries can only be logged for time that has already passed.</div>
-              </div>
-            )}
-            {logOverlapEntry && (
-              <div
-                style={{
-                  color: "var(--danger-text)", fontSize: 11.5, marginBottom: 8, padding: "8px 10px",
-                  background: "var(--danger-bg)", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)",
-                }}
-              >
-                <div style={{ fontWeight: 700, marginBottom: 4 }}>Time overlap detected</div>
-                <div>You already have a logged entry for this period:</div>
-                <div><strong>Log ID:</strong> {timeLogId(logOverlapEntry.entry_number)}</div>
-                <div><strong>Task ID:</strong> {overlapTaskIdLabel(logOverlapEntry)}</div>
-                <div><strong>Task:</strong> {overlapTitle(logOverlapEntry)}</div>
-                <div><strong>Time:</strong> {formatClockRange(logOverlapEntry.started_at, logOverlapEntry.ended_at)}</div>
-                <div><strong>Status:</strong> {STATUS_LABEL[logOverlapEntry.status]}</div>
-                <div style={{ borderTop: "1px solid var(--danger-text)", opacity: 0.5, margin: "6px 0" }} />
-                <div>Please adjust the start or end time.</div>
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={handleSubmitManual}
-                disabled={logSaving}
-                style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer" }}
-              >
-                {logSaving ? "Submitting…" : "Submit for approval"}
-              </button>
-              <button
-                onClick={() => {
-                  setLogMode(null);
-                  setLogProjectId("");
-                  setLogTaskId("");
-                }}
-                style={{ fontSize: 12, color: "var(--muted)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer" }}
-              >
-                Cancel
-              </button>
-            </div>
-              </>
-            )}
-        </Modal>
+        />
       )}
 
       {loading ? (

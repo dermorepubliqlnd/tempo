@@ -21,7 +21,7 @@ import Modal from "../components/Modal";
 import { PauseProjectModal, ScheduleReviewModal } from "../components/PauseProjectModals";
 import { timingWithPause, type TimingResult } from "../lib/pause";
 import RequestExtensionModal from "../components/RequestExtensionModal";
-import FollowUpTimeModal from "../components/FollowUpTimeModal";
+import LogTimeModal from "../components/LogTimeModal";
 import NotesSidebar from "../components/NotesSidebar";
 import { useConfirm, type AlertOptions } from "../lib/useConfirm";
 import { useAutoApprovalsOn } from "../lib/autoApprovals";
@@ -6776,15 +6776,16 @@ export default function Projects() {
       </div>
       </div>
 
-      {followUpTask && (
-        <FollowUpTimeModal
-          taskId={followUpTask.id}
-          taskName={followUpTask.name}
-          onBehalfOf={followUpTask.onBehalfOf}
+      {/* 2026-10-08 (Sandra, item H): the shared Log time form, pre-set to
+          this Done task, so it logs as follow-up (same checks as everywhere). */}
+      {followUpTask && me && (
+        <LogTimeModal
+          personId={me.id}
+          isFullAccess={me.access_level === "full"}
+          presetTaskId={followUpTask.id}
           onClose={() => setFollowUpTask(null)}
-          onSaved={async () => {
+          onSaved={() => {
             setFollowUpTask(null);
-            await alert({ title: "Follow-up time submitted", message: "It counts toward the task once it's approved in Approval Center." });
             loadAll();
           }}
         />
