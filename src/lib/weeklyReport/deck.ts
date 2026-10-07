@@ -264,13 +264,14 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     const u = d.util;
     const s = content("Team utilization", t.titles.util, "util");
     card(s, 0.33, 1.55, 8.2, 5.07, "Utilization by role · last week, this week, next week",
-      "Last week = actual (logged ÷ expected) · This & next week = planned (task estimates ÷ capacity) · red = over 100%");
+      // 2026-10-08 (item I): one name for logged ÷ expected everywhere.
+      "Last week = logged vs expected (logged ÷ expected) · This & next week = planned (started projects' task estimates ÷ capacity) · red = over 100%");
     const labels = u.roles.map((r) => r.label);
     const maxV = Math.max(1.2, ...u.roles.flatMap((r) => [r.last, r.thisW, r.nextW])) * 1.12;
     const pc: ChartPatch["pointColors"] = [];
     u.roles.forEach((r, i) => { if (r.thisW > 1.005) pc.push({ ser: 1, idx: i, color: B.renew }); if (r.nextW > 1.005) pc.push({ ser: 2, idx: i, color: B.renew }); });
     addChart(s, pptx.ChartType.bar, [
-      { name: "Last week · actual", labels, values: u.roles.map((r) => r.last) },
+      { name: "Last week · logged vs expected", labels, values: u.roles.map((r) => r.last) },
       { name: "This week · planned", labels, values: u.roles.map((r) => r.thisW) },
       { name: "Next week · planned", labels, values: u.roles.map((r) => r.nextW) },
     ], { x: 0.45, y: 2.4, w: 7.95, h: 4.1, barDir: "col", barGrouping: "clustered", barGapWidthPct: 70, chartColors: [B.calm, B.hydrate, B.nextWeek],

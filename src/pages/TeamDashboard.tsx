@@ -1,4 +1,7 @@
 // Team Dashboard -- L&D Executive Dashboard (phase126, 2026-09-30).
+// 2026-10-08 (Sandra, item I): the Projects Portfolio tab is merged in --
+// one page. Its unique sections (Active Projects table, Materials Output,
+// Training Delivery) are sections here; every count uses lib/metrics.ts.
 // Sandra's 10-part executive brief; built section by section. This pass:
 //   Section 1 Portfolio Overview (Reporting Period)
 //   Section 2 Executive Operating Summary (mixed time contexts)
@@ -10,7 +13,7 @@
 // (lib/dailyAllocation.ts) so they can never disagree with the Utilization page.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   Folder,
   CheckCircle2,
@@ -39,14 +42,30 @@ import {
   Flag,
   FileWarning,
   CheckCheck,
+  Package,
+  GraduationCap,
+  Info,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { fetchAllRows } from "../lib/fetchAllRows";
 import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from "../lib/workingDays";
 import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, isOpenTask, type UtilTaskRow, type UtilProjectRow } from "../lib/dailyAllocation";
-import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { healthOf, actualProgress, projectCompletionDate, type ProjectRow, type TaskRow } from "./Projects";
-import Dashboard from "./Dashboard";
+import { MaterialsOutputBarList, HEALTH_TONE, materialsOutputRowsFor, trainingDeliveryFor, type OutputTypeRow } from "./Dashboard";
+import {
+  METRIC_DEFINITIONS,
+  LOGGED_VS_EXPECTED_LABEL,
+  projectStatus,
+  isStartedProject,
+  isActiveProject,
+  isOverdueProject,
+  isOverdueTask,
+  portfolioInPeriod,
+  completionDateOf as metricCompletionDate,
+  missingHoursWindow,
+  loggedVsExpected,
+} from "../lib/metrics";
+import { formatDate } from "../lib/formatDate";
 import Modal from "../components/Modal";
 import { CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 import { colorForPerson } from "../lib/personColors";
@@ -198,45 +217,10 @@ const TONES = {
 type Tone = keyof typeof TONES;
 
 // ================================================================= page
-// phase126q (Sandra 2026-10-01): Team Dashboard hosts two views --
-// Executive Dashboard (default) and Projects Portfolio (the former
-// standalone page, unchanged). ?view=portfolio deep-links the second.
+// phase126q (2026-10-01) hosted two tabs here (Executive Dashboard +
+// Projects Portfolio). 2026-10-08 (Sandra, item I): one page now; old
+// /projects-portfolio and ?view=portfolio links land here.
 export default function TeamDashboard() {
-  const [params, setParams] = useSearchParams();
-  const view = params.get("view") === "portfolio" ? "portfolio" : "executive";
-  return (
-    <div>
-      <div className="exec-viewtabs" role="tablist">
-        {([
-          ["executive", "Executive Dashboard"],
-          ["portfolio", "Projects Portfolio"],
-        ] as const).map(([k, label]) => (
-          <button
-            key={k}
-            type="button"
-            role="tab"
-            aria-selected={view === k}
-            className={view === k ? "on" : ""}
-            onClick={() => setParams(k === "executive" ? {} : { view: k }, { replace: true })}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <style>{VIEWTAB_CSS}</style>
-      {view === "portfolio" ? <Dashboard /> : <ExecutiveDashboard />}
-    </div>
-  );
-}
-
-const VIEWTAB_CSS = `
-.exec-viewtabs{display:inline-flex;gap:2px;padding:3px;background:var(--hover-bg);border:1px solid var(--border);border-radius:9px;margin-bottom:14px}
-.exec-viewtabs button{font:inherit;font-size:12.5px;font-weight:600;padding:6px 14px;border:none;border-radius:7px;background:transparent;color:var(--text-secondary);cursor:pointer}
-.exec-viewtabs button.on{background:var(--surface);color:var(--navy);box-shadow:0 1px 3px rgba(15,41,66,.12)}
-.exec-viewtabs button:not(.on):hover{color:var(--navy)}
-`;
-
-function ExecutiveDashboard() {
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<Date>(new Date());
   const [people, setPeople] = useState<Person[]>([]);
@@ -256,7 +240,9 @@ function ExecutiveDashboard() {
   // Site Settings > Time tracking start date (phase126c): expected hours are
   // only counted from this date, so pre-go-live months don't read as missing.
   const [trackingStart, setTrackingStart] = useState<string>("2026-08-03");
-  const [lookups, setLookups] = useState<{ sources: Lookup[]; planningTypes: Lookup[]; projectTypes: Lookup[]; categories: Lookup[]; phases: Lookup[] }>({ sources: [], planningTypes: [], projectTypes: [], categories: [], phases: [] });
+  const [lookups, setLookups] = useState<{ sources: Lookup[]; planningTypes: Lookup[]; projectTypes: (Lookup & { uses_sessions?: boolean | null })[]; categories: Lookup[]; phases: Lookup[] }>({ sources: [], planningTypes: [], projectTypes: [], categories: [], phases: [] });
+  // 2026-10-08 (item I): Materials Output + Training Delivery (from the old Portfolio tab).
+  const [outputTypes, setOutputTypes] = useState<OutputTypeRow[]>([]);
 
   // filters
   const today = useMemo(() => {
@@ -289,7 +275,7 @@ function ExecutiveDashboard() {
     setPendingExt((peRes.data as typeof pendingExt) ?? []);
     setPendingBaseline((pbRes.data as typeof pendingBaseline) ?? []);
     setPendingClosure((pcRes.data as typeof pendingClosure) ?? []);
-    const [pe, pr, tk, hol, av, oh, ah, del, settings, src, pt, prt, cat, phs, te] = await Promise.all([
+    const [pe, pr, tk, hol, av, oh, ah, del, settings, src, pt, prt, cat, phs, te, ot] = await Promise.all([
       supabase.from("people").select("id,name,daily_capacity_hours,job_title,tracks_time,color").eq("is_active", true).order("name"),
       supabase.from("projects").select("*").eq("is_archived", false),
       fetchAll<TaskRow>((f, t) => supabase.from("tasks").select("*").eq("is_archived", false).range(f, t)),
@@ -301,7 +287,7 @@ function ExecutiveDashboard() {
       supabase.from("app_settings").select("historical_locking_enabled,time_tracking_start_date").eq("id", true).single(),
       supabase.from("project_sources").select("id,name").order("sort_order"),
       supabase.from("project_planning_types").select("id,name,color").order("sort_order"),
-      supabase.from("project_types").select("id,name,color").order("sort_order"),
+      supabase.from("project_types").select("id,name,color,uses_sessions").order("sort_order"),
       supabase.from("project_categories").select("id,name").order("sort_order"),
       supabase.from("project_phases").select("id,name,color").order("sort_order"),
       fetchAll<Entry>((f, t) =>
@@ -314,6 +300,7 @@ function ExecutiveDashboard() {
           .order("started_at")
           .range(f, t)
       ),
+      supabase.from("output_types").select("id,name,is_active,sort_order").order("sort_order"),
     ]);
     const sd = settings.data as { historical_locking_enabled?: boolean; time_tracking_start_date?: string | null } | null;
     const hist = sd?.historical_locking_enabled ?? false;
@@ -334,6 +321,7 @@ function ExecutiveDashboard() {
       phases: (phs.data as Lookup[]) ?? [],
     });
     setEntries(te);
+    setOutputTypes((ot.data as OutputTypeRow[]) ?? []);
     setUpdatedAt(new Date());
     setLoading(false);
   }
@@ -364,8 +352,8 @@ function ExecutiveDashboard() {
   const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   // phase126r guard: a CLOSED project is final -- never Active/open, even if
   // legacy data left its Status as In Progress (closed before phase114).
-  const statusOf = (p: ProjectRow) =>
-    p.wbs_status === "draft" ? "Not Started" : p.wbs_status === "closed" && p.status !== "Cancelled" ? "Completed" : p.status ?? "Not Started";
+  // 2026-10-08 (item I): shared rule, lib/metrics.ts.
+  const statusOf = (p: ProjectRow) => projectStatus(p);
 
   // Project-level More Filters only (Role is person-level -> handled by popPeople).
   const moreActive = (Object.keys(more) as (keyof MoreFilters)[]).some((k) => more[k].length > 0);
@@ -396,34 +384,18 @@ function ExecutiveDashboard() {
   const scopedProjectIds = useMemo(() => new Set(scopedProjects.map((p) => p.id)), [scopedProjects]);
 
   // ======================================================== SECTION 1
-  const completionDateOf = (p: ProjectRow) => ((p as ProjectRow & { actual_close_date?: string | null }).actual_close_date ?? p.completed_at ?? p.end_date ?? "").slice(0, 10);
+  const completionDateOf = (p: ProjectRow) => metricCompletionDate(p);
+  // 2026-10-08 (item I): Total / Active / Overdue projects = lib/metrics.ts.
   function portfolioFor(start: string, end: string) {
-    const completed: ProjectRow[] = [];
-    const active: ProjectRow[] = [];
-    const notStarted: ProjectRow[] = [];
-    const paused: ProjectRow[] = [];
-    for (const p of scopedProjects) {
-      const s = statusOf(p);
-      if (s === "Cancelled") continue;
-      if (s === "Completed") {
-        const cd = completionDateOf(p);
-        if (cd && cd >= start && cd <= end) completed.push(p);
-        continue;
-      }
-      // Open projects: relevant if they had started (or were planned to) by period end.
-      if (p.start_date && p.start_date.slice(0, 10) > end) continue;
-      if (s === "In Progress") active.push(p);
-      else if (s === "Paused") paused.push(p);
-      else notStarted.push(p);
-    }
-    const overdue = active.filter((p) => healthOf(p, tasks, holidayDates).label === "Overdue");
-    return { total: completed.length + active.length + notStarted.length + paused.length, completed, active, notStarted, paused, overdue };
+    const b = portfolioInPeriod(scopedProjects, start, end);
+    const overdue = b.active.filter((p) => isOverdueProject(p, healthOf(p, tasks, holidayDates).label));
+    return { ...b, overdue };
   }
   const portfolio = useMemo(() => portfolioFor(range.start, range.end), [scopedProjects, range, tasks, holidayDates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ======================================================== SECTION 2
   const committedProjectIds = useMemo(
-    () => new Set(projects.filter((p) => !!p.wbs_status && p.wbs_status !== "draft").map((p) => p.id)),
+    () => new Set(projects.filter(isStartedProject).map((p) => p.id)),
     [projects]
   );
   const engine = useMemo(
@@ -573,16 +545,14 @@ function ExecutiveDashboard() {
     return sum;
   }, [range, todayIso, holidaySet, loggers, availStatus, trackingStart]);
 
-  // Overdue Tasks (current state): open leaf tasks past Target Due Date.
+  // Overdue Tasks (current state) -- 2026-10-08 (item I): lib/metrics.ts
+  // isOverdueTask (now also requires a started project, like My Dashboard).
   const overdueTasks = useMemo(
     () =>
       leafTasks.filter((t) => {
-        if (!isOpenTask(t) || !t.current_due_date || t.current_due_date.slice(0, 10) >= todayIso) return false;
         if (!scopedProjectIds.has(t.project_id)) return false;
         if (!popIsAll && (!t.assignee_id || !popIds.has(t.assignee_id))) return false;
-        const proj = projectById.get(t.project_id);
-        if (proj && (statusOf(proj) === "Cancelled" || statusOf(proj) === "Completed")) return false;
-        return !isOverdueSuppressed(t, proj as unknown as PauseProjectInfo);
+        return isOverdueTask(t, projectById.get(t.project_id), todayIso);
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [leafTasks, todayIso, scopedProjectIds, popIds, popIsAll, projectById]
@@ -593,12 +563,14 @@ function ExecutiveDashboard() {
   // working day this week (Mon -> yesterday; today is excluded so a mid-day
   // view doesn't count hours people simply haven't logged yet). When no
   // working day has finished yet this week (e.g. Monday), shows last week.
-  // Sandra 2026-09-30. My Dashboard keeps its own include-today nudge.
+  // Sandra 2026-09-30. 2026-10-08 (item I): same Mon -> yesterday window as
+  // My Dashboard (lib/metrics.ts missingHoursWindow); neither counts today.
   const missing = useMemo(() => {
-    const thisMon = addDays(today, -((today.getDay() + 6) % 7));
+    const win = missingHoursWindow(today);
+    const thisMon = parseLocalDate(win.start);
     const isWd = (d: string) => isWorkingDay(parseLocalDate(d), holidaySet) && d >= trackingStart;
-    const yesterday = toISO(addDays(today, -1));
-    let weekStart = toISO(thisMon);
+    const yesterday = win.end;
+    let weekStart = win.start;
     let days = weekStart <= yesterday ? eachDay(weekStart, yesterday).filter(isWd) : [];
     let label = "This week";
     if (days.length === 0) {
@@ -737,7 +709,9 @@ function ExecutiveDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggers, engine, availStatus, holidaySet, todayIso, moreActive, scopedProjectIds, horizon]);
 
-  const horizonLabel = `Next 2 weeks · to ${fmtShort(horizon.end)}`;
+  // 2026-10-08 (item I): was "Next 2 weeks", but the window is today through
+  // the Friday of the week after next -- say exactly that.
+  const horizonLabel = `Today – ${fmtShort(horizon.end)}`;
 
   // ======================================================== WORK MIX
   // Scoped Hours by Planning Type / Project Type, for the Reporting Period
@@ -750,7 +724,7 @@ function ExecutiveDashboard() {
       if (!t.assignee_id || !popIds.has(t.assignee_id) || !scopedProjectIds.has(t.project_id) || !t.estimated_hours) continue;
       const proj = projectById.get(t.project_id);
       if (!proj || statusOf(proj) === "Cancelled") continue;
-      if (mixActiveOnly && statusOf(proj) !== "In Progress") continue;
+      if (mixActiveOnly && !isActiveProject(proj)) continue;
       const days = engine.taskDays(t.assignee_id, t as unknown as UtilTaskRow);
       if (!days.size) continue;
       let inWin = 0;
@@ -807,11 +781,16 @@ function ExecutiveDashboard() {
   // ======================================================== ACTIVE HEALTH
   // Current state: Status = In Progress today. Ignores the Reporting Period
   // (Population + More Filters still apply).
-  const opActiveCount = useMemo(() => scopedProjects.filter((p) => statusOf(p) === "In Progress" && p.is_operational).length, [scopedProjects]); // eslint-disable-line react-hooks/exhaustive-deps
+  const opActiveCount = useMemo(() => scopedProjects.filter((p) => isActiveProject(p) && p.is_operational).length, [scopedProjects]);
+  // phase161: "Training Delivery" unless an ongoing container is active too.
+  const opLabel = useMemo(() => {
+    const sessionTypeIds = new Set(lookups.projectTypes.filter((t) => t.uses_sessions).map((t) => t.id));
+    return scopedProjects.some((p) => isActiveProject(p) && p.is_operational && !(p.project_type_id && sessionTypeIds.has(p.project_type_id))) ? "ongoing" : "Training Delivery";
+  }, [scopedProjects, lookups.projectTypes]);
   const activeHealth = useMemo(() => {
     // Sandra 2026-10-05: one rule everywhere -- Training Delivery (operational)
     // projects COUNT in the portfolio; only Health leaves them out ("Ongoing").
-    const act = scopedProjects.filter((p) => statusOf(p) === "In Progress" && !p.is_operational);
+    const act = scopedProjects.filter((p) => isActiveProject(p) && !p.is_operational);
     const count = (keyOf: (p: ProjectRow) => string) => {
       const m = new Map<string, number>();
       for (const p of act) m.set(keyOf(p), (m.get(keyOf(p)) ?? 0) + 1);
@@ -843,6 +822,35 @@ function ExecutiveDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopedProjects, tasks, holidayDates, lookups]);
 
+  // ======================================================== FROM PORTFOLIO
+  // 2026-10-08 (Sandra, item I): the old Projects Portfolio tab's unique
+  // sections. Materials Output follows the Reporting Period (projects in the
+  // Total Projects count); the Active Projects table and Training Delivery
+  // are current state / their own period, like Active Projects Health.
+  const periodProjects = useMemo(() => [...portfolio.completed, ...portfolio.active, ...portfolio.notStarted, ...portfolio.paused], [portfolio]);
+  const materials = useMemo(() => materialsOutputRowsFor(tasks, periodProjects, outputTypes), [tasks, periodProjects, outputTypes]);
+  const activeList = useMemo(() => {
+    const SEVERITY = ["Overdue", "Off track", "At risk", "Schedule review"];
+    const rank = (l: string) => (SEVERITY.indexOf(l) < 0 ? 99 : SEVERITY.indexOf(l));
+    return scopedProjects
+      .filter((p) => isActiveProject(p))
+      .map((p) => ({ p, health: healthOf(p, tasks, holidayDates), progress: actualProgress(p.id, tasks) }))
+      .sort((a, b) => rank(a.health.label) - rank(b.health.label) || (a.p.end_date ?? "9999").localeCompare(b.p.end_date ?? "9999"));
+  }, [scopedProjects, tasks, holidayDates]);
+  const [tdPeriod, setTdPeriod] = useState<"month" | "quarter" | "year" | "all">("quarter");
+  const training = useMemo(() => {
+    const y = today.getFullYear();
+    const m = today.getMonth();
+    const q = Math.floor(m / 3) * 3;
+    const r =
+      tdPeriod === "month" ? { start: toISO(new Date(y, m, 1)), end: toISO(new Date(y, m + 1, 0)) }
+      : tdPeriod === "quarter" ? { start: toISO(new Date(y, q, 1)), end: toISO(new Date(y, q + 3, 0)) }
+      : tdPeriod === "year" ? { start: `${y}-01-01`, end: `${y}-12-31` }
+      : { start: "0000-01-01", end: "9999-12-31" };
+    const tdProjects = scopedProjects.filter((p) => p.is_operational && !(p as ProjectRow & { is_ongoing_container?: boolean | null }).is_ongoing_container);
+    return { projects: tdProjects, ...trainingDeliveryFor(tdProjects, tasks, people, outputTypes, r, todayIso) };
+  }, [tdPeriod, scopedProjects, tasks, people, outputTypes, today, todayIso]);
+
   // ======================================================== SECTION 3
   // Needs Attention -- current state. Working-day age uses the same
   // holiday calendar as everything else.
@@ -860,9 +868,9 @@ function ExecutiveDashboard() {
   const AGING_DAYS = 2;
   const attention = useMemo(() => {
     const open = scopedProjects.filter((p) => !["Cancelled", "Completed"].includes(statusOf(p)) && p.wbs_status !== "closed");
-    const overdueProjects = open.filter((p) => statusOf(p) === "In Progress" && healthOf(p, tasks, holidayDates).label === "Overdue");
+    const overdueProjects = open.filter((p) => isOverdueProject(p, healthOf(p, tasks, holidayDates).label));
     const atRisk = open
-      .filter((p) => statusOf(p) === "In Progress")
+      .filter((p) => isActiveProject(p) && !p.is_operational)
       .map((p) => ({ p, h: healthOf(p, tasks, holidayDates).label }))
       .filter((x) => x.h === "At risk" || x.h === "Off track");
     const pausedReview = scopedProjects.filter(
@@ -945,13 +953,13 @@ function ExecutiveDashboard() {
         definition: "People planned below 50% of their capacity from today through the Friday of the week after next -- open capacity that can take more work.", columns: ["Member", "Planned", "Capacity", "Utilization"], to: "/utilization", toLabel: "Utilization",
         rows: [...horizon.under].sort((x, y) => x.pct - y.pct).map((u) => ({ cells: [u.person.name, fmtH(u.planned), fmtH(u.cap), `${Math.round(u.pct)}%`], to: "/utilization" })) },
       { key: "odproj", tier: 2, tone: "red", icon: <Clock3 size={16} />, label: "Overdue projects", context: "Health", value: a.overdueProjects.length, sub: "Past End Date",
-        definition: "Active projects whose Health is Overdue: past their End Date and not complete.", columns: ["Project", "Owner", "End date"], to: "/projects", toLabel: "Projects & Tasks",
+        definition: METRIC_DEFINITIONS.overdueProject, columns: ["Project", "Owner", "End date"], to: "/projects", toLabel: "Projects & Tasks",
         rows: a.overdueProjects.map((p) => projRow(p, [p.end_date ? fmtLong(p.end_date.slice(0, 10)) : "—"])) },
       { key: "risk", tier: 2, tone: "amber", icon: <AlertTriangle size={16} />, label: "At-risk projects", context: "Health", value: a.atRisk.length, sub: "At risk · off track",
-        definition: "Active projects whose progress is behind schedule (Health = At risk or Off track) but not overdue yet.", columns: ["Project", "Owner", "Health", "End date"], to: "/projects", toLabel: "Projects & Tasks",
+        definition: "Active projects whose progress is behind schedule (Health = At risk or Off track) but not overdue yet. Training Delivery and other ongoing projects are left out.", columns: ["Project", "Owner", "Health", "End date"], to: "/projects", toLabel: "Projects & Tasks",
         rows: a.atRisk.map((x) => projRow(x.p, [x.h, x.p.end_date ? fmtLong(x.p.end_date.slice(0, 10)) : "—"])) },
       { key: "odtask", tier: 2, tone: "red", icon: <ListChecks size={16} />, label: "Overdue tasks", context: `As of ${fmtShort(todayIso)}`, value: overdueTasks.length, sub: `${overdueProjectCount} project${overdueProjectCount === 1 ? "" : "s"}`,
-        definition: "Open tasks past their Target Due Date. Tasks in paused projects are excluded.", columns: ["Task", "Project", "Assignee", "Due", "Days late"], to: "/projects", toLabel: "Projects & Tasks",
+        definition: METRIC_DEFINITIONS.overdueTask, columns: ["Task", "Project", "Assignee", "Due", "Days late"], to: "/projects", toLabel: "Projects & Tasks",
         rows: [...overdueTasks].sort((x, y) => (x.current_due_date ?? "").localeCompare(y.current_due_date ?? "")).map((t) => taskRow(t, [fmtLong(t.current_due_date.slice(0, 10)), String(workingDaysSince(t.current_due_date))])) },
       { key: "paused", tier: 2, tone: "amber", icon: <PauseCircle size={16} />, label: "Paused / needs review", context: "Current", value: a.pausedReview.length, sub: `${pastResume} past resume · ${reviewPending} review`,
         definition: "Paused projects past their expected resume date, or resumed projects still waiting for their Schedule Review.", columns: ["Project", "Owner", "Reason", "Expected resume"], to: "/projects", toLabel: "Projects & Tasks",
@@ -971,7 +979,7 @@ function ExecutiveDashboard() {
         definition: "Projects with Status Completed whose WBS hasn't been closed yet.", columns: ["Project", "Owner", "Completed", "Days waiting"], to: "/projects", toLabel: "Projects & Tasks",
         rows: a.readyToClose.map((x) => projRow(x.p, [x.since ? fmtLong(x.since) : "—", String(x.days)])) },
       { key: "miss", tier: 4, tone: "blue", icon: <Hourglass size={16} />, label: "Missing hours", context: missing.rangeLabel ? `${missing.label} · ${missing.rangeLabel}` : missing.label, value: missing.members.length, sub: `members · ${fmtH(missing.total)}`,
-        definition: "Members whose finalized logged hours are below expected hours on completed working days this week.", columns: ["Member", "Missing"], to: "/time-tracking?scope=all", toLabel: "Time Tracking",
+        definition: `Members with missing hours. ${METRIC_DEFINITIONS.missingHours} On a Monday this shows last week.`, columns: ["Member", "Missing"], to: "/time-tracking?scope=all", toLabel: "Time Tracking",
         rows: [...missing.members].sort((x, y) => y.hours - x.hours).map((m) => ({ cells: [m.person.name, `${m.hours.toFixed(1)}h`], to: "/time-tracking?scope=all" })) },
       { key: "gaps", tier: 4, tone: "amber", icon: <FileWarning size={16} />, label: "Planning gaps", context: "Started projects", value: a.planningGaps.length, sub: "No assignee or hours",
         definition: "Open tasks in started projects with no Assignee or no Estimated Hours -- invisible to Utilization. Draft projects are not counted.", columns: ["Task", "Project", "Assignee", "Missing"], to: "/projects", toLabel: "Projects & Tasks",
@@ -998,6 +1006,7 @@ function ExecutiveDashboard() {
   const completedIn = (a: string, b: string) => scopedProjects.filter((p) => { if (statusOf(p) !== "Completed") return false; const c = completionDateOf(p); return c >= a && c <= b; }).length;
   const periodTag = period === "ytd" ? "YTD" : range.label;
   const t = portfolio.total;
+  const opInTotal = [...portfolio.completed, ...portfolio.active, ...portfolio.notStarted, ...portfolio.paused].filter((p) => p.is_operational).length;
 
   return (
     <div className="exec-dash">
@@ -1041,12 +1050,12 @@ function ExecutiveDashboard() {
             <SectionTitle title={`Portfolio Overview (${periodTag})`} caption={`Projects relevant to the selected period (${fmtShort(range.start)} – ${fmtLong(range.end)})`} />
             <div className="exec-portfolio">
             <div className="exec-grid exec-grid-3">
-              <Kpi to="/projects?tab=projects" tone="blue" icon={<Folder size={18} />} label="Total Projects" value={t} sub="Completed + open in period" title="Completed in period + open projects (In Progress, Not Started, Paused) that started by period end. Cancelled excluded." />
+              <Kpi to="/projects?tab=projects" tone="blue" icon={<Folder size={18} />} label="Total Projects" value={t} sub={`Completed + open in period${opInTotal ? ` · incl. ${opInTotal} ${opLabel}` : ""}`} title={METRIC_DEFINITIONS.totalProjectsInPeriod} />
               <Kpi to="/projects?tab=projects" tone="green" icon={<CheckCircle2 size={18} />} label="Completed" share={pctOf(portfolio.completed.length, t)} value={portfolio.completed.length} sub={`${pctOf(portfolio.completed.length, t)}% of total`} trend={trend(completedIn)} title="Projects whose Actual Close Date (or completion stamp) falls in the period." />
-              <Kpi to="/projects?tab=projects" tone="indigo" icon={<Activity size={18} />} label="Active" share={pctOf(portfolio.active.length, t)} value={portfolio.active.length} sub={`${pctOf(portfolio.active.length, t)}% of total${portfolio.active.some((p) => p.is_operational) ? ` · incl. ${portfolio.active.filter((p) => p.is_operational).length} ongoing` : ""}`} title="Status = In Progress (current state). Includes ongoing projects: Training Delivery and ongoing containers (health always Ongoing)." />
+              <Kpi to="/projects?tab=projects" tone="indigo" icon={<Activity size={18} />} label="Active" share={pctOf(portfolio.active.length, t)} value={portfolio.active.length} sub={`${pctOf(portfolio.active.length, t)}% of total${portfolio.operationalActive.length ? ` · incl. ${portfolio.operationalActive.length} ${opLabel}` : ""}`} title={METRIC_DEFINITIONS.activeProject} />
               <Kpi to="/projects?tab=projects" tone="slate" icon={<CircleDashed size={18} />} label="Not Started" share={pctOf(portfolio.notStarted.length, t)} value={portfolio.notStarted.length} sub={`${pctOf(portfolio.notStarted.length, t)}% of total`} title="Status = Not Started, or WBS still in Draft." />
               <Kpi to="/projects?tab=projects" tone="orange" icon={<PauseCircle size={18} />} label="Paused" share={pctOf(portfolio.paused.length, t)} value={portfolio.paused.length} sub={`${pctOf(portfolio.paused.length, t)}% of total`} />
-              <Kpi to="/projects?tab=projects" tone="red" icon={<Clock3 size={18} />} label="Overdue" value={portfolio.overdue.length} share={pctOf(portfolio.overdue.length, portfolio.active.length)} sub={`${pctOf(portfolio.overdue.length, portfolio.active.length)}% of active`} title="Active projects whose Health is Overdue (past End Date, not complete). Health is separate from Status." />
+              <Kpi to="/projects?tab=projects" tone="red" icon={<Clock3 size={18} />} label="Overdue Projects" value={portfolio.overdue.length} share={pctOf(portfolio.overdue.length, portfolio.active.length)} sub={`${pctOf(portfolio.overdue.length, portfolio.active.length)}% of active`} title={METRIC_DEFINITIONS.overdueProject} />
             </div>
             <div className="exec-chart-card">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
@@ -1077,12 +1086,12 @@ function ExecutiveDashboard() {
             <SectionTitle title="Executive Operating Summary" caption="Key capacity, effort and execution metrics" />
             <div className="exec-grid exec-grid-7">
               <Kpi to="/time-tracking?scope=all" tone="slate" icon={<CalendarClock size={18} />} label="Expected Hours" context={periodTag} value={fmtH(expectedInPeriod)} sub={`${loggers.length} ${loggers.length === 1 ? "person" : "people"} · from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)}`} title={`Each person's daily shift (usually 7.5h), adjusted for half-days, approved time off, holidays and weekends, from the Time tracking start date (${fmtShort(trackingStart)}) or period start, whichever is later, to today. People tagged "not expected to log time" are excluded.`} />
-              <Kpi to="/hours-overview" tone="teal" icon={<Timer size={18} />} label="Logged Hours" context={`${periodTag} · from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)}`} value={fmtH(logged)} sub={expectedInPeriod > 0 ? `${pctOf(loggedIn(range.start, range.end, new Set(loggers.map((p) => p.id))), expectedInPeriod)}% of expected` : undefined} trend={trend((a, b) => loggedIn(a, b))} title={`Finalized (Confirmed/Approved) time only${moreActive ? ", project time within filtered projects" : ", incl. non-project time"}. Expected = ${fmtH(expectedInPeriod)}: each person's daily capacity (adjusted for half-days, time off, holidays, weekends) across working days from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)} (time tracking start) to today.`} />
-              <Kpi to="/utilization" tone="purple" icon={<Users size={18} />} label="Planned Utilization" context={horizonLabel} value={`${Math.round(horizon.util)}%`} sub={`${fmtH(horizon.planned)} of ${fmtH(horizon.cap)} capacity`} valueTone={horizon.util > 100 ? "red" : undefined} title={`Planned workload vs available capacity, ${fmtShort(todayIso)} – ${fmtShort(horizon.end)}. Same engine as the Utilization page.`} />
+              <Kpi to="/hours-overview" tone="teal" icon={<Timer size={18} />} label="Logged Hours" context={`${periodTag} · from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)}`} value={fmtH(logged)} sub={expectedInPeriod > 0 ? `${Math.round(loggedVsExpected(loggedIn(range.start, range.end, new Set(loggers.map((p) => p.id))), expectedInPeriod) * 100)}% ${LOGGED_VS_EXPECTED_LABEL.toLowerCase()}` : undefined} trend={trend((a, b) => loggedIn(a, b))} title={`${METRIC_DEFINITIONS.loggedVsExpected}\n\nLogged Hours: Final (Confirmed/Approved) time only${moreActive ? ", project time within filtered projects" : ", incl. non-project time"}. Expected = ${fmtH(expectedInPeriod)}: each person's daily capacity (adjusted for half-days, time off, holidays, weekends) across working days from ${fmtShort(range.start > trackingStart ? range.start : trackingStart)} (time tracking start) to today.`} />
+              <Kpi to="/utilization" tone="purple" icon={<Users size={18} />} label="Planned Utilization" context={horizonLabel} value={`${Math.round(horizon.util)}%`} sub={`${fmtH(horizon.planned)} of ${fmtH(horizon.cap)} capacity`} valueTone={horizon.util > 100 ? "red" : undefined} title={`${METRIC_DEFINITIONS.plannedUtilization} Window: ${fmtShort(todayIso)} – ${fmtShort(horizon.end)}. Same engine as the Utilization page.`} />
               <Kpi to="/utilization" tone="green" icon={<BatteryCharging size={18} />} label="Available Capacity" context={horizonLabel} value={fmtH(horizon.available)} sub={`${pctOf(horizon.available, horizon.cap)}% of capacity open`} title="Sum of unallocated hours per person per working day (an overloaded day doesn't cancel out someone else's free time)." />
-              <Kpi to="/utilization" tone="orange" icon={<UserX size={18} />} label="Overallocated Members" context={horizonLabel} value={horizon.over.length} sub="> 100% on at least 1 day" valueTone={horizon.over.length ? "orange" : undefined} title={horizon.over.length ? horizon.over.map((o) => `${o.person.name}: ${o.days} day(s), peak ${Math.round(o.peak)}%`).join("\n") : "Nobody above 100% in the next 2 weeks."} />
-              <Kpi to="/projects?tab=tasks" tone="red" icon={<AlertTriangle size={18} />} label="Overdue Tasks" context={`As of ${fmtShort(todayIso)}`} value={overdueTasks.length} sub={`Across ${overdueProjectCount} project${overdueProjectCount === 1 ? "" : "s"}`} valueTone={overdueTasks.length ? "red" : undefined} title="Open leaf tasks with Target Due Date before today. Paused-project tasks excluded." />
-              <Kpi to="/time-tracking?scope=all" tone="orange" icon={<Hourglass size={18} />} label="Missing Hours" context={missing.rangeLabel ? `${missing.label} · ${missing.rangeLabel}` : missing.label} value={fmtH(missing.total)} sub={`${missing.members.length} member${missing.members.length === 1 ? "" : "s"} · completed days only`} valueTone={missing.total > 0.1 ? "orange" : undefined} title={missing.members.length ? missing.members.sort((a, b) => b.hours - a.hours).map((m) => `${m.person.name}: ${m.hours.toFixed(1)}h`).join("\n") : "No missing hours this week."} />
+              <Kpi to="/utilization" tone="orange" icon={<UserX size={18} />} label="Overallocated Members" context={horizonLabel} value={horizon.over.length} sub="> 100% on at least 1 day" valueTone={horizon.over.length ? "orange" : undefined} title={horizon.over.length ? horizon.over.map((o) => `${o.person.name}: ${o.days} day(s), peak ${Math.round(o.peak)}%`).join("\n") : `Nobody above 100% from today to ${fmtShort(horizon.end)}.`} />
+              <Kpi to="/projects?tab=tasks" tone="red" icon={<AlertTriangle size={18} />} label="Overdue Tasks" context={`As of ${fmtShort(todayIso)}`} value={overdueTasks.length} sub={`Across ${overdueProjectCount} project${overdueProjectCount === 1 ? "" : "s"}`} valueTone={overdueTasks.length ? "red" : undefined} title={METRIC_DEFINITIONS.overdueTask} />
+              <Kpi to="/time-tracking?scope=all" tone="orange" icon={<Hourglass size={18} />} label="Missing Hours" context={missing.rangeLabel ? `${missing.label} · ${missing.rangeLabel}` : missing.label} value={fmtH(missing.total)} sub={`${missing.members.length} member${missing.members.length === 1 ? "" : "s"} · completed days only`} valueTone={missing.total > 0.1 ? "orange" : undefined} title={`${METRIC_DEFINITIONS.missingHours} On a Monday this shows last week.${missing.members.length ? `\n\n${[...missing.members].sort((a, b) => b.hours - a.hours).map((m) => `${m.person.name}: ${m.hours.toFixed(1)}h`).join("\n")}` : ""}`} />
             </div>
           </section>
 
@@ -1180,7 +1189,7 @@ function ExecutiveDashboard() {
           </section>
 
           <section className="exec-section">
-            <SectionTitle title="Active Projects Health" caption={`Current state · ${activeHealth.total} active (In Progress) project${activeHealth.total === 1 ? "" : "s"}${opActiveCount ? ` · excludes ${opActiveCount} ongoing (health always “Ongoing”)` : ""} · not affected by the Reporting Period`} />
+            <SectionTitle title="Active Projects Health" caption={`Current state · ${activeHealth.total} active (In Progress) project${activeHealth.total === 1 ? "" : "s"}${opActiveCount ? ` · excludes ${opActiveCount} ${opLabel} (health always “Ongoing”)` : ""} · not affected by the Reporting Period`} />
             <div className="exec-grid-4">
               {([
                 ["Health", activeHealth.health],
@@ -1193,6 +1202,79 @@ function ExecutiveDashboard() {
             </div>
           </section>
           <section className="exec-section">
+            <div className="exec-section-title" style={{ justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                <span className="exec-title">Active Projects</span>
+                <span className="exec-caption" title={METRIC_DEFINITIONS.activeProject}>
+                  Current state · {activeList.length} active project{activeList.length === 1 ? "" : "s"} · most at risk first · not affected by the Reporting Period
+                </span>
+              </div>
+              <Link to="/projects?tab=projects" style={{ fontSize: 11.5, color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>View all →</Link>
+            </div>
+            {activeList.length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>No active projects in the current view.</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="exec-attn-table">
+                  <thead>
+                    <tr>
+                      <th>Project</th>
+                      <th>Health</th>
+                      <th>Progress</th>
+                      <th>Owner</th>
+                      <th>Timeline</th>
+                      <th>Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeList.slice(0, ACTIVE_LIST_MAX).map(({ p, health, progress }) => (
+                      <tr key={p.id}>
+                        <td><Link to={`/projects/${p.id}/wbs`}>{p.name}</Link></td>
+                        <td><span className={`status-pill ${HEALTH_TONE[health.label]?.pill ?? health.tone ?? "neutral"}`}>{health.label}</span></td>
+                        <td>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ width: 70, height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden", display: "inline-block" }}>
+                              <span style={{ display: "block", height: "100%", width: `${progress ?? 0}%`, background: "#2f6fed", borderRadius: 3 }} />
+                            </span>
+                            <span style={{ fontSize: 11, color: "var(--muted)" }}>{progress === null ? "—" : `${progress}%`}</span>
+                          </span>
+                        </td>
+                        <td>{personName(p.owner_id)}</td>
+                        <td style={{ fontSize: 11, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{p.start_date ? formatDate(p.start_date) : "—"} – {p.end_date ? formatDate(p.end_date) : "—"}</td>
+                        <td style={{ fontSize: 11, color: "var(--text-secondary)" }}>{lookups.sources.find((s) => s.id === p.source_id)?.name ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {activeList.length > ACTIVE_LIST_MAX && (
+                  <Link to="/projects?tab=projects" style={{ display: "inline-block", marginTop: 8, fontSize: 11.5, color: "var(--accent)", textDecoration: "none" }}>
+                    +{activeList.length - ACTIVE_LIST_MAX} more in Projects &amp; Tasks →
+                  </Link>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="exec-section">
+            <div className="exec-section-title" style={{ justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                <span className="exec-title">Materials Output</span>
+                <span className="exec-caption">
+                  {periodTag} · projects in Total Projects · {materials.closedTotal.toLocaleString()} counted (closed projects) · {(materials.grandTotal - materials.closedTotal).toLocaleString()} tentative
+                </span>
+              </div>
+              <Link to="/materials-output" style={{ fontSize: 11.5, color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>View all →</Link>
+            </div>
+            <div className="exec-chart-card" title="Sum of Output Count on leaf tasks, by Output Type. Counted = the project's WBS is Closed; tentative = not closed yet. Cancelled and parent tasks aren't counted.">
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                <Package size={14} color="var(--muted)" />
+                <span className="exec-kpi-context">Top 5 Output Types</span>
+              </div>
+              <MaterialsOutputBarList rows={materials.rows.slice(0, 5)} total={materials.grandTotal} hiddenCount={Math.max(0, materials.rows.length - 5)} />
+            </div>
+          </section>
+
+          <section className="exec-section">
             <SectionTitle title="Capacity & Utilization (this week + next 2)" caption={`Planned workload vs available capacity · full weeks ${fmtShort(capacity.from)} – ${fmtShort(capacity.to)} · based on current task allocations`} />
             <div className="exec-cap">
               <div className="exec-chart-card">
@@ -1204,11 +1286,92 @@ function ExecutiveDashboard() {
               <PeopleBarList title="Most Available Capacity" subtitle={`Free hours from today · ${fmtShort(todayIso)} – ${fmtShort(horizon.end)}`} rows={capacity.avail.map((r) => ({ person: r.person, pct: r.pct, note: `${fmtH(r.free)} free of ${fmtH(r.cap)} · ${Math.round(r.pct)}% planned (${fmtShort(todayIso)} – ${fmtShort(horizon.end)})`, right: fmtH(r.free), sub: `${fmtH(r.nextWeekFree)} free next week` }))} tone="avail" empty="Nobody has free capacity in these weeks." />
             </div>
           </section>
+
+          {training.projects.length > 0 && (
+            <section className="exec-section">
+              <div className="exec-section-title" style={{ justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <span className="exec-title">Training Delivery</span>
+                  <span className="exec-caption">
+                    Drill-down of the {training.projects.length} Training Delivery project{training.projects.length === 1 ? "" : "s"} counted in the portfolio above · a session = a task with Output Type “Session”
+                  </span>
+                </div>
+                <div className="exec-seg" role="tablist" aria-label="Training Delivery period">
+                  {([
+                    ["month", "Month"],
+                    ["quarter", "Quarter"],
+                    ["year", "Year"],
+                    ["all", "All"],
+                  ] as const).map(([k, l]) => (
+                    <button key={k} type="button" role="tab" aria-selected={tdPeriod === k} className={tdPeriod === k ? "on" : ""} onClick={() => setTdPeriod(k)}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="exec-grid exec-grid-4" style={{ marginBottom: 10 }}>
+                <Kpi to="/projects?tab=tasks" tone="green" icon={<GraduationCap size={18} />} label="Sessions delivered" value={training.total.delivered} sub={`${training.total.validated} validated`} />
+                <Kpi to="/projects?tab=tasks" tone="blue" icon={<CalendarClock size={18} />} label="Upcoming" value={training.total.upcoming} />
+                <Kpi to="/projects?tab=tasks" tone="orange" icon={<Clock3 size={18} />} label="Past date, not Done" value={training.total.notMarked} valueTone={training.total.notMarked ? "orange" : undefined} title="Sessions whose date has passed but aren't marked Done or Cancelled yet." />
+                <Kpi to="/hours-overview" tone="teal" icon={<Timer size={18} />} label="Hours logged" value={fmtH(training.total.logged)} sub={`of ${fmtH(training.total.scoped)} estimated`} />
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table className="exec-attn-table">
+                  <thead>
+                    <tr>
+                      <th>Trainer</th>
+                      <th style={{ textAlign: "right" }}>Delivered</th>
+                      <th style={{ textAlign: "right" }}>Validated</th>
+                      <th style={{ textAlign: "right" }}>Upcoming</th>
+                      <th style={{ textAlign: "right" }}>Past date, not Done</th>
+                      <th style={{ textAlign: "right" }}>Cancelled</th>
+                      <th style={{ textAlign: "right" }}>Estimated hrs</th>
+                      <th style={{ textAlign: "right" }}>Logged hrs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {training.rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} style={{ color: "var(--muted)" }}>No sessions in this period yet.</td>
+                      </tr>
+                    ) : (
+                      training.rows.map((r) => (
+                        <tr key={r.id}>
+                          <td style={{ fontWeight: 600 }}>{r.name}</td>
+                          <td style={{ textAlign: "right" }}>{r.delivered}</td>
+                          <td style={{ textAlign: "right" }}>{r.validated}</td>
+                          <td style={{ textAlign: "right" }}>{r.upcoming}</td>
+                          <td style={{ textAlign: "right", color: r.notMarked ? "#b45309" : undefined }}>{r.notMarked}</td>
+                          <td style={{ textAlign: "right", color: "var(--muted)" }}>{r.cancelled}</td>
+                          <td style={{ textAlign: "right" }}>{fmtH(r.scoped)}</td>
+                          <td style={{ textAlign: "right" }}>{fmtH(r.logged)}</td>
+                        </tr>
+                      ))
+                    )}
+                    {training.rows.length > 1 && (
+                      <tr style={{ fontWeight: 700 }}>
+                        <td>Total</td>
+                        <td style={{ textAlign: "right" }}>{training.total.delivered}</td>
+                        <td style={{ textAlign: "right" }}>{training.total.validated}</td>
+                        <td style={{ textAlign: "right" }}>{training.total.upcoming}</td>
+                        <td style={{ textAlign: "right" }}>{training.total.notMarked}</td>
+                        <td style={{ textAlign: "right" }}>{training.total.cancelled}</td>
+                        <td style={{ textAlign: "right" }}>{fmtH(training.total.scoped)}</td>
+                        <td style={{ textAlign: "right" }}>{fmtH(training.total.logged)}</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
         </>
       )}
     </div>
   );
 }
+
+const ACTIVE_LIST_MAX = 10;
 
 
 // ---------------------------------------------------------------- Needs Attention
@@ -1546,7 +1709,11 @@ function Kpi({
         {icon}
       </span>
       <div style={{ minWidth: 0 }}>
-        <div className="exec-kpi-label">{label}</div>
+        <div className="exec-kpi-label">
+          {label}
+          {/* 2026-10-08 (item I): hover for the metric's definition. */}
+          {title && <Info size={10.5} style={{ marginLeft: 4, verticalAlign: "-1px", color: "var(--muted)" }} aria-label="Definition" />}
+        </div>
         {context && <div className="exec-kpi-context">{context}</div>}
         <div className="exec-kpi-value" style={{ color: vc }}>
           {value}

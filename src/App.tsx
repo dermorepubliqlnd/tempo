@@ -95,7 +95,8 @@ export default function App() {
           }
         >
           <Route path="/" element={<MyDashboard />} />
-          <Route path="/projects-portfolio" element={<Navigate to="/team-dashboard?view=portfolio" replace />} />
+          {/* 2026-10-08 (item I): Projects Portfolio merged into the Executive Dashboard. */}
+          <Route path="/projects-portfolio" element={<Navigate to="/team-dashboard" replace />} />
           <Route path="/team-dashboard" element={<TeamDashboardGate />} />
           <Route path="/materials-output" element={<MaterialsOutput />} />
           <Route path="/projects" element={<Projects />} />

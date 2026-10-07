@@ -5,8 +5,10 @@
 //   * Report week      = Mon-Fri of the selected week (Sandra: Mon-Fri only)
 //   * "This week"      = the Mon-Fri right after the report week
 //   * Health           = current state (healthOf uses today), like the dashboard
-//   * Utilization      = last week actual (finalized logged / expected),
-//                        this + next week planned (allocation engine / capacity)
+//   * Utilization      = last week logged vs expected (finalized logged / expected),
+//                        this + next week planned (allocation engine / capacity,
+//                        started projects only -- Draft excluded, 2026-10-08 item I)
+//   * Total / Active / Overdue projects = lib/metrics.ts (2026-10-08, item I)
 //   * Development      = projects owned by anyone who is NOT a Trainer
 import { supabase } from "../supabaseClient";
 import { fetchAllRows } from "../fetchAllRows";
@@ -14,6 +16,7 @@ import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from ".
 import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, type UtilTaskRow, type UtilProjectRow } from "../dailyAllocation";
 import { healthOf, type ProjectRow, type TaskRow } from "../../pages/Projects";
 import { fmtMD } from "./format";
+import { projectStatus, isActiveProject, isOverdueProject, isStartedProject, portfolioInPeriod } from "../metrics";
 
 // ------------------------------------------------------------------ types
 export interface Person {
@@ -170,7 +173,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       .gte("started_at", fromTs).lt("started_at", toTs).order("started_at").range(f, t)
   );
 
-  const statusOf = (p: P) => (p.wbs_status === "draft" ? "Not Started" : p.wbs_status === "closed" && p.status !== "Cancelled" ? "Completed" : p.status ?? "Not Started");
+  const statusOf = (p: P) => projectStatus(p);
   const completionDateOf = (p: P) => d10(p.actual_close_date ?? p.completed_at ?? p.end_date);
   const parentIds = new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
   const leaf = tasks.filter((t) => !parentIds.has(t.id));
@@ -234,25 +237,19 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   const pausedInWeek = live.filter((p) => inWeek(d10(p.paused_at), week)).length;
 
   // ------------------------------------------------------------ portfolio
-  const pfCompleted = completedProjects.length;
-  let pfActive = 0, pfNotStarted = 0, pfPaused = 0;
-  for (const p of live) {
-    const s = statusOf(p);
-    if (s === "Completed") continue;
-    if (p.start_date && d10(p.start_date) > week.end) continue;
-    if (s === "In Progress") pfActive++;
-    else if (s === "Paused") pfPaused++;
-    else pfNotStarted++;
-  }
+  // 2026-10-08 (item I): Total projects in the report week = lib/metrics.ts.
+  const pfWeek = portfolioInPeriod(live, week.start, week.end);
+  const pfCompleted = pfWeek.completed.length;
+  const pfActive = pfWeek.active.length, pfNotStarted = pfWeek.notStarted.length, pfPaused = pfWeek.paused.length;
   // phase149: operational projects (e.g. quarterly Training Delivery) have no
   // date-based health -- keep them out of the health/overdue/due-this-week slides.
   // Sandra 2026-10-05: operational projects (Training Delivery) STAY in the
   // portfolio counts and mix; only date-based health/overdue/due-this-week
   // leave them out. The Training delivery slide is the drill-down.
-  const activeAll = live.filter((p) => statusOf(p) === "In Progress");
+  const activeAll = live.filter((p) => isActiveProject(p));
   const activeP = activeAll.filter((p) => !(p as { is_operational?: boolean | null }).is_operational);
   const healthBy = new Map(activeP.map((p) => [p.id, healthOf(p as ProjectRow, tasks as TaskRow[], holidayDates).label]));
-  const overdueP = activeP.filter((p) => healthBy.get(p.id) === "Overdue");
+  const overdueP = activeP.filter((p) => isOverdueProject(p, healthBy.get(p.id) ?? ""));
   const movement: WeeklyReportData["portfolio"]["movement"] = [];
   for (let i = 7; i >= 0; i--) {
     const s = toISO(addDays(parseLocalDate(week.start), -7 * i));
@@ -361,9 +358,13 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   };
 
   // ------------------------------------------------------------ utilization by role
+  // 2026-10-08 (Sandra, item I): planned = committed (started) projects
+  // only, same as the Executive Dashboard, My Dashboard and Utilization's
+  // default. Draft projects used to be counted in "This week planned".
+  const committedIds = new Set(projects.filter((p) => isStartedProject(p)).map((p) => p.id));
   const engine = createAllocationEngine({
-    tasks: tasks as unknown as UtilTaskRow[],
-    projects: projects as unknown as UtilProjectRow[],
+    tasks: tasks.filter((t) => committedIds.has(t.project_id)) as unknown as UtilTaskRow[],
+    projects: projects.filter((p) => committedIds.has(p.id)) as unknown as UtilProjectRow[],
     holidays: holidaySet,
     availability,
     assigneeHistory: hist ? ((ah.data as never[]) ?? []) : [],
@@ -484,17 +485,17 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   const isOp = (p: P) => !!(p as { is_operational?: boolean | null }).is_operational;
   const ytdStart = `${week.end.slice(0, 4)}-01-01`;
   const ytdEnd = week.end;
-  // Sandra 2026-10-05: one basis -- open projects counted as of TODAY (same as
-  // the Health donut), completed counted Jan 1 -> report-week Friday.
+  // Sandra 2026-10-05: open projects are the CURRENT state (same as the
+  // Health donut), completed counted Jan 1 -> report-week Friday.
   // Active projects (regular) and Training Delivery are shown separately.
-  let yCompleted = 0, yActive = 0, yOpActive = 0, yOther = 0;
-  for (const p of live) {
-    const st = statusOf(p);
-    if (st === "Completed") { const cd = completionDateOf(p); if (cd && cd >= ytdStart && cd <= ytdEnd) yCompleted++; continue; }
-    if (st === "In Progress") { if (isOp(p)) yOpActive++; else yActive++; continue; }
-    if (p.start_date && d10(p.start_date) > todayIso) continue;
-    yOther++;
-  }
+  // 2026-10-08 (item I): same Total projects rule as the Executive
+  // Dashboard (lib/metrics.ts), with the period Jan 1 -> report-week Friday,
+  // so an open project planned to start after that Friday isn't counted.
+  const pfYtd = portfolioInPeriod(live, ytdStart, ytdEnd);
+  const yCompleted = pfYtd.completed.length;
+  const yOpActive = pfYtd.active.filter(isOp).length;
+  const yActive = pfYtd.active.length - yOpActive;
+  const yOther = pfYtd.notStarted.length + pfYtd.paused.length;
   const months: { label: string; from: string; to: string }[] = [];
   for (let m = new Date(Number(ytdStart.slice(0, 4)), 0, 1); toISO(m) <= ytdEnd; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
     const last = toISO(new Date(m.getFullYear(), m.getMonth() + 1, 0));
@@ -647,7 +648,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       `All paused projects (${pausedNowP.length}):`, bl(pausedNotes(pausedNowP)),
     ].join("\n"),
     portfolio: [
-      `Total year to date = projects completed ${md(ytdStart)} – ${md(ytdEnd)} + projects open today (Cancelled excluded).`,
+      `Total year to date = projects completed ${md(ytdStart)} – ${md(ytdEnd)} + projects open today that started (or were planned to start) by ${md(ytdEnd)} (Cancelled excluded). Same rule as the Executive Dashboard's Total Projects.`,
       `Total ${yCompleted + yActive + yOpActive + yOther} = ${yCompleted} completed + ${yActive} active projects + ${yOpActive} Training Delivery + ${yOther} not started or paused.`,
       `Active projects (${yActive}) = In Progress project work as of ${md(todayIso)} — the same ${yActive} on the Health donut:`, bl(activeP.map((p) => `${p.name} (owner ${who(p.owner_id)})`)),
       `${opLabel} (${yOpActive}) = ongoing projects kept open while work comes in (Training Delivery sessions${opLabel === "Ongoing" ? " and ongoing containers such as revision buckets" : ""}); health is always "Ongoing":`, bl(opActive.map((p) => p.name)),
@@ -684,7 +685,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       `Paused (${pausedNowP.length}):`, bl(pausedNotes(pausedNowP)),
     ].join("\n"),
     util: [
-      "Last week = actual (finalized logged ÷ expected hours). This and next week = planned (task estimates spread over working days ÷ capacity, leave and holidays removed).",
+      "Last week = logged vs expected (finalized logged ÷ expected hours). This and next week = planned (task estimates from started projects spread over working days ÷ capacity, leave and holidays removed; Draft projects not counted).",
       `Last week: ${h1(logged)} logged of ${h1(expected)} expected.`,
       `People with 2h+ not logged last week:`, bl(cap(gaps, 10), "Everyone logged within 2h of expected."),
       `Non-project time last week (${h1(nonProject)}) by activity:`, bl(npNotes),

@@ -5,7 +5,8 @@ import { canAccessPage } from "../lib/pageAccess";
 // is auto-drafted and editable here before the .pptx is generated on the
 // real Dermorepubliq template (lib/weeklyReport/deck.ts).
 import { useEffect, useMemo, useState } from "react";
-import { Presentation, Download, RotateCcw, Loader2, CalendarRange, ChevronDown, ChevronRight } from "lucide-react";
+import { Presentation, Download, RotateCcw, Loader2, CalendarRange, ChevronDown, ChevronRight, Info } from "lucide-react";
+import { METRIC_DEFINITIONS, LOGGED_VS_EXPECTED_LABEL } from "../lib/metrics";
 import { useSession } from "../lib/useSession";
 import { loadWeeklyReport, defaultReportMonday, weekOf, type WeeklyReportData } from "../lib/weeklyReport/data";
 import { defaultDeckText, weekLabel, type DeckText, type SlideKey } from "../lib/weeklyReport/text";
@@ -129,9 +130,10 @@ export default function Reports() {
           <div className="rp-kpis">
             <Kpi label="Completed last week" value={`${g.completedProjects.length} proj · ${g.tasksDone} tasks`} />
             <Kpi label="Tasks on time" value={g.tasksDone ? `${Math.round((g.tasksOnTime / g.tasksDone) * 100)}%` : "—"} />
-            <Kpi label="Utilization (actual)" value={`${Math.round(g.utilPct * 100)}%`} />
-            <Kpi label="This week planned" value={`${Math.round((data.util.roles[0]?.thisW ?? 0) * 100)}%`} />
-            <Kpi label="Overdue projects" value={String(data.health.overdue.length)} />
+            {/* 2026-10-08 (Sandra, item I): one name per metric + definitions on hover. */}
+            <Kpi label={`${LOGGED_VS_EXPECTED_LABEL} (last week)`} value={`${Math.round(g.utilPct * 100)}%`} title={METRIC_DEFINITIONS.loggedVsExpected} />
+            <Kpi label="Planned utilization (this week)" value={`${Math.round((data.util.roles[0]?.thisW ?? 0) * 100)}%`} title={METRIC_DEFINITIONS.plannedUtilization} />
+            <Kpi label="Overdue projects" value={String(data.health.overdue.length)} title={METRIC_DEFINITIONS.overdueProject} />
             <Kpi label="New intake · starting" value={`${g.intake} · ${g.starting}`} />
           </div>
 
@@ -191,8 +193,16 @@ export default function Reports() {
   );
 }
 
-function Kpi({ label, value }: { label: string; value: string }) {
-  return <div className="rp-kpi"><div className="rp-kpi-l">{label}</div><div className="rp-kpi-v">{value}</div></div>;
+function Kpi({ label, value, title }: { label: string; value: string; title?: string }) {
+  return (
+    <div className="rp-kpi" title={title}>
+      <div className="rp-kpi-l">
+        {label}
+        {title && <Info size={10} style={{ marginLeft: 4, verticalAlign: "-1px" }} aria-label="Definition" />}
+      </div>
+      <div className="rp-kpi-v">{value}</div>
+    </div>
+  );
 }
 function Section({ id, title, open, setOpen, children }: { id: string; title: string; open: Record<string, boolean>; setOpen: (f: (o: Record<string, boolean>) => Record<string, boolean>) => void; children: React.ReactNode }) {
   const isOpen = !!open[id];

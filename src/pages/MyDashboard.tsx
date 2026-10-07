@@ -23,9 +23,11 @@ import {
   Circle,
   TrendingUp,
   Sparkles,
+  Info,
 } from "lucide-react";
 import { tierOf, displayPct, UTIL_LEGEND } from "../lib/utilizationBands";
-import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
+import { type PauseProjectInfo } from "../lib/pause";
+import { METRIC_DEFINITIONS, LOGGED_VS_EXPECTED_LABEL, isOverdueTask, isDueThisWeek, isActiveProject, isStartedProject } from "../lib/metrics";
 import { supabase } from "../lib/supabaseClient";
 import { fetchAllRows } from "../lib/fetchAllRows";
 import Modal from "../components/Modal";
@@ -91,7 +93,8 @@ import {
 // the same shared allocation engine every other utilization surface
 // uses; Hours Logged is real submitted time entries), and month-to-date
 // scoped-vs-logged + deliverable progress. The team-wide view moved to
-// its own page/nav item, "/team-dashboard" (Dashboard.tsx, unchanged).
+// its own page/nav item, "/team-dashboard" (TeamDashboard.tsx; shared
+// metric rules in lib/metrics.ts since 2026-10-08, item I).
 
 interface PersonLite {
   id: string;
@@ -429,9 +432,10 @@ export default function MyDashboard() {
   const hasConfirmedBaseline = (t: { project?: ProjectRow | null }) => !!t.project && t.project.wbs_status !== "draft" && t.project.timelines_locked;
   // phase118: paused projects' tasks (and dates that passed during a pause,
   // until the schedule review is confirmed) don't count as overdue.
-  const overdueTasks = myOpenTasks.filter(
-    (t) => hasConfirmedBaseline(t) && t.current_due_date && t.current_due_date.slice(0, 10) < todayIso && !isOverdueSuppressed(t, t.project as PauseProjectInfo | null)
-  );
+  // 2026-10-08 (Sandra, item I): one rule everywhere -- lib/metrics.ts
+  // isOverdueTask (started project, not paused, leaf tasks only).
+  const myParentIds = useMemo(() => new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string)), [tasks]);
+  const overdueTasks = myOpenTasks.filter((t) => isOverdueTask(t, t.project, todayIso, myParentIds.has(t.id)));
   const isPausedTask = (t: { project?: unknown }) => (t.project as PauseProjectInfo | null)?.status === "Paused";
   const tasksDueToday = myOpenTasks.filter((t) => hasConfirmedBaseline(t) && t.current_due_date && t.current_due_date.slice(0, 10) === todayIso);
 
@@ -626,12 +630,13 @@ export default function MyDashboard() {
     const t = setTimeout(() => setJustHidden(null), 6000);
     return () => clearTimeout(t);
   }, [justHidden]);
-  const weekEndIso = toISO(weekDays[4]);
-  const weekStartIso = toISO(weekDays[0]);
-  const tasksThisWeek = myOpenTasks.filter((t) => hasConfirmedBaseline(t) && !isPausedTask(t) && t.current_due_date && t.current_due_date.slice(0, 10) >= weekStartIso && t.current_due_date.slice(0, 10) <= weekEndIso);
+  // 2026-10-08 (Sandra, item I): Due this week = today through Sunday,
+  // overdue not included (lib/metrics.ts) -- same as the Tasks KPI card.
+  // Was Mon-Fri including past days (which double-counted overdue tasks).
+  const tasksThisWeek = myOpenTasks.filter((t) => isDueThisWeek(t, t.project, new Date(), myParentIds.has(t.id)));
   // 2026-10-02 (Sandra): full-width deadline card -- overdue first, then
   // the rest of this week (today onward; past days this week are overdue).
-  const dueRestOfWeek = tasksThisWeek.filter((t) => (t.current_due_date ?? "").slice(0, 10) >= todayIso);
+  const dueRestOfWeek = tasksThisWeek;
   const pendingExtTaskIds = new Set(extensions.filter((e) => e.requester?.id === me?.id && e.task?.id).map((e) => e.task!.id));
   async function submitExtension(newDueDate: string, reasonCategory: string, reasonNotes: string) {
     if (!extensionTask || !me) return;
@@ -654,13 +659,18 @@ export default function MyDashboard() {
   // 2026-09-24 (Sandra): My Projects lists only projects whose WBS is NOT
   // closed -- a closed WBS is final, nothing left to act on.
   const myProjects = useMemo(() => (me ? projects.filter((p) => p.owner_id === me.id && p.wbs_status !== "closed") : []), [projects, me]);
+  // 2026-10-08 (Sandra, item I): the "My Active Projects" tile = projects I
+  // own that are Active (In Progress, started) -- same rule as the
+  // Executive Dashboard. The My Projects list below still shows every
+  // owned project whose WBS isn't closed.
+  const myActiveProjects = useMemo(() => myProjects.filter((p) => isActiveProject(p)), [myProjects]);
 
   // ---- Utilization This Week (assigned/scoped work), via the SAME
   // shared allocation engine Utilization.tsx/HoursOverview.tsx/
   // WbsPlanning.tsx use -- so this number never disagrees with the real
   // Utilization page. ---------------------------------------------------
   const committedProjectIds = useMemo(
-    () => new Set(projects.filter((p) => !!p.wbs_status && p.wbs_status !== "draft").map((p) => p.id)),
+    () => new Set(projects.filter(isStartedProject).map((p) => p.id)),
     [projects]
   );
   const engine = useMemo(
@@ -718,21 +728,37 @@ export default function MyDashboard() {
   // Missing-hours attention should only evaluate completed workdays.
   // The current day is intentionally excluded because the employee still
   // has time remaining in the workday to complete their expected hours.
+  // 2026-10-08 (item I): = lib/metrics.ts missingHoursWindow (Mon -> yesterday).
   const missingLogHours = dailyStats
     .filter((d) => d.dateStr < todayIso && !d.off)
     .reduce((sum, d) => sum + Math.max(0, d.expected - d.logged), 0);
 
   // ---- Scoped vs Logged (This Month), by project, for my tasks -----
+  // 2026-10-08 (Sandra, item I): both sides are THIS MONTH now. Estimated
+  // hours = each leaf task's estimate spread over its working days (same
+  // engine as Utilization), counting only this month's days, started
+  // projects only. It used to compare a task's whole estimate with this
+  // month's logged hours.
   const scopedVsLoggedByProject = useMemo(() => {
     if (!me) return [];
+    const now = new Date();
+    const monthStart = toISO(new Date(now.getFullYear(), now.getMonth(), 1));
+    const monthEnd = toISO(new Date(now.getFullYear(), now.getMonth() + 1, 0));
     const map = new Map<string, { projectId: string; name: string; scoped: number; logged: number }>();
     tasks
-      .filter((t) => t.assignee_id === me.id)
+      .filter((t) => t.assignee_id === me.id && !myParentIds.has(t.id))
       .forEach((t) => {
         const proj = projectById.get(t.project_id);
         if (!proj) return;
         const entry = map.get(proj.id) ?? { projectId: proj.id, name: proj.name, scoped: 0, logged: 0 };
-        entry.scoped += t.estimated_hours ?? 0;
+        if (committedProjectIds.has(proj.id) && t.estimated_hours) {
+          const days = engine.taskDays(me.id, t as unknown as UtilTaskRow);
+          let inMonth = 0;
+          days.forEach((d) => {
+            if (d >= monthStart && d <= monthEnd) inMonth++;
+          });
+          if (days.size) entry.scoped += (Number(t.estimated_hours) * inMonth) / days.size;
+        }
         entry.logged += thisMonthEntries.filter((e) => e.task_id === t.id).reduce((sum, e) => sum + (e.duration_minutes ?? 0) / 60, 0);
         map.set(proj.id, entry);
       });
@@ -740,7 +766,7 @@ export default function MyDashboard() {
       .filter((r) => r.scoped > 0 || r.logged > 0)
       .sort((a, b) => Math.abs(b.logged - b.scoped) - Math.abs(a.logged - a.scoped))
       .slice(0, 6);
-  }, [tasks, me, projectById, thisMonthEntries]);
+  }, [tasks, me, projectById, thisMonthEntries, myParentIds, committedProjectIds, engine]);
 
   // ---- My Deliverables (This Month) -- grouped by Output Type among my
   // tasks due this calendar month. -----------------------------------
@@ -978,12 +1004,12 @@ export default function MyDashboard() {
       </div>
 
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
-        <MetricCard icon={<Folder size={16} />} colors={METRIC_COLORS.blue} label="My Active Projects" value={myProjects.length} />
-        <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Tasks Due This Week" value={tasksThisWeek.length} />
-        <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Items" value={overdueTasks.length} />
+        <MetricCard icon={<Folder size={16} />} colors={METRIC_COLORS.blue} label="My Active Projects" value={myActiveProjects.length} sub="Owned, In Progress" title={`${METRIC_DEFINITIONS.activeProject} Counts projects you own.`} />
+        <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Tasks Due This Week" value={tasksThisWeek.length} sub="Today through Sunday" title={METRIC_DEFINITIONS.dueThisWeek} />
+        <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Tasks" value={overdueTasks.length} title={METRIC_DEFINITIONS.overdueTask} />
         <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="My pending requests" value={myPendingApprovalsCount} />
-        <MetricCard icon={<BarChart3 size={16} />} colors={METRIC_COLORS.teal} label="Utilization This Week" value={`${Math.round(weekUtilPct)}%`} sub={`of ${weekCapacityTotal.toFixed(1)}h capacity`} />
-        <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={notTrackingTime ? "Not expected to log time" : `of ${weekExpectedTotal.toFixed(1)}h expected`} />
+        <MetricCard icon={<BarChart3 size={16} />} colors={METRIC_COLORS.teal} label="Utilization This Week" value={`${Math.round(weekUtilPct)}%`} sub={`of ${weekCapacityTotal.toFixed(1)}h capacity`} title={METRIC_DEFINITIONS.plannedUtilization} />
+        <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={notTrackingTime ? "Not expected to log time" : `of ${weekExpectedTotal.toFixed(1)}h expected`} title={`${LOGGED_VS_EXPECTED_LABEL}: ${weekExpectedTotal > 0 ? Math.round((weekLoggedTotal / weekExpectedTotal) * 100) : 0}% this week (Monday to Friday, today included). ${METRIC_DEFINITIONS.loggedVsExpected}`} />
       </div>
 
       {/* 2026-10-06 (Sandra): approvers see their queue without leaving the
@@ -1053,7 +1079,7 @@ export default function MyDashboard() {
             />
           )}
           {missingLogHours > 0.1 && (
-            <AttentionPill tone="accent" icon={<Clock3 size={12} />} value={`${missingLogHours.toFixed(1)}h`} label="Missing hours this week" to="/time-tracking?scope=mine" />
+            <AttentionPill tone="accent" icon={<Clock3 size={12} />} value={`${missingLogHours.toFixed(1)}h`} label="Missing hours this week" to="/time-tracking?scope=mine" title={METRIC_DEFINITIONS.missingHours} />
           )}
           {workDoneProjects.length > 0 && (
             <AttentionPill
@@ -1706,14 +1732,18 @@ function SectionHeader({ title, to, small }: { title: string; to: string; small?
   );
 }
 
-function MetricCard({ icon, colors, label, value, sub }: { icon: JSX.Element; colors: { bg: string; fg: string }; label: string; value: number | string; sub?: string }) {
+function MetricCard({ icon, colors, label, value, sub, title }: { icon: JSX.Element; colors: { bg: string; fg: string }; label: string; value: number | string; sub?: string; title?: string }) {
   return (
-    <div className="dash-card" style={{ display: "flex", alignItems: "flex-start", gap: 12, flex: "1 1 180px", minWidth: 165, marginBottom: 0, padding: "16px" }}>
+    <div className="dash-card" title={title} style={{ display: "flex", alignItems: "flex-start", gap: 12, flex: "1 1 180px", minWidth: 165, marginBottom: 0, padding: "16px" }}>
       <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: "50%", background: colors.bg, color: colors.fg, flexShrink: 0 }}>
         {icon}
       </span>
       <div>
-        <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)" }}>{label}</div>
+        <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--muted)" }}>
+          {label}
+          {/* 2026-10-08 (item I): hover for the metric's definition. */}
+          {title && <Info size={10} style={{ marginLeft: 4, verticalAlign: "-1px" }} aria-label="Definition" />}
+        </div>
         <div style={{ fontSize: 21, fontWeight: 700, color: "var(--navy)", lineHeight: 1.25 }}>{value}</div>
         {sub && <div style={{ fontSize: 9.5, color: "var(--muted)" }}>{sub}</div>}
       </div>
@@ -1737,6 +1767,7 @@ function AttentionPill({
   label,
   to,
   onClick,
+  title,
 }: {
   tone: string;
   icon: JSX.Element;
@@ -1744,6 +1775,7 @@ function AttentionPill({
   label: string;
   to?: string;
   onClick?: () => void;
+  title?: string;
 }) {
   const content = (
     <>
@@ -1755,17 +1787,17 @@ function AttentionPill({
   const style: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, padding: "7px 12px", textDecoration: "none" };
   if (onClick) {
     return (
-      <button type="button" onClick={onClick} className={`status-pill ${tone}`} style={{ ...style, border: "none", cursor: "pointer", fontFamily: "inherit" }}>
+      <button type="button" onClick={onClick} title={title} className={`status-pill ${tone}`} style={{ ...style, border: "none", cursor: "pointer", fontFamily: "inherit" }}>
         {content}
       </button>
     );
   }
   return to ? (
-    <Link to={to} className={`status-pill ${tone}`} style={style}>
+    <Link to={to} title={title} className={`status-pill ${tone}`} style={style}>
       {content}
     </Link>
   ) : (
-    <span className={`status-pill ${tone}`} style={style}>
+    <span title={title} className={`status-pill ${tone}`} style={style}>
       {content}
     </span>
   );

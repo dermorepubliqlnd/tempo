@@ -20,6 +20,7 @@ import ViewSettingsMenu, { ViewFilterPills } from "../components/ViewSettingsMen
 import Modal from "../components/Modal";
 import { PauseProjectModal, ScheduleReviewModal } from "../components/PauseProjectModals";
 import { timingWithPause, type TimingResult } from "../lib/pause";
+import { METRIC_DEFINITIONS, isActiveProject, isOverdueProject, isOverdueTask, isDueThisWeek } from "../lib/metrics";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import LogTimeModal from "../components/LogTimeModal";
 import NotesSidebar from "../components/NotesSidebar";
@@ -1215,12 +1216,16 @@ function KpiIcon({ icon: Icon, color, bg }: { icon: typeof Plus; color: string; 
 }
 
 // Card body in the My Dashboard style: round icon left, label / value / note stacked.
-function KpiCardBody({ icon, color, bg, label, value, note, valueColor }: { icon: typeof Plus; color: string; bg: string; label: string; value: React.ReactNode; note?: React.ReactNode; valueColor?: string }) {
+function KpiCardBody({ icon, color, bg, label, value, note, valueColor, hasDefinition }: { icon: typeof Plus; color: string; bg: string; label: string; value: React.ReactNode; note?: React.ReactNode; valueColor?: string; hasDefinition?: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
       <KpiIcon icon={icon} color={color} bg={bg} />
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 11, fontWeight: 500, color: "var(--text-secondary)" }}>{label}</div>
+        <div style={{ fontSize: 11, fontWeight: 500, color: "var(--text-secondary)" }}>
+          {label}
+          {/* 2026-10-08 (item I): the card's title holds the metric definition. */}
+          {hasDefinition && <Info size={10} style={{ marginLeft: 4, verticalAlign: "-1px", color: "var(--muted)" }} aria-label="Definition" />}
+        </div>
         <div style={{ fontSize: 20, lineHeight: 1.15, fontWeight: 700, color: valueColor ?? "var(--navy)", fontVariantNumeric: "tabular-nums" }}>{value}</div>
         {note && <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{note}</div>}
       </div>
@@ -2927,8 +2932,9 @@ export default function Projects() {
       (p) => p.owner_id !== personId && contributedProjectIds.has(p.id)
     );
 
-    const activeOwnedProjects = ownedProjects.filter((p) => projectStatusOf(p) === "In Progress");
-    const activeContributionProjects = contributionProjects.filter((p) => projectStatusOf(p) === "In Progress");
+    // 2026-10-08 (Sandra, item I): Active = lib/metrics.ts isActiveProject.
+    const activeOwnedProjects = ownedProjects.filter((p) => isActiveProject(p));
+    const activeContributionProjects = contributionProjects.filter((p) => isActiveProject(p));
 
     // Phase 1 attention rule reuses Tempo's existing health engine rather
     // than maintaining a second schedule-risk calculation here.
@@ -2942,7 +2948,8 @@ export default function Projects() {
       const health = healthOf(p, tasks, holidayDates).label;
       if (health === "At risk") atRisk += 1;
       else if (health === "Off track") offTrack += 1;
-      else if (health === "Overdue") overdue += 1;
+      // 2026-10-08 (item I): Overdue project = lib/metrics.ts isOverdueProject.
+      else if (isOverdueProject(p, health)) overdue += 1;
     }
 
     return {
@@ -5622,18 +5629,21 @@ export default function Projects() {
     const g = statusGroupOf(TASK_STATUS_GROUPED, t.status);
     return g !== "complete" && g !== "cancelled";
   }
+  const quickParentIds = useMemo(() => new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string)), [tasks]);
+  const quickProjectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   function quickMatch(key: QuickListKey, t: TaskRow, ownedIds: Set<string>): boolean {
     const mine = t.assignee_id === me?.id;
     const accountable = projectHasConfirmedBaseline(t.project_id);
     switch (key) {
       case "open":
         return mine && taskIsOpen(t);
+      // 2026-10-08 (Sandra, item I): Overdue / Due this week = lib/metrics.ts
+      // (same as My Dashboard and the Executive Dashboard): paused projects
+      // and parent tasks are left out.
       case "overdue":
-        return accountable && mine && taskIsOpen(t) && dueWindowOf(t) === "Overdue";
-      case "due_week": {
-        const w = dueWindowOf(t);
-        return accountable && mine && taskIsOpen(t) && (w === "Today" || w === "This week");
-      }
+        return mine && isOverdueTask(t, quickProjectById.get(t.project_id), toISOWorkingDay(new Date()), quickParentIds.has(t.id));
+      case "due_week":
+        return mine && isDueThisWeek(t, quickProjectById.get(t.project_id), new Date(), quickParentIds.has(t.id));
       case "awaiting":
         return mine && statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete" && !t.validated_completion_date;
       case "at_risk": {
@@ -6078,8 +6088,8 @@ export default function Projects() {
             { label: "My Portfolio", value: personalPortfolioKpis.portfolio, note: "Owned + contributed to", icon: FolderKanban, color: "#2563eb", bg: "#eaf2ff" },
             { label: "Projects Owned", value: personalPortfolioKpis.owned, note: "All statuses", icon: UserCheck, color: "#7c3aed", bg: "#f1ecff" },
             { label: "Contributing To", value: personalPortfolioKpis.contributing, note: "Owned by someone else", icon: Users, color: "#0d9488", bg: "#e6f7f4" },
-            { label: "Active Owned", value: personalPortfolioKpis.activeOwned, note: "In-progress projects I own", icon: Activity, color: "#16a34a", bg: "#e8f7ee" },
-            { label: "Active Contributions", value: personalPortfolioKpis.activeContributions, note: "In-progress projects I support", icon: Handshake, color: "#0284c7", bg: "#e6f4fb" },
+            { label: "Active Owned", value: personalPortfolioKpis.activeOwned, note: "In-progress projects I own", icon: Activity, color: "#16a34a", bg: "#e8f7ee", definition: METRIC_DEFINITIONS.activeProject },
+            { label: "Active Contributions", value: personalPortfolioKpis.activeContributions, note: "In-progress projects I support", icon: Handshake, color: "#0284c7", bg: "#e6f4fb", definition: METRIC_DEFINITIONS.activeProject },
             {
               label: "Needs Attention",
               value: personalPortfolioKpis.needsAttention,
@@ -6094,10 +6104,11 @@ export default function Projects() {
               icon: AlertTriangle,
               color: "#dc2626",
               bg: "#fdecec",
+              definition: `Owned projects whose Health is At risk, Off track or Overdue. ${METRIC_DEFINITIONS.overdueProject}`,
             },
-          ].map((item) => (
-            <div key={item.label} className="card" style={{ padding: "14px 16px", minWidth: 0 }}>
-              <KpiCardBody icon={item.icon} color={item.color} bg={item.bg} label={item.label} value={item.value} note={item.note} />
+          ].map((item: { label: string; value: number; note: string; icon: typeof Plus; color: string; bg: string; definition?: string }) => (
+            <div key={item.label} className="card" title={item.definition} style={{ padding: "14px 16px", minWidth: 0 }}>
+              <KpiCardBody icon={item.icon} color={item.color} bg={item.bg} label={item.label} value={item.value} note={item.note} hasDefinition={!!item.definition} />
             </div>
           ))}
         </div>
@@ -6430,7 +6441,7 @@ export default function Projects() {
         {(
           [
             { key: "open", note: "Not done or cancelled", tone: "var(--navy)" },
-            { key: "overdue", note: "Past due", tone: taskKpis.overdue > 0 ? "var(--danger-text)" : "var(--navy)" },
+            { key: "overdue", note: "Due before today", tone: taskKpis.overdue > 0 ? "var(--danger-text)" : "var(--navy)" },
             { key: "due_week", note: "Due today through Sunday", tone: "var(--navy)" },
             { key: "awaiting", note: "Done, not yet validated", tone: taskKpis.awaiting > 0 ? "var(--warning-text)" : "var(--navy)" },
             ...(myOwnedProjectIds.size > 0 ? [{ key: "at_risk", note: "Overdue, due soon or unassigned", tone: taskKpis.at_risk > 0 ? "var(--danger-text)" : "var(--navy)" }] : []),
@@ -6443,7 +6454,7 @@ export default function Projects() {
               type="button"
               className="card"
               onClick={() => setQuickList(active ? null : c.key)}
-              title={active ? "Back to the selected view" : `Show ${QUICK_LIST_META[c.key].label.toLowerCase()}`}
+              title={`${c.key === "overdue" ? `${METRIC_DEFINITIONS.overdueTask}\n\n` : c.key === "due_week" ? `${METRIC_DEFINITIONS.dueThisWeek}\n\n` : ""}${active ? "Back to the selected view" : `Show ${QUICK_LIST_META[c.key].label.toLowerCase()}`}`}
               style={{
                 padding: "14px 16px", textAlign: "left", cursor: "pointer", minWidth: 0,
                 border: active ? "1.5px solid var(--accent)" : undefined,
@@ -6458,7 +6469,7 @@ export default function Projects() {
                   awaiting: { icon: BadgeCheck, color: "#7c3aed", bg: "#f1ecff" },
                   at_risk: { icon: AlertTriangle, color: "#dc2626", bg: "#fdecec" },
                 }[c.key];
-                return <KpiCardBody icon={ic.icon} color={ic.color} bg={ic.bg} label={QUICK_LIST_META[c.key].label} value={taskKpis[c.key]} note={c.note} valueColor={c.tone} />;
+                return <KpiCardBody icon={ic.icon} color={ic.color} bg={ic.bg} label={QUICK_LIST_META[c.key].label} value={taskKpis[c.key]} note={c.note} valueColor={c.tone} hasDefinition={c.key === "overdue" || c.key === "due_week"} />;
               })()}
             </button>
           );
