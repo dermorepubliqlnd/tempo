@@ -1,3 +1,4 @@
+import { extensionOutcomeMessage } from "../lib/autoApprovals";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -631,19 +632,19 @@ export default function MyDashboard() {
   const pendingExtTaskIds = new Set(extensions.filter((e) => e.requester?.id === me?.id && e.task?.id).map((e) => e.task!.id));
   async function submitExtension(newDueDate: string, reasonCategory: string, reasonNotes: string) {
     if (!extensionTask || !me) return;
-    const { error } = await supabase.from("extension_requests").insert({
+    const { data: inserted, error } = await supabase.from("extension_requests").insert({
       task_id: extensionTask.id,
       requested_by: me.id,
       requested_new_due_date: newDueDate,
       reason_category: reasonCategory,
       reason_notes: reasonNotes,
-    });
+    }).select("id").single();
     if (error) {
       await alert(`Couldn't submit extension request: ${error.message}`);
       return;
     }
     setExtensionTask(null);
-    await alert({ title: "Extension request submitted", message: "It goes to your supervisor in Approval Center. The due date moves once it's approved." });
+    await alert(await extensionOutcomeMessage((inserted as { id: string } | null)?.id));
     loadAll();
   }
 

@@ -33,6 +33,8 @@ import OverrideReasonModal from "../components/OverrideReasonModal";
 import MyRequestsPanel from "../components/MyRequestsPanel";
 import { useApprovalAuthority } from "../lib/useApprovalAuthority";
 import DelegateApprovalsModal from "../components/DelegateApprovalsModal";
+import AutoApprovedPanel from "../components/AutoApprovedPanel";
+import { useAutoApprovalsOn, completionTiming, COMPLETION_TIMING_LABEL, autoValidateOn, setValidationHold } from "../lib/autoApprovals";
 import { formatDate } from "../lib/formatDate";
 import { decideTimeEntry, decideTimeEntryCorrection, formatDuration, FOLLOW_UP_REASON_LABEL, timeLogId, type FollowUpReason } from "../lib/timeTracking";
 
@@ -81,6 +83,8 @@ interface ExtensionRow {
   reason_notes: string;
   created_at: string;
   is_manager_initiated: boolean;
+  // phase169: why this one wasn't auto-approved (set by the DB)
+  auto_check_note?: string | null;
   task: {
     id: string;
     name: string;
@@ -180,6 +184,8 @@ interface TaskCompletionRow {
   // card) -- Scoped is just the task's own estimated_hours; Logged comes
   // from a separate lightweight time_entries fetch below (ownHoursFor).
   estimated_hours: number | null;
+  // phase169: approver hold on an on-the-due-date completion
+  validation_hold?: boolean | null;
   project: { id: string; name: string; owner_id: string | null; wbs_status: string | null } | null;
 }
 
@@ -499,17 +505,19 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
   // 2026-10-02 (Sandra): Approval Center is open to everyone; approval tabs
   // only for people with approval rights, My Requests for all.
   const hasAuthority = useApprovalAuthority();
+  const autoOn = useAutoApprovalsOn();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTabState] = useState<"mine" | "team" | "requests">(searchParams.get("tab") === "requests" ? "requests" : "mine");
-  const setTab = (t: "mine" | "team" | "requests") => {
+  const [tab, setTabState] = useState<"mine" | "team" | "requests" | "auto">(searchParams.get("tab") === "requests" ? "requests" : searchParams.get("tab") === "auto" ? "auto" : "mine");
+  const setTab = (t: "mine" | "team" | "requests" | "auto") => {
     setTabState(t);
     const next = new URLSearchParams(searchParams);
-    if (t === "requests") next.set("tab", "requests");
+    if (t === "requests" || t === "auto") next.set("tab", t);
     else next.delete("tab");
     setSearchParams(next, { replace: true });
   };
   useEffect(() => {
     if (hasAuthority === false && tab !== "requests") setTabState("requests");
+    if (tab === "auto" && !autoOn) setTabState("mine");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasAuthority]);
   const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({});
@@ -526,7 +534,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
       supabase
         .from("extension_requests")
         .select(
-          `id, requested_new_due_date, request_type, reason_category, reason_notes, created_at, is_manager_initiated,
+          `id, requested_new_due_date, request_type, reason_category, reason_notes, created_at, is_manager_initiated,${autoOn ? " auto_check_note," : ""}
            task:tasks!extension_requests_task_id_fkey ( id, name, is_archived, assignee_id, current_due_date, project_id, project:projects ( id, name, owner_id ) ),
            project:projects!extension_requests_project_id_fkey ( id, name, is_archived, owner_id, end_date ),
            requester:people!extension_requests_requested_by_fkey ( id, name )`
@@ -549,7 +557,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
       supabase
         .from("tasks")
         .select(
-          `id, name, task_number, assignee_id, project_id, parent_task_id, current_due_date, actual_completion_date, submitted_on, start_date, estimated_hours,
+          `id, name, task_number, assignee_id, project_id, parent_task_id, current_due_date, actual_completion_date, submitted_on, start_date, estimated_hours,${autoOn ? " validation_hold," : ""}
            project:projects ( id, name, owner_id, wbs_status )`
         )
         .eq("status", "Done")
@@ -1569,6 +1577,36 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
     );
   }
 
+  // phase169 (Sandra): Early = approver validates; On the due date =
+  // auto-validates after 2 working days unless held; Late = auto-validated
+  // on report (so it rarely shows here).
+  function TimingCell(tc: TaskCompletionRow, canDecide: boolean) {
+    const timing = completionTiming(tc.current_due_date, tc.actual_completion_date);
+    if (!timing) return <span style={{ color: "var(--muted)" }}>—</span>;
+    const tone = timing === "early" ? "purple" : timing === "late" ? "orange" : "blue";
+    const autoDate = timing === "on_due" ? autoValidateOn(tc.submitted_on ?? tc.actual_completion_date, holidaySet) : null;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+        <span className={`status-pill ${tone}`} style={{ fontSize: 10, whiteSpace: "nowrap" }}>{COMPLETION_TIMING_LABEL[timing]}</span>
+        {timing === "early" && <span style={{ fontSize: 10.5, color: "var(--muted)" }}>Needs your validation</span>}
+        {timing === "on_due" && !tc.validation_hold && autoDate && <span style={{ fontSize: 10.5, color: "var(--muted)", whiteSpace: "nowrap" }}>Auto-validates {formatDate(autoDate)}</span>}
+        {timing === "on_due" && tc.validation_hold && <span className="status-pill gold" style={{ fontSize: 9.5, whiteSpace: "nowrap" }}>On hold for review</span>}
+        {timing === "on_due" && canDecide && (
+          <button
+            onClick={async () => {
+              const res = await setValidationHold(tc.id, !tc.validation_hold);
+              if (res.error) { await alert({ title: "Couldn't update hold", message: res.error }); return; }
+              loadAll();
+            }}
+            style={{ fontSize: 10.5, fontWeight: 600, color: "var(--accent)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "2px 7px", cursor: "pointer", whiteSpace: "nowrap" }}
+          >
+            {tc.validation_hold ? "Release hold" : "Hold for review"}
+          </button>
+        )}
+      </div>
+    );
+  }
+
   function TaskCompletionTable({ rows }: { rows: Row[] }) {
     const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap" };
     const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
@@ -1582,6 +1620,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
               <th style={th}>Assignee</th>
               <th style={th}>Due Date</th>
               <th style={th}>Reported Completion</th>
+              {autoOn && <th style={th}>Timing</th>}
               <th style={th}>Confirmed Completion Date</th>
               <th style={{ ...th, textAlign: "center" }}>Action</th>
             </tr>
@@ -1619,6 +1658,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
                   </td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(tc.current_due_date)}</td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{tc.actual_completion_date ? formatDate(tc.actual_completion_date) : "Not set"}</td>
+                  {autoOn && <td style={td}>{TimingCell(tc, row.canDecide)}</td>}
                   {row.canDecide ? (
                     <ValidateActionCells row={tc} busy={decidingKey === `taskval-${tc.id}`} onValidate={(d) => confirmAndValidate(tc, d)} />
                   ) : (
@@ -1725,6 +1765,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
                       {ext.reason_category}
                     </span>
                     {ext.reason_notes && <div style={{ marginTop: 3 }}>{ext.reason_notes}</div>}
+                    {ext.auto_check_note && <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--muted)", fontStyle: "italic" }}>Needs approval: {ext.auto_check_note}</div>}
                   </td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(row.requestedAt)}</td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>
@@ -1980,7 +2021,8 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
           ...(hasAuthority ? [["mine", `Mine to approve (${mineCount})`]] : []),
           ...(hasAuthority && showTeamTab ? [["team", `Team view (${teamCount})`]] : []),
           ["requests", "My Requests"],
-        ] as [("mine" | "team" | "requests"), string][]).map(([k, label]) => (
+          ...(hasAuthority && autoOn ? [["auto", "Auto-approved"]] : []),
+        ] as [("mine" | "team" | "requests" | "auto"), string][]).map(([k, label]) => (
           <button
             key={k}
             onClick={() => { setTab(k); setKindFilter(null); }}
@@ -1989,7 +2031,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
             {label}
           </button>
         ))}
-        {hasAuthority && tab !== "requests" && <button
+        {hasAuthority && tab !== "requests" && tab !== "auto" && <button
           onClick={() => setDelegateOpen(true)}
           style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: "var(--accent)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 10px", cursor: "pointer", marginBottom: 6 }}
         >
@@ -2003,7 +2045,17 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
       )}
 
       {tab === "requests" && me && <MyRequestsPanel meId={me.id} />}
-      {tab !== "requests" && (
+      {tab === "auto" && me && (
+        <AutoApprovedPanel
+          meId={me.id}
+          isFullAccess={isFullAccess}
+          routing={routing}
+          personName={(id) => personName(id ?? null)}
+          projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+          onChanged={() => loadAll()}
+        />
+      )}
+      {tab !== "requests" && tab !== "auto" && (
         <>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         {AllRequestsSummaryCard()}

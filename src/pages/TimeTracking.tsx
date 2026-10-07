@@ -1,3 +1,4 @@
+import { timeEntryOutcomeMessage } from "../lib/autoApprovals";
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ShieldCheck, ChevronRight, ChevronLeft, ChevronDown, Pencil, Timer, Trash2, Archive, RotateCcw, Plus, Search, X, CalendarDays, AlertCircle, ListChecks, Radio, FilePen, Download } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -1239,11 +1240,7 @@ export default function TimeTracking() {
       }
       setLogMode(null);
       setLogNotes("");
-      await alert(
-        clampedAtMidnight
-          ? "Time entry submitted -- your end time was before the start time, so it was clamped to 11:59 PM the same day. It goes to your manager for approval."
-          : "Time entry submitted -- it goes to your manager for approval."
-      );
+      await alert(await timeEntryOutcomeMessage(res.id, clampedAtMidnight ? " (your end time was before the start time, so it was clamped to 11:59 PM the same day)" : ""));
       loadAll();
       return;
     }
@@ -1300,11 +1297,8 @@ export default function TimeTracking() {
     setLogTaskId("");
     setLogNotes("");
     setLogReasonCategory(reasonOptions.find((r) => r.is_active)?.name || "");
-    await alert(
-      clampedAtMidnight
-        ? "Time entry submitted -- your end time was before the start time, so it was clamped to 11:59 PM the same day. It goes to your project owner (or their manager, if you own the project) for approval."
-        : "Time entry submitted -- it goes to your project owner (or their manager, if you own the project) for approval."
-    );
+    // phase169: the DB may auto-approve it; also fixes the old "project owner" wording (approvals follow the reporting line).
+    await alert(await timeEntryOutcomeMessage(res.id, clampedAtMidnight ? " (your end time was before the start time, so it was clamped to 11:59 PM the same day)" : ""));
     loadAll();
   }
 

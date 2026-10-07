@@ -33,6 +33,7 @@ import { PROJECT_PRIORITY_SYMBOLS, PROJECT_EFFORT_LEVEL_SYMBOLS } from "../lib/n
 import type { ColumnDef, GroupOption, SortOption, TableView } from "../lib/tableTypes";
 import { sortRows, sortRowsHierarchical, visibleOrderedColumns, resolveFilterPersonIds, GROUP_EXCLUDE } from "../lib/tableTypes";
 import { formatDate } from "../lib/formatDate";
+import { extensionOutcomeMessage } from "../lib/autoApprovals";
 import { WBS_STATUS_META, wbsStatusMetaFor, type WbsStatus } from "../lib/wbsStatus";
 
 // Tone-palette mapping for wbs_status (Phase 4, 2026-07-28) -- WBS_STATUS_META
@@ -2160,7 +2161,13 @@ export default function Projects() {
     // (a closed project keeps showing whatever extension history it
     // ended with -- only the "Request extension" action below is gated)
     const latest = latestExtensionRequest(t.id);
-    if (!latest) return { label: "No Extension", tone: "neutral" };
+    // phase169 (Sandra 2026-10-07): a due date that moved without its own
+    // extension -- pushed by an extended task it depends on -- reads
+    // "Shifted" (not "Extended"; doesn't count as this task's extension).
+    if (!latest) {
+      if (t.original_due_date && t.current_due_date && t.current_due_date.slice(0, 10) > t.original_due_date.slice(0, 10)) return { label: "Shifted", tone: "blue" };
+      return { label: "No Extension", tone: "neutral" };
+    }
     if (latest.status === "Pending") return { label: "Requested", tone: "purple" };
     if (latest.status === "Rejected") return { label: "Rejected", tone: "danger" };
     return { label: "Extended", tone: "gold" };
@@ -2332,19 +2339,20 @@ export default function Projects() {
   // project owner (or their manager, if the owner is the requester) or
   // Full Access approves it on the Extension Requests page.
   async function submitExtensionRequest(task: TaskWithDepth, newDueDate: string, reasonCategory: string, reasonNotes: string) {
-    const { error } = await supabase.from("extension_requests").insert({
+    const { data: inserted, error } = await supabase.from("extension_requests").insert({
       task_id: task.id,
       requested_by: me?.id,
       requested_new_due_date: newDueDate,
       reason_category: reasonCategory,
       reason_notes: reasonNotes,
-    });
+    }).select("id").single();
     if (error) {
       await alert(`Couldn't submit extension request: ${error.message}`);
       return;
     }
     setExtensionTask(null);
-    await alert("Extension request submitted -- you'll see it reflected once it's decided.");
+    await alert(await extensionOutcomeMessage((inserted as { id: string } | null)?.id));
+    loadAll();
   }
 
   async function submitProjectExtensionRequest(project: ProjectRow, newDueDate: string, reasonCategory: string, reasonNotes: string) {
@@ -5327,7 +5335,7 @@ export default function Projects() {
       label: "Due Date Ext.",
       getGroup: (t) => dueDateExtStatus(t).label,
       getTone: (t) => dueDateExtStatus(t).tone,
-      allGroups: () => ["No Extension", "Requested", "Rejected", "Extended"],
+      allGroups: () => ["No Extension", "Shifted", "Requested", "Rejected", "Extended"],
     },
   ];
 
@@ -5403,6 +5411,7 @@ export default function Projects() {
   // is fully computed so there's nothing to write back.
   const DUE_DATE_EXT_BOARD_COLUMNS: BoardColumnDef[] = [
     { value: "No Extension", label: "No Extension", tone: "neutral" },
+    { value: "Shifted", label: "Shifted", tone: "blue" },
     { value: "Requested", label: "Requested", tone: "purple" },
     { value: "Rejected", label: "Rejected", tone: "danger" },
     { value: "Extended", label: "Extended", tone: "gold" },
@@ -5458,7 +5467,7 @@ export default function Projects() {
     {
       key: "due_date_ext",
       label: "Due Date Ext.",
-      getValue: (t) => ["No Extension", "Requested", "Rejected", "Extended"].indexOf(dueDateExtStatus(t).label),
+      getValue: (t) => ["No Extension", "Shifted", "Requested", "Rejected", "Extended"].indexOf(dueDateExtStatus(t).label),
     },
     { key: "task_number", label: "Task ID", getValue: (t) => t.task_number },
     { key: "time_log_status", label: "Time Log Status", getValue: (t) => ({ none: 0, pending: 1, finalized: 2 }[timeLogStatusFor(t.id)]) },
