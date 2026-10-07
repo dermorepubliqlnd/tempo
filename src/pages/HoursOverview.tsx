@@ -7,6 +7,7 @@ import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
 import { buildHolidaySet, toISO as toLocalISODate } from "../lib/workingDays";
 import { expectedHoursForDay } from "../lib/dailyAllocation";
+import { committedOnly, METRIC_DEFINITIONS } from "../lib/metrics";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
 // 2026-09-23 (stakeholder review: "keep it subtle -- a legend, not a
 // row of swatch pills") -- small colored dot + label instead of full
@@ -413,8 +414,12 @@ export default function HoursOverview() {
   // set, Scoped (engine) and Logged both come only from those projects'
   // tasks; non-project time and archived (deleted-task) hours are left out.
   const projectFilterSet = useMemo(() => (projectFilter.length ? new Set(projectFilter) : null), [projectFilter]);
-  const gridTasks = useMemo(() => (projectFilterSet ? tasks.filter((t) => projectFilterSet.has(t.project_id)) : tasks), [tasks, projectFilterSet]);
-  const gridProjects = useMemo(() => (projectFilterSet ? projects.filter((p) => projectFilterSet.has(p.id)) : projects), [projects, projectFilterSet]);
+  // 2026-10-08 (Sandra, item I): Estimated hours = started (committed)
+  // projects only, like Utilization's default, the Executive Dashboard and
+  // My Dashboard. Draft projects are planning, not load (lib/metrics.ts).
+  const committed = useMemo(() => committedOnly(projects, tasks), [projects, tasks]);
+  const gridTasks = useMemo(() => (projectFilterSet ? committed.tasks.filter((t) => projectFilterSet.has(t.project_id)) : committed.tasks), [committed, projectFilterSet]);
+  const gridProjects = useMemo(() => (projectFilterSet ? committed.projects.filter((p) => projectFilterSet.has(p.id)) : committed.projects), [committed, projectFilterSet]);
   const gridEntries = useMemo(() => {
     if (!projectFilterSet) return timeEntries;
     const ids = new Set(gridTasks.map((t) => t.id));
@@ -538,8 +543,9 @@ export default function HoursOverview() {
 
   // Per-task flat comparison (whole-task totals, not windowed to the
   // visible date range) -- unchanged from the original Overview build.
+  // 2026-10-08 (item I): started projects only (Draft tasks have no load yet).
   const taskRows = useMemo(() => {
-    return tasks
+    return committed.tasks
       .filter((t) => !parentTaskIds.has(t.id))
       .map((t) => {
         const proj = projects.find((p) => p.id === t.project_id);
@@ -568,7 +574,7 @@ export default function HoursOverview() {
         };
       })
       .filter((r) => r.scoped > 0 || r.logged > 0);
-  }, [tasks, projects, allPeople, timeEntries, parentTaskIds]);
+  }, [committed, projects, allPeople, timeEntries, parentTaskIds]);
 
   // 2026-08-26 (Sandra: "allow grouping and filtering by person and by
   // project") -- both single-select dropdowns; kept simple (one active
@@ -698,7 +704,7 @@ export default function HoursOverview() {
     },
     {
       key: "scoped",
-      label: "Estimated",
+      label: <span title={METRIC_DEFINITIONS.estimatedHours}>Estimated</span>,
       defaultWidth: 90,
       render: (r) => <div style={{ textAlign: "right" }}>{r.scoped.toFixed(2)}h</div>,
     },

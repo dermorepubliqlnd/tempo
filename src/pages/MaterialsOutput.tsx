@@ -197,14 +197,14 @@ export default function MaterialsOutput() {
 
   return (
     <div>
-      <Link to="/team-dashboard?view=portfolio" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "var(--muted)", textDecoration: "none", marginBottom: 8 }}>
-        <ChevronLeft size={14} /> Back to Projects Portfolio
+      <Link to="/team-dashboard" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "var(--muted)", textDecoration: "none", marginBottom: 8 }}>
+        <ChevronLeft size={14} /> Back to Executive Dashboard
       </Link>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <h1 style={{ marginBottom: 4 }}>Materials Output</h1>
           <p className="subtitle" style={{ marginBottom: 16 }}>
-            Every Output Type with logged Output Count, closed vs. tentative -- same rollup as the Projects Portfolio card, unbounded.
+            Every Output Type with logged Output Count, closed vs. tentative -- same rollup as the Executive Dashboard card, unbounded.
           </p>
         </div>
         {/* 2026-09-21 (Sandra: "can't you just add an export to Excel
