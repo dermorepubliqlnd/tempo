@@ -181,6 +181,7 @@ interface OutputTypeOption {
   name: string;
   is_active: boolean;
   sort_order: number;
+  counts_deliverable?: boolean;
 }
 
 // Column resizing (2026-08-24, Sandra: "can we now allow resizing column
@@ -1132,7 +1133,7 @@ export default function WbsPlanning() {
       ),
       supabase.from("projects").select("id,owner_id,start_date,end_date,wbs_status,status,paused_at,resumed_at,cancelled_at,completed_at,actual_close_date").eq("is_archived", false),
       supabase.from("work_types").select("id,name,is_active,sort_order,is_fixed_schedule").order("sort_order"),
-      supabase.from("output_types").select("id,name,is_active,sort_order").order("sort_order"),
+      supabase.from("output_types").select("id,name,is_active,sort_order,counts_deliverable").order("sort_order"),
       supabase.from("work_type_output_types").select("work_type_id,output_type_id"),
       supabase.from("project_categories").select("name,is_active").order("sort_order"),
       supabase.from("project_sources").select("id,name,is_active").order("sort_order"),
@@ -2655,9 +2656,17 @@ export default function WbsPlanning() {
     // && !isParent} a few hundred lines down), so this was flagging every
     // baselined project's parent tasks as "missing" and permanently
     // blocking closure until this fix.
-    const missingOutputCount = orderedTasks.filter((t) => (t.output_count === null || t.output_count === undefined) && !(t.depth === 0 && hasChildren(t.id)));
+    const missingOutputCount = orderedTasks.filter(
+      (t) =>
+        // phase163: only counted output types need a number (1+); cancelled
+        // tasks and "No Deliverable" types are skipped.
+        t.status !== "Cancelled" &&
+        outputTypes.find((o) => o.id === t.output_type_id)?.counts_deliverable !== false &&
+        (t.output_count === null || t.output_count === undefined || t.output_count < 1) &&
+        !(t.depth === 0 && hasChildren(t.id))
+    );
     if (missingOutputCount.length) {
-      await alert(`Can't request closure yet -- ${missingOutputCount.length} task(s) still need an Output Count.`);
+      await alert(`Can't request closure yet -- ${missingOutputCount.length} task(s) still need an Output Count of 1 or more:\n\n${missingOutputCount.slice(0, 8).map((t) => `• ${t.name || "Untitled task"}`).join("\n")}${missingOutputCount.length > 8 ? `\n…and ${missingOutputCount.length - 8} more` : ""}`);
       return;
     }
     // Hard gate (2026-09-21, Sandra: "how come this project was closed
@@ -2721,9 +2730,17 @@ export default function WbsPlanning() {
         return;
       }
       // Same parent-row exemption as handleRequestClosure above.
-      const missingOutputCount = orderedTasks.filter((t) => (t.output_count === null || t.output_count === undefined) && !(t.depth === 0 && hasChildren(t.id)));
+      const missingOutputCount = orderedTasks.filter(
+      (t) =>
+        // phase163: only counted output types need a number (1+); cancelled
+        // tasks and "No Deliverable" types are skipped.
+        t.status !== "Cancelled" &&
+        outputTypes.find((o) => o.id === t.output_type_id)?.counts_deliverable !== false &&
+        (t.output_count === null || t.output_count === undefined || t.output_count < 1) &&
+        !(t.depth === 0 && hasChildren(t.id))
+    );
       if (missingOutputCount.length) {
-        await alert(`Can't approve closure yet -- ${missingOutputCount.length} task(s) still need an Output Count.`);
+        await alert(`Can't approve closure yet -- ${missingOutputCount.length} task(s) still need an Output Count of 1 or more:\n\n${missingOutputCount.slice(0, 8).map((t) => `• ${t.name || "Untitled task"}`).join("\n")}${missingOutputCount.length > 8 ? `\n…and ${missingOutputCount.length - 8} more` : ""}`);
         return;
       }
       // 2026-09-21 (Sandra): the task-completion gate lives ONLY on the
@@ -7428,6 +7445,9 @@ export default function WbsPlanning() {
                         })()}
                       </td>
                       <td className={canEditWbs && !isParent && t.status !== "Done" ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("output_count", true, rowLocked)}>
+                        {t.output_type_id && outputTypes.find((o) => o.id === t.output_type_id)?.counts_deliverable === false ? (
+                          <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="This Output Type isn't counted as a deliverable (Site Settings), so Output Count is always 0.">0 · not counted</span>
+                        ) : (
                         <InlineNumber
                           value={t.output_count}
                           // Sandra, 2026-08-26: "I can't edit output count.
@@ -7452,6 +7472,7 @@ export default function WbsPlanning() {
                           editable={canEditWbs && !isParent && t.status !== "Done"}
                           onCommit={(v) => saveTaskField(t.id, { output_count: v })}
                         />
+                        )}
                       </td>
                       <td className={rowEditable && !isParent ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("effort_hours", true, rowLocked)}>
                         <span title={isParent ? "Computed from this task's own sub-tasks (sum of their Scoped Hours)" : undefined}>

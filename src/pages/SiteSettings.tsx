@@ -220,6 +220,7 @@ interface OutputTypeRow {
   sort_order: number;
   is_active: boolean;
   color?: string | null;
+  counts_deliverable?: boolean;
 }
 
 export default function SiteSettings() {
@@ -1168,7 +1169,7 @@ export default function SiteSettings() {
 
   async function loadOutputTypes() {
     setOutputTypesLoading(true);
-    const { data } = await supabase.from("output_types").select("id,name,sort_order,is_active,color").eq("is_archived", false).order("sort_order");
+    const { data } = await supabase.from("output_types").select("id,name,sort_order,is_active,color,counts_deliverable").eq("is_archived", false).order("sort_order");
     setOutputTypes((data as OutputTypeRow[]) ?? []);
     setOutputTypesLoading(false);
   }
@@ -1209,6 +1210,29 @@ export default function SiteSettings() {
       return;
     }
     setEditingOutputTypeId(null);
+    loadOutputTypes();
+  }
+
+  // phase163: does this output type count as a deliverable? Not counted ->
+  // Output Count is always 0; counted -> a number (1+) is required at Done.
+  async function toggleOutputTypeCounted(o: OutputTypeRow) {
+    const turningOff = o.counts_deliverable !== false;
+    const ok = await confirmDlg({
+      title: turningOff ? `Stop counting "${o.name}"?` : `Count "${o.name}" as a deliverable?`,
+      confirmLabel: turningOff ? "Not counted (always 0)" : "Count it",
+      message: turningOff
+        ? `Tasks with this Output Type will always have Output Count 0, and nobody will be asked for a number. Existing counts on these tasks are set to 0 and leave Materials Output.`
+        : `Tasks with this Output Type will need an Output Count of 1 or more when they're marked complete.`,
+    });
+    if (!ok) return;
+    setOutputTypeBusy(true);
+    const { error } = await supabase.from("output_types").update({ counts_deliverable: !turningOff }).eq("id", o.id);
+    if (!error && turningOff) await supabase.from("tasks").update({ output_count: 0 }).eq("output_type_id", o.id);
+    setOutputTypeBusy(false);
+    if (error) {
+      window.alert(`Couldn't update: ${error.message}`);
+      return;
+    }
     loadOutputTypes();
   }
 
@@ -3401,7 +3425,16 @@ export default function SiteSettings() {
                                     {o.name}
                                   </span>
                                 )}
-                                <div style={{ display: "flex", gap: 4 }}>
+                                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                                  <button
+                                    onClick={() => toggleOutputTypeCounted(o)}
+                                    disabled={outputTypeBusy}
+                                    title={o.counts_deliverable === false ? "Not counted: Output Count is always 0. Click to count it." : "Counted: a number (1+) is required when the task is completed. Click to stop counting."}
+                                    className={`status-pill ${o.counts_deliverable === false ? "neutral" : "success"}`}
+                                    style={{ fontSize: 9, border: o.counts_deliverable === false ? "1px dashed var(--border)" : undefined, cursor: "pointer" }}
+                                  >
+                                    {o.counts_deliverable === false ? "Not counted" : "Counted"}
+                                  </button>
                                   <button
                                     onClick={() => toggleOutputTypeActive(o)}
                                     disabled={outputTypeBusy}

@@ -1,4 +1,4 @@
--- phase161 (2026-10-07, Sandra): "Ongoing container" switch per PROJECT.
+-- phase162 (2026-10-07, Sandra; applied live 10-07 as "phase161"): "Ongoing container" switch per PROJECT.
 -- A normal project (e.g. BAU "Content Revisions – Q4 2026") can be marked an
 -- ongoing container: project Health / WBS Status show "Ongoing" (no baseline
 -- variance, out of health charts) while its TASKS keep full due-date rules:

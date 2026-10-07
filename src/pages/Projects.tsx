@@ -112,6 +112,7 @@ interface OutputTypeOption {
   is_active: boolean;
   sort_order: number;
   color?: string | null;
+  counts_deliverable?: boolean;
 }
 
 // Project Source (Phase 20, 2026-08-24) -- admin-configurable lookup for
@@ -1647,7 +1648,7 @@ export default function Projects() {
       // Deletion archive (2026-08-14c) -- see DeletedSpentHourRow above.
       supabase.from("deleted_project_spent_hours_archive").select("project_id,person_id,hours"),
       supabase.from("work_types").select("id,name,is_active,sort_order,color").order("sort_order"),
-      supabase.from("output_types").select("id,name,is_active,sort_order,color").order("sort_order"),
+      supabase.from("output_types").select("id,name,is_active,sort_order,color,counts_deliverable").order("sort_order"),
       supabase.from("project_sources").select("id,name,is_active,sort_order,color").order("sort_order"),
       supabase.from("project_categories").select("id,name,is_active,sort_order,icon,color").order("sort_order"),
       supabase.from("project_phases").select("id,name,is_active,sort_order,color").order("sort_order"),
@@ -4358,6 +4359,9 @@ export default function Projects() {
           // Done, it locks; still editable pre-Done and (same as
           // before) never on a parent row.
           if (isParent) return <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="Not applicable -- outputs are counted on the sub-tasks.">N/A</span>;
+          // phase163: output types that aren't counted are always 0.
+          if (t.output_type_id && outputTypes.find((o) => o.id === t.output_type_id)?.counts_deliverable === false)
+            return <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="This Output Type isn't counted as a deliverable (Site Settings), so Output Count is always 0.">0 · not counted</span>;
           return (
             <InlineNumber
               value={t.output_count}
@@ -4771,12 +4775,17 @@ export default function Projects() {
                 const scoped = t.estimated_hours;
                 const logged = spentHoursFor(t.id);
                 const outputCount = t.output_count;
+                // phase163 (Sandra 2026-10-07): "No Deliverable" types are
+                // always 0 (no question asked); every other output type
+                // needs a whole number of 1 or more.
+                const outType = outputTypes.find((o) => o.id === t.output_type_id);
+                const countsDeliverable = !!outType && outType.counts_deliverable !== false;
                 const missing: string[] = [];
                 if (ownHoursFor(timeEntries, t.id) <= 0) {
                   missing.push("- **Logged Hours** -- no Confirmed/Approved time logged on this task yet. Log time first.");
                 }
-                if (outputCount === null || outputCount === undefined) {
-                  missing.push("- **Output Count** -- not set yet. Fill it in (Output Count column) first.");
+                if (countsDeliverable && (outputCount === null || outputCount === undefined || outputCount < 1)) {
+                  missing.push(`- **Output Count** -- enter how many ${outType?.name ?? "outputs"} this task produced (1 or more) in the Output Count column first.`);
                 }
                 if (missing.length) {
                   await alert({
@@ -4794,7 +4803,7 @@ export default function Projects() {
                 // it gets its own extra confirmation, separate from and
                 // before the general completion confirm below. Cancelling
                 // here aborts the whole commit so nothing gets saved.
-                if (outputCount === 0) {
+                if (outputCount === 0 && countsDeliverable) {
                   const zeroOk = await confirm({
                     title: "Output Count is 0",
                     message:
