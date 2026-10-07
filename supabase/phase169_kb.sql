@@ -43,7 +43,7 @@ A due-date extension is approved automatically when **all** of these are true:
 | **2 working days or less** | 3 or more working days go to your approver. |
 | **First extension on the task** | A second or later request goes to your approver. |
 | **Requested on time** | Asked for on or before the current due date. Requests made after the task is already overdue go to your approver. |
-| **Doesn't push the project end date** | After the extension and any tasks that depend on it move, no task ends after the project end date. |
+| **Doesn't push the project end date** | After the extension and any tasks that depend on it move, the project's last task doesn't finish later than the project end date (or later than it already did, if the project was already running late). |
 
 - The reason is still required, and your approver sees every auto-approved extension in their **Auto-approved** list.
 - Auto-approved extensions **can't be undone**, because dependent tasks may already have moved.
@@ -75,7 +75,7 @@ Manual entries of **2 hrs or less**, logged within **2 working days** of the wor
 **Related article:** [[Auto-Approvals: What Tempo Approves Automatically]]
 
 ### Small first extensions are approved automatically
-Extensions of **2 working days or less**, requested on or before the due date, for a task's **first** extension, are approved automatically when they don't push any task past the project end date. Everything else goes to your approver, and Tempo tells you why.
+Extensions of **2 working days or less**, requested on or before the due date, for a task's **first** extension, are approved automatically when they don't push the project's finish past its end date. Everything else goes to your approver, and Tempo tells you why.
 **Related article:** [[Auto-Approvals: What Tempo Approves Automatically]]
 
 ### New Auto-approved tab in Approval Center
