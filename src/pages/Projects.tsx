@@ -6868,7 +6868,7 @@ export default function Projects() {
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
                 <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--navy)", marginBottom: 4 }}>Reschedule session</div>
                 <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
-                  Operational project -- moving or extending a session range isn't an extension request, so no approval is needed.
+                  Training Delivery session -- moving or extending a session range isn't an extension request, so no approval is needed.
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, alignItems: "end" }}>
                   <label style={{ display: "grid", gap: 4, fontSize: 11, color: "var(--muted)" }}>

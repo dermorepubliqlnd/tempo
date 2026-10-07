@@ -5629,7 +5629,7 @@ export default function WbsPlanning() {
           </div>
           <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
             {isSessionProject
-              ? "Manage this operational project and plot Training Delivery sessions as they are scheduled."
+              ? "Ongoing Training Delivery project: plot sessions as they are scheduled."
               : project.is_operational
               ? "Ongoing container: add tasks as requests come in. Task due dates, Overdue and extension requests work as usual."
               : "Define the project, add tasks, and review the forecast. Lock the baseline when the plan is ready."}
@@ -7899,7 +7899,7 @@ export default function WbsPlanning() {
           {project.wbs_status === "draft" && !pendingBaselineRequest && !declinedBaselineRequest && "Start Project once scoping is final to start tracking against it."}
           {project.wbs_status === "draft" && !!pendingBaselineRequest && "Waiting on an approver to lock this in as the Baseline."}
           {project.wbs_status === "draft" && !pendingBaselineRequest && !!declinedBaselineRequest && wbsMeta.hint}
-          {isOperationalStarted && (isSessionProject ? "Operational project -- trainers add their own sessions here with Add Session. No baseline variance is tracked; close it at the end of the quarter." : "Ongoing container -- add tasks as requests come in. Tasks keep due dates, Overdue and extension requests; no baseline variance is tracked at project level. Close it at the end of the period.")}
+          {isOperationalStarted && (isSessionProject ? "Ongoing Training Delivery project -- trainers add their own sessions here with Add Session. No baseline variance is tracked; close it at the end of the quarter." : "Ongoing container -- add tasks as requests come in. Tasks keep due dates, Overdue and extension requests; no baseline variance is tracked at project level. Close it at the end of the period.")}
           {!isOperationalStarted && project.wbs_status === "baseline_locked" && "This is the official commitment. You can keep editing -- close the project once work is complete."}
           {!isOperationalStarted && project.wbs_status === "changed_after_baseline" &&
             "This plan differs from the original baseline. Baselines are locked once by design -- variance tracking measures against the original. Close the project once work is complete."}

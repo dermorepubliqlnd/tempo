@@ -841,8 +841,8 @@ export default function SiteSettings() {
   async function toggleProjectTypeOperational(t: ProjectTypeRow) {
     const turningOn = !t.is_operational;
     const ok = await confirmDlg({
-      title: turningOn ? "Make this an Operational project type?" : "Turn off Operational?",
-      confirmLabel: turningOn ? "Make Operational" : "Turn off",
+      title: turningOn ? "Make every project of this type Ongoing?" : "Turn off Ongoing?",
+      confirmLabel: turningOn ? "Make Ongoing" : "Turn off",
       message: turningOn
         ? `Every project with this type will show Health and WBS Status as "Ongoing" (no date-based health or baseline variance), and anyone can add their own sessions to it once it's started. Task validation stays the same.`
         : `"${t.name}" projects go back to normal Health and baseline tracking.`,
@@ -1946,7 +1946,7 @@ export default function SiteSettings() {
               <td>
                 <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>Project Types</div>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
-                  Whether a project is BAU (operational -- sessions of already-built training, or a program deployment) or Development (building new content). Offered on every project's Project Type field.
+                  What kind of work the project is (e.g. Operational, Internal, Curation, Training Delivery). Offered on every project's Project Type field.
                 </div>
               </td>
               <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>{projectTypesLoading ? "…" : listSummary(projectTypes)}</td>
@@ -3091,9 +3091,10 @@ export default function SiteSettings() {
                 <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 14 }}>
                   Drag the grip handle to reorder. Deactivating keeps a project type's label on any project that
                   already has it set -- it just disappears from the picker on new projects. Click Standard /
-                  Operational to switch a type: Operational projects are open, cumulative containers (e.g. one
+                  Ongoing to switch a type: every project of an Ongoing type is an open, cumulative container (e.g. one
                   Training Delivery project per quarter) -- Health and WBS Status show "Ongoing" and anyone can
-                  add their own sessions once it's started.
+                  add their own sessions once it's started. To make a single project Ongoing instead, tick
+                  "Ongoing container" in that project's WBS.
                 </div>
 
                 <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
@@ -3183,11 +3184,11 @@ export default function SiteSettings() {
                         <button
                           onClick={() => toggleProjectTypeOperational(t)}
                           disabled={projectTypeBusy}
-                          title={t.is_operational ? "Operational: open, cumulative projects (Health/WBS show Ongoing; anyone can add their own sessions). Click to turn off." : "Click to make this an Operational project type (open, cumulative -- e.g. quarterly Training Delivery)"}
+                          title={t.is_operational ? "Ongoing: every project of this type is an open, cumulative container (Health/WBS show Ongoing; anyone can add their own sessions). Click to turn off." : "Standard: normal date-based Health. Click to make every project of this type Ongoing (e.g. quarterly Training Delivery)."}
                           className={`status-pill ${t.is_operational ? "success" : "neutral"}`}
                           style={{ fontSize: 10, border: t.is_operational ? undefined : "1px dashed var(--border)", cursor: "pointer", opacity: t.is_operational ? 1 : 0.75 }}
                         >
-                          {t.is_operational ? "Operational" : "Standard"}
+                          {t.is_operational ? "Ongoing" : "Standard"}
                         </button>
                         <span className={`status-pill ${t.is_active ? "success" : "neutral"}`} style={{ fontSize: 10 }}>
                           {t.is_active ? "Active" : "Off"}

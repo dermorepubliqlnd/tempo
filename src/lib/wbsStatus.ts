@@ -116,7 +116,7 @@ export function wbsStatusMetaFor(
 // phase149: display-only label for started operational projects.
 export const OPERATIONAL_WBS_META = {
   label: "Ongoing",
-  hint: "Operational project -- sessions/tasks are added as work happens, so no baseline variance is tracked.",
+  hint: "Ongoing project -- sessions/tasks are added as work happens, so no baseline variance is tracked.",
   color: "#0f766e",
   bg: "#e6f6f3",
   border: "#c3e9e1",

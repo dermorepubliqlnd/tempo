@@ -1595,7 +1595,7 @@ function TrainingDeliverySection({
         </select>
       </div>
       <div style={{ fontSize: 11, color: "var(--muted)", margin: "-4px 0 10px" }}>
-        Drill-down of the {projects.length} Training Delivery (operational) projects counted in the portfolio above. A session = a task with Output Type
+        Drill-down of the {projects.length} Training Delivery (ongoing) projects counted in the portfolio above. A session = a task with Output Type
         "Session"; hours = time logged on those sessions.
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 12 }}>

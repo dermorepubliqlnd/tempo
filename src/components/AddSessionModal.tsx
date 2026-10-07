@@ -96,7 +96,7 @@ export default function AddSessionModal({ projects, people, meId, isFullAccess, 
         </div>
         {sorted.length === 0 ? (
           <div style={{ fontSize: 12, color: "var(--danger-text)" }}>
-            No open operational project you can add sessions to. Ask the project owner to start this quarter's Training Delivery project.
+            No open Training Delivery project you can add sessions to. Ask the project owner to start this quarter's Training Delivery project.
           </div>
         ) : (
           <>
