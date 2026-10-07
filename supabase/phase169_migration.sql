@@ -43,6 +43,26 @@ grant execute on function public.working_days_after(date, date) to authenticated
 create or replace function public.auto_approval_active() returns boolean
 language sql stable as $$ select coalesce(current_setting('app.auto_approval', true), '') = 'on' $$;
 
+-- System decisions pass the existing approval checks (live defs patched):
+create or replace function public.can_decide_extension(p_request_id uuid) returns boolean
+language sql stable security definer as $function$
+  select public.auto_approval_active() or coalesce(exists (
+    select 1 from extension_requests er
+    where er.id = p_request_id
+      and (can_full_access_approve(er.requested_by) or is_decider_for(er.requested_by))
+  ), false)
+$function$;
+
+do $$
+declare v_def text;
+begin
+  select pg_get_functiondef('public.assert_routed_or_overridden(uuid,uuid)'::regprocedure) into v_def;
+  if position('auto_approval_active' in v_def) = 0 then
+    v_def := regexp_replace(v_def, '\mbegin\M', E'begin\n  if public.auto_approval_active() then return; end if;  -- phase169');
+    execute v_def;
+  end if;
+end $$;
+
 -- ---------------------------------------------------------------- columns
 alter table public.time_entries      add column if not exists auto_approved boolean not null default false;
 alter table public.time_entries      add column if not exists auto_reversed_at timestamptz;
