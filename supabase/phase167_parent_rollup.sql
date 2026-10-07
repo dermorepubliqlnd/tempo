@@ -31,11 +31,16 @@ begin
   select status into v_cur from public.tasks where id = v_parent;
   if v_cur is null or v_cur = 'Cancelled' or v_cur = v_new then return null; end if;
   perform set_config('app.bypass_done_task_lock', 'on', true);
-  update public.tasks
-     set status = v_new,
-         submitted_on = case when v_new = 'Done' then now() else null end,
-         submitted_by = null
-   where id = v_parent;
+  begin
+    update public.tasks
+       set status = v_new,
+           submitted_on = case when v_new = 'Done' then now() else null end,
+           submitted_by = null
+     where id = v_parent;
+  exception when others then
+    -- never let a locked parent (e.g. validated) block the sub-task's own change
+    raise notice 'parent roll-up skipped for %: %', v_parent, sqlerrm;
+  end;
   perform set_config('app.bypass_done_task_lock', 'off', true);
   return null;
 end $$;
