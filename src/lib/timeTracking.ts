@@ -30,6 +30,7 @@ export interface TimeEntryRow {
   requested_by: string | null;
   reason_notes: string | null;
   auto_stopped: boolean;
+  auto_stop_reason?: "limit" | "10pm" | null;
   confirmed_at: string | null;
   decided_by: string | null;
   decided_at: string | null;

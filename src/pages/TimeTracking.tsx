@@ -1,3 +1,4 @@
+import RecycleBinLink from "../components/RecycleBinLink";
 import { timeEntryOutcomeMessage } from "../lib/autoApprovals";
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ShieldCheck, ChevronRight, ChevronLeft, ChevronDown, Pencil, Timer, Trash2, Archive, RotateCcw, Plus, Search, X, CalendarDays, AlertCircle, ListChecks, Radio, FilePen, Download } from "lucide-react";
@@ -105,6 +106,7 @@ interface EntryRow {
   reason_category: string | null;
   reason_notes: string | null;
   auto_stopped: boolean;
+  auto_stop_reason?: "limit" | "10pm" | null;
   decided_by: string | null;
   decided_at: string | null;
   decision_notes: string | null;
@@ -917,7 +919,7 @@ export default function TimeTracking() {
       fetchAllRows((f, t) => supabase
         .from("time_entries")
         .select(
-          `id, task_id, activity_type_id, person_id, started_at, ended_at, duration_minutes, source, status, requested_by, reason_category, reason_notes, auto_stopped,
+          `id, task_id, activity_type_id, person_id, started_at, ended_at, duration_minutes, source, status, requested_by, reason_category, reason_notes, auto_stopped, auto_stop_reason,
            decided_by, decided_at, decision_notes, corrected_by, corrected_at, original_duration_minutes, correction_notes, created_at,
            original_started_at, original_ended_at, correction_requested_by, is_follow_up, follow_up_reason,
            is_archived, archived_at, archived_by, archive_reason, non_project_entry_number, entry_number,
@@ -1801,7 +1803,7 @@ export default function TimeTracking() {
                         </div>
                       )}
                       {row.auto_stopped && (
-                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>Auto-stopped after 4 hours</div>
+                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>{row.auto_stop_reason === "10pm" ? "Stopped at 10 PM sign-out" : "Auto-stopped after 4 hours"}</div>
                       )}
                     </td>
                     <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>
@@ -1999,7 +2001,7 @@ export default function TimeTracking() {
     <div>
       {confirmDialog}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-        <h1 style={{ margin: 0 }}>Time Tracking</h1>
+        <h1 style={{ margin: 0, display: "flex", alignItems: "baseline", gap: 12 }}>Time Tracking <RecycleBinLink /></h1>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {/* 2026-09-29 (Sandra: "revert the add time to limit to manual adds
             only ... add the start nonproject timer in the time tracking page

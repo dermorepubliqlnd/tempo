@@ -36,7 +36,7 @@ export default function ConfirmTimeEntryModal({
   onContinue,
   onDiscarded,
 }: {
-  entry: { id: string; task_name: string; started_at: string; ended_at: string; duration_minutes: number; auto_stopped: boolean; is_non_project?: boolean; notes?: string | null };
+  entry: { id: string; task_name: string; started_at: string; ended_at: string; duration_minutes: number; auto_stopped: boolean; auto_stop_reason?: "limit" | "10pm" | null; is_non_project?: boolean; notes?: string | null };
   onDone: () => void;
   onContinue: () => void;
   onDiscarded?: () => void;
@@ -106,17 +106,21 @@ export default function ConfirmTimeEntryModal({
     onContinue();
   }
 
+  // 2026-10-07 (item K): a timer stopped at the 10 PM sign-out can't resume
+  // from last night's start time -- confirm it, then start a new one.
+  const stoppedOvernight = entry.auto_stop_reason === "10pm";
+
   return (
-    <Modal title="Confirm time entry" onClose={handleContinue} requireChoice>
+    <Modal title="Confirm time entry" onClose={stoppedOvernight ? () => {} : handleContinue} requireChoice>
       <div style={{ fontSize: 12.5 }}>
         {entry.auto_stopped && (
           <div className="status-pill warning" style={{ marginBottom: 10, display: "inline-block" }}>
-            Auto-stopped after 4 hours -- please check these times
+            {entry.auto_stop_reason === "10pm" ? "Stopped at the 10 PM sign-out. Check the end time." : "Auto-stopped after 4 hours. Check these times."}
           </div>
         )}
         <p style={{ margin: "0 0 12px", color: "var(--muted)" }}>
-          {entry.is_non_project ? "Non-project timer" : "Timer"} on <strong style={{ color: "var(--navy)" }}>{entry.task_name}</strong>. Still working on this? Choose Continue work. Otherwise you
-          can adjust the times once below, then Confirm.
+          {entry.is_non_project ? "Non-project timer" : "Timer"} on <strong style={{ color: "var(--navy)" }}>{entry.task_name}</strong>.{" "}
+          {stoppedOvernight ? "Adjust the times if needed, then Confirm. Start a new timer for today's work." : "Still working on this? Choose Continue work. Otherwise adjust the times if needed, then Confirm."}
         </p>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
@@ -188,13 +192,13 @@ export default function ConfirmTimeEntryModal({
               {discarding ? "Discarding…" : "Discard (started by accident)"}
             </button>
           )}
-          <button
+          {!stoppedOvernight && <button
             onClick={handleContinue}
             disabled={saving || resuming || discarding}
             style={{ fontSize: 12, fontWeight: 600, color: "var(--navy)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 14px", cursor: "pointer" }}
           >
             {resuming ? "Resuming…" : "Continue work"}
-          </button>
+          </button>}
           <button
             onClick={handleConfirm}
             disabled={saving || resuming || discarding || (notesRequired && !notes.trim())}

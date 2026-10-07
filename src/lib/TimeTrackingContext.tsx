@@ -40,6 +40,7 @@ interface PendingConfirmEntry {
   ended_at: string;
   duration_minutes: number;
   auto_stopped: boolean;
+  auto_stop_reason?: "limit" | "10pm" | null;
 }
 
 interface TimeTrackingContextValue {
@@ -95,7 +96,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
 
     const { data } = await supabase
       .from("time_entries")
-      .select("id, task_id, activity_type_id, started_at, ended_at, duration_minutes, auto_stopped, status, reason_notes, task:tasks(name), activity_type:non_project_activity_types(name)")
+      .select("id, task_id, activity_type_id, started_at, ended_at, duration_minutes, auto_stopped, auto_stop_reason, status, reason_notes, task:tasks(name), activity_type:non_project_activity_types(name)")
       .eq("person_id", me.id)
       .eq("is_archived", false)
       .in("status", ["running", "pending_confirm"])
@@ -133,6 +134,7 @@ export function TimeTrackingProvider({ children }: { children: ReactNode }) {
           ended_at: r.ended_at!,
           duration_minutes: r.duration_minutes ?? 0,
           auto_stopped: r.auto_stopped,
+          auto_stop_reason: r.auto_stop_reason ?? null,
         }))
     );
   }, [me]);

@@ -35,6 +35,8 @@ import type { ColumnDef, GroupOption, SortOption, TableView } from "../lib/table
 import { sortRows, sortRowsHierarchical, visibleOrderedColumns, resolveFilterPersonIds, GROUP_EXCLUDE } from "../lib/tableTypes";
 import { formatDate } from "../lib/formatDate";
 import { extensionOutcomeMessage } from "../lib/autoApprovals";
+import { useNavAccess } from "../lib/navAccess";
+import RecycleBinLink from "../components/RecycleBinLink";
 import { WBS_STATUS_META, wbsStatusMetaFor, type WbsStatus } from "../lib/wbsStatus";
 
 // Tone-palette mapping for wbs_status (Phase 4, 2026-07-28) -- WBS_STATUS_META
@@ -464,11 +466,11 @@ function projectSystemView(
 }
 
 const PROJECT_SYSTEM_VIEWS: TableView[] = [
-  projectSystemView("system_my_active_projects", "My Active Projects", "my_active_owned", "my", PROJECT_OWNER_VISIBLE, true),
-  projectSystemView("system_my_active_portfolio", "My Active Portfolio", "my_active_portfolio", "my", PROJECT_ACTIVE_PORTFOLIO_VISIBLE),
+  projectSystemView("system_my_active_projects", "Active Projects I Own", "my_active_owned", "my", PROJECT_OWNER_VISIBLE, true),
+  projectSystemView("system_my_active_portfolio", "My Active Projects", "my_active_portfolio", "my", PROJECT_ACTIVE_PORTFOLIO_VISIBLE),
   projectSystemView("system_all_projects_i_own", "All Projects I Own", "my_owned_all", "my", PROJECT_OWNER_VISIBLE),
-  projectSystemView("system_my_full_portfolio", "My Full Portfolio", "my_full_portfolio", "my", PROJECT_FULL_PORTFOLIO_VISIBLE),
-  projectSystemView("system_active_project_portfolio", "Active Project Portfolio", "org_active", "organization", PROJECT_ORG_VISIBLE),
+  projectSystemView("system_my_full_portfolio", "All My Projects", "my_full_portfolio", "my", PROJECT_FULL_PORTFOLIO_VISIBLE),
+  projectSystemView("system_active_project_portfolio", "All Active Projects", "org_active", "organization", PROJECT_ORG_VISIBLE),
   projectSystemView("system_all_projects", "All Projects", "org_all", "organization", PROJECT_ORG_VISIBLE),
 ];
 
@@ -1309,6 +1311,8 @@ export default function Projects() {
     return !!project && project.wbs_status !== "draft" && project.timelines_locked;
   }
   const { person: me } = useSession();
+  // 2026-10-07 (item E): System Views shown for this person's role.
+  const navAccess = useNavAccess(me);
   // URL-driven "My Dashboard" quick links (2026-09-21, Sandra: "let's try
   // the saved view approach" -- View All should land the person on a real,
   // persistent view they can find again and keep customizing, not a
@@ -2741,13 +2745,16 @@ export default function Projects() {
 
 
   useEffect(() => {
-    if (!projectViews.loaded) return;
-    projectViews.installSystemViews(PROJECT_SYSTEM_VIEWS, "system_my_active_projects", migrateProjectScope);
+    if (!projectViews.loaded || !navAccess.loaded) return;
+    const allowed = PROJECT_SYSTEM_VIEWS.filter((v) => navAccess.views.has(v.id));
+    const list = allowed.length ? allowed : PROJECT_SYSTEM_VIEWS.filter((v) => v.id === "system_my_active_portfolio");
+    const def = list.find((v) => v.id === "system_my_active_projects" && navAccess.role !== "member") ?? list.find((v) => v.id === "system_my_active_portfolio") ?? list[0];
+    projectViews.installSystemViews(list, def.id, migrateProjectScope);
     // installSystemViews is intentionally idempotent; PROJECT_SYSTEM_VIEWS is
     // module-level and stable so this only changes state when the saved set
     // actually differs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectViews.loaded]);
+  }, [projectViews.loaded, navAccess.loaded, navAccess.views]);
 
   function updateProjectView(patch: Partial<TableView>) {
     const active = projectViews.activeView;
@@ -5513,10 +5520,13 @@ export default function Projects() {
   });
 
   useEffect(() => {
-    if (!taskViews.loaded) return;
-    taskViews.installSystemViews(TASK_SYSTEM_VIEWS, "system_tasks_my_open", migrateTaskScope);
+    if (!taskViews.loaded || !navAccess.loaded) return;
+    const allowed = TASK_SYSTEM_VIEWS.filter((v) => navAccess.views.has(v.id));
+    const list = allowed.length ? allowed : TASK_SYSTEM_VIEWS.filter((v) => v.id === "system_tasks_my_open");
+    const def = list.find((v) => v.id === "system_tasks_my_open") ?? list[0];
+    taskViews.installSystemViews(list, def.id, migrateTaskScope);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskViews.loaded]);
+  }, [taskViews.loaded, navAccess.loaded, navAccess.views]);
 
   // Same System View edit rule as updateProjectView.
   function updateTaskView(patch: Partial<TableView>) {
@@ -5964,7 +5974,7 @@ export default function Projects() {
       />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <div>
-          <h1 style={{ margin: 0 }}>Projects &amp; Tasks</h1>
+          <h1 style={{ margin: 0, display: "flex", alignItems: "baseline", gap: 12 }}>Projects &amp; Tasks <RecycleBinLink /></h1>
         </div>
         {/* phase127g (Sandra 2026-10-01): header "Add New Project" button,
             styled like Time Tracking's Add Time pill. Same createBlankProject

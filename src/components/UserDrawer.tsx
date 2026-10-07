@@ -1,3 +1,5 @@
+import NavAccessSection from "./NavAccessSection";
+import type { NavPage, NavRole } from "../lib/navAccess";
 import { createPortal } from "react-dom";
 import { X, Pencil } from "lucide-react";
 import type { CSSProperties } from "react";
@@ -61,6 +63,8 @@ export interface UserDrawerProps {
   meId?: string;
   onSaveColor: (hex: string | null) => void;
   onToggleTracksTime: (value: boolean) => void;
+  // 2026-10-07 (item E): role + sidebar pages + System Views.
+  onUpdateNav?: (patch: { nav_role?: NavRole | null; page_access?: Partial<Record<NavPage, boolean>> | null; system_views?: string[] | null }) => void;
 }
 
 function initialsFor(name: string): string {
@@ -139,6 +143,7 @@ export default function UserDrawer({
   onToggleApprovalFlag,
   onSaveColor,
   onToggleTracksTime,
+  onUpdateNav,
 }: UserDrawerProps) {
   const { alert, dialog } = useConfirm();
   const manager = people.find((x) => x.id === person.reports_to);
@@ -360,12 +365,15 @@ export default function UserDrawer({
             )}
           </Section>
 
+          <Section title="Role, sidebar and views">
+            <NavAccessSection person={person} isEdit={isEdit && !!onUpdateNav} onUpdate={(patch) => onUpdateNav?.(patch)} />
+          </Section>
+
           {/* phase132 (Sandra): per-user page access. Admin pages also need Full Access. */}
-          <Section title="Page access">
+          <Section title="Admin page access">
             {(() => {
               const isFull = person.access_level === "full";
               const items: { field: "can_view_team_dashboard" | "can_access_user_management" | "can_access_reports" | "can_access_site_settings"; label: string; admin: boolean }[] = [
-                { field: "can_view_team_dashboard", label: "Team Dashboard", admin: false },
                 { field: "can_access_user_management", label: "User Management", admin: true },
                 { field: "can_access_reports", label: "Reports", admin: true },
                 { field: "can_access_site_settings", label: "Site Settings", admin: true },

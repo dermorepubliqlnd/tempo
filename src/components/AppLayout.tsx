@@ -26,6 +26,7 @@ import { useSession } from "../lib/useSession";
 import { useApprovalAuthority } from "../lib/useApprovalAuthority";
 import TimeTrackerBar from "./TimeTrackerBar";
 import TempoMark from "./TempoMark";
+import { useNavAccess, NAV_PAGES } from "../lib/navAccess";
 
 type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
@@ -129,7 +130,14 @@ export default function AppLayout() {
   const groups = adminVisible.length ? [mainItems, adminVisible] : [mainItems];
   const hasApprovalAuthority = useApprovalAuthority();
   // 2026-10-02: Approval Center visible to all (non-approvers see My Requests only).
-  const visibleMainItems = mainItems.filter((i) => i.to !== "/team-dashboard" || canAccessPage(person, "team_dashboard"));
+  // 2026-10-07 (item E): role-based sidebar (lib/navAccess.ts).
+  const nav = useNavAccess(person);
+  const pageAllowed = (to: string) => {
+    const pg = NAV_PAGES.find((x) => x.route === to);
+    return !pg || nav.pages[pg.key];
+  };
+  const visibleMainItems = mainItems.filter((i) => pageAllowed(i.to));
+  const visibleResourceItems = resourcePlanningItems.filter((i) => pageAllowed(i.to));
   void hasApprovalAuthority;
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -240,7 +248,7 @@ export default function AppLayout() {
 
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", display: "flex", flexDirection: "column" }}>
           <NavGroup title="Main" items={visibleMainItems} collapsed={collapsed} />
-          <NavGroup title="Resource Planning" items={resourcePlanningItems} collapsed={collapsed} />
+          {visibleResourceItems.length > 0 && <NavGroup title="Resource Planning" items={visibleResourceItems} collapsed={collapsed} />}
           {groups.length > 1 && <NavGroup title="Admin" items={adminVisible} collapsed={collapsed} />}
           <div className="nav-spacer" style={{ flex: 1 }} />
         </div>

@@ -1,3 +1,5 @@
+import { useNavAccess, type NavPage } from "./lib/navAccess";
+import type { ReactNode } from "react";
 import { useSession } from "./lib/useSession";
 import { canAccessPage } from "./lib/pageAccess";
 import { HashRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
@@ -32,9 +34,16 @@ import SetPassword from "./pages/SetPassword";
 // is on the task itself). The page file is kept, just unrouted.
 // phase132: Team Dashboard is a per-user toggle (User Management).
 function TeamDashboardGate() {
+  return <PageGate page="team_dashboard"><TeamDashboard /></PageGate>;
+}
+
+// 2026-10-07 (item E): pages hidden for someone's role (User Management)
+// also close their route. Archive stays reachable (Recycle bin links).
+function PageGate({ page, children }: { page: NavPage; children: ReactNode }) {
   const { person, loading } = useSession();
-  if (loading || !person) return null;
-  return canAccessPage(person, "team_dashboard") ? <TeamDashboard /> : <Navigate to="/" replace />;
+  const nav = useNavAccess(person);
+  if (loading || !person || !nav.loaded) return null;
+  return nav.pages[page] ? <>{children}</> : <Navigate to="/" replace />;
 }
 
 function ExtensionRequestsRedirect() {
@@ -100,19 +109,19 @@ export default function App() {
               redirect straight to /wbs instead of breaking. */}
           <Route path="/projects/:projectId/baseline" element={<RedirectToWbs />} />
           <Route path="/projects/:projectId/audit-trail" element={<AuditTrail />} />
-          <Route path="/knowledge-base" element={<KnowledgeBase />} />
-          <Route path="/knowledge-base/category/:categoryId" element={<KnowledgeBase />} />
-          <Route path="/knowledge-base/article/:entryId" element={<KnowledgeBase />} />
+          <Route path="/knowledge-base" element={<PageGate page="knowledge_base"><KnowledgeBase /></PageGate>} />
+          <Route path="/knowledge-base/category/:categoryId" element={<PageGate page="knowledge_base"><KnowledgeBase /></PageGate>} />
+          <Route path="/knowledge-base/article/:entryId" element={<PageGate page="knowledge_base"><KnowledgeBase /></PageGate>} />
           <Route path="/archive" element={<Archive />} />
-          <Route path="/feedback" element={<Feedback />} />
+          <Route path="/feedback" element={<PageGate page="feedback"><Feedback /></PageGate>} />
           <Route path="/tasks" element={<Navigate to="/projects?tab=tasks" replace />} />
           <Route path="/tasks/:taskId" element={<Navigate to="/projects?tab=tasks" replace />} />
           <Route path="/approval-center" element={<ApprovalCenterGate />} />
           <Route path="/extension-requests" element={<ExtensionRequestsRedirect />} />
           <Route path="/time-tracking" element={<TimeTracking />} />
-          <Route path="/utilization" element={<Utilization />} />
-          <Route path="/hours-overview" element={<HoursOverview />} />
-          <Route path="/time-off" element={<TimeOff />} />
+          <Route path="/utilization" element={<PageGate page="utilization"><Utilization /></PageGate>} />
+          <Route path="/hours-overview" element={<PageGate page="productivity"><HoursOverview /></PageGate>} />
+          <Route path="/time-off" element={<PageGate page="time_off"><TimeOff /></PageGate>} />
           <Route path="/admin" element={<Admin />} />
           <Route path="/site-settings" element={<SiteSettings />} />
           <Route path="/reports" element={<Reports />} />
