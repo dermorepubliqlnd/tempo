@@ -2529,6 +2529,88 @@ export default function Projects() {
   // above). Deleting a task is always via checkbox selection + the bulk
   // Delete button (bulkDeleteTasks below) -- there's no separate per-row
   // delete affordance since selecting one row already surfaces Delete.
+  // 2026-10-07 (Sandra, item L): the ONE path into Done -- Reported
+  // Completion cell, board drag and bulk Status all go through here, so the
+  // logged-hours / Output Count checks and the confirm can't be skipped.
+  async function markTaskDone(t: TaskRow, v: string, fromBoard = false): Promise<void> {
+    // 2026-09-22 (Sandra: "make output count a hard
+    // requirement too" + "when there's missing information
+    // before tagging completion date, all needed information
+    // as asked" -- both gates now checked together, up front,
+    // with every missing item named at once rather than one
+    // alert per field) -- Logged Hours (Confirmed/Approved)
+    // and Output Count are both required before Actual
+    // Completion Date can be set at all.
+    const scoped = t.estimated_hours;
+    const logged = spentHoursFor(t.id);
+    const outputCount = t.output_count;
+    // phase163 (Sandra 2026-10-07): "No Deliverable" types are
+    // always 0 (no question asked); every other output type
+    // needs a whole number of 1 or more.
+    const outType = outputTypes.find((o) => o.id === t.output_type_id);
+    const countsDeliverable = !!outType && outType.counts_deliverable !== false;
+    const missing: string[] = [];
+    if (ownHoursFor(timeEntries, t.id) <= 0) {
+      missing.push("- **Logged Hours** -- no Confirmed/Approved time logged on this task yet. Log time first.");
+    }
+    if (countsDeliverable && (outputCount === null || outputCount === undefined || outputCount < 1)) {
+      missing.push(`- **Output Count** -- enter how many ${outType?.name ?? "outputs"} this task produced (1 or more) in the Output Count column first.`);
+    }
+    if (missing.length) {
+      await alert({
+        title: "Can't set Reported Completion Date yet",
+        message: `This task is missing required information before it can be tagged complete:\n\n${missing.join("\n")}`,
+      });
+      return;
+    }
+    // 2026-09-22 (Sandra: "we have output count that is 0,
+    // can you add a verifying layer if output count is 0 to
+    // confirm there was really no output for this task") --
+    // Output Count = 0 passes the "is it set" check above (0
+    // is a real, deliberate value, not missing), but it's
+    // also the easiest value to leave behind by accident, so
+    // it gets its own extra confirmation, separate from and
+    // before the general completion confirm below. Cancelling
+    // here aborts the whole commit so nothing gets saved.
+    if (outputCount === 0 && countsDeliverable) {
+      const zeroOk = await confirm({
+        title: "Output Count is 0",
+        message:
+          `**Output Count** is set to 0 for this task. Confirm that this task genuinely produced no output.\n\n` +
+          `If that's not right, cancel and enter the actual number in the Output Count column first.`,
+        confirmLabel: "Yes, 0 is correct",
+        cancelLabel: "Cancel, let me fix it",
+      });
+      if (!zeroOk) return;
+    }
+    // 2026-09-22 (Sandra: "before accepting completion date
+    // ask user to confirm logged hours and output count") --
+    // one last look at the numbers behind this task, with the
+    // two required fields bolded, before it locks Status to
+    // Done.
+    const ok = await confirm({
+      title: "Confirm task completion",
+      message:
+        `Estimated Hours: ${scoped != null ? scoped : "—"}\n` +
+        `**Logged Hours**: ${logged.toFixed(2)}\n` +
+        `**Output Count**: ${outputCount}\n\n` +
+        `Marking ${formatDate(v)} as the Reported Completion Date will move this task's Status to Done. Confirm these are correct?${fromBoard ? "\n\nFor a different date, cancel and set **Reported Completion** in the table." : ""}`,
+      confirmLabel: "Confirm & mark Done",
+    });
+    if (!ok) return;
+    const patch: Partial<TaskRow> = {
+      actual_completion_date: v,
+      status: "Done",
+      submitted_on: new Date().toISOString(),
+      submitted_by: me?.id ?? null,
+    };
+    await updateTask(t.id, patch);
+    await recomputeAncestorStatus(
+      t.id,
+      tasks.map((row) => (row.id === t.id ? { ...row, ...patch } : row))
+    );
+  }
+
   async function bulkUpdateTasks(patch: Partial<TaskRow>) {
     let ids = selectedTaskIds;
     if (ids.length === 0) return;
@@ -4773,82 +4855,7 @@ export default function Projects() {
                   );
                   return;
                 }
-                // 2026-09-22 (Sandra: "make output count a hard
-                // requirement too" + "when there's missing information
-                // before tagging completion date, all needed information
-                // as asked" -- both gates now checked together, up front,
-                // with every missing item named at once rather than one
-                // alert per field) -- Logged Hours (Confirmed/Approved)
-                // and Output Count are both required before Actual
-                // Completion Date can be set at all.
-                const scoped = t.estimated_hours;
-                const logged = spentHoursFor(t.id);
-                const outputCount = t.output_count;
-                // phase163 (Sandra 2026-10-07): "No Deliverable" types are
-                // always 0 (no question asked); every other output type
-                // needs a whole number of 1 or more.
-                const outType = outputTypes.find((o) => o.id === t.output_type_id);
-                const countsDeliverable = !!outType && outType.counts_deliverable !== false;
-                const missing: string[] = [];
-                if (ownHoursFor(timeEntries, t.id) <= 0) {
-                  missing.push("- **Logged Hours** -- no Confirmed/Approved time logged on this task yet. Log time first.");
-                }
-                if (countsDeliverable && (outputCount === null || outputCount === undefined || outputCount < 1)) {
-                  missing.push(`- **Output Count** -- enter how many ${outType?.name ?? "outputs"} this task produced (1 or more) in the Output Count column first.`);
-                }
-                if (missing.length) {
-                  await alert({
-                    title: "Can't set Reported Completion Date yet",
-                    message: `This task is missing required information before it can be tagged complete:\n\n${missing.join("\n")}`,
-                  });
-                  return;
-                }
-                // 2026-09-22 (Sandra: "we have output count that is 0,
-                // can you add a verifying layer if output count is 0 to
-                // confirm there was really no output for this task") --
-                // Output Count = 0 passes the "is it set" check above (0
-                // is a real, deliberate value, not missing), but it's
-                // also the easiest value to leave behind by accident, so
-                // it gets its own extra confirmation, separate from and
-                // before the general completion confirm below. Cancelling
-                // here aborts the whole commit so nothing gets saved.
-                if (outputCount === 0 && countsDeliverable) {
-                  const zeroOk = await confirm({
-                    title: "Output Count is 0",
-                    message:
-                      `**Output Count** is set to 0 for this task. Confirm that this task genuinely produced no output.\n\n` +
-                      `If that's not right, cancel and enter the actual number in the Output Count column first.`,
-                    confirmLabel: "Yes, 0 is correct",
-                    cancelLabel: "Cancel, let me fix it",
-                  });
-                  if (!zeroOk) return;
-                }
-                // 2026-09-22 (Sandra: "before accepting completion date
-                // ask user to confirm logged hours and output count") --
-                // one last look at the numbers behind this task, with the
-                // two required fields bolded, before it locks Status to
-                // Done.
-                const ok = await confirm({
-                  title: "Confirm task completion",
-                  message:
-                    `Estimated Hours: ${scoped != null ? scoped : "—"}\n` +
-                    `**Logged Hours**: ${logged.toFixed(2)}\n` +
-                    `**Output Count**: ${outputCount}\n\n` +
-                    `Marking ${formatDate(v)} as the Reported Completion Date will move this task's Status to Done. Confirm these are correct?`,
-                  confirmLabel: "Confirm & mark Done",
-                });
-                if (!ok) return;
-                const patch: Partial<TaskRow> = {
-                  actual_completion_date: v,
-                  status: "Done",
-                  submitted_on: new Date().toISOString(),
-                  submitted_by: me?.id ?? null,
-                };
-                await updateTask(t.id, patch);
-                await recomputeAncestorStatus(
-                  t.id,
-                  tasks.map((row) => (row.id === t.id ? { ...row, ...patch } : row))
-                );
+                await markTaskDone(t, v);
               }}
             />
           );
@@ -5442,7 +5449,12 @@ export default function Projects() {
     // Validation actions now -- dragging a card between Assignee or
     // Effort board columns used to silently reassign/re-score the task,
     // which is a structural edit that now belongs in WBS Planning only.
-    if (groupBy === "status") return (t, v) => updateTask(t.id, { status: v || null });
+    if (groupBy === "status") return (t, v) => {
+      // 2026-10-07 (item L): Done and Cancelled go through their real paths.
+      if (v === "Done") { markTaskDone(t, toISOWorkingDay(new Date()), true); return; }
+      if (v === "Cancelled") { setCancelTaskDialog({ taskIds: [t.id], label: `"${t.name}"` }); return; }
+      updateTask(t.id, { status: v || null, submitted_on: null, submitted_by: null, actual_completion_date: null });
+    };
     return undefined; // assignee, effort, work_type, project, timing, due_date_ext: read-only board
   }
 
@@ -6581,7 +6593,13 @@ export default function Projects() {
                     setCancelTaskDialog({ taskIds: ids, label: `${ids.length} task${ids.length > 1 ? "s" : ""}` });
                     return;
                   }
-                  bulkUpdateTasks({ status: v || null });
+                  // 2026-10-07 (item L): Done needs each task's own Reported
+                  // Completion checks, so it can't be bulk-set.
+                  if (v === "Done") {
+                    alert({ title: "Mark tasks Done one at a time", message: "Done needs each task's logged hours and Output Count checked. Set **Reported Completion** on each task instead." });
+                    return;
+                  }
+                  bulkUpdateTasks({ status: v || null, ...(v !== "Done" ? { submitted_on: null, submitted_by: null, actual_completion_date: null } : {}) });
                 }}
               />
             </div>

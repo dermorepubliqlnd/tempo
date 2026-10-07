@@ -7,10 +7,9 @@ import { confirmTimeEntry, resumeTimer, discardTimerEntry, formatDuration, DISCA
 // idle auto-stop produces a pending_confirm row (see TimeTrackingContext).
 // Exactly two choices, no third "decide later" escape hatch (Sandra
 // explicitly removed that): Continue work resumes the same entry from its
-// original start time (undoes the stop); Confirm locks it in. Closing the
-// modal any other way (X, backdrop, Escape) is treated the same as
-// Continue work -- there's no dismiss action that leaves an entry
-// dangling unconfirmed.
+// original start time (undoes the stop); Confirm locks it in.
+// 2026-10-07 (Sandra): no X and no backdrop close any more -- closing it by
+// accident used to count as Continue work and silently restart the timer.
 //
 // Start/end use separate date + time fields rather than a single
 // <input type="datetime-local"> -- that control's displayed time format
@@ -108,7 +107,7 @@ export default function ConfirmTimeEntryModal({
   }
 
   return (
-    <Modal title="Confirm time entry" onClose={handleContinue}>
+    <Modal title="Confirm time entry" onClose={handleContinue} requireChoice>
       <div style={{ fontSize: 12.5 }}>
         {entry.auto_stopped && (
           <div className="status-pill warning" style={{ marginBottom: 10, display: "inline-block" }}>
