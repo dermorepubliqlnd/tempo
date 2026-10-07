@@ -151,7 +151,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     const y = d.ytd;
     const m = y.mix;
     const s = content("Work mix & effort allocation", t.titles.mix, "mix");
-    card(s, 0.33, 1.55, 7.85, 5.07, "Scoped hours by Project Type, split by Planning Type",
+    card(s, 0.33, 1.55, 7.85, 5.07, "Estimated hours by Project Type, split by Planning Type",
       `Year to date (${fmtMD(y.start)} – ${fmtMD(y.end)}) · ${h0(m.total)} across ${plural(m.projects, "project")}`);
     const PT_COLORS = [B.hydrate, B.protect, B.clarify, B.rewind, B.calm, B.taupe];
     if (m.bars.length) {

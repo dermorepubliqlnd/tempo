@@ -632,7 +632,7 @@ export default function HoursOverview() {
 
   const taskHourSortOptions: SortOption<TaskHourRowData>[] = [
     { key: "variance", label: "Variance (largest first)", getValue: (r) => Math.abs(r.variance) },
-    { key: "scoped", label: "Scoped hours", getValue: (r) => r.scoped },
+    { key: "scoped", label: "Estimated hours", getValue: (r) => r.scoped },
     { key: "logged", label: "Logged hours", getValue: (r) => r.logged },
     { key: "name", label: "Task name", getValue: (r) => r.name },
     { key: "current_due_date", label: "Due date", getValue: (r) => (r.dueDate ? new Date(r.dueDate).getTime() : null) },
@@ -698,7 +698,7 @@ export default function HoursOverview() {
     },
     {
       key: "scoped",
-      label: "Scoped",
+      label: "Estimated",
       defaultWidth: 90,
       render: (r) => <div style={{ textAlign: "right" }}>{r.scoped.toFixed(2)}h</div>,
     },
@@ -775,7 +775,7 @@ export default function HoursOverview() {
       r.logged.toFixed(2),
       r.variance.toFixed(2),
     ]);
-    const csv = toCsv(["Team Member", "Project", "Task", "Task ID", "Status", "Due", "Timing", "Time Log Status", "Scoped (h)", "Logged (h)", "Variance (h)"], rows);
+    const csv = toCsv(["Team Member", "Project", "Task", "Task ID", "Status", "Due", "Timing", "Time Log Status", "Estimated (h)", "Logged (h)", "Variance (h)"], rows);
     downloadCsv(csv, `productivity_per_task_${toISO(new Date())}.csv`);
   }
 
@@ -794,7 +794,7 @@ export default function HoursOverview() {
         rows.push([person.name, dateStr, scoped.toFixed(2), logged.toFixed(2)]);
       }
     }
-    const csv = toCsv(["Team Member", "Date", "Scoped (h)", "Logged (h)"], rows);
+    const csv = toCsv(["Team Member", "Date", "Estimated (h)", "Logged (h)"], rows);
     downloadCsv(csv, `daily_activity_${toISO(rangeStart)}_to_${toISO(rangeEnd)}.csv`);
   }
 
@@ -1283,7 +1283,7 @@ export default function HoursOverview() {
               onViewChange={taskHourViews.updateActiveView}
               groupOptions={taskHourGroupOptions}
               sortOptions={taskHourSortOptions}
-              emptyLabel="No tasks with Scoped or Logged hours yet."
+              emptyLabel="No tasks with Estimated or Logged hours yet."
               groupFooterRow={(colSpan, group) => {
                 const groupScoped = group.rows.reduce((sum, r) => sum + r.scoped, 0);
                 const groupLogged = group.rows.reduce((sum, r) => sum + r.logged, 0);

@@ -134,7 +134,7 @@ export type TimeLogStatus = "none" | "pending" | "finalized";
 // Shared display strings/tones -- centralized here (not redefined per
 // page) so Time Log Status reads identically everywhere it's shown (the
 // same drift class flagged in [[project_capaciq_logged_hours_6tier_bands_2026_09_23]]).
-export const TIME_LOG_STATUS_LABEL: Record<TimeLogStatus, string> = { none: "—", pending: "Pending", finalized: "Finalized" };
+export const TIME_LOG_STATUS_LABEL: Record<TimeLogStatus, string> = { none: "—", pending: "Awaiting approval", finalized: "Final" };
 export const TIME_LOG_STATUS_TONE: Record<TimeLogStatus, string> = { none: "neutral", pending: "warning", finalized: "success" };
 
 type TimeLogStatusEntry = Pick<TimeEntryRow, "task_id" | "status" | "is_archived">;

@@ -19,7 +19,7 @@ const GROUP_META: Record<Group, { label: string; plural: string; tone: string; i
   extension: { label: "Extension", plural: "Extension Requests", tone: "gold", icon: <CalendarClock size={13} /> },
   time: { label: "Time Entry", plural: "Time Entries", tone: "accent", icon: <Timer size={13} /> },
   correction: { label: "Time Correction", plural: "Time Corrections", tone: "skyblue", icon: <FilePen size={13} /> },
-  baseline: { label: "Project Start", plural: "Project Start", tone: "purple", icon: <ShieldCheck size={13} /> },
+  baseline: { label: "Start Project request", plural: "Start Project requests", tone: "purple", icon: <ShieldCheck size={13} /> },
   closure: { label: "Project Close", plural: "Project Close", tone: "mint", icon: <FolderCheck size={13} /> },
   task_completion: { label: "Task Validation", plural: "Task Validations", tone: "success", icon: <ListChecks size={13} /> },
 };

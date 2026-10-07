@@ -994,7 +994,7 @@ const TASK_CARD_DEFAULT = { primary: ["task_number", "project", "assignee", "cur
 const PROJECT_CARD_DEFAULT = { primary: ["project_number", "owner", "end_date", "actual_progress"], secondary: ["estimated_hours", "time_spent_hours", "days_extended", "priority"] };
 const CARD_SHORT_LABELS: Record<string, string> = {
   task_number: "ID", project_number: "ID", current_due_date: "Due", end_date: "Due", start_date: "Start",
-  estimated_hours: "Scoped", time_spent_hours: "Spent", due_date_ext: "Ext.", days_extended: "Extended",
+  estimated_hours: "Estimated", time_spent_hours: "Logged", due_date_ext: "Ext.", days_extended: "Extended",
   actual_progress: "Progress", hours_variance: "Var.", hours_variance_pct: "Var. %", time_log_status: "Logs",
   actual_completion_date: "Reported", validated_completion_date: "Confirmed", validated_by: "Validated by",
 };
@@ -2369,7 +2369,7 @@ export default function Projects() {
     }
     setExtensionProject(null);
     await alert(
-      "Timeline change request submitted -- it goes to your manager (or Full Access) for approval. The project's due date only moves once it's approved."
+      "Extension request submitted -- it goes to your supervisor (or Full Access) for approval. The project's due date only moves once it's approved."
     );
   }
 
@@ -3160,7 +3160,7 @@ export default function Projects() {
       },
       {
         key: "estimated_hours",
-        label: "Scoped Hours",
+        label: "Estimated Hours",
         defaultWidth: 90,
         maxWidth: 120,
         render: (p) => {
@@ -3170,7 +3170,7 @@ export default function Projects() {
       },
       {
         key: "time_spent_hours",
-        label: "Spent hrs",
+        label: "Logged hrs",
         defaultWidth: 100,
         maxWidth: 130,
         render: (p) => {
@@ -3206,7 +3206,7 @@ export default function Projects() {
       },
       {
         key: "hours_variance_pct",
-        label: "Hrs Variance %",
+        label: "% of estimate",
         defaultWidth: 120,
         maxWidth: 150,
         render: (p) => {
@@ -3961,8 +3961,8 @@ export default function Projects() {
     { key: "my_hours", label: "My Hours", getValue: (p) => (myStatsByProject.get(p.id)?.hasTasks ? myStatsByProject.get(p.id)!.spent : null) },
     { key: "health", label: "Health", getValue: (p) => healthRank(healthOf(p, tasks, holidayDates).label) },
     { key: "actual_progress", label: "Actual Progress", getValue: (p) => actualProgress(p.id, tasks) ?? -1 },
-    { key: "estimated_hours", label: "Scoped Hours", getValue: (p) => projectEstimatedHoursTotal(p.id, tasks) ?? -1 },
-    { key: "time_spent_hours", label: "Spent hrs", getValue: (p) => projectSpentHoursTotal(p.id, tasks, timeEntries, deletedSpentHours) },
+    { key: "estimated_hours", label: "Estimated Hours", getValue: (p) => projectEstimatedHoursTotal(p.id, tasks) ?? -1 },
+    { key: "time_spent_hours", label: "Logged hrs", getValue: (p) => projectSpentHoursTotal(p.id, tasks, timeEntries, deletedSpentHours) },
     {
       key: "hours_variance",
       label: "Hrs Variance",
@@ -3970,7 +3970,7 @@ export default function Projects() {
     },
     {
       key: "hours_variance_pct",
-      label: "Hrs Variance %",
+      label: "% of estimate",
       getValue: (p) => projectHoursVarianceOf(projectEstimatedHoursTotal(p.id, tasks), projectSpentHoursTotal(p.id, tasks, timeEntries, deletedSpentHours))?.percent ?? -1,
     },
     { key: "wbs_status", label: "WBS Status", getValue: (p) => (Object.keys(WBS_STATUS_META) as WbsStatus[]).indexOf(p.wbs_status) },
@@ -4522,7 +4522,7 @@ export default function Projects() {
       },
       {
         key: "validated_completion_date",
-        label: "Confirmed Completion Date",
+        label: "Validated date",
         defaultWidth: 160,
         minWidth: 140,
         // Independent completion check, distinct from the assignee's own
@@ -4831,7 +4831,7 @@ export default function Projects() {
                 const ok = await confirm({
                   title: "Confirm task completion",
                   message:
-                    `Scoped Hours: ${scoped != null ? scoped : "—"}\n` +
+                    `Estimated Hours: ${scoped != null ? scoped : "—"}\n` +
                     `**Logged Hours**: ${logged.toFixed(2)}\n` +
                     `**Output Count**: ${outputCount}\n\n` +
                     `Marking ${formatDate(v)} as the Reported Completion Date will move this task's Status to Done. Confirm these are correct?`,
@@ -4856,13 +4856,13 @@ export default function Projects() {
       },
       {
         key: "estimated_hours",
-        label: "Scoped Hours",
+        label: "Estimated Hours",
         defaultWidth: 90,
         maxWidth: 120,
         render: (t) => {
           const isParent = t._depth === 0 && hasChildren(t.id);
           return (
-            <span title={isParent ? "Computed from this task's own sub-tasks (sum of their Scoped Hours)" : undefined}>
+            <span title={isParent ? "Computed from this task's own sub-tasks (sum of their Estimated Hours)" : undefined}>
               <InlineNumber
                 value={t.estimated_hours}
                 editable={false}
@@ -4887,7 +4887,7 @@ export default function Projects() {
       },
       {
         key: "hours_variance_pct",
-        label: "Hrs Variance %",
+        label: "% of estimate",
         defaultWidth: 120,
         maxWidth: 150,
         render: (t) => {
@@ -4898,7 +4898,7 @@ export default function Projects() {
       },
       {
         key: "time_spent_hours",
-        label: "Spent hrs",
+        label: "Logged hrs",
         defaultWidth: 110,
         maxWidth: 140,
         alwaysVisible: true,
@@ -5332,7 +5332,7 @@ export default function Projects() {
     },
     {
       key: "due_date_ext",
-      label: "Due Date Ext.",
+      label: "Extension",
       getGroup: (t) => dueDateExtStatus(t).label,
       getTone: (t) => dueDateExtStatus(t).tone,
       allGroups: () => ["No Extension", "Shifted", "Requested", "Rejected", "Extended"],
@@ -5371,20 +5371,20 @@ export default function Projects() {
     { key: "current_due_date", label: "Due", getGroup: () => "", boardGroupable: false },
     {
       key: "due_date_ext",
-      label: "Due Date Ext.",
+      label: "Extension",
       getGroup: (t) => dueDateExtStatus(t).label,
       getTone: (t) => dueDateExtStatus(t).tone,
       boardGroupable: true,
     },
     {
       key: "estimated_hours",
-      label: "Scoped Hours",
+      label: "Estimated Hours",
       getGroup: () => "",
       boardGroupable: false,
     },
     {
       key: "time_spent_hours",
-      label: "Spent hrs",
+      label: "Logged hrs",
       getGroup: () => "",
       boardGroupable: false,
     },
@@ -5462,11 +5462,11 @@ export default function Projects() {
     { key: "start_date", label: "Start", getValue: (t) => (t.start_date ? new Date(t.start_date).getTime() : null) },
     { key: "timing", label: "Timing", getValue: (t) => (t._depth === 0 && hasChildren(t.id) ? -1 : timingRank(taskTiming(t).label)) },
     { key: "current_due_date", label: "Due", getValue: (t) => (t.current_due_date ? new Date(t.current_due_date).getTime() : null) },
-    { key: "estimated_hours", label: "Scoped Hours", getValue: (t) => t.estimated_hours ?? null },
-    { key: "time_spent_hours", label: "Spent hrs", getValue: (t) => spentHoursFor(t.id) },
+    { key: "estimated_hours", label: "Estimated Hours", getValue: (t) => t.estimated_hours ?? null },
+    { key: "time_spent_hours", label: "Logged hrs", getValue: (t) => spentHoursFor(t.id) },
     {
       key: "due_date_ext",
-      label: "Due Date Ext.",
+      label: "Extension",
       getValue: (t) => ["No Extension", "Shifted", "Requested", "Rejected", "Extended"].indexOf(dueDateExtStatus(t).label),
     },
     { key: "task_number", label: "Task ID", getValue: (t) => t.task_number },

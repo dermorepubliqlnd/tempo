@@ -157,10 +157,10 @@ interface CorrectionRequestRow {
 
 const STATUS_LABEL: Record<string, string> = {
   running: "Running",
-  pending_confirm: "Awaiting confirmation",
-  confirmed: "Confirmed",
-  pending_approval: "Pending approval",
-  approved: "Approved",
+  pending_confirm: "Needs confirming",
+  confirmed: "Final",
+  pending_approval: "Awaiting approval",
+  approved: "Final",
   rejected: "Rejected",
 };
 
@@ -1114,7 +1114,7 @@ export default function TimeTracking() {
   async function submitArchive(row: EntryRow, reason: string) {
     const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
     const ok = await confirm({
-      message: `Archive this ${formatDuration(row.duration_minutes)} entry for ${label}? It stops counting toward Spent Hrs, Productivity and dashboard totals. ${ARCHIVE_MOVE_NOTE}`,
+      message: `Archive this ${formatDuration(row.duration_minutes)} entry for ${label}? It stops counting toward Logged hrs, Productivity and dashboard totals. ${ARCHIVE_MOVE_NOTE}`,
       confirmLabel: "Archive",
       danger: true,
     });
@@ -1783,7 +1783,7 @@ export default function TimeTracking() {
                         </div>
                       )}
                       {row.auto_stopped && (
-                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>Auto-stopped after being idle</div>
+                        <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 2 }}>Auto-stopped after 4 hours</div>
                       )}
                     </td>
                     <td style={{ ...td, fontWeight: 700, color: "var(--navy)", whiteSpace: "nowrap" }}>
@@ -2127,7 +2127,7 @@ export default function TimeTracking() {
                 logging time can see at a glance how much is already on
                 the task and when it's due, without leaving this page.
                 Logged hours only counts Confirmed/Approved entries (same
-                rule Spent Hrs uses elsewhere -- see ownHoursFor). */}
+                rule Logged hrs uses elsewhere -- see ownHoursFor). */}
             {logMode === "project" && logTaskId &&
               (() => {
                 const selectedTask = myTasks.find((t) => t.id === logTaskId);
@@ -2596,7 +2596,7 @@ export default function TimeTracking() {
               for now (Sandra: "remove projects filter and more for now
               in the My time tracking") -- the underlying `filterProjectId`
               still works if a project is passed via the URL (e.g. the
-              Spent Hrs cell click-through from elsewhere in the app),
+              Logged hrs cell click-through from elsewhere in the app),
               there's just no visible control for it here right now. */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <div style={{ position: "relative", flex: "1 1 220px", minWidth: 180, maxWidth: 280 }}>

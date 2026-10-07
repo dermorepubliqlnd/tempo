@@ -979,7 +979,7 @@ export default function MyDashboard() {
         <MetricCard icon={<Folder size={16} />} colors={METRIC_COLORS.blue} label="My Active Projects" value={myProjects.length} />
         <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Tasks Due This Week" value={tasksThisWeek.length} />
         <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Items" value={overdueTasks.length} />
-        <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="Pending Approvals" value={myPendingApprovalsCount} />
+        <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="My pending requests" value={myPendingApprovalsCount} />
         <MetricCard icon={<BarChart3 size={16} />} colors={METRIC_COLORS.teal} label="Utilization This Week" value={`${Math.round(weekUtilPct)}%`} sub={`of ${weekCapacityTotal.toFixed(1)}h capacity`} />
         <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={notTrackingTime ? "Not expected to log time" : `of ${weekExpectedTotal.toFixed(1)}h expected`} />
       </div>

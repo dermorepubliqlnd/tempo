@@ -34,7 +34,7 @@ export const MY_REQUEST_KIND_LABEL: Record<MyRequestKind, string> = {
   correction: "Time Correction",
   extension: "Task Extension",
   project_extension: "Project Timeline Extension",
-  baseline: "Project Start",
+  baseline: "Start Project request",
   closure: "Project Close",
   task_completion: "Task Validation",
 };
@@ -158,7 +158,7 @@ export async function loadMyRequests(meId: string, sinceDays = 90): Promise<MyRe
     rows.push({
       key: `bl-${r.id}`,
       kind: "baseline",
-      typeLabel: "Project Start",
+      typeLabel: "Start Project request",
       refId: r.project?.project_number ? `P-${String(r.project.project_number).padStart(4, "0")}` : null,
       item: r.project?.name ?? "Project",
       context: "Start Project (lock baseline)",

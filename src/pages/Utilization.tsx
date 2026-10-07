@@ -2237,7 +2237,7 @@ export default function Utilization() {
                     </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 9.5, color: "var(--muted)" }}>Scoped Hours</div>
+                    <div style={{ fontSize: 9.5, color: "var(--muted)" }}>Estimated Hours</div>
                     <div style={{ marginTop: 4, border: "1px solid var(--border)", borderRadius: 9, padding: "8px 9px", background: "rgba(255,255,255,.72)", fontSize: 11, fontWeight: 600, color: "var(--navy)" }}>{Number(scenarioTask.estimated_hours ?? 0).toFixed(1)}h</div>
                   </div>
                 </div>
@@ -2828,7 +2828,7 @@ export default function Utilization() {
                               <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3 }}>{pTasks.length} task{pTasks.length === 1 ? "" : "s"} · {workloadScope === "active" ? "Planning" : "Historical"}</div>
                             </div>
                             <div style={{ textAlign: "center" }}>
-                              <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 2 }}>Scoped</div>
+                              <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 2 }}>Estimated</div>
                               <div style={{ fontSize: 14, fontWeight: 600, color: "var(--navy)" }}>{totalHours.toFixed(1)}h</div>
                             </div>
                             <div style={{ textAlign: "center" }}>
@@ -2839,7 +2839,7 @@ export default function Utilization() {
                           <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) 130px 125px 165px 165px", columnGap: 18, alignItems: "center", padding: "8px 12px", background: "rgba(15,35,65,.025)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
                             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Task</div>
                             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>Status</div>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>Scoped Hours</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>Estimated Hours</div>
                             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>Date Assigned</div>
                             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "center" }}>Week Coverage</div>
                           </div>
@@ -2985,7 +2985,7 @@ export default function Utilization() {
                     ) : (
                       <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "var(--surface)" }}>
                         <div style={{ display: "grid", gridTemplateColumns: "56px minmax(240px,1fr) 120px 105px 130px 150px 125px", gap: 10, padding: "8px 12px", background: "var(--hover-bg)", borderBottom: "1px solid var(--border)", alignItems: "center" }}>
-                          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Seq.</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Task</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Status</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "right" }}>Scoped Hours</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Date Assigned</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Week Coverage</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "right" }}>Selected Impact</div>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Seq.</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Task</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Status</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "right" }}>Estimated Hours</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Date Assigned</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)" }}>Week Coverage</div><div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textAlign: "right" }}>Selected Impact</div>
                         </div>
                         {pipelineRows.map((row, idx) => {
                           const project = projects.find((p) => p.id === row.task.project_id);

@@ -1614,7 +1614,7 @@ function TrainingDeliverySection({
               <th style={{ textAlign: "right" }}>Upcoming</th>
               <th style={{ textAlign: "right" }}>Past date, not Done</th>
               <th style={{ textAlign: "right" }}>Cancelled</th>
-              <th style={{ textAlign: "right" }}>Scoped hrs</th>
+              <th style={{ textAlign: "right" }}>Estimated hrs</th>
               <th style={{ textAlign: "right" }}>Logged hrs</th>
             </tr>
           </thead>

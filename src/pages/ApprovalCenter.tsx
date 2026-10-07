@@ -255,8 +255,8 @@ const KIND_META: Record<ApprovalKind, { label: string; pluralLabel: string; tone
   extension: { label: "Task Extension", pluralLabel: "Extension Requests", tone: "gold", icon: <CalendarClock size={13} /> },
   time: { label: "Time Entry", pluralLabel: "Time Entries", tone: "accent", icon: <Timer size={13} /> },
   correction: { label: "Time Correction", pluralLabel: "Time Corrections", tone: "skyblue", icon: <FilePen size={13} /> },
-  baseline: { label: "Baseline Approval", pluralLabel: "Baselines", tone: "purple", icon: <ShieldCheck size={13} /> },
-  closure: { label: "Project Close Request", pluralLabel: "Project Close Requests", tone: "mint", icon: <FolderCheck size={13} /> },
+  baseline: { label: "Start Project request", pluralLabel: "Start Project requests", tone: "purple", icon: <ShieldCheck size={13} /> },
+  closure: { label: "Close Project request", pluralLabel: "Close Project requests", tone: "mint", icon: <FolderCheck size={13} /> },
   task_completion: { label: "Task Completion", pluralLabel: "Task Validations", tone: "success", icon: <ListChecks size={13} /> },
 };
 
@@ -423,7 +423,7 @@ function ValidateActionCells({ row, busy, onValidate }: { row: TaskCompletionRow
           onChange={(e) => setDate(e.target.value)}
           max={(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; })()}
           min={row.actual_completion_date ? row.actual_completion_date.slice(0, 10) : undefined}
-          title="Confirmed Completion Date -- the date that gets locked in when you validate"
+          title="Validated date -- the completion date that is locked in when you validate"
           style={{ fontSize: 11.5, padding: "6px 7px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--navy)" }}
         />
       </td>
@@ -1117,7 +1117,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
         kind: "baseline",
         personId: row.requested_by,
         projectId: row.project_id,
-        typeLabel: "Baseline Approval",
+        typeLabel: "Start Project request",
         subject: proj?.name ?? "Untitled project",
         refId: projectIdLabel(row.project_id),
         context: "Baseline approval",
@@ -1621,7 +1621,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
               <th style={th}>Due Date</th>
               <th style={th}>Reported Completion</th>
               {autoOn && <th style={th}>Timing</th>}
-              <th style={th}>Confirmed Completion Date</th>
+              <th style={th}>Validated date</th>
               <th style={{ ...th, textAlign: "center" }}>Action</th>
             </tr>
           </thead>

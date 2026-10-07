@@ -974,8 +974,8 @@ function ExecutiveDashboard() {
         definition: "Members whose finalized logged hours are below expected hours on completed working days this week.", columns: ["Member", "Missing"], to: "/time-tracking?scope=all", toLabel: "Time Tracking",
         rows: [...missing.members].sort((x, y) => y.hours - x.hours).map((m) => ({ cells: [m.person.name, `${m.hours.toFixed(1)}h`], to: "/time-tracking?scope=all" })) },
       { key: "gaps", tier: 4, tone: "amber", icon: <FileWarning size={16} />, label: "Planning gaps", context: "Started projects", value: a.planningGaps.length, sub: "No assignee or hours",
-        definition: "Open tasks in started projects with no Assignee or no Scoped Hours -- invisible to Utilization. Draft projects are not counted.", columns: ["Task", "Project", "Assignee", "Missing"], to: "/projects", toLabel: "Projects & Tasks",
-        rows: a.planningGaps.map((t) => taskRow(t, [[!t.assignee_id && "Assignee", !t.estimated_hours && "Scoped Hours"].filter(Boolean).join(", ")])) },
+        definition: "Open tasks in started projects with no Assignee or no Estimated Hours -- invisible to Utilization. Draft projects are not counted.", columns: ["Task", "Project", "Assignee", "Missing"], to: "/projects", toLabel: "Projects & Tasks",
+        rows: a.planningGaps.map((t) => taskRow(t, [[!t.assignee_id && "Assignee", !t.estimated_hours && "Estimated Hours"].filter(Boolean).join(", ")])) },
     ];
   }
 
@@ -1159,7 +1159,7 @@ function ExecutiveDashboard() {
               <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
                 <span className="exec-title">Work Mix &amp; Effort Allocation</span>
                 <span className="exec-caption">
-                  Scoped Hours by type · {periodTag} · {fmtH(workMix.total)} across {workMix.projects} project{workMix.projects === 1 ? "" : "s"}
+                  Estimated Hours by type · {periodTag} · {fmtH(workMix.total)} across {workMix.projects} project{workMix.projects === 1 ? "" : "s"}
                 </span>
               </div>
               <label className="exec-toggle" title="Only count projects whose Status is In Progress today">
@@ -1173,7 +1173,7 @@ function ExecutiveDashboard() {
               <MixDonut title="By Project Type" segments={workMix.typeSegs} total={workMix.total} />
               <div className="exec-chart-card">
                 <div className="exec-kpi-label" style={{ fontSize: 12.5, color: "var(--navy)" }}>Project Type × Planning Type</div>
-                <div className="exec-kpi-context" style={{ marginBottom: 10 }}>Scoped Hours per Project Type, split by Planning Type</div>
+                <div className="exec-kpi-context" style={{ marginBottom: 10 }}>Estimated Hours per Project Type, split by Planning Type</div>
                 <StackedBars bars={workMix.bars} legend={workMix.planSegs} />
               </div>
             </div>

@@ -129,7 +129,7 @@ function splitCsvRows(text: string): string[][] {
 
 function downloadTemplate() {
   const csv = [
-    "Session,Start Date,End Date,Scoped Hours,Trainer",
+    "Session,Start Date,End Date,Estimated Hours,Trainer",
     '"TS-2026-074 - NEO",2026-10-09,2026-10-09,4,"Fritzie Dipon"',
   ].join("\r\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -195,12 +195,13 @@ export default function BulkUploadSessionsModal({
       return;
     }
 
-    const header = rawRows[0].map(normalize);
+    // Estimated Hours (renamed from Scoped Hours, 2026-10-07) -- old templates still accepted.
+    const header = rawRows[0].map(normalize).map((h) => (h === "estimated hours" ? "scoped hours" : h));
     const required = ["session", "start date", "end date", "scoped hours", "trainer"];
     const indexes = Object.fromEntries(required.map((name) => [name, header.indexOf(name)])) as Record<string, number>;
     const missing = required.filter((name) => indexes[name] < 0);
     if (missing.length) {
-      setFileError(`Missing required column${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}.`);
+      setFileError(`Missing required column${missing.length === 1 ? "" : "s"}: ${missing.map((m) => (m === "scoped hours" ? "estimated hours" : m)).join(", ")}.`);
       return;
     }
 
@@ -228,7 +229,7 @@ export default function BulkUploadSessionsModal({
       if (!startDate) errors.push("Invalid Start Date");
       if (!endDate) errors.push("Invalid End Date");
       if (startDate && endDate && endDate < startDate) errors.push("End Date is before Start Date");
-      if (!Number.isFinite(hours) || hours <= 0 || hours > 12) errors.push("Scoped Hours must be > 0 and <= 12");
+      if (!Number.isFinite(hours) || hours <= 0 || hours > 12) errors.push("Estimated Hours must be > 0 and <= 12");
       if (!trainerText) errors.push("Trainer is required");
       else if (trainers.length === 0) errors.push("Trainer not found");
       else if (trainers.length > 1) errors.push("Trainer name matches multiple people");
@@ -300,7 +301,7 @@ export default function BulkUploadSessionsModal({
     <Modal title="Bulk Upload Sessions" onClose={busy ? () => {} : onClose} width={900}>
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.45 }}>
-          Temporary CSV uploader for <strong>{projectName}</strong>. Required columns: Session, Start Date, End Date, Scoped Hours, Trainer.
+          Temporary CSV uploader for <strong>{projectName}</strong>. Required columns: Session, Start Date, End Date, Estimated Hours, Trainer.
           Dates may be YYYY-MM-DD or MM/DD/YYYY.
         </div>
 

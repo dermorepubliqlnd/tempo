@@ -668,7 +668,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       bl(driverRows.map((r) => `${r.name} (${r.daysLate} days late) — ${r.what} Signal: ${r.signal}.`)),
     ].join("\n"),
     mix: [
-      `Effort allocation = Scoped Hours (task estimates) spread over each task's working days, counting only days from ${md(ytdStart)} to ${md(ytdEnd)}. ${h1(mixTotal)} across ${ytdByProject.size} projects. Same method as the Executive Dashboard's Work Mix & Effort Allocation.`,
+      `Effort allocation = Estimated Hours (task estimates) spread over each task's working days, counting only days from ${md(ytdStart)} to ${md(ytdEnd)}. ${h1(mixTotal)} across ${ytdByProject.size} projects. Same method as the Executive Dashboard's Work Mix & Effort Allocation.`,
       `By Project Type (and Planning Type split):`,
       bl(mixBars.map((b) => `${b.label}: ${h1(b.total)} (${mixTotal ? Math.round((b.total / mixTotal) * 100) : 0}%) — ${planTypes.map((pt) => `${pt.label} ${h1(b.parts[pt.label] ?? 0)}`).join(", ")}`)),
       `By Planning Type:`, bl(planTypes.map((pt) => `${pt.label}: ${h1(pt.value)} (${mixTotal ? Math.round((pt.value / mixTotal) * 100) : 0}%)`)),

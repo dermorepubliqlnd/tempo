@@ -472,7 +472,7 @@ export default function ProjectOverview() {
             </div>
             <div style={{ background: "var(--hover-bg)", borderRadius: 8, padding: "10px 11px" }}>
               <div style={{ fontSize: 15, fontWeight: 800 }}>{Math.round(scopedHours * 10) / 10}h</div>
-              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Scoped Hours</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Estimated Hours</div>
               {unassignedScopedHours > 0 && (
                 <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3 }}>
                   {Math.round(unassignedScopedHours * 10) / 10}h unassigned
@@ -492,7 +492,7 @@ export default function ProjectOverview() {
           <div style={{ marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 7 }}>
               <div>
-                <div style={{ fontSize: 11.5, fontWeight: 700 }}>Scoped Hours by Contributor</div>
+                <div style={{ fontSize: 11.5, fontWeight: 700 }}>Estimated Hours by Contributor</div>
                 <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 1 }}>Share of this project's scoped effort</div>
               </div>
               <div style={{ fontSize: 10, color: "var(--muted)" }}>{Math.round(scopedHours * 10) / 10}h total</div>

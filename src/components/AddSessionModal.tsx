@@ -150,7 +150,7 @@ export default function AddSessionModal({ projects, people, meId, isFullAccess, 
                 />
               </div>
               <div>
-                <div style={labelStyle}>Scoped hours</div>
+                <div style={labelStyle}>Estimated hours</div>
                 <input type="number" min={0.25} max={12} step={0.25} value={hours} onChange={(e) => setHours(e.target.value)} style={fieldStyle} />
               </div>
             </div>

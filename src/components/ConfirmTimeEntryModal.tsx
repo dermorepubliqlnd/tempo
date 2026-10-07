@@ -112,7 +112,7 @@ export default function ConfirmTimeEntryModal({
       <div style={{ fontSize: 12.5 }}>
         {entry.auto_stopped && (
           <div className="status-pill warning" style={{ marginBottom: 10, display: "inline-block" }}>
-            Auto-stopped after being idle -- please check these times
+            Auto-stopped after 4 hours -- please check these times
           </div>
         )}
         <p style={{ margin: "0 0 12px", color: "var(--muted)" }}>

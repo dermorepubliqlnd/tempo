@@ -94,7 +94,7 @@ export function wbsStatusMetaFor(
   }
   if (status === "draft" && hasPendingBaselineRequest) {
     return {
-      label: "Awaiting Baseline Approval",
+      label: "Awaiting Start",
       hint: "Start Project has been requested -- waiting on an approver to lock this in as the Baseline.",
       color: "var(--warning-text, #b45309)",
       bg: "var(--warning-bg, #fff7ed)",

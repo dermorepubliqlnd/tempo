@@ -5896,7 +5896,7 @@ export default function WbsPlanning() {
                 Reject
               </button>
               <button className="btn-primary" disabled={workflowBusy} onClick={() => handleDecideClosure(true)}>
-                Approve &amp; Close
+                Approve Close Project
               </button>
             </div>
           )}
@@ -7019,7 +7019,7 @@ export default function WbsPlanning() {
                   <ResizableTh colKey="work_type">Work Type</ResizableTh>
                   <ResizableTh colKey="output_type">Output Type <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
                   <ResizableTh colKey="output_count">Output Count</ResizableTh>
-                  <ResizableTh colKey="effort_hours">Scoped Hours <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
+                  <ResizableTh colKey="effort_hours">Estimated Hours <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
                   <ResizableTh colKey="spent_hrs">Logged Hours</ResizableTh>
                   <ResizableTh colKey="effort">Effort</ResizableTh>
                   <ResizableTh colKey="changes" title="vs the active Baseline">
@@ -7475,7 +7475,7 @@ export default function WbsPlanning() {
                         )}
                       </td>
                       <td className={rowEditable && !isParent ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("effort_hours", true, rowLocked)}>
-                        <span title={isParent ? "Computed from this task's own sub-tasks (sum of their Scoped Hours)" : undefined}>
+                        <span title={isParent ? "Computed from this task's own sub-tasks (sum of their Estimated Hours)" : undefined}>
                           <InlineNumber
                             value={t.estimated_hours}
                             editable={rowEditable && !isParent}
