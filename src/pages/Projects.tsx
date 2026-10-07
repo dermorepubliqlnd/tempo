@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FolderKanban, UserCheck, Users, Activity, ListTodo, BadgeCheck, Clock, Plus, CornerDownRight, ChevronRight, ChevronDown, Archive, ArchiveRestore, Trash2, Feather, Weight, BicepsFlexed, Flame, AlertTriangle, CalendarClock, CheckCircle2, X, RotateCcw, MessageCircle, Handshake, ShieldCheck, Cpu, Crown, TrendingUp, Wrench, Sparkles, Folder, Lock } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { fetchAllRows } from "../lib/fetchAllRows";
 import { splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useTableViews, SYSTEM_VIEW_PERSONAL_KEYS } from "../lib/useTableViews";
@@ -1639,7 +1640,7 @@ export default function Projects() {
       // Only confirmed/approved/legacy entries actually count toward Spent
       // Hrs (see rollupHoursFor) -- fetching just those keeps this list
       // small instead of pulling every running/pending/rejected row too.
-      supabase.from("time_entries").select("*").in("status", ["confirmed", "approved"]).eq("is_archived", false),
+      fetchAllRows<TimeEntryRow>((f, t) => supabase.from("time_entries").select("*").in("status", ["confirmed", "approved"]).eq("is_archived", false).order("id").range(f, t)),
       // Project Notes bubble/count (2026-08-14) -- just the project_id per
       // note, reduced client-side into a count map. The sidebar itself
       // fetches full note rows (body, timestamps, mentions) lazily only

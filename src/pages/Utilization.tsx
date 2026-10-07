@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ChevronLeft, ChevronRight, Minus, Plus, Circle, CheckCircle2, TrendingUp, Gauge, AlertTriangle, Info, X, Search, ArrowRight, Sparkles } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { fetchAllRows } from "../lib/fetchAllRows";
 import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
 import { buildHolidaySet } from "../lib/workingDays";
@@ -469,7 +470,7 @@ export default function Utilization() {
       supabase.from("holidays").select("*"),
       supabase.from("work_types").select("id,is_fixed_schedule"),
       supabase.from("project_owner_history").select("project_id,person_id,effective_from,effective_to"),
-      supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to"),
+      fetchAllRows((f, t) => supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to").order("id").range(f, t)),
       supabase.from("deleted_person_day_hours").select("person_id,date,hours"),
       supabase.from("app_settings").select("historical_locking_enabled").eq("id", true).single(),
     ]);

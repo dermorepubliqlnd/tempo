@@ -41,6 +41,7 @@ import {
   CheckCheck,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { fetchAllRows } from "../lib/fetchAllRows";
 import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from "../lib/workingDays";
 import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, isOpenTask, type UtilTaskRow, type UtilProjectRow } from "../lib/dailyAllocation";
 import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
@@ -295,7 +296,7 @@ function ExecutiveDashboard() {
       supabase.from("holidays").select("date"),
       supabase.from("person_availability").select("person_id,date,status"),
       supabase.from("project_owner_history").select("project_id,person_id,effective_from,effective_to"),
-      supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to"),
+      fetchAllRows((f, t) => supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to").order("id").range(f, t)),
       supabase.from("deleted_person_day_hours").select("person_id,date,hours"),
       supabase.from("app_settings").select("historical_locking_enabled,time_tracking_start_date").eq("id", true).single(),
       supabase.from("project_sources").select("id,name").order("sort_order"),

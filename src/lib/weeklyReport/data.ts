@@ -9,6 +9,7 @@
 //                        this + next week planned (allocation engine / capacity)
 //   * Development      = projects owned by anyone who is NOT a Trainer
 import { supabase } from "../supabaseClient";
+import { fetchAllRows } from "../fetchAllRows";
 import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from "../workingDays";
 import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, type UtilTaskRow, type UtilProjectRow } from "../dailyAllocation";
 import { healthOf, type ProjectRow, type TaskRow } from "../../pages/Projects";
@@ -132,7 +133,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     supabase.from("holidays").select("date"),
     supabase.from("person_availability").select("person_id,date,status"),
     supabase.from("project_owner_history").select("project_id,person_id,effective_from,effective_to"),
-    supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to"),
+    fetchAllRows((f, t) => supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to").order("id").range(f, t)),
     supabase.from("deleted_person_day_hours").select("person_id,date,hours"),
     supabase.from("app_settings").select("historical_locking_enabled,time_tracking_start_date").eq("id", true).single(),
     supabase.from("project_types").select("id,name,uses_sessions"),

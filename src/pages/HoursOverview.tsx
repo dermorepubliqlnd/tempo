@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } fr
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon, Download } from "lucide-react";
 import { timingWithPause, type PauseProjectInfo, type TimingResult } from "../lib/pause";
 import { supabase } from "../lib/supabaseClient";
+import { fetchAllRows } from "../lib/fetchAllRows";
 import { useSession } from "../lib/useSession";
 import { useSearchParams } from "react-router-dom";
 import { buildHolidaySet, toISO as toLocalISODate } from "../lib/workingDays";
@@ -260,15 +261,17 @@ export default function HoursOverview() {
           .from("tasks")
           .select("id,project_id,parent_task_id,name,assignee_id,status,start_date,current_due_date,estimated_hours,is_archived,task_number,submitted_on,validated_completion_date,actual_completion_date,cancelled_at")
           .eq("is_archived", false),
-        supabase
+        fetchAllRows((f, t) => supabase
           .from("time_entries")
           .select("id,entry_number,task_id,activity_type_id,person_id,started_at,duration_minutes,status,source,activity_type:non_project_activity_types ( id, name )")
           .in("status", ["confirmed", "approved"])
-          .eq("is_archived", false),
+          .eq("is_archived", false)
+          .order("id")
+          .range(f, t)),
         supabase.from("holidays").select("*"),
         supabase.from("person_availability").select("person_id,date,status"),
         supabase.from("project_owner_history").select("project_id,person_id,effective_from,effective_to"),
-        supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to"),
+        fetchAllRows((f, t) => supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to").order("id").range(f, t)),
         supabase.from("deleted_person_day_hours").select("person_id,date,hours"),
         supabase.from("app_settings").select("historical_locking_enabled").eq("id", true).single(),
       ]);

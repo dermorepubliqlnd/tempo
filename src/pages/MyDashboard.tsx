@@ -26,6 +26,7 @@ import {
 import { tierOf, displayPct, UTIL_LEGEND } from "../lib/utilizationBands";
 import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { supabase } from "../lib/supabaseClient";
+import { fetchAllRows } from "../lib/fetchAllRows";
 import Modal from "../components/Modal";
 import ApprovalCenter from "./ApprovalCenter";
 import RequestExtensionModal from "../components/RequestExtensionModal";
@@ -312,7 +313,7 @@ export default function MyDashboard() {
       supabase.from("holidays").select("date,name"),
       supabase.from("person_availability").select("person_id,date,status"),
       supabase.from("project_owner_history").select("project_id,person_id,effective_from,effective_to"),
-      supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to"),
+      fetchAllRows((f, t) => supabase.from("task_assignee_history").select("task_id,person_id,effective_from,effective_to").order("id").range(f, t)),
       supabase.from("deleted_person_day_hours").select("person_id,date,hours"),
       supabase.from("app_settings").select("historical_locking_enabled").eq("id", true).single(),
       supabase.from("output_types").select("id,name,sort_order").order("sort_order"),

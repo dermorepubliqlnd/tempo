@@ -23,6 +23,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { fetchAllRows } from "../lib/fetchAllRows";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { workingDayDelta, formatWorkingDayDelta } from "../lib/workingDays";
@@ -555,7 +556,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
         .is("validated_completion_date", null)
         .eq("is_archived", false)
         .order("submitted_on", { ascending: false }),
-      supabase.from("time_entries").select("task_id, duration_minutes, status").in("status", ["confirmed", "approved"]).eq("is_archived", false),
+      fetchAllRows((f, t) => supabase.from("time_entries").select("task_id, duration_minutes, status").in("status", ["confirmed", "approved"]).eq("is_archived", false).order("id").range(f, t)),
       // 2026-09-21 bugfix (Sandra, spotting "Revise deck" -- a parent
       // task -- sitting in "Other pending approvals" with no assignee):
       // a parent task's completion is fully computed from its children

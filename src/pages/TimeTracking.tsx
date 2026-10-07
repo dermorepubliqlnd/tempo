@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ShieldCheck, ChevronRight, ChevronLeft, ChevronDown, Pencil, Timer, Trash2, Archive, RotateCcw, Plus, Search, X, CalendarDays, AlertCircle, ListChecks, Radio, FilePen, Download } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { fetchAllRows } from "../lib/fetchAllRows";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { formatDate } from "../lib/formatDate";
@@ -902,7 +903,7 @@ export default function TimeTracking() {
   async function loadAll() {
     setLoading(true);
     const [{ data: entryData }, { data: peopleData }, { data: taskData }, { data: reasonData }, { data: activityTypeData }, { data: availabilityData }, { data: holidayData }, { data: correctionRequestData }] = await Promise.all([
-      supabase
+      fetchAllRows((f, t) => supabase
         .from("time_entries")
         .select(
           `id, task_id, activity_type_id, person_id, started_at, ended_at, duration_minutes, source, status, requested_by, reason_category, reason_notes, auto_stopped,
@@ -913,7 +914,9 @@ export default function TimeTracking() {
            activity_type:non_project_activity_types ( id, name ),
            person:people!time_entries_person_id_fkey ( id, name )`
         )
-        .order("started_at", { ascending: false }),
+        .order("started_at", { ascending: false })
+        .order("id")
+        .range(f, t)),
       supabase.from("people").select("id,name,reports_to").eq("is_active", true),
       supabase.from("tasks").select("id,name,assignee_id,project_id,current_due_date,status,task_number,project:projects(id,name,owner_id,timelines_locked,wbs_status)").eq("is_archived", false),
       supabase.from("time_entry_reasons").select("id,name,is_active").order("sort_order"),
