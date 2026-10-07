@@ -29,6 +29,7 @@ import { isOverdueSuppressed, type PauseProjectInfo } from "../lib/pause";
 import { supabase } from "../lib/supabaseClient";
 import { fetchAllRows } from "../lib/fetchAllRows";
 import Modal from "../components/Modal";
+import LogTimeModal, { type LogTimeMode } from "../components/LogTimeModal";
 import ApprovalCenter from "./ApprovalCenter";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import { loadMyRequests, type MyRequestRow } from "../lib/myRequests";
@@ -267,6 +268,7 @@ export default function MyDashboard() {
   // start work week, navigable, drives every "This Week" card/widget.
   // "This Month" widgets stay fixed to the current calendar month.
   const [addTimeMenuOpen, setAddTimeMenuOpen] = useState(false);
+  const [logTimeMode, setLogTimeMode] = useState<LogTimeMode | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const weekStart = useMemo(() => {
     const d = new Date();
@@ -905,9 +907,8 @@ export default function MyDashboard() {
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <NonProjectTimerQuickStart />
           {/* 2026-09-24 (Sandra): Add Time shortcut. Same Project task /
-              Non-project choice as Time Tracking; opens that page's own Log
-              time form (via ?add=) so all the overlap/cap/holiday checks stay
-              in one place. */}
+              Non-project choice as Time Tracking. 2026-10-08 (Sandra, item H):
+              opens the shared Log time form right here instead of navigating. */}
           <div style={{ position: "relative" }}>
             <button
               onClick={() => setAddTimeMenuOpen((v) => !v)}
@@ -925,7 +926,7 @@ export default function MyDashboard() {
                       className="dash-menu-item"
                       onClick={() => {
                         setAddTimeMenuOpen(false);
-                        navigate(`/time-tracking?add=${mode}`);
+                        setLogTimeMode(mode);
                       }}
                       onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-bg)")}
                       onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
@@ -1633,6 +1634,18 @@ export default function MyDashboard() {
       </div>
 
       {confirmDialog}
+      {logTimeMode && (
+        <LogTimeModal
+          personId={me.id}
+          isFullAccess={me.access_level === "full"}
+          initialMode={logTimeMode}
+          onClose={() => setLogTimeMode(null)}
+          onSaved={() => {
+            setLogTimeMode(null);
+            loadAll();
+          }}
+        />
+      )}
     </div>
   );
 }
