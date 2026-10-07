@@ -24,6 +24,8 @@ import RequestExtensionModal from "../components/RequestExtensionModal";
 import FollowUpTimeModal from "../components/FollowUpTimeModal";
 import NotesSidebar from "../components/NotesSidebar";
 import { useConfirm, type AlertOptions } from "../lib/useConfirm";
+import { useAutoApprovalsOn } from "../lib/autoApprovals";
+import { loadRoutingData, routeApproval, type RoutingData } from "../lib/approvalRouting";
 import { friendlyError } from "../lib/prompts";
 import { buildHolidayNameMap, nonWorkingDayConfirmMessage, toISO as toISOWorkingDay, type HolidayNameMap } from "../lib/workingDays";
 import { InlineText, InlineSelect, InlineDate, InlineNumber } from "../components/InlineCell";
@@ -1477,6 +1479,11 @@ export default function Projects() {
   // authorization gate is the validate_task_completion RPC server-side,
   // so an approximate client-side check here is fine.
   const [chainPeople, setChainPeople] = useState<{ id: string; reports_to: string | null; is_active: boolean }[]>([]);
+  // 2026-10-08 (Sandra, item J): one approval rule -- Validate / Reopen show
+  // only to the ROUTED approver (same routing as Approval Center). Staging
+  // only (autoOn); live keeps the reporting-line rule.
+  const autoOn = useAutoApprovalsOn();
+  const [routing, setRouting] = useState<RoutingData | null>(null);
   // Project Notes (2026-08-14): per-project note count for the list/board
   // bubble, and which project (if any) currently has the Notes sidebar
   // open. Counts are fetched once in loadAll() and kept in sync afterward
@@ -1596,11 +1603,20 @@ export default function Projects() {
       p_validated_date: new Date(validatingTask.date).toISOString(),
       p_adjustment_reason: reason,
     });
-    setValidatingBusy(false);
     if (error) {
+      setValidatingBusy(false);
       setValidatingTask((prev) => (prev ? { ...prev, error: error.message } : prev));
       return;
     }
+    // 2026-10-08 (Sandra, item J): same flow as Approval Center -- validate
+    // and lock in one step (validate_task_completion then lock_task_validation).
+    if (autoOn) {
+      const { error: lockError } = await supabase.rpc("lock_task_validation", { p_task_id: validatingTask.t.id });
+      if (lockError) {
+        await alert({ title: "Validated, but still editable", message: `"${validatingTask.t.name}" was validated, but its fields couldn't be made read-only. Try again or tell Sandra.`, details: lockError.message });
+      }
+    }
+    setValidatingBusy(false);
     setValidatingTask(null);
     loadAll();
   }
@@ -1694,6 +1710,7 @@ export default function Projects() {
     setTasks(nextTasks);
     setPeople((peopleData as PersonOption[]) ?? []);
     setChainPeople((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []);
+    loadRoutingData((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []).then(setRouting);
     setHolidayDates(new Set(((holidayData as { date: string }[]) ?? []).map((h) => h.date)));
     setHolidayNames(buildHolidayNameMap((holidayData as { date: string; name: string }[]) ?? []));
     setExtensionRequests((extReqData as ExtensionRequestLite[]) ?? []);
@@ -1969,8 +1986,19 @@ export default function Projects() {
     return true;
   }
 
+  // 2026-10-08 (item J): who a task's validation is routed to (null when
+  // routing is off, not loaded, or the task has no assignee).
+  function routedValidatorOf(t: TaskRow): string | null {
+    if (!autoOn || !routing || !t.assignee_id) return null;
+    return routeApproval(routing, t.assignee_id).approverId;
+  }
+
   function canValidateTask(t: TaskRow): boolean {
     if (isProjectClosed(t.project_id)) return false;
+    // 2026-10-08 (item J): routed approver only (the DB refuses anyone else
+    // without an Override in Approval Center).
+    const routed = routedValidatorOf(t);
+    if (routed) return routed === me?.id;
     if (t.assignee_id && t.assignee_id === me?.id) {
       // Own work: only when nobody active sits above you.
       return nearestActiveManagerClient(t.assignee_id) === null;
@@ -1995,6 +2023,14 @@ export default function Projects() {
     if (isProjectClosed(t.project_id)) return false;
     if (canFullAccessApprove(t.assignee_id)) return true;
     return isInApprovalChainOf(t.assignee_id);
+  }
+  // 2026-10-08 (item J): Reopen on the Validated column follows the same
+  // one rule as Validate -- routed approver only. (Uncancel on the Status
+  // column keeps canReopenTask above.)
+  function canReopenValidation(t: TaskRow): boolean {
+    const routed = routedValidatorOf(t);
+    if (routed) return !isProjectClosed(t.project_id) && routed === me?.id;
+    return canReopenTask(t);
   }
 
   // 2026-09-03 (Sandra): opened up project creation + visibility to
@@ -4657,7 +4693,16 @@ export default function Projects() {
             return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>—</span>;
           }
           if (!t.validated_completion_date) {
-            if (!canValidate) return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>Pending validation</span>;
+            if (!canValidate) {
+              // 2026-10-08 (item J): say who it's routed to.
+              const routed = routedValidatorOf(t);
+              const routedName = routed ? people.find((p) => p.id === routed)?.name : null;
+              return (
+                <span style={{ color: "var(--muted)", fontSize: 11.5 }} title={routedName ? "Only the routed approver validates here. Others with approval rights can use Override in Approval Center." : undefined}>
+                  {routedName ? `Routed to ${routedName}` : "Pending validation"}
+                </span>
+              );
+            }
             return (
               <button
                 onClick={() => {
@@ -4674,7 +4719,7 @@ export default function Projects() {
           }
           const dateOnly = t.validated_completion_date.slice(0, 10);
           const locked = Boolean(t.validated_locked_at);
-          const canReopen = canReopenTask(t);
+          const canReopen = canReopenValidation(t);
           // Reopening clears the validation (and, via the DB trigger, the
           // lock alongside it) and reverts Status to In Progress,
           // unlocking Assignee/Status/Effort/Est. Hrs/Start/Due (and Actual
@@ -5114,7 +5159,7 @@ export default function Projects() {
         render: (t) => <span>{ownerName(t.created_by)}</span>,
       },
     ],
-    [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents, taskNoteCounts]
+    [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents, taskNoteCounts, routing, autoOn]
   );
 
   // Board cards get their own name renderer rather than reusing the table

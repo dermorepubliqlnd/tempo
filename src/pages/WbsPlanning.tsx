@@ -11,6 +11,8 @@ import { archiveItem, restoreItem, ARCHIVE_MOVE_NOTE, splitByArchivePermission, 
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { friendlyError } from "../lib/prompts";
+import { startProjectChecklist, checklistBlocks, type ChecklistGroup } from "../lib/startProjectChecklist";
+import { useChecklistDialog } from "../components/ChecklistDialog";
 import NotesSidebar from "../components/NotesSidebar";
 import { InlineText, InlineNumber, InlineSelect, InlineDate, InlineTextArea } from "../components/InlineCell";
 import { CancelTaskDialog } from "../components/CancelTaskDialog";
@@ -576,6 +578,7 @@ export default function WbsPlanning() {
     });
   }, [projectId, wbsNotes]);
   const { confirm, alert, dialog } = useConfirm();
+  const { showChecklist, dialog: checklistDialog } = useChecklistDialog();
   const isFullAccess = me?.access_level === "full";
 
   const [project, setProject] = useState<ProjectRow | null>(null);
@@ -2348,118 +2351,49 @@ export default function WbsPlanning() {
       return !!end && end < today;
     });
   }
-  async function confirmPastDates(verb: string): Promise<boolean> {
-    const past = pastDatedOpenTasks();
-    if (!past.length) return true;
-    return confirm({
-      title: `${past.length} task${past.length === 1 ? " has a date" : "s have dates"} in the past`,
-      message: `Once the project starts, these show as Overdue for the people assigned. Re-plan the dates first, or ${verb} anyway.`,
-      items: past.map((t) => t.name || "Untitled task"),
-      confirmLabel: `${verb[0].toUpperCase()}${verb.slice(1)} anyway`,
-      cancelLabel: "Re-plan dates",
+
+  // 2026-10-08 (Sandra, item F): every Start Project check now runs at once
+  // (lib/startProjectChecklist.ts) and shows in ONE checklist dialog instead
+  // of a chain of one-at-a-time pop-ups. Same rules as before: the dated
+  // history of each rule (project details, placeholder names / hours /
+  // dependency conflicts with the Full Access override, leaf Assignee,
+  // Output Type, past dates) now lives in that file. The approver runs the
+  // same list (forApprover skips Description -- requester-only since
+  // 2026-09-07 -- and lets the approver go past the override-able ones).
+  function startChecklistGroups(forApprover: boolean): ChecklistGroup[] {
+    if (!project) return [];
+    return startProjectChecklist({
+      project,
+      tasks: orderedTasks,
+      dependencyConflicts: orderedTasks.filter((t) => dependencyConflict(t, "full_capacity")).map((t) => t.name || "Untitled task"),
+      pastDated: pastDatedOpenTasks().map((t) => t.name || "Untitled task"),
+      hasUnsavedChanges: forApprover ? false : hasUnsavedChanges,
+      forApprover,
     });
   }
 
   async function handleRequestBaseline() {
     if (!project) return;
-    if (project.wbs_status === "draft" && orderedTasks.length === 0) {
-      await alert({ title: "Add a task first", message: "Add at least one task before sending a Start Project request." });
-      return;
-    }
-    // 2026-09-03 (Sandra: "push that source, category and complexity
-    // level be filled out before locking the baseline") -- same
-    // missing-fields gate style as handleRequestClosure's, just a
-    // smaller field set: she confirmed Status/Phase/Priority can stay
-    // optional until Closure, only these 3 are required to Start
-    // Project. No Full Access override (same as the Output Type gate
-    // right below) -- these are meant to always be set by this point.
-    const missingSetupFields: string[] = [];
-    if (!project.planning_type_id) missingSetupFields.push("Planning Type");
-    if (!project.project_type_id) missingSetupFields.push("Project Type");
-    if (!project.priority) missingSetupFields.push("Priority");
-    if (!project.category) missingSetupFields.push("Category");
-    if (!project.source_id) missingSetupFields.push("Source");
-    if (!project.effort_level) missingSetupFields.push("Complexity");
-    // 2026-09-07 (Sandra: "add project description... have this been
-    // required before starting a project or locking baseline") -- same
-    // gate, same no-Full-Access-override treatment as Category/Source/
-    // Complexity above.
-    if (!project.description) missingSetupFields.push("Description");
-    if (missingSetupFields.length) {
-      await alert({
-        title: "Project details missing",
-        message: "Fill these in above (Project Details) or on the Projects & Tasks list before starting the project.",
-        items: missingSetupFields.map((f) => `**${f}**`),
+    const groups = startChecklistGroups(false);
+    if (groups.length) {
+      const blocked = checklistBlocks(groups, isFullAccess);
+      const choice = await showChecklist({
+        title: blocked ? "Can't start the project yet" : "Start Project anyway?",
+        message: blocked
+          ? "Fix these before sending the Start Project request."
+          : groups.some((g) => g.overridable)
+          ? "Some tasks aren't ready yet. As a Full Access user you can start the project anyway."
+          : "Re-plan the dates first, or request start anyway.",
+        groups,
+        canOverride: isFullAccess,
+        proceedLabel: "Start anyway",
       });
-      return;
-    }
-    // Sandra, 2026-08-26: "only push to fill in all needed info when
-    // requesting for Baseline Approval" -- softIssues() (placeholder task
-    // names, missing Effort/Scoped Hours, dependency-date conflicts) used
-    // to gate Save itself; it now gates the baseline request instead, so
-    // a draft can be saved incomplete but not baselined incomplete.
-    const issues = softIssues();
-    if (issues.length && !isFullAccess) {
-      await alert({ title: "Can't start the project yet", message: "Fix these before sending the Start Project request.", items: issues });
-      return;
-    }
-    if (issues.length && isFullAccess) {
-      if (
-        !(await confirm({
-          title: "Start Project anyway?",
-          message: "Some tasks aren't ready yet. As a Full Access user you can start the project anyway.",
-          items: issues,
-          confirmLabel: "Start anyway",
-          cancelLabel: "Keep editing",
-        }))
-      )
-        return;
-    }
-    // Sandra: "make sure the output type is keyed in before saving
-    // baseline, but the count can be kept optional until project is
-    // closed." Output Type is a hard gate here (no Full Access override,
-    // same as the "add at least one task" check above) -- Output Count
-    // deliberately has no equivalent check anywhere, since it's expected
-    // to often still be a guess/placeholder until the project's real work
-    // is actually done.
-    // 2026-09-03 (Sandra): parent/grouping rows are exempt -- a parent's
-    // own Output Type never drives anything downstream (its Output Count
-    // is locked/blank by design, and the Dashboard's Materials Output
-    // breakdown only sums rows with a positive count), so requiring one
-    // here was pure friction with no reporting payoff. Same treatment as
-    // Work Type, which parents already skip. Leaf tasks (including every
-    // sub-task) still require Output Type, and different sub-tasks under
-    // one parent can each carry a different Output Type -- nothing rolls
-    // up or is inherited.
-    // phase126j (Sandra 2026-10-01): every LEAF task needs an assignee
-    // before Start Project -- otherwise its hours are invisible to
-    // Utilization. Parent tasks are exempt (their assignee is derived from
-    // children, and can span several people). Cancelled tasks skip.
-    // Hard gate, no Full Access override; also enforced in the DB
-    // (trg_baseline_request_requires_assignees).
-    const missingAssignee = orderedTasks.filter((t) => !t.assignee_id && !hasChildren(t.id) && t.status !== "Cancelled");
-    if (missingAssignee.length) {
-      await alert({
-        title: "Tasks need an Assignee",
-        message: `${missingAssignee.length} task(s) need an **Assignee** before the project can start. Parent tasks don't need one; they use their sub-tasks' assignees.`,
-        items: missingAssignee.map((t) => t.name || "Untitled task"),
-      });
-      return;
-    }
-    const missingOutputType = orderedTasks.filter((t) => !t.output_type_id && !(t.depth === 0 && hasChildren(t.id)));
-    if (missingOutputType.length) {
-      await alert({
-        title: "Tasks need an Output Type",
-        message: `${missingOutputType.length} task(s) need an **Output Type** before the project can start. Output Count can stay blank until you close the project.`,
-        items: missingOutputType.map((t) => t.name || "Untitled task"),
-      });
-      return;
+      if (choice !== "proceed") return;
     }
     // 2026-08-27 (Sandra: rename Lock Baseline -> Start Project, remove
     // Re-baseline): this action is now only ever reachable from Draft
     // (see canRequestBaseline above), so the old isFirstBaseline branch
     // that handled a second/later re-baseline request no longer applies.
-    if (!(await confirmPastDates("request start"))) return;
     if (
       !(await confirm({
         title: "Send Start Project request?",
@@ -2497,33 +2431,23 @@ export default function WbsPlanning() {
       setRejectDialogOpen(true);
       return;
     }
-    // Same gate as handleRequestBaseline above -- an approver shouldn't
-    // be able to wave through a Start Project request that's missing
-    // Category/Source/Complexity just because the request itself
-    // slipped through before this gate existed (mirrors the same
-    // belt-and-suspenders pattern used for Closure's request+decide).
-    // 2026-09-07 (Sandra: "make sure the description is required from
-    // the project owner or whoever is creating the WBS or requesting
-    // for baseline lock, not the approver of baseline") -- Description
-    // is the one exception to that belt-and-suspenders pattern: it's
-    // only ever enforced on the requester's own action
-    // (handleRequestBaseline above), never re-checked here on approval.
-    const missingSetupFields: string[] = [];
-    if (!project.category) missingSetupFields.push("Category");
-    if (!project.source_id) missingSetupFields.push("Source");
-    if (!project.effort_level) missingSetupFields.push("Complexity");
-    if (!project.priority) missingSetupFields.push("Priority");
-    if (!project.planning_type_id) missingSetupFields.push("Planning Type");
-    if (!project.project_type_id) missingSetupFields.push("Project Type");
-    if (missingSetupFields.length) {
-      await alert({
-        title: "Project details missing",
-        message: "Fill these in above (Project Details) or on the Projects & Tasks list before approving.",
-        items: missingSetupFields.map((f) => `**${f}**`),
+    // 2026-10-08 (Sandra, item F): the approver now sees the SAME checklist
+    // as the requester (it used to re-check only six project fields + past
+    // dates). Description is still skipped here (2026-09-07: "required from
+    // the project owner ... not the approver of baseline"); the
+    // override-able task issues show as warnings the approver may accept.
+    const groups = startChecklistGroups(true);
+    if (groups.length) {
+      const blocked = checklistBlocks(groups, true);
+      const choice = await showChecklist({
+        title: blocked ? "Can't approve yet" : "Approve anyway?",
+        message: blocked ? "These need fixing in the plan before the project can start." : "Check these before you approve.",
+        groups,
+        canOverride: true,
+        proceedLabel: "Approve anyway",
       });
-      return;
+      if (choice !== "proceed") return;
     }
-    if (!(await confirmPastDates("approve"))) return;
     if (
       !(await confirm({
         title: "Approve Start Project?",
@@ -3820,46 +3744,8 @@ export default function WbsPlanning() {
     return true;
   }
 
-  // Soft completeness gate -- mirrors the Task name / Effort part of the
-  // Projects table's own Lock policy. Round 11: conflict check now covers
-  // BOTH modes always (not just whichever is toggled active), since the
-  // scoping table itself shows both modes' Start/End side by side
-  // regardless of the toggle now.
-  function softIssues(): string[] {
-    const issues: string[] = [];
-    const noName = orderedTasks.filter((t) => !t.name || !t.name.trim() || t.name === "Untitled task" || t.name === "Untitled sub-task");
-    // Phase 24 bugfix (2026-08-24, Sandra: "this should not be an error
-    // too since it should auto"): this used to check `!t.effort`, but
-    // `effort` is a DB-trigger-derived column (derive_effort_level, see
-    // phase12_migration.sql) that only gets recomputed when a task's
-    // estimated_hours patch actually round-trips to Postgres. Since
-    // saveTaskField only STAGES edits into pendingTaskPatches now (staged
-    // Save flow, see [[project_capaciq_phase6_baseline_approval]]) rather
-    // than writing instantly, the local `effort` field stays stale --
-    // often null on a brand-new task -- right up until Save's own
-    // flushPendingEdits() round-trip, even after hours have been typed.
-    // softIssues() runs BEFORE that flush, so it was flagging tasks that
-    // WILL derive a correct Effort the instant Save actually writes them.
-    // The real precondition is estimated_hours being set at all (NULL
-    // hours -> NULL effort; any other value, including 0, always derives
-    // to some level) -- so check that instead of the lagging derived
-    // column.
-    const noEffort = orderedTasks.filter((t) => t.estimated_hours == null && !(t.depth === 0 && hasChildren(t.id)));
-    // 2026-08-26 (Sandra: "I tried to move a task with dependency to an
-    // earlier date than the dependency's end date but the warning shown
-    // was on the Capacity-Based start date" -- i.e. this aggregate
-    // pre-Save check used to also test the now-removed "standard"
-    // (Capacity-Based) mode, so a conflict only visible on that hidden
-    // column still surfaced a warning with nowhere for her to actually
-    // see or resolve it. Only Theoretical (full_capacity) has its own
-    // real column left to check against.
-    const conflicted = orderedTasks.filter((t) => dependencyConflict(t, "full_capacity"));
-    if (noName.length) issues.push(`${noName.length} task(s) still have a placeholder name.`);
-    if (noEffort.length) issues.push(`${noEffort.length} task(s) still need **Estimated hours**.`);
-    if (conflicted.length)
-      issues.push(`${conflicted.length} task(s) start on or before the End of a task they depend on. Check those Start dates.`);
-    return issues;
-  }
+  // 2026-10-08 (item F): softIssues() (placeholder names, missing Estimated
+  // hours, dependency conflicts) moved into lib/startProjectChecklist.ts.
 
   // Total effort for the whole project -- summed from top-level tasks
   // only (a parent's own Est. hrs already mirrors the sum of its
@@ -5312,6 +5198,7 @@ export default function WbsPlanning() {
         }
       `}</style>
       {dialog}
+      {checklistDialog}
       {assigneePicker.element}
       {startDatePrompt.element}
       {showAddSession && isSessionProject && me?.id && (

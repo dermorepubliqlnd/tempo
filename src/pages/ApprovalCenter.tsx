@@ -1,7 +1,7 @@
 import MultiSelectFilter from "../components/MultiSelectFilter";
 import ValidateCompletionModal from "../components/ValidateCompletionModal";
 import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
   XCircle,
@@ -29,7 +29,11 @@ import { useConfirm } from "../lib/useConfirm";
 import { friendlyError } from "../lib/prompts";
 import { workingDayDelta, formatWorkingDayDelta } from "../lib/workingDays";
 import { useHolidaySet } from "../lib/useHolidaySet";
-import { loadRoutingData, routeApproval, activeDelegationFor, type RoutingData } from "../lib/approvalRouting";
+import { loadRoutingData, routeApproval, routeProjectRequest, activeDelegationFor, type RoutingData, type ApprovalRightsPerson } from "../lib/approvalRouting";
+import Modal from "../components/Modal";
+import { useChecklistDialog } from "../components/ChecklistDialog";
+import { startProjectChecklist, closeProjectApproverChecklist, checklistBlocks } from "../lib/startProjectChecklist";
+import { loadProjectPlanForDecision } from "../lib/projectDecisionData";
 import OverrideReasonModal from "../components/OverrideReasonModal";
 import MyRequestsPanel from "../components/MyRequestsPanel";
 import { useApprovalAuthority } from "../lib/useApprovalAuthority";
@@ -411,6 +415,95 @@ function DecideButtons({ onApprove, onReject }: { onApprove: () => void | Promis
   );
 }
 
+// 2026-10-08 (Sandra, item J): Start Project / Close Project requests are
+// decided inline here (staging: behind useAutoApprovalsOn). Module level for
+// the same remount reason as DecideButtons above.
+function ProjectDecisionButtons({ projectId, busy, onApprove, onDecline }: { projectId: string; busy: boolean; onApprove: () => void; onDecline: () => void }) {
+  return (
+    <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          onClick={onDecline}
+          disabled={busy}
+          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--danger-text)", background: "#fff", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          <XCircle size={13} /> Decline
+        </button>
+        <button
+          onClick={onApprove}
+          disabled={busy}
+          style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--success-text)", border: "none", borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer", whiteSpace: "nowrap", opacity: busy ? 0.6 : 1 }}
+        >
+          <CheckCircle2 size={13} /> {busy ? "Working…" : "Approve"}
+        </button>
+      </div>
+      <Link to={`/projects/${projectId}/wbs`} style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none", whiteSpace: "nowrap" }}>
+        Review plan in WBS
+      </Link>
+    </div>
+  );
+}
+
+// Decline dialog. Start Project: same reason list + notes rule as the WBS
+// page (reason required; notes required only for "Other"). Close Project:
+// optional note.
+function ProjectDeclineModal({
+  kind,
+  projectName,
+  reasons,
+  busy,
+  onCancel,
+  onSubmit,
+}: {
+  kind: "baseline" | "closure";
+  projectName: string;
+  reasons: string[];
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (reason: string | null, note: string | null) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [note, setNote] = useState("");
+  const isStart = kind === "baseline";
+  const noteRequired = isStart && reason === "Other";
+  const ready = isStart ? !!reason && (!noteRequired || !!note.trim()) : true;
+  const field: CSSProperties = { width: "100%", fontSize: 12, padding: "7px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" };
+  return (
+    <Modal title={isStart ? "Decline Start Project request" : "Reject Close Project request"} onClose={onCancel} width={420}>
+      <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 10 }}>
+        {isStart ? `"${projectName}" stays in Draft and the request goes back to the requester.` : `"${projectName}" stays open and the request is sent back.`}
+      </div>
+      {isStart && (
+        <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: "var(--navy)", marginBottom: 8 }}>
+          Reason
+          <select value={reason} onChange={(e) => setReason(e.target.value)} style={{ ...field, marginTop: 4 }}>
+            <option value="">Choose a reason…</option>
+            {reasons.map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: "var(--navy)" }}>
+        {noteRequired ? "Notes (required)" : "Notes (optional)"}
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} style={{ ...field, marginTop: 4, resize: "vertical" }} />
+      </label>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+        <button onClick={onCancel} style={{ fontSize: 12, color: "var(--text-secondary)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 12px", cursor: "pointer" }}>
+          Cancel
+        </button>
+        <button
+          onClick={() => ready && onSubmit(isStart ? reason : null, note.trim() || null)}
+          disabled={!ready || busy}
+          style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: ready ? "var(--danger-text)" : "var(--muted)", border: "none", borderRadius: "var(--radius-sm)", padding: "6px 12px", cursor: ready ? "pointer" : "not-allowed" }}
+        >
+          {isStart ? "Decline request" : "Reject request"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function ValidateActionCells({ row, busy, onValidate }: { row: TaskCompletionRow; busy: boolean; onValidate: (date: string) => void }) {
   const defaultDate = (row.actual_completion_date ?? row.submitted_on ?? new Date().toISOString()).slice(0, 10);
   const [date, setDate] = useState(defaultDate);
@@ -448,7 +541,9 @@ function ValidateActionCells({ row, busy, onValidate }: { row: TaskCompletionRow
 // the numbers always match the Approval Center.
 export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: boolean } = {}) {
   const { person: me } = useSession();
-  const { alert, dialog: confirmDialog } = useConfirm();
+  const { alert, confirm, dialog: confirmDialog } = useConfirm();
+  const { showChecklist, dialog: checklistDialog } = useChecklistDialog();
+  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [people, setPeople] = useState<PersonLite[]>([]);
@@ -524,6 +619,11 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
   const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({});
   const [overrideTarget, setOverrideTarget] = useState<Row | null>(null);
   const [delegateOpen, setDelegateOpen] = useState(false);
+  // 2026-10-08 (item J): approval rights per person (project-request
+  // routing), Start Project decline reasons, and the open Decline dialog.
+  const [rights, setRights] = useState<Map<string, ApprovalRightsPerson>>(new Map());
+  const [declineReasons, setDeclineReasons] = useState<string[]>([]);
+  const [projectDecline, setProjectDecline] = useState<{ kind: "baseline" | "closure"; requestId: string; projectId: string; requesterId: string | null; key: string } | null>(null);
   const [recentOverrides, setRecentOverrides] = useState<{ id: string; kind: string; decision: string; reason: string; created_at: string; overridden_by: string; routed_approver_id: string | null; subject_person_id: string | null }[]>([]);
 
   async function loadAll() {
@@ -610,10 +710,14 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
     setChainPeople((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []);
     setParentTaskIds(new Set(((parentIdData as { parent_task_id: string }[]) ?? []).map((r) => r.parent_task_id)));
     const since = new Date(Date.now() - 30 * 86400000).toISOString();
-    const [rd, { data: ovData }] = await Promise.all([
+    const [rd, { data: ovData }, { data: rightsData }, { data: reasonData }] = await Promise.all([
       loadRoutingData((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []),
       supabase.from("approval_overrides").select("id,kind,decision,reason,created_at,overridden_by,routed_approver_id,subject_person_id").gte("created_at", since).not("decision", "in", "(pending,failed)").order("created_at", { ascending: false }).limit(50),
+      supabase.from("people").select("id,can_approve_rebaseline,can_approve_closures,access_level"),
+      supabase.from("baseline_decline_reasons").select("name").eq("is_active", true).order("sort_order"),
     ]);
+    setRights(new Map(((rightsData as ApprovalRightsPerson[]) ?? []).map((p) => [p.id, p])));
+    setDeclineReasons(((reasonData as { name: string }[]) ?? []).map((r) => r.name));
     setRouting(rd);
     setRecentOverrides((ovData as typeof recentOverrides) ?? []);
     setLoading(false);
@@ -742,10 +846,10 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
   // confirmation step now, so this no longer asks twice.
   // phase130/131: an override is logged BEFORE deciding (the DB requires
   // it for items routed to someone else), then stamped with the outcome.
-  async function beginOverride(key: string, kind: ApprovalKind, itemId: string, subjectId: string | null): Promise<string | null | false> {
+  async function beginOverride(key: string, kind: ApprovalKind, itemId: string, subjectId: string | null, routedOverride?: string | null): Promise<string | null | false> {
     const reason = overrideReasons[key];
     if (!reason) return null;
-    const routed = routing ? routeApproval(routing, subjectId).approverId : null;
+    const routed = routedOverride !== undefined ? routedOverride : routing ? routeApproval(routing, subjectId).approverId : null;
     const { data, error } = await supabase
       .from("approval_overrides")
       .insert({ kind, item_id: itemId, subject_person_id: subjectId, routed_approver_id: routed, decision: "pending", reason })
@@ -985,6 +1089,124 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
     return { canDecide: perm && !!overrideReasons[key], route: "team", routedToName: r.approverId ? personName(r.approverId) : null, overridable: perm, subjectId };
   }
 
+  // 2026-10-08 (Sandra, item J): Start Project / Close Project requests are
+  // routed (lib/approvalRouting routeProjectRequest, mirrors
+  // project_request_approver() in phase172). Staging only (autoOn); live
+  // keeps the old "anyone with the right" behaviour.
+  function gateProject(key: string, kind: "start" | "close", requesterId: string | null, perm: boolean): Pick<Row, "canDecide" | "route" | "actingForName" | "routedToName" | "overridable" | "subjectId"> {
+    const plain = { canDecide: perm, route: (perm ? "mine" : "team") as Row["route"], overridable: false, subjectId: requesterId };
+    if (!autoOn || !me || !routing) return plain;
+    const r = routeProjectRequest(routing, rights, kind, requesterId);
+    if (!r.approverId) return plain;
+    if (r.approverId === me.id) {
+      return { canDecide: true, route: r.actingFor ? "acting" : "mine", actingForName: r.actingFor ? personName(r.actingFor) : null, routedToName: null, overridable: false, subjectId: requesterId };
+    }
+    return { canDecide: perm && !!overrideReasons[key], route: "team", routedToName: personName(r.approverId), overridable: perm, subjectId: requesterId };
+  }
+  function projectRoutedTo(kind: "start" | "close", requesterId: string | null): string | null {
+    return routing ? routeProjectRequest(routing, rights, kind, requesterId).approverId : null;
+  }
+
+  // Approve inline: run the same checks the WBS page runs for the approver
+  // (Start Project: the item F checklist; Close Project: project details +
+  // Output Count), then call the SAME RPC the WBS page calls.
+  async function approveProjectRequest(kind: "baseline" | "closure", requestId: string, projectId: string, requesterId: string | null) {
+    const key = `${kind}-${requestId}`;
+    setDecidingKey(key);
+    const { plan, error: loadErr } = await loadProjectPlanForDecision(projectId, holidaySet);
+    setDecidingKey(null);
+    if (!plan) {
+      await alert(friendlyError("load this project's plan", (loadErr ?? { message: "Unknown error" }) as { message: string }));
+      return;
+    }
+    if (kind === "baseline") {
+      const groups = startProjectChecklist({ project: plan.project, tasks: plan.tasks, dependencyConflicts: plan.dependencyConflicts, pastDated: plan.pastDated, forApprover: true });
+      if (groups.length) {
+        const blocked = checklistBlocks(groups, true);
+        const choice = await showChecklist({
+          title: blocked ? "Can't approve yet" : "Approve anyway?",
+          message: blocked ? "These need fixing in the plan before the project can start." : "Check these before you approve.",
+          groups,
+          canOverride: true,
+          proceedLabel: "Approve anyway",
+          cancelLabel: "Cancel",
+          reviewLabel: "Review plan in WBS",
+        });
+        if (choice === "review") navigate(`/projects/${projectId}/wbs`);
+        if (choice !== "proceed") return;
+      } else if (
+        !(await confirm({
+          title: "Approve Start Project?",
+          message: "The current plan becomes the project's official commitment and the project is marked as started.",
+          items: ["All Start Project checks pass."],
+          confirmLabel: "Approve",
+        }))
+      ) {
+        return;
+      }
+    } else {
+      const groups = closeProjectApproverChecklist(plan.project, plan.tasks, plan.outputTypes);
+      if (groups.length) {
+        const choice = await showChecklist({
+          title: "Can't approve yet",
+          message: "Fill these in before the Close Project request can be approved.",
+          groups,
+          canOverride: false,
+          proceedLabel: "Approve",
+          reviewLabel: "Review plan in WBS",
+        });
+        if (choice === "review") navigate(`/projects/${projectId}/wbs`);
+        return;
+      }
+      if (
+        !(await confirm({
+          title: "Approve Close Project?",
+          message: "The project is closed with its current plan. Closed projects aren't meant to be reopened casually.",
+          confirmLabel: "Approve",
+        }))
+      )
+        return;
+    }
+    const ovId = await beginOverride(key, kind, requestId, requesterId, projectRoutedTo(kind === "baseline" ? "start" : "close", requesterId));
+    if (ovId === false) return;
+    setDecidingKey(key);
+    const { error } =
+      kind === "baseline"
+        ? await supabase.rpc("decide_baseline_request", { p_request_id: requestId, p_approve: true, p_reason: null, p_mode: "manual", p_tasks: plan.payload })
+        : await supabase.rpc("decide_wbs_closure", { p_request_id: requestId, p_approve: true, p_reason: null, p_tasks: plan.payload });
+    setDecidingKey(null);
+    if (error) {
+      await finishOverride(key, ovId, "failed");
+      await alert(friendlyError("approve this request", error));
+      return;
+    }
+    await finishOverride(key, ovId, "approved");
+    loadAll();
+  }
+
+  // Decline inline. p_tasks is only read on approval by both RPCs, so an
+  // empty list is sent here.
+  async function declineProjectRequest(reason: string | null, note: string | null) {
+    if (!projectDecline) return;
+    const { kind, requestId, requesterId, key } = projectDecline;
+    const ovId = await beginOverride(key, kind, requestId, requesterId, projectRoutedTo(kind === "baseline" ? "start" : "close", requesterId));
+    if (ovId === false) return;
+    setDecidingKey(key);
+    const { error } =
+      kind === "baseline"
+        ? await supabase.rpc("decide_baseline_request", { p_request_id: requestId, p_approve: false, p_reason: note, p_mode: "manual", p_tasks: [], p_decline_reason: reason })
+        : await supabase.rpc("decide_wbs_closure", { p_request_id: requestId, p_approve: false, p_reason: note, p_tasks: [] });
+    setDecidingKey(null);
+    if (error) {
+      await finishOverride(key, ovId, "failed");
+      await alert(friendlyError(kind === "baseline" ? "decline this request" : "reject this request", error));
+      return;
+    }
+    await finishOverride(key, ovId, "rejected");
+    setProjectDecline(null);
+    loadAll();
+  }
+
   function OverrideButton({ row }: { row: Row }) {
     return (
       <button
@@ -1113,6 +1335,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
     baselineRequests.forEach((row) => {
       const key = `baseline-${row.id}`;
       const proj = projectById.get(row.project_id);
+      const gBl = gateProject(key, "start", row.requested_by, canDecideBaseline);
       rows.push({
         key,
         kind: "baseline",
@@ -1127,9 +1350,22 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
         reasonCategory: null,
         reasonNotes: "Captures the current plan as the official Baseline and marks the project as started.",
         extraLine: null,
-        canDecide: canDecideBaseline,
-        route: canDecideBaseline ? "mine" : "team",
-        action: canDecideBaseline ? <ReviewLink projectId={row.project_id} label="Review WBS" button /> : null,
+        ...gBl,
+        itemId: row.id,
+        action: !gBl.canDecide
+          ? null
+          : autoOn
+          ? withActing(
+              gBl,
+              <ProjectDecisionButtons
+                projectId={row.project_id}
+                busy={decidingKey === key}
+                onApprove={() => approveProjectRequest("baseline", row.id, row.project_id, row.requested_by)}
+                onDecline={() => setProjectDecline({ kind: "baseline", requestId: row.id, projectId: row.project_id, requesterId: row.requested_by, key })}
+              />,
+              key
+            )
+          : <ReviewLink projectId={row.project_id} label="Review WBS" button />,
         linkProjectId: row.project_id,
       });
     });
@@ -1137,6 +1373,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
     closureRequests.forEach((row) => {
       const key = `closure-${row.id}`;
       const proj = projectById.get(row.project_id);
+      const gCl = gateProject(key, "close", row.requested_by, canDecideClosure(row));
       rows.push({
         key,
         kind: "closure",
@@ -1151,9 +1388,22 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
         reasonCategory: null,
         reasonNotes: "Locks in the current plan as Final Scope — final, no re-opening.",
         extraLine: null,
-        canDecide: canDecideClosure(row),
-        route: canDecideClosure(row) ? "mine" : "team",
-        action: canDecideClosure(row) ? <ReviewLink projectId={row.project_id} /> : null,
+        ...gCl,
+        itemId: row.id,
+        action: !gCl.canDecide
+          ? null
+          : autoOn
+          ? withActing(
+              gCl,
+              <ProjectDecisionButtons
+                projectId={row.project_id}
+                busy={decidingKey === key}
+                onApprove={() => approveProjectRequest("closure", row.id, row.project_id, row.requested_by)}
+                onDecline={() => setProjectDecline({ kind: "closure", requestId: row.id, projectId: row.project_id, requesterId: row.requested_by, key })}
+              />,
+              key
+            )
+          : <ReviewLink projectId={row.project_id} />,
       });
     });
 
@@ -1204,7 +1454,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
     });
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensions, timeEntries, correctionRequests, baselineRequests, closureRequests, taskCompletions, allTimeEntries, parentTaskIds, chainPeople, people, projects, me, routing, overrideReasons]);
+  }, [extensions, timeEntries, correctionRequests, baselineRequests, closureRequests, taskCompletions, allTimeEntries, parentTaskIds, chainPeople, people, projects, me, routing, overrideReasons, rights, autoOn, decidingKey, holidaySet]);
 
   // phase130: cards count only the active tab's rows.
   const inTab = (r: Row) => (tab === "mine" ? r.route === "mine" || r.route === "acting" : r.route === "team");
@@ -2143,6 +2393,17 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
         />
       )}
       {confirmDialog}
+      {checklistDialog}
+      {projectDecline && (
+        <ProjectDeclineModal
+          kind={projectDecline.kind}
+          projectName={projectById.get(projectDecline.projectId)?.name ?? "This project"}
+          reasons={declineReasons}
+          busy={decidingKey === projectDecline.key}
+          onCancel={() => setProjectDecline(null)}
+          onSubmit={(reason, note) => declineProjectRequest(reason, note)}
+        />
+      )}
       {validating && (
         <ValidateCompletionModal
           taskName={validating.row.name}

@@ -90,3 +90,45 @@ export function routeApproval(data: RoutingData, subjectId: string | null): { ap
   }
   return { approverId: m, actingFor: m === original ? null : original };
 }
+
+// 2026-10-08 (Sandra, item J): Start Project and Close Project requests are
+// routed like everything else. Start at the requester's routed approver
+// (routeApproval above: leave + delegation applied) and walk up the
+// reporting line (active people) to the first person who holds the right:
+//   start -> can_approve_rebaseline
+//   close -> can_approve_closures or Full Access
+// Mirrors project_request_approver() in phase172_project_approvals.sql.
+// approverId null = nobody in the line holds the right (anyone with the
+// right may decide, no routing).
+export interface ApprovalRightsPerson {
+  id: string;
+  can_approve_rebaseline?: boolean | null;
+  can_approve_closures?: boolean | null;
+  access_level?: string | null;
+}
+
+export type ProjectRequestKind = "start" | "close";
+
+export function holdsProjectRight(p: ApprovalRightsPerson | undefined, kind: ProjectRequestKind): boolean {
+  if (!p) return false;
+  return kind === "start" ? !!p.can_approve_rebaseline : !!p.can_approve_closures || p.access_level === "full";
+}
+
+export function routeProjectRequest(
+  data: RoutingData,
+  rights: Map<string, ApprovalRightsPerson>,
+  kind: ProjectRequestKind,
+  requesterId: string | null
+): { approverId: string | null; actingFor: string | null } {
+  if (!requesterId) return { approverId: null, actingFor: null };
+  const first = routeApproval(data, requesterId);
+  let p = first.approverId;
+  for (let i = 0; p && i < 25; i++) {
+    const person = data.chain.find((c) => c.id === p);
+    if (person?.is_active && holdsProjectRight(rights.get(p), kind)) {
+      return { approverId: p, actingFor: p === first.approverId ? first.actingFor : null };
+    }
+    p = nearestActiveManagerOf(data.chain, p);
+  }
+  return { approverId: null, actingFor: null };
+}
