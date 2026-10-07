@@ -10,6 +10,7 @@ import { supabase } from "../lib/supabaseClient";
 import { archiveItem, restoreItem, ARCHIVE_MOVE_NOTE, splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, loggedTimeDeleteWarning } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 import NotesSidebar from "../components/NotesSidebar";
 import { InlineText, InlineNumber, InlineSelect, InlineDate, InlineTextArea } from "../components/InlineCell";
 import { CancelTaskDialog } from "../components/CancelTaskDialog";
@@ -1492,19 +1493,23 @@ export default function WbsPlanning() {
     // guards exist (both used to end in a "Maximum update depth exceeded"
     // page hang rather than a clean refusal).
     if (isRelatedTask(taskId, dependsOnId)) {
-      await alert(
-        "Can't add this -- a parent task and its own sub-task can't depend on each other. A parent's dates are already derived from its sub-tasks' dates."
-      );
+      await alert({
+        title: "Can't add this dependency",
+        message: "A parent task and its own sub-task can't depend on each other. The parent's dates already come from its sub-tasks.",
+      });
       return;
     }
     if (wouldCreateDependencyCycle(taskId, dependsOnId)) {
-      await alert("Can't add this -- it would create a circular dependency (that task already depends on this one, directly or through a chain).");
+      await alert({
+        title: "Can't add this dependency",
+        message: "That task already depends on this one, directly or through a chain, so this would create a loop.",
+      });
       return;
     }
     setDependencies((prev) => [...prev, { task_id: taskId, depends_on_task_id: dependsOnId }]);
     const { error } = await supabase.from("task_dependencies").insert({ task_id: taskId, depends_on_task_id: dependsOnId });
     if (error) {
-      await alert(`Couldn't add dependency: ${error.message}`);
+      await alert(friendlyError("add the dependency", error));
       loadAll();
       return;
     }
@@ -1536,7 +1541,7 @@ export default function WbsPlanning() {
     setDependencies((prev) => prev.filter((d) => !(d.task_id === taskId && d.depends_on_task_id === dependsOnId)));
     const { error } = await supabase.from("task_dependencies").delete().eq("task_id", taskId).eq("depends_on_task_id", dependsOnId);
     if (error) {
-      await alert(`Couldn't remove dependency: ${error.message}`);
+      await alert(friendlyError("remove the dependency", error));
       loadAll();
       return;
     }
@@ -2348,10 +2353,8 @@ export default function WbsPlanning() {
     if (!past.length) return true;
     return confirm({
       title: `${past.length} task${past.length === 1 ? " has a date" : "s have dates"} in the past`,
-      message: `${past
-        .slice(0, 6)
-        .map((t) => `• ${t.name || "Untitled task"}`)
-        .join("\n")}${past.length > 6 ? `\n…and ${past.length - 6} more` : ""}\n\nOnce the project starts these show as Overdue for the people assigned. Re-plan the dates first, or ${verb} anyway.`,
+      message: `Once the project starts, these show as Overdue for the people assigned. Re-plan the dates first, or ${verb} anyway.`,
+      items: past.map((t) => t.name || "Untitled task"),
       confirmLabel: `${verb[0].toUpperCase()}${verb.slice(1)} anyway`,
       cancelLabel: "Re-plan dates",
     });
@@ -2360,7 +2363,7 @@ export default function WbsPlanning() {
   async function handleRequestBaseline() {
     if (!project) return;
     if (project.wbs_status === "draft" && orderedTasks.length === 0) {
-      await alert("Add at least one task before requesting a baseline.");
+      await alert({ title: "Add a task first", message: "Add at least one task before sending a Start Project request." });
       return;
     }
     // 2026-09-03 (Sandra: "push that source, category and complexity
@@ -2383,9 +2386,11 @@ export default function WbsPlanning() {
     // Complexity above.
     if (!project.description) missingSetupFields.push("Description");
     if (missingSetupFields.length) {
-      await alert(
-        `Can't start this project yet -- it's still missing: ${missingSetupFields.join(", ")}. Set these above (Project Details) or on the Projects & Tasks list first.`
-      );
+      await alert({
+        title: "Project details missing",
+        message: "Fill these in above (Project Details) or on the Projects & Tasks list before starting the project.",
+        items: missingSetupFields.map((f) => `**${f}**`),
+      });
       return;
     }
     // Sandra, 2026-08-26: "only push to fill in all needed info when
@@ -2395,11 +2400,20 @@ export default function WbsPlanning() {
     // a draft can be saved incomplete but not baselined incomplete.
     const issues = softIssues();
     if (issues.length && !isFullAccess) {
-      await alert(`Can't request a baseline yet:\n\n${issues.join("\n")}`);
+      await alert({ title: "Can't start the project yet", message: "Fix these before sending the Start Project request.", items: issues });
       return;
     }
     if (issues.length && isFullAccess) {
-      if (!(await confirm(`${issues.join("\n")}\n\nFull Access override: Start Project anyway?`))) return;
+      if (
+        !(await confirm({
+          title: "Start Project anyway?",
+          message: "Some tasks aren't ready yet. As a Full Access user you can start the project anyway.",
+          items: issues,
+          confirmLabel: "Start anyway",
+          cancelLabel: "Keep editing",
+        }))
+      )
+        return;
     }
     // Sandra: "make sure the output type is keyed in before saving
     // baseline, but the count can be kept optional until project is
@@ -2425,19 +2439,20 @@ export default function WbsPlanning() {
     // (trg_baseline_request_requires_assignees).
     const missingAssignee = orderedTasks.filter((t) => !t.assignee_id && !hasChildren(t.id) && t.status !== "Cancelled");
     if (missingAssignee.length) {
-      await alert(
-        `Can't request a baseline yet -- ${missingAssignee.length} task(s) still need an Assignee:\n\n${missingAssignee
-          .slice(0, 8)
-          .map((t) => `• ${t.name || "Untitled task"}`)
-          .join("\n")}${missingAssignee.length > 8 ? `\n…and ${missingAssignee.length - 8} more` : ""}\n\nParent tasks don't need one -- they take their assignees from their sub-tasks.`
-      );
+      await alert({
+        title: "Tasks need an Assignee",
+        message: `${missingAssignee.length} task(s) need an **Assignee** before the project can start. Parent tasks don't need one; they use their sub-tasks' assignees.`,
+        items: missingAssignee.map((t) => t.name || "Untitled task"),
+      });
       return;
     }
     const missingOutputType = orderedTasks.filter((t) => !t.output_type_id && !(t.depth === 0 && hasChildren(t.id)));
     if (missingOutputType.length) {
-      await alert(
-        `Can't request a baseline yet -- ${missingOutputType.length} task(s) still need an Output Type picked. Output Count can stay blank for now; it only needs to be accurate by the time this project is closed.`
-      );
+      await alert({
+        title: "Tasks need an Output Type",
+        message: `${missingOutputType.length} task(s) need an **Output Type** before the project can start. Output Count can stay blank until you close the project.`,
+        items: missingOutputType.map((t) => t.name || "Untitled task"),
+      });
       return;
     }
     // 2026-08-27 (Sandra: rename Lock Baseline -> Start Project, remove
@@ -2447,9 +2462,9 @@ export default function WbsPlanning() {
     if (!(await confirmPastDates("request start"))) return;
     if (
       !(await confirm({
-        title: "Start Project",
-        message: `Request approval to lock ${MODE_LABEL[activeMode]} as this project's Baseline and start the project? Once approved, this becomes the official commitment.`,
-        confirmLabel: "Request Approval",
+        title: "Send Start Project request?",
+        message: `Your supervisor will be asked to approve the ${MODE_LABEL[activeMode]} plan. Once approved, it becomes the project's official commitment.`,
+        confirmLabel: "Send request",
       }))
     )
       return;
@@ -2462,7 +2477,7 @@ export default function WbsPlanning() {
     const { error } = await supabase.rpc("request_baseline_approval", { p_project_id: project.id, p_reason: null });
     setWorkflowBusy(false);
     if (error) {
-      await alert(`Couldn't request baseline approval: ${error.message}`);
+      await alert(friendlyError("send the Start Project request", error));
       return;
     }
     await loadAll();
@@ -2501,16 +2516,18 @@ export default function WbsPlanning() {
     if (!project.planning_type_id) missingSetupFields.push("Planning Type");
     if (!project.project_type_id) missingSetupFields.push("Project Type");
     if (missingSetupFields.length) {
-      await alert(
-        `Can't approve yet -- this project is still missing: ${missingSetupFields.join(", ")}. Set these above (Project Details) or on the Projects & Tasks list first.`
-      );
+      await alert({
+        title: "Project details missing",
+        message: "Fill these in above (Project Details) or on the Projects & Tasks list before approving.",
+        items: missingSetupFields.map((f) => `**${f}**`),
+      });
       return;
     }
     if (!(await confirmPastDates("approve"))) return;
     if (
       !(await confirm({
-        title: "Start Project",
-        message: `Confirm this baseline request? This captures the current plan as the official Baseline, marking the project as started.`,
+        title: "Approve Start Project?",
+        message: "The current plan becomes the project's official commitment and the project is marked as started.",
         confirmLabel: "Approve",
         danger: false,
       }))
@@ -2531,7 +2548,7 @@ export default function WbsPlanning() {
     });
     setWorkflowBusy(false);
     if (error) {
-      await alert(`Couldn't decide baseline request: ${error.message}`);
+      await alert(friendlyError("approve this request", error));
       return;
     }
     await loadAll();
@@ -2546,11 +2563,11 @@ export default function WbsPlanning() {
   async function submitRejectBaselineRequest() {
     if (!project || !pendingBaselineRequest) return;
     if (!rejectReason) {
-      await alert("Pick a reason before rejecting.");
+      await alert({ title: "Pick a reason", message: "Choose a reason before you reject this request." });
       return;
     }
     if (rejectReason === "Other" && !rejectNotes.trim()) {
-      await alert(`Notes are required when "Other" is selected.`);
+      await alert({ title: "Add a note", message: `Notes are required when the reason is "Other".` });
       return;
     }
     const flushedBeforeDecide = await flushPendingEdits();
@@ -2566,7 +2583,7 @@ export default function WbsPlanning() {
     });
     setWorkflowBusy(false);
     if (error) {
-      await alert(`Couldn't reject baseline request: ${error.message}`);
+      await alert(friendlyError("reject this request", error));
       return;
     }
     setRejectDialogOpen(false);
@@ -2582,20 +2599,20 @@ export default function WbsPlanning() {
     if (!tasks.some((t) => !t.is_archived)) {
       const del = await confirm({
         title: "This project has no tasks",
-        message: "A project can't be closed without tasks.\n\nWas there any work on it? If yes, add the tasks below first. If nothing happened, delete the project instead.",
-        confirmLabel: "Delete project",
+        message: "A project can't be closed without tasks. If work happened, add the tasks first. If not, move the project to Archive.",
+        confirmLabel: "Move to Archive",
         cancelLabel: "I'll add tasks",
         danger: true,
       });
       if (!del) return;
       const { blocked } = await splitByArchivePermission("project", [project.id]);
       if (blocked.length) {
-        await alert({ title: "You can't delete this", message: blockedDeleteMessage("project", [project.name], 0) });
+        await alert({ title: "Can't move to Archive", message: blockedDeleteMessage("project", [project.name], 0) });
         return;
       }
       const { error } = await archiveItem("project", project.id);
       if (error) {
-        await alert(`Couldn't delete project: ${error.message}`);
+        await alert(friendlyError("move the project to Archive", error));
         return;
       }
       navigate("/projects?tab=projects");
@@ -2642,9 +2659,11 @@ export default function WbsPlanning() {
     if (!project.lessons_learned_worked) missingProjectFields.push("Lessons Learned (What Worked)");
     if (!project.lessons_learned_not_worked) missingProjectFields.push("Lessons Learned (What Didn't Work)");
     if (missingProjectFields.length) {
-      await alert(
-        `Can't request closure yet -- this project is still missing: ${missingProjectFields.join(", ")}. Set these on the Projects & Tasks list first.`
-      );
+      await alert({
+        title: "Project details missing",
+        message: "Fill these in on the Projects & Tasks list before sending the Close Project request.",
+        items: missingProjectFields.map((f) => `**${f}**`),
+      });
       return;
     }
     // Sandra, 2026-08-26: "output count will be required on project close
@@ -2666,7 +2685,11 @@ export default function WbsPlanning() {
         !(t.depth === 0 && hasChildren(t.id))
     );
     if (missingOutputCount.length) {
-      await alert(`Can't request closure yet -- ${missingOutputCount.length} task(s) still need an Output Count of 1 or more:\n\n${missingOutputCount.slice(0, 8).map((t) => `• ${t.name || "Untitled task"}`).join("\n")}${missingOutputCount.length > 8 ? `\n…and ${missingOutputCount.length - 8} more` : ""}`);
+      await alert({
+        title: "Tasks need an Output Count",
+        message: `${missingOutputCount.length} task(s) need an **Output Count** of 1 or more before you can send the Close Project request.`,
+        items: missingOutputCount.map((t) => t.name || "Untitled task"),
+      });
       return;
     }
     // Hard gate (2026-09-21, Sandra: "how come this project was closed
@@ -2682,22 +2705,28 @@ export default function WbsPlanning() {
     // work.
     const notDoneTasks = orderedTasks.filter((t) => !isCompleteStatusForSched(t.status));
     if (notDoneTasks.length) {
-      await alert(
-        `Can't request closure yet -- ${notDoneTasks.length} task(s) are still not Done or Cancelled: ${notDoneTasks
-          .slice(0, 8)
-          .map((t) => t.name)
-          .join(", ")}${notDoneTasks.length > 8 ? ", ..." : ""}. Finish or cancel these first.`
-      );
+      await alert({
+        title: "Some tasks are still open",
+        message: `${notDoneTasks.length} task(s) aren't Done or Cancelled yet. Finish or cancel them before closing the project.`,
+        items: notDoneTasks.map((t) => t.name),
+      });
       return;
     }
-    if (!(await confirm(`Request closure for "${project.name}"? This asks an approver to lock in the current plan as Final Scope.`))) return;
+    if (
+      !(await confirm({
+        title: "Send Close Project request?",
+        message: `Your supervisor will be asked to approve closing "${project.name}" with its current plan.`,
+        confirmLabel: "Send request",
+      }))
+    )
+      return;
     const flushedBeforeClosureRequest = await flushPendingEdits();
     if (!flushedBeforeClosureRequest) return;
     setWorkflowBusy(true);
     const { error } = await supabase.rpc("request_wbs_closure", { p_project_id: project.id });
     setWorkflowBusy(false);
     if (error) {
-      await alert(`Couldn't request closure: ${error.message}`);
+      await alert(friendlyError("send the Close Project request", error));
       return;
     }
     setClosureFormOpen(false);
@@ -2724,9 +2753,11 @@ export default function WbsPlanning() {
       if (!project.lessons_learned_worked) missingProjectFields.push("Lessons Learned (What Worked)");
       if (!project.lessons_learned_not_worked) missingProjectFields.push("Lessons Learned (What Didn't Work)");
       if (missingProjectFields.length) {
-        await alert(
-          `Can't approve closure yet -- this project is still missing: ${missingProjectFields.join(", ")}. Set these on the Projects & Tasks list first.`
-        );
+        await alert({
+          title: "Project details missing",
+          message: "Fill these in on the Projects & Tasks list before approving the Close Project request.",
+          items: missingProjectFields.map((f) => `**${f}**`),
+        });
         return;
       }
       // Same parent-row exemption as handleRequestClosure above.
@@ -2740,7 +2771,11 @@ export default function WbsPlanning() {
         !(t.depth === 0 && hasChildren(t.id))
     );
       if (missingOutputCount.length) {
-        await alert(`Can't approve closure yet -- ${missingOutputCount.length} task(s) still need an Output Count of 1 or more:\n\n${missingOutputCount.slice(0, 8).map((t) => `• ${t.name || "Untitled task"}`).join("\n")}${missingOutputCount.length > 8 ? `\n…and ${missingOutputCount.length - 8} more` : ""}`);
+        await alert({
+        title: "Tasks need an Output Count",
+        message: `${missingOutputCount.length} task(s) need an **Output Count** of 1 or more before you can approve the Close Project request.`,
+        items: missingOutputCount.map((t) => t.name || "Untitled task"),
+      });
         return;
       }
       // 2026-09-21 (Sandra): the task-completion gate lives ONLY on the
@@ -2758,7 +2793,18 @@ export default function WbsPlanning() {
         // reopened" now that Full Access has an actual Reopen path
         // (handleReopenProject below) -- the old wording was flatly
         // wrong the moment that shipped.
-        approve ? "Approve this closure? This locks in the current plan as Final Scope -- not meant to be reopened casually." : "Reject this closure request?"
+        approve
+          ? {
+              title: "Approve Close Project?",
+              message: "The project is closed with its current plan. Closed projects aren't meant to be reopened casually.",
+              confirmLabel: "Approve",
+            }
+          : {
+              title: "Reject Close Project request?",
+              message: "The project stays open and the request is sent back.",
+              confirmLabel: "Reject",
+              danger: true,
+            }
       ))
     )
       return;
@@ -2773,7 +2819,7 @@ export default function WbsPlanning() {
     });
     setWorkflowBusy(false);
     if (error) {
-      await alert(`Couldn't decide closure: ${error.message}`);
+      await alert(friendlyError(approve ? "approve this request" : "reject this request", error));
       return;
     }
     await loadAll();
@@ -2789,16 +2835,18 @@ export default function WbsPlanning() {
   async function handleReopenProject() {
     if (!project) return;
     if (
-      !(await confirm(
-        `Reopen "${project.name}"? This un-does its Final Scope lock so it can be edited again -- the original closure stays on record, and the project will show as Baseline Locked again.`
-      ))
+      !(await confirm({
+        title: "Reopen this project?",
+        message: `"${project.name}" goes back to started and can be edited again. The original closure stays on record.`,
+        confirmLabel: "Reopen project",
+      }))
     )
       return;
     setWorkflowBusy(true);
     const { error } = await supabase.rpc("reopen_wbs_closure", { p_project_id: project.id });
     setWorkflowBusy(false);
     if (error) {
-      await alert(`Couldn't reopen project: ${error.message}`);
+      await alert(friendlyError("reopen the project", error));
       return;
     }
     await loadAll();
@@ -3003,7 +3051,7 @@ export default function WbsPlanning() {
       sort_order: Date.now(),
     }).select("id").single();
     if (error) {
-      await alert(`Couldn't create task: ${error.message}`);
+      await alert(friendlyError("create the task", error));
       return;
     }
     if (newTask?.id) setFocusTaskNameId(newTask.id as string);
@@ -3053,7 +3101,7 @@ export default function WbsPlanning() {
       sort_order: Date.now(),
     }).select("id").single();
     if (error) {
-      await alert(`Couldn't add subtask: ${error.message}`);
+      await alert(friendlyError("add the sub-task", error));
       return;
     }
     if (newTask?.id) setFocusTaskNameId(newTask.id as string);
@@ -3099,7 +3147,7 @@ export default function WbsPlanning() {
       sort_order: sortOrder,
     }).select("id").single();
     if (error) {
-      await alert(`Couldn't add task: ${error.message}`);
+      await alert(friendlyError("add the task", error));
       return;
     }
     if (newTask?.id) setFocusTaskNameId(newTask.id as string);
@@ -3109,7 +3157,7 @@ export default function WbsPlanning() {
   async function duplicateTask(t: TaskRow & { depth: number }) {
     if (!project || project.wbs_status === "closed" || isLockedStatus(t.status)) return;
     if (hasChildren(t.id)) {
-      await alert("Parent tasks can't be duplicated with their sub-tasks yet. Duplicate the sub-tasks individually.");
+      await alert({ title: "Can't duplicate a parent task", message: "Parent tasks can't be duplicated with their sub-tasks yet. Duplicate the sub-tasks one by one." });
       return;
     }
     const flushed = await flushPendingEdits();
@@ -3146,7 +3194,7 @@ export default function WbsPlanning() {
       sort_order: sortOrder,
     }).select("id").single();
     if (error) {
-      await alert(`Couldn't duplicate task: ${error.message}`);
+      await alert(friendlyError("duplicate the task", error));
       return;
     }
     if (newTask?.id) setFocusTaskNameId(newTask.id as string);
@@ -3204,7 +3252,7 @@ export default function WbsPlanning() {
     const nextOrder = Math.max(0, ...orderedTasks.filter((x) => x.parent_task_id === parentId).map((x) => x.sort_order ?? 0)) + 1000;
     const { error } = await supabase.from("tasks").update({ parent_task_id: parentId, sort_order: nextOrder }).eq("id", t.id);
     if (error) {
-      await alert(`Couldn't move task: ${error.message}`);
+      await alert(friendlyError("move the task", error));
       return;
     }
     setMoveParentTaskId(null);
@@ -3219,7 +3267,7 @@ export default function WbsPlanning() {
     if (project?.wbs_status === "closed") return;
     const eligible = selectedTasks().filter((t) => !hasChildren(t.id) && !isLockedStatus(t.status) && t.status !== "Cancelled");
     if (!eligible.length) {
-      await alert("Select at least one editable leaf task to assign.");
+      await alert({ title: "Nothing to assign", message: "Select at least one open task without sub-tasks to assign." });
       return;
     }
     const personId = await assigneePicker.pick(`Assign ${eligible.length} selected task${eligible.length === 1 ? "" : "s"}`);
@@ -3227,7 +3275,7 @@ export default function WbsPlanning() {
     for (const t of eligible) {
       const { error } = await supabase.from("tasks").update({ assignee_id: personId }).eq("id", t.id);
       if (error) {
-        await alert(`Couldn't assign "${t.name}": ${error.message}`);
+        await alert(friendlyError(`assign "${t.name}"`, error));
         return;
       }
     }
@@ -3243,7 +3291,7 @@ export default function WbsPlanning() {
     const started = project?.wbs_status !== "draft";
     const eligible = chosen.filter((t) => !hasChildren(t.id) && !isLockedStatus(t.status) && (!started || !!t.assignee_id));
     if (!eligible.length) {
-      await alert("Select at least one open task without sub-tasks to duplicate.");
+      await alert({ title: "Nothing to duplicate", message: "Select at least one open task without sub-tasks to duplicate." });
       return;
     }
     const flushed = await flushPendingEdits();
@@ -3276,14 +3324,17 @@ export default function WbsPlanning() {
         sort_order: sortOrder,
       });
       if (error) {
-        await alert(`Couldn't duplicate "${t.name}": ${error.message}`);
+        await alert(friendlyError(`duplicate "${t.name}"`, error));
         return;
       }
     }
     clearTaskSelection();
     await loadAll(true);
     if (eligible.length < chosen.length) {
-      await alert(`${chosen.length - eligible.length} task(s) were skipped (parents with sub-tasks, Done/Cancelled tasks${started ? ", or tasks with no assignee" : ""}).`);
+      await alert({
+        title: `${chosen.length - eligible.length} task(s) not duplicated`,
+        message: `Parent tasks with sub-tasks and Done or Cancelled tasks${started ? ", and tasks with no assignee," : ""} were skipped.`,
+      });
     }
   }
 
@@ -3292,20 +3343,24 @@ export default function WbsPlanning() {
     const chosen = selectedTasks();
     if (!chosen.length) return;
     const chosenIds = new Set(chosen.map((t) => t.id));
-    const roots = chosen.filter((t) => !t.parent_task_id || !chosenIds.has(t.parent_task_id));
+    let roots = chosen.filter((t) => !t.parent_task_id || !chosenIds.has(t.parent_task_id));
     const { blocked } = await splitByArchivePermission("task", roots.map((t) => t.id));
     if (blocked.length) {
-      await alert({ title: "Some tasks can't be deleted", message: blockedDeleteMessage("task", roots.map((t) => t.name), roots.length - blocked.length) });
-      return;
+      // 2026-10-07 fix: list only the blocked tasks, then carry on with the rest.
+      const blockedIds = new Set(blocked.map((b) => b.id));
+      const blockedNames = roots.filter((t) => blockedIds.has(t.id)).map((t) => t.name);
+      await alert({ title: "Can't move some to Archive", message: blockedDeleteMessage("task", blockedNames, roots.length - blocked.length) });
+      roots = roots.filter((t) => !blockedIds.has(t.id));
+      if (roots.length === 0) return;
     }
     const allAffectedIds = Array.from(new Set(roots.flatMap((t) => [t.id, ...tasks.filter((x) => x.parent_task_id === t.id).map((x) => x.id)])));
     const logged = await loggedHoursOnTasks(allAffectedIds);
     const ok = await confirm({
-      title: `Delete ${roots.length} selected task${roots.length === 1 ? "" : "s"}`,
+      title: `Move ${roots.length} task${roots.length === 1 ? "" : "s"} to Archive?`,
       message: logged.entries > 0
-        ? `${loggedTimeDeleteWarning("The selected tasks", logged.hours, logged.entries)}\n\nThey will be moved to Archive and can be restored.`
-        : `Move ${roots.length} selected task${roots.length === 1 ? "" : "s"} to Archive? Parent tasks include their sub-tasks.`,
-      confirmLabel: "Delete",
+        ? `${loggedTimeDeleteWarning("The selected tasks", logged.hours, logged.entries)}\n\nThey can be restored from the Archive.`
+        : "Parent tasks go with their sub-tasks. You can restore them from the Archive.",
+      confirmLabel: "Move to Archive",
       danger: true,
     });
     if (!ok) return;
@@ -3314,7 +3369,7 @@ export default function WbsPlanning() {
     for (const t of roots) {
       const { error } = await archiveItem("task", t.id);
       if (error) {
-        await alert(`Couldn't delete "${t.name}": ${error.message}`);
+        await alert(friendlyError(`move "${t.name}" to Archive`, error));
         return;
       }
     }
@@ -3333,7 +3388,11 @@ export default function WbsPlanning() {
       if (why) skipped.push(why); else eligible.push(t);
     }
     if (!eligible.length) {
-      await alert({ title: "Nothing to move", message: skipped.slice(0, 5).join("\n") || "Select at least one movable task without sub-tasks." });
+      await alert(
+        skipped.length
+          ? { title: "Nothing to move", message: "None of the selected tasks can be moved:", items: skipped }
+          : { title: "Nothing to move", message: "Select at least one movable task without sub-tasks." }
+      );
       return;
     }
     const flushedMove = await flushPendingEdits();
@@ -3343,7 +3402,7 @@ export default function WbsPlanning() {
       if (parentId === t.id) continue;
       const { error } = await supabase.from("tasks").update({ parent_task_id: parentId, sort_order: nextOrder }).eq("id", t.id);
       if (error) {
-        await alert(`Couldn't move "${t.name}": ${error.message}`);
+        await alert(friendlyError(`move "${t.name}"`, error));
         return;
       }
       nextOrder += 1000;
@@ -3352,7 +3411,7 @@ export default function WbsPlanning() {
     clearTaskSelection();
     await loadAll(true);
     if (skipped.length) {
-      await alert({ title: `${skipped.length} task(s) not moved`, message: skipped.slice(0, 5).join("\n") });
+      await alert({ title: `${skipped.length} task(s) not moved`, message: "The other tasks were moved. These were skipped:", items: skipped });
     }
   }
 
@@ -3363,7 +3422,7 @@ export default function WbsPlanning() {
     const chosen = selectedTasks();
     const eligible = chosen.filter((t) => !hasChildren(t.id) && !isLockedStatus(t.status) && t.status !== "Cancelled");
     if (!eligible.length) {
-      await alert("Select at least one active leaf task to cancel.");
+      await alert({ title: "Nothing to cancel", message: "Select at least one open task without sub-tasks to cancel." });
       return;
     }
     const flushed = await flushPendingEdits();
@@ -3374,7 +3433,7 @@ export default function WbsPlanning() {
         .update({ status: "Cancelled", cancellation_reason: reason, submitted_on: null, submitted_by: null, actual_completion_date: null })
         .eq("id", t.id);
       if (error) {
-        await alert(`Couldn't cancel "${t.name}": ${error.message}`);
+        await alert(friendlyError(`cancel "${t.name}"`, error));
         return;
       }
     }
@@ -3397,7 +3456,7 @@ export default function WbsPlanning() {
     // phase117: flag it (with who to contact) if this person can't delete it.
     const { blocked } = await splitByArchivePermission("task", [t.id]);
     if (blocked.length) {
-      await alert({ title: "You can't delete this", message: blockedDeleteMessage("task", [t.name], 0) });
+      await alert({ title: "Can't move to Archive", message: blockedDeleteMessage("task", [t.name], 0) });
       return;
     }
     const childIds = t.depth === 0 ? tasks.filter((x) => x.parent_task_id === t.id).map((x) => x.id) : [];
@@ -3408,7 +3467,7 @@ export default function WbsPlanning() {
       const goAhead = await confirm({
         title: "This task has logged time",
         message: loggedTimeDeleteWarning(childIds.length ? "This task (with its sub-tasks)" : "This task", logged.hours, logged.entries),
-        confirmLabel: "Delete anyway",
+        confirmLabel: "Move to Archive anyway",
         cancelLabel: "Keep task",
         danger: true,
       });
@@ -3416,9 +3475,9 @@ export default function WbsPlanning() {
     }
     // One dialog only: the logged-time warning already asked.
     const ok = logged.entries > 0 || (await confirm({
-      title: "Delete task",
-      message: `Delete "${t.name}"${childIds.length ? ` (and ${childIds.length} sub-task${childIds.length > 1 ? "s" : ""})` : ""}? ${ARCHIVE_MOVE_NOTE}`,
-      confirmLabel: "Delete",
+      title: "Move task to Archive?",
+      message: `"${t.name}"${childIds.length ? ` and its ${childIds.length} sub-task${childIds.length > 1 ? "s" : ""}` : ""} will be archived. ${ARCHIVE_MOVE_NOTE}`,
+      confirmLabel: "Move to Archive",
       danger: true,
     }));
     if (!ok) return;
@@ -3431,7 +3490,7 @@ export default function WbsPlanning() {
     // its sub-tasks and their time entries (restorable from the Archive).
     const { error } = await archiveItem("task", t.id);
     if (error) {
-      await alert(`Couldn't delete: ${error.message}`);
+      await alert(friendlyError("move the task to Archive", error));
       return;
     }
     setLastDeletedTask({ id: t.id, name: t.name });
@@ -3455,7 +3514,7 @@ export default function WbsPlanning() {
       .update({ status: "Cancelled", cancellation_reason: reason, submitted_on: null, submitted_by: null, actual_completion_date: null })
       .eq("id", taskId);
     if (error) {
-      await alert(`Couldn't cancel: ${error.message}`);
+      await alert(friendlyError("cancel the task", error));
       return;
     }
     setCancelTaskDialogOpen(null);
@@ -3472,7 +3531,7 @@ export default function WbsPlanning() {
     if (!flushed) return;
     const { error } = await supabase.rpc("reopen_task", { p_task_id: taskId });
     if (error) {
-      await alert(`Couldn't uncancel: ${error.message}`);
+      await alert(friendlyError("restore the cancelled task", error));
       return;
     }
     loadAll(true);
@@ -3635,7 +3694,7 @@ export default function WbsPlanning() {
       }
     }
     if (patches.size === 0) {
-      await alert("Nothing to refresh -- every task's Start is either manually set or already tracking a dependency.");
+      await alert({ title: "Nothing to refresh", message: "Every task's Start is either set by hand or already follows its dependency." });
       return;
     }
     for (const [id, patch] of patches) {
@@ -3730,7 +3789,7 @@ export default function WbsPlanning() {
       if (movesStandardStart) {
         const { error } = await supabase.rpc("wbs_save_task_start", { p_task_id: taskId, p_start_standard: nextStandardStart });
         if (error) {
-          await alert(`Couldn't save: ${error.message}`);
+          await alert(friendlyError("save your changes", error));
           loadAll();
           return false;
         }
@@ -3739,7 +3798,7 @@ export default function WbsPlanning() {
       if (Object.keys(rest).length === 0) continue;
       const { data, error } = await supabase.from("tasks").update(rest).eq("id", taskId).select().single();
       if (error) {
-        await alert(`Couldn't save: ${error.message}`);
+        await alert(friendlyError("save your changes", error));
         loadAll();
         return false;
       }
@@ -3750,7 +3809,7 @@ export default function WbsPlanning() {
     if (project && Object.keys(pendingProjectPatch.current).length > 0) {
       const { error } = await supabase.from("projects").update(pendingProjectPatch.current).eq("id", project.id);
       if (error) {
-        await alert(`Couldn't save: ${error.message}`);
+        await alert(friendlyError("save your changes", error));
         loadAll();
         return false;
       }
@@ -3796,9 +3855,9 @@ export default function WbsPlanning() {
     // real column left to check against.
     const conflicted = orderedTasks.filter((t) => dependencyConflict(t, "full_capacity"));
     if (noName.length) issues.push(`${noName.length} task(s) still have a placeholder name.`);
-    if (noEffort.length) issues.push(`${noEffort.length} task(s) still need an Effort level.`);
+    if (noEffort.length) issues.push(`${noEffort.length} task(s) still need **Estimated hours**.`);
     if (conflicted.length)
-      issues.push(`${conflicted.length} task(s) start on or before a dependency's own End under at least one mode -- double-check those Start dates.`);
+      issues.push(`${conflicted.length} task(s) start on or before the End of a task they depend on. Check those Start dates.`);
     return issues;
   }
 
@@ -3843,7 +3902,11 @@ export default function WbsPlanning() {
       ].filter((x): x is string => !!x);
 
       if (missing.length) {
-        await alert(`Complete the required Project Information before continuing: ${missing.join(", ")}.`);
+        await alert({
+          title: "Project Information missing",
+          message: "Fill in these required fields before you continue.",
+          items: missing.map((f) => `**${f}**`),
+        });
         return;
       }
     }
@@ -3851,9 +3914,11 @@ export default function WbsPlanning() {
     const chosenChain = chainByMode[activeMode];
     const unresolved = orderedTasks.filter((t) => !chosenChain.get(t.id));
     if (unresolved.length) {
-      await alert(
-        `Can't save ${MODE_LABEL[activeMode]} yet -- ${unresolved.length} task(s) don't have a schedule under it. Add a Start date and Estimated hours for every task first.`
-      );
+      await alert({
+        title: `Can't save ${MODE_LABEL[activeMode]} yet`,
+        message: `${unresolved.length} task(s) have no schedule yet. Add a **Start** date and **Estimated hours** to every task first.`,
+        items: unresolved.map((t) => t.name || "Untitled task"),
+      });
       return;
     }
 
@@ -3874,12 +3939,24 @@ export default function WbsPlanning() {
     // and flips status to Changed After Baseline (record_wbs_edit below).
     const wasBaselineLocked = project.wbs_status === "baseline_locked";
     const confirmMsg = project.is_unsaved
-      ? "Save Project Information?\n\nThis saves the project details and opens the WBS planning sections. You can still update the information while the project is in Draft."
+      ? {
+          title: "Save Project Information?",
+          message: "This saves the project details and opens the WBS planning sections. You can still edit them while the project is in Draft.",
+          confirmLabel: "Save",
+        }
       : wasBaselineLocked
-      ? `Save this project's timelines using ${verb}?\n\nThis writes every task's computed End date, records both modes for reporting, and marks the project Changed After Baseline since this is an edit made after the Baseline was locked.`
-      : `Save this project's timelines using ${verb}?\n\nThis writes every task's computed End date (Start dates are already saved per-task) and records both modes for reporting.${
-          project.wbs_status === "draft" ? " Nothing is locked yet -- use Start Project from the actions above when you're ready." : ""
-        }`;
+      ? {
+          title: `Save timelines using ${verb}?`,
+          message: "Every task's End date is saved, and the project is marked Changed After Baseline because it was edited after it started.",
+          confirmLabel: "Save timelines",
+        }
+      : {
+          title: `Save timelines using ${verb}?`,
+          message: `Every task's End date is saved for reporting.${
+            project.wbs_status === "draft" ? " Nothing is committed yet. Use Start Project above when you're ready." : ""
+          }`,
+          confirmLabel: "Save timelines",
+        };
     if (!(await confirm(confirmMsg))) return;
 
     setSaving(true);
@@ -3957,7 +4034,10 @@ export default function WbsPlanning() {
               ? await supabase.from("tasks").update(patch).eq("id", t.id)
               : await supabase.rpc("wbs_save_task_schedule", { p_task_id: t.id, p_start: finalStart, p_due: finalDue });
           if (taskDateError) {
-            await alert(`Couldn't save "${t.name}"'s dates: ${taskDateError.message}. Stopping here -- reloading to show what actually saved.`);
+            await alert({
+              ...friendlyError(`save "${t.name}"'s dates`, taskDateError),
+              items: ["Saving stopped here. The page will reload to show what was saved."],
+            });
             await loadAll();
             return;
           }
@@ -3995,7 +4075,10 @@ export default function WbsPlanning() {
         .eq("id", project.id);
       if (!scopingModeError && project.is_unsaved) setProject((prev) => (prev ? { ...prev, is_unsaved: false } : prev));
       if (scopingModeError) {
-        await alert(`Timelines were saved, but the project's Scoping Effort setting couldn't be updated: ${scopingModeError.message}`);
+        await alert({
+          ...friendlyError("update the Scoping Effort setting", scopingModeError),
+          title: "Timelines saved, one setting didn't",
+        });
         await loadAll();
         return;
       }
@@ -4014,7 +4097,10 @@ export default function WbsPlanning() {
       if (wasBaselineLocked || project.wbs_status === "changed_after_baseline") {
         const { error } = await supabase.rpc("record_wbs_edit", { p_project_id: project.id, p_tasks: buildTaskSnapshotPayload() });
         if (error) {
-          await alert(`Timelines were saved, but the project's status couldn't be updated: ${error.message}`);
+          await alert({
+            ...friendlyError("update the project status", error),
+            title: "Timelines saved, status didn't update",
+          });
           await loadAll();
           return;
         }
@@ -4040,15 +4126,16 @@ export default function WbsPlanning() {
       if (!wasInitialProjectInfoSave) {
         await alert(
           project.wbs_status === "draft"
-            ? "Draft saved."
+            ? { title: "Draft saved", message: "Your changes to this draft are saved." }
             : keptDue.length
-            ? `Timelines have been saved. Due dates on a started project only change through an approved extension, so these kept their current due date:\n\n${keptDue
-                .slice(0, 12)
-                .map((k) => `• ${k.name}: plan says ${formatDate(k.plan)}, kept ${formatDate(k.kept)}`)
-                .join("\n")}${keptDue.length > 12 ? `\n…and ${keptDue.length - 12} more` : ""}\n\nIf a task needs more time, request an extension.`
+            ? {
+                title: "Timelines saved",
+                message: "On a started project, due dates only change through an approved Extension. These kept their current due date; request an Extension if a task needs more time.",
+                items: keptDue.map((k) => `**${k.name}**: plan says ${formatDate(k.plan)}, kept ${formatDate(k.kept)}`),
+              }
             : project.is_operational
-            ? "Changes saved."
-            : "Changes saved. This project is already started, so the update is tracked as variance against its Baseline."
+            ? { title: "Changes saved", message: "Your changes are saved." }
+            : { title: "Changes saved", message: "This project has already started, so the change is tracked against its original plan." }
         );
       }
     } finally {
@@ -4099,7 +4186,7 @@ export default function WbsPlanning() {
     const { error } = await supabase.from("projects").update({ is_unsaved: false }).eq("id", project.id);
     setLeaveBusy(false);
     if (error) {
-      await alert(`Couldn't save the project: ${error.message}`);
+      await alert(friendlyError("save the project", error));
       return;
     }
     setHasUnsavedChanges(false);
@@ -4115,7 +4202,7 @@ export default function WbsPlanning() {
     const { error } = await supabase.rpc("discard_unsaved_project", { p_id: project.id });
     setLeaveBusy(false);
     if (error) {
-      await alert(`Couldn't discard the project: ${error.message}`);
+      await alert(friendlyError("discard the project", error));
       return;
     }
     pendingTaskPatches.current.clear();
@@ -4603,9 +4690,10 @@ export default function WbsPlanning() {
                   // 7.5h/day calc from the new Start.
                   if (v && t.manual_end_date && t.manual_end_date.slice(0, 10) < v.slice(0, 10)) {
                     patch.manual_end_date = null;
-                    void alert(
-                      `The End date on this row (${formatDate(t.manual_end_date.slice(0, 10))}) is before the Start you just set, so it's been cleared -- End is back to the calculated date. Type a new End if you want the hours spread across a specific window.`
-                    );
+                    void alert({
+                      title: "End date cleared",
+                      message: `The End date (${formatDate(t.manual_end_date.slice(0, 10))}) was before the new Start, so End is back to the calculated date. Type a new End to spread the hours yourself.`,
+                    });
                   }
                   saveTaskField(t.id, patch);
                 }}
@@ -4674,7 +4762,10 @@ export default function WbsPlanning() {
                   // clamped to a single day, and the hour spread became
                   // nonsense -- all silently.
                   if (v && v.slice(0, 10) < entry.start.slice(0, 10)) {
-                    void alert(`End can't be before Start (${formatDate(entry.start)}). Move the Start date first if this task really needs to begin earlier.`);
+                    void alert({
+                      title: "End is before Start",
+                      message: `End can't be before Start (${formatDate(entry.start)}). Move the Start date first if this task needs to begin earlier.`,
+                    });
                     return;
                   }
                   saveTaskField(t.id, {
@@ -5461,7 +5552,7 @@ export default function WbsPlanning() {
                 setLastDeletedTask(null);
                 const { error } = await restoreItem("task", target.id);
                 if (error) {
-                  await alert(`Couldn't undo delete: ${error.message}`);
+                  await alert(friendlyError("restore the task from Archive", error));
                   return;
                 }
                 await loadAll(true);

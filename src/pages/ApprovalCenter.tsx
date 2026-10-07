@@ -26,6 +26,7 @@ import { supabase } from "../lib/supabaseClient";
 import { fetchAllRows } from "../lib/fetchAllRows";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 import { workingDayDelta, formatWorkingDayDelta } from "../lib/workingDays";
 import { useHolidaySet } from "../lib/useHolidaySet";
 import { loadRoutingData, routeApproval, activeDelegationFor, type RoutingData } from "../lib/approvalRouting";
@@ -751,7 +752,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
       .select("id")
       .single();
     if (error) {
-      await alert(`Couldn't record the override: ${error.message}`);
+      await alert(friendlyError("save the override reason", error));
       return false;
     }
     return (data as { id: string }).id;
@@ -782,7 +783,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
     setDecidingKey(null);
     if (error) {
       await finishOverride(key, ovId, "failed");
-      await alert(`Couldn't ${status === "Approved" ? "approve" : "reject"} this request: ${error.message}`);
+      await alert(friendlyError(`${status === "Approved" ? "approve" : "reject"} this request`, error));
       return;
     }
     await finishOverride(key, ovId, status.toLowerCase());
@@ -800,7 +801,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
     setDecidingKey(null);
     if (res.error) {
       await finishOverride(key, ovId, "failed");
-      await alert(`Couldn't ${status === "approved" ? "approve" : "reject"} this entry: ${res.error}`);
+      await alert(friendlyError(`${status === "approved" ? "approve" : "reject"} this time entry`, res.error));
       return;
     }
     await finishOverride(key, ovId, status);
@@ -829,7 +830,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
     setDecidingKey(null);
     if (res.error) {
       await finishOverride(key, ovId, "failed");
-      await alert(`Couldn't ${decision === "approved" ? "approve" : "reject"} this correction: ${res.error}`);
+      await alert(friendlyError(`${decision === "approved" ? "approve" : "reject"} this correction`, res.error));
       return;
     }
     await finishOverride(key, ovId, decision);
@@ -887,7 +888,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
       // Validation itself succeeded -- only the lock step failed (rare;
       // e.g. a permission edge case). Surface it rather than silently
       // leaving the row unlocked with no explanation.
-      await alert(`"${row.name}" was validated, but couldn't be locked: ${lockError.message}`);
+      await alert({ title: "Validated, but still editable", message: `"${row.name}" was validated, but its fields couldn't be made read-only. Try again or tell Sandra.`, details: lockError.message });
     }
     await finishOverride(key, ovId, "validated");
     loadAll();
@@ -1595,7 +1596,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
           <button
             onClick={async () => {
               const res = await setValidationHold(tc.id, !tc.validation_hold);
-              if (res.error) { await alert({ title: "Couldn't update hold", message: res.error }); return; }
+              if (res.error) { await alert(friendlyError("update the hold", res.error)); return; }
               loadAll();
             }}
             style={{ fontSize: 10.5, fontWeight: 600, color: "var(--accent)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "2px 7px", cursor: "pointer", whiteSpace: "nowrap" }}

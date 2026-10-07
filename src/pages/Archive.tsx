@@ -3,6 +3,7 @@ import { Search, RotateCcw, RefreshCw } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 import { restoreItem, ARCHIVE_KIND_LABEL, ARCHIVE_RETENTION_DAYS, type ArchiveKind } from "../lib/archive";
 
 // 2026-09-23 (phase104, Sandra: "create a separate archive page... like a
@@ -84,7 +85,7 @@ export default function Archive() {
   async function load() {
     setLoading(true);
     const { data, error } = await supabase.from("archive_items").select("*").order("archived_at", { ascending: false });
-    if (error) await alert(`Couldn't load the Archive: ${error.message}`);
+    if (error) await alert(friendlyError("load the Archive", error));
     setRows((data as ArchiveRow[]) ?? []);
     setLoading(false);
   }
@@ -119,8 +120,8 @@ export default function Archive() {
   async function handleRestore(r: ArchiveRow) {
     const bundle = bundleText(r);
     const ok = await confirm({
-      title: "Restore from Archive",
-      message: `Restore ${ARCHIVE_KIND_LABEL[r.kind]} **${r.label}**${bundle ? ` together with its ${bundle}` : ""}? It goes back exactly where it was.`,
+      title: "Restore from Archive?",
+      message: `Puts ${ARCHIVE_KIND_LABEL[r.kind]} **${r.label}**${bundle ? ` and its ${bundle}` : ""} back exactly where ${bundle ? "they were" : "it was"}.`,
       confirmLabel: "Restore",
     });
     if (!ok) return;
@@ -129,7 +130,7 @@ export default function Archive() {
     const { error } = await restoreItem(r.kind, r.id);
     setRestoringKey(null);
     if (error) {
-      await alert(`Couldn't restore: ${error.message}`);
+      await alert(friendlyError("restore this item", error));
       return;
     }
     load();

@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { RotateCcw, Zap } from "lucide-react";
 import { supabase, IS_PREVIEW } from "../lib/supabaseClient";
 import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 import { formatDate } from "../lib/formatDate";
 import { formatDuration, timeLogId } from "../lib/timeTracking";
 import { routeApproval, type RoutingData } from "../lib/approvalRouting";
@@ -119,7 +120,7 @@ export default function AutoApprovedPanel({ meId, isFullAccess, routing, personN
     setBusy(true);
     const res = reversing.kind === "time" ? await reverseAutoTime(reversing.id, note.trim()) : await reverseAutoValidation(reversing.id, note.trim());
     setBusy(false);
-    if (res.error) { await alert({ title: "Couldn't reverse", message: res.error }); return; }
+    if (res.error) { await alert(friendlyError("reverse this approval", res.error)); return; }
     setReversing(null);
     setNote("");
     await load();
@@ -129,8 +130,8 @@ export default function AutoApprovedPanel({ meId, isFullAccess, routing, personN
   async function runTest() {
     if (!testProject) return;
     const res = await runAutoValidations(testProject, testIgnoreWait);
-    if (res.error) { await alert({ title: "Couldn't run", message: res.error }); return; }
-    await alert({ title: "Auto-validation run", message: `${res.count ?? 0} task(s) auto-validated in this project.` });
+    if (res.error) { await alert(friendlyError("run auto-validation", res.error)); return; }
+    await alert({ title: "Auto-validation finished", message: `${res.count ?? 0} ${res.count === 1 ? "task was" : "tasks were"} validated automatically in this project.` });
     await load();
     onChanged?.();
   }

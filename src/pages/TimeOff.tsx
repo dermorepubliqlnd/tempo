@@ -4,6 +4,8 @@ import { supabase } from "../lib/supabaseClient";
 import { useSearchParams } from "react-router-dom";
 import HolidayCalendar from "./HolidayCalendar";
 import { useSession } from "../lib/useSession";
+import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 
 // Time Off (2026-08-25) -- split out of the old Work Schedule "Scheduled"
 // tab when that manual hour-splitting grid was removed (Sandra: "I don't
@@ -71,6 +73,7 @@ function DayMenu({ onPick, onClose }: { onPick: (s: "off" | "half_day" | null) =
 }
 
 function TimeOffGrid() {
+  const { alert, dialog } = useConfirm();
   const { person: me } = useSession();
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
@@ -134,7 +137,7 @@ function TimeOffGrid() {
         setAvailability((prev) => prev.filter((a) => a.id !== existing.id));
         const { error } = await supabase.from("person_availability").delete().eq("id", existing.id);
         if (error) {
-          window.alert(`Couldn't clear status: ${error.message}`);
+          await alert(friendlyError("clear this day", error));
           loadAll();
         }
       }
@@ -142,13 +145,13 @@ function TimeOffGrid() {
       setAvailability((prev) => prev.map((a) => (a.id === existing.id ? { ...a, status } : a)));
       const { error } = await supabase.from("person_availability").update({ status }).eq("id", existing.id);
       if (error) {
-        window.alert(`Couldn't save status: ${error.message}`);
+        await alert(friendlyError("save this day", error));
         loadAll();
       }
     } else {
       const { data, error } = await supabase.from("person_availability").insert({ person_id: personId, date: dateStr, status }).select().single();
       if (!error && data) setAvailability((prev) => [...prev, data as AvailabilityRow]);
-      if (error) window.alert(`Couldn't save: ${error.message}`);
+      if (error) await alert(friendlyError("save this day", error));
     }
     setDayMenu(null);
   }
@@ -170,6 +173,7 @@ function TimeOffGrid() {
 
   return (
     <div>
+      {dialog}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
         <button

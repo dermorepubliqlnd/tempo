@@ -5,6 +5,7 @@ import { toISO as toLocalISODate } from "../lib/workingDays";
 import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { InlineText, InlineDate, InlineSelect } from "../components/InlineCell";
 import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 import { useSession } from "../lib/useSession";
 
 interface HolidayRow {
@@ -44,7 +45,7 @@ export default function HolidayCalendar({ embedded = false }: { embedded?: boole
   const canEdit = me?.access_level === "full";
   const [holidays, setHolidays] = useState<HolidayRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const { confirm, dialog } = useConfirm();
+  const { confirm, alert, dialog } = useConfirm();
 
   async function loadAll() {
     setLoading(true);
@@ -61,7 +62,7 @@ export default function HolidayCalendar({ embedded = false }: { embedded?: boole
     setHolidays((prev) => prev.map((h) => (h.id === id ? { ...h, ...patch } : h)));
     const { error } = await supabase.from("holidays").update(patch).eq("id", id);
     if (error) {
-      window.alert(`Couldn't save: ${error.message}`);
+      await alert(friendlyError("save the holiday", error));
       loadAll();
     }
   }
@@ -70,7 +71,7 @@ export default function HolidayCalendar({ embedded = false }: { embedded?: boole
     const today = toLocalISODate(new Date());
     const { error } = await supabase.from("holidays").insert({ date: today, name: "New holiday", category: "legal_ph" });
     if (error) {
-      window.alert(`Couldn't add: ${error.message}`);
+      await alert(friendlyError("add the holiday", error));
       return;
     }
     loadAll();
@@ -78,15 +79,15 @@ export default function HolidayCalendar({ embedded = false }: { embedded?: boole
 
   async function remove(h: HolidayRow) {
     const ok = await confirm({
-      title: "Delete holiday",
-      message: `Delete "${h.name}" (${h.date})? ${ARCHIVE_MOVE_NOTE}`,
-      confirmLabel: "Delete",
+      title: "Move holiday to Archive?",
+      message: `"${h.name}" (${h.date}) will be removed from the calendar. ${ARCHIVE_MOVE_NOTE}`,
+      confirmLabel: "Move to Archive",
       danger: true,
     });
     if (!ok) return;
     const { error } = await archiveItem("holiday", h.id);
     if (error) {
-      window.alert(`Couldn't delete: ${error.message}`);
+      await alert(friendlyError("move the holiday to Archive", error));
       return;
     }
     loadAll();

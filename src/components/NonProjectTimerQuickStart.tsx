@@ -3,6 +3,7 @@ import { Timer, ChevronDown } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useTimeTracking } from "../lib/TimeTrackingContext";
 import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 import { buildHolidayNameMap, nonWorkingDayConfirmMessage, toISO, type HolidayNameMap } from "../lib/workingDays";
 
 // 2026-09-29 (phase123, Sandra: quick start for non-project timers) --
@@ -32,9 +33,9 @@ export default function NonProjectTimerQuickStart() {
   async function startFor(t: { id: string; name: string }) {
     setOpen(false);
     const warnMsg = nonWorkingDayConfirmMessage(toISO(new Date()), holidayNames);
-    if (warnMsg && !(await confirm({ message: warnMsg, confirmLabel: "Yes, start" }))) return;
+    if (warnMsg && !(await confirm({ title: "Start a timer on a day off?", message: warnMsg, confirmLabel: "Start anyway" }))) return;
     const res = await startNonProject(t);
-    if (res.error) await alert(`Couldn't start timer: ${res.error}`);
+    if (res.error) await alert(friendlyError("start the timer", res.error));
   }
 
   return (

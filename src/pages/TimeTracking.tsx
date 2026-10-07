@@ -5,6 +5,7 @@ import { supabase } from "../lib/supabaseClient";
 import { fetchAllRows } from "../lib/fetchAllRows";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 import { formatDate } from "../lib/formatDate";
 import { FOLLOW_UP_REASON_LABEL, type FollowUpReason, timeLogId, formatDuration, submitManualTimeEntry, submitNonProjectTimeEntry, correctTimeEntry, requestTimeEntryCorrection, cancelTimeEntryCorrection, editPendingManualTimeEntry } from "../lib/timeTracking";
 import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
@@ -271,13 +272,13 @@ function findAllOverlappingEntries(entries: EntryRow[], personId: string, startI
 // Why a conflicting entry can't simply be trimmed to fit (mirrors
 // apply_time_entry_correction's server-side rules) -- null = trimmable.
 function untrimmableReason(row: EntryRow, startIso: string, endIso: string): string | null {
-  if (row.status !== "confirmed" && row.status !== "approved") return "it's still pending -- the owner can edit it directly";
+  if (row.status !== "confirmed" && row.status !== "approved") return "it's still pending, so its owner can edit it directly";
   const s = new Date(startIso).getTime();
   const e = new Date(endIso).getTime();
   const rs = new Date(row.started_at).getTime();
   const re = row.ended_at ? new Date(row.ended_at).getTime() : Date.now();
-  if (rs >= s && re <= e) return "it sits entirely inside the corrected time -- archive or adjust it first";
-  if (rs < s && re > e) return "it fully surrounds the corrected time -- trimming would split it";
+  if (rs >= s && re <= e) return "it sits entirely inside the corrected time. Move it to Archive or adjust it first";
+  if (rs < s && re > e) return "it fully surrounds the corrected time, so trimming would split it in two";
   return null;
 }
 function trimmedRangeText(row: EntryRow, startIso: string, endIso: string): string {
@@ -297,8 +298,17 @@ function overlapTaskIdLabel(row: EntryRow): string {
 function overlapTitle(row: EntryRow): string {
   return row.activity_type_id ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "Untitled task";
 }
-function overlapMessageText(row: EntryRow): string {
-  return `Time overlap detected\n\nYou already have a logged entry for this period:\nLog ID: ${timeLogId(row.entry_number)}\nTask ID: ${overlapTaskIdLabel(row)}\nTask: ${overlapTitle(row)}\nTime: ${formatClockRange(row.started_at, row.ended_at)}\nStatus: ${STATUS_LABEL[row.status]}\n\nPlease adjust the start or end time.`;
+function overlapMessageText(row: EntryRow): { title: string; message: string; items: string[] } {
+  return {
+    title: "Time overlaps another entry",
+    message: "You already have time logged in this period. Adjust the start or end time.",
+    items: [
+      `**Log ID:** ${timeLogId(row.entry_number)}`,
+      `**Task:** ${overlapTaskIdLabel(row)} ${overlapTitle(row)}`,
+      `**Time:** ${formatClockRange(row.started_at, row.ended_at)}`,
+      `**Status:** ${STATUS_LABEL[row.status]}`,
+    ],
+  };
 }
 
 // 2026-09-23 (Sandra: "can we hard gate manual plotting time in
@@ -312,7 +322,7 @@ function isFutureTimeEntry(startIso: string, endIso: string): boolean {
   const now = Date.now();
   return new Date(startIso).getTime() > now || new Date(endIso).getTime() > now;
 }
-const FUTURE_ENTRY_MESSAGE_TEXT = "Future time entry not allowed\n\nTime entries can only be logged for time that has already passed.";
+const FUTURE_ENTRY_MESSAGE_TEXT = { title: "Can't log future time", message: "Time entries can only cover time that has already passed." };
 
 function formatWorkDate(value: string): string {
   const d = new Date(value);
@@ -1008,7 +1018,7 @@ export default function TimeTracking() {
     const start = new Date(`${v.date}T${v.startTime}`);
     const end = new Date(`${v.date}T${v.endTime}`);
     if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) {
-      await alert("End time must be after start time.");
+      await alert({ title: "Check the times", message: "End time must be after the start time." });
       return null;
     }
     if (isFutureTimeEntry(start.toISOString(), end.toISOString())) {
@@ -1016,11 +1026,11 @@ export default function TimeTracking() {
       return null;
     }
     if (!v.notes.trim()) {
-      await alert("Please add a reason for the correction.");
+      await alert({ title: "Reason needed", message: "Add a reason for the correction, then submit again." });
       return null;
     }
     const warn = nonWorkingDayConfirmMessage(v.date, holidayNames);
-    if (warn && !(await confirm({ message: warn, confirmLabel: "Yes, continue" }))) return null;
+    if (warn && !(await confirm({ title: "Log time on a day off?", message: warn, confirmLabel: "Continue anyway" }))) return null;
     return { startIso: start.toISOString(), endIso: end.toISOString() };
   }
 
@@ -1036,17 +1046,23 @@ export default function TimeTracking() {
     const conflicts = findAllOverlappingEntries(entries, row.person_id, startIso, endIso, row.id);
     const blocked = conflicts.map((c) => ({ c, why: untrimmableReason(c, startIso, endIso) })).find((x) => x.why);
     if (blocked) {
-      await alert(`${overlapMessageText(blocked.c)}\n\nThis entry can't be trimmed automatically: ${blocked.why}.`);
+      const ov = overlapMessageText(blocked.c);
+      await alert({ ...ov, message: `This overlapping entry can't be trimmed automatically: ${blocked.why}.` });
       return;
     }
-    let message = `Correct this entry to **${formatClockRange(startIso, endIso)}** (${formatDuration(Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000))})?\n\nWas: ${formatClockRange(row.started_at, row.ended_at)} (${formatDuration(row.duration_minutes)}). The original stays on record.`;
-    if (conflicts.length > 0) {
-      message =
-        `**Time overlap detected**\n\nThe corrected time runs into ${conflicts.length === 1 ? "another entry" : `${conflicts.length} other entries`}. They'll be trimmed to fit:\n` +
-        conflicts.map((c) => `• **${overlapTaskIdLabel(c)}** ${overlapTitle(c)}: ${formatClockRange(c.started_at, c.ended_at)} → ${trimmedRangeText(c, startIso, endIso)}`).join("\n") +
-        `\n\n` + message;
-    }
-    const ok = await confirm({ message, confirmLabel: conflicts.length > 0 ? "Trim & correct" : "Correct" });
+    const newRange = `**${formatClockRange(startIso, endIso)}** (${formatDuration(Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000))})`;
+    const wasRange = `${formatClockRange(row.started_at, row.ended_at)} (${formatDuration(row.duration_minutes)})`;
+    const message = conflicts.length > 0
+      ? `Changes ${wasRange} to ${newRange}. ${conflicts.length === 1 ? "The overlapping entry below is" : "The overlapping entries below are"} trimmed to fit; the original stays on record.`
+      : `Changes ${wasRange} to ${newRange}. The original stays on record.`;
+    const ok = await confirm({
+      title: conflicts.length > 0 ? "Correct and trim overlaps?" : "Correct this time entry?",
+      message,
+      items: conflicts.length > 0
+        ? conflicts.map((c) => `**${overlapTaskIdLabel(c)}** ${overlapTitle(c)}: ${formatClockRange(c.started_at, c.ended_at)} → ${trimmedRangeText(c, startIso, endIso)}`)
+        : undefined,
+      confirmLabel: conflicts.length > 0 ? "Trim and correct" : "Correct entry",
+    });
     if (!ok) return;
     const isNonProject = Boolean(row.activity_type_id);
     const res = await correctTimeEntry(row.id, startIso, endIso, v.notes.trim(), {
@@ -1055,7 +1071,7 @@ export default function TimeTracking() {
       trimEntryIds: conflicts.map((c) => c.id),
     });
     if (res.error) {
-      await alert(`Couldn't correct this entry: ${res.error}`);
+      await alert(friendlyError("correct this entry", res.error));
       return;
     }
     setCorrectingId(null);
@@ -1076,8 +1092,9 @@ export default function TimeTracking() {
     }
     const isNonProject = Boolean(row.activity_type_id);
     const ok = await confirm({
-      message: `Request a correction to **${formatClockRange(win.startIso, win.endIso)}**?\n\nWas: ${formatClockRange(row.started_at, row.ended_at)} (${formatDuration(row.duration_minutes)}). Your approver will review it in the Approval Center.`,
-      confirmLabel: "Submit request",
+      title: "Request a time correction?",
+      message: `Changes ${formatClockRange(row.started_at, row.ended_at)} (${formatDuration(row.duration_minutes)}) to **${formatClockRange(win.startIso, win.endIso)}**. Your supervisor reviews it in Approval Center.`,
+      confirmLabel: "Send request",
     });
     if (!ok) return;
     const res = await requestTimeEntryCorrection(
@@ -1088,7 +1105,7 @@ export default function TimeTracking() {
       isNonProject && v.activityTypeId && v.activityTypeId !== row.activity_type_id ? v.activityTypeId : undefined
     );
     if (res.error) {
-      await alert(`Couldn't submit this request: ${res.error}`);
+      await alert(friendlyError("send this request", res.error));
       return;
     }
     setRequestingId(null);
@@ -1096,11 +1113,11 @@ export default function TimeTracking() {
   }
 
   async function handleCancelCorrectionRequest(req: CorrectionRequestRow) {
-    const ok = await confirm({ message: "Cancel this correction request?", confirmLabel: "Cancel request", danger: true });
+    const ok = await confirm({ title: "Cancel this correction request?", message: "The entry keeps its current times.", confirmLabel: "Cancel request", cancelLabel: "Keep request", danger: true });
     if (!ok) return;
     const res = await cancelTimeEntryCorrection(req.id);
     if (res.error) {
-      await alert(`Couldn't cancel: ${res.error}`);
+      await alert(friendlyError("cancel this request", res.error));
       return;
     }
     loadAll();
@@ -1114,14 +1131,15 @@ export default function TimeTracking() {
   async function submitArchive(row: EntryRow, reason: string) {
     const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
     const ok = await confirm({
-      message: `Archive this ${formatDuration(row.duration_minutes)} entry for ${label}? It stops counting toward Logged hrs, Productivity and dashboard totals. ${ARCHIVE_MOVE_NOTE}`,
-      confirmLabel: "Archive",
+      title: "Move time entry to Archive?",
+      message: `This ${formatDuration(row.duration_minutes)} entry for ${label} stops counting toward Logged hours, Productivity and dashboard totals. ${ARCHIVE_MOVE_NOTE}`,
+      confirmLabel: "Move to Archive",
       danger: true,
     });
     if (!ok) return;
     const res = await archiveItem("time_entry", row.id, reason.trim() || undefined);
     if (res.error) {
-      await alert(`Couldn't archive this entry: ${res.error.message}`);
+      await alert(friendlyError("move this entry to Archive", res.error));
       return;
     }
     setArchivingId(null);
@@ -1146,7 +1164,7 @@ export default function TimeTracking() {
     const start = new Date(`${v.date}T${v.startTime}`);
     const end = new Date(`${v.date}T${v.endTime}`);
     if (end <= start) {
-      await alert("End time must be after start time.");
+      await alert({ title: "Check the times", message: "End time must be after the start time." });
       return;
     }
     if (isFutureTimeEntry(start.toISOString(), end.toISOString())) {
@@ -1161,7 +1179,7 @@ export default function TimeTracking() {
     // 2026-09-23 (Sandra: same weekend/holiday soft check -- an edit can
     // move a pending entry's date onto a weekend/holiday too).
     const editWarnMsg = nonWorkingDayConfirmMessage(v.date, holidayNames);
-    if (editWarnMsg && !(await confirm({ message: editWarnMsg, confirmLabel: "Yes, save it" }))) return;
+    if (editWarnMsg && !(await confirm({ title: "Log time on a day off?", message: editWarnMsg, confirmLabel: "Save anyway" }))) return;
     setEditSaving(true);
     const res = await editPendingManualTimeEntry(row.id, start.toISOString(), end.toISOString(), {
       reasonCategory: row.activity_type_id ? undefined : v.reasonCategory || undefined,
@@ -1170,7 +1188,7 @@ export default function TimeTracking() {
     });
     setEditSaving(false);
     if (res.error) {
-      await alert(`Couldn't save these changes: ${res.error}`);
+      await alert(friendlyError("save these changes", res.error));
       return;
     }
     setEditingId(null);
@@ -1179,11 +1197,11 @@ export default function TimeTracking() {
 
   async function handleDeletePending(row: EntryRow) {
     const label = row.activity_type_id ? row.activity_type?.name ?? "this non-project entry" : `"${row.task?.name}"`;
-    const ok = await confirm({ message: `Delete this time entry for ${label}? ${ARCHIVE_MOVE_NOTE}`, confirmLabel: "Delete", danger: true });
+    const ok = await confirm({ title: "Move time entry to Archive?", message: `The time entry for ${label} is removed. ${ARCHIVE_MOVE_NOTE}`, confirmLabel: "Move to Archive", danger: true });
     if (!ok) return;
     const res = await archiveItem("time_entry", row.id);
     if (res.error) {
-      await alert(`Couldn't delete this entry: ${res.error.message}`);
+      await alert(friendlyError("move this entry to Archive", res.error));
       return;
     }
     loadAll();
@@ -1230,7 +1248,7 @@ export default function TimeTracking() {
       // the form, since a manual entry is often backdated rather than
       // logged for today.
       const npWarnMsg = nonWorkingDayConfirmMessage(logStartDate, holidayNames);
-      if (npWarnMsg && !(await confirm({ message: npWarnMsg, confirmLabel: "Yes, log it" }))) return;
+      if (npWarnMsg && !(await confirm({ title: "Log time on a day off?", message: npWarnMsg, confirmLabel: "Log anyway" }))) return;
       setLogSaving(true);
       const res = await submitNonProjectTimeEntry(me?.id ?? "", logActivityTypeId, start.toISOString(), end.toISOString(), logNotes.trim());
       setLogSaving(false);
@@ -1240,7 +1258,7 @@ export default function TimeTracking() {
       }
       setLogMode(null);
       setLogNotes("");
-      await alert(await timeEntryOutcomeMessage(res.id, clampedAtMidnight ? " (your end time was before the start time, so it was clamped to 11:59 PM the same day)" : ""));
+      await alert(await timeEntryOutcomeMessage(res.id, clampedAtMidnight ? "Your end time was before the start time, so it was set to 11:59 PM the same day." : ""));
       loadAll();
       return;
     }
@@ -1284,7 +1302,7 @@ export default function TimeTracking() {
     // comment in the non-project branch above) -- same treatment for
     // project time.
     const warnMsg = nonWorkingDayConfirmMessage(logStartDate, holidayNames);
-    if (warnMsg && !(await confirm({ message: warnMsg, confirmLabel: "Yes, log it" }))) return;
+    if (warnMsg && !(await confirm({ title: "Log time on a day off?", message: warnMsg, confirmLabel: "Log anyway" }))) return;
     setLogSaving(true);
     const res = await submitManualTimeEntry(logTaskId, start.toISOString(), end.toISOString(), logReasonCategory, logNotes.trim() || logReasonCategory);
     setLogSaving(false);
@@ -1298,7 +1316,7 @@ export default function TimeTracking() {
     setLogNotes("");
     setLogReasonCategory(reasonOptions.find((r) => r.is_active)?.name || "");
     // phase169: the DB may auto-approve it; also fixes the old "project owner" wording (approvals follow the reporting line).
-    await alert(await timeEntryOutcomeMessage(res.id, clampedAtMidnight ? " (your end time was before the start time, so it was clamped to 11:59 PM the same day)" : ""));
+    await alert(await timeEntryOutcomeMessage(res.id, clampedAtMidnight ? "Your end time was before the start time, so it was set to 11:59 PM the same day." : ""));
     loadAll();
   }
 

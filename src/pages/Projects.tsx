@@ -23,7 +23,8 @@ import { timingWithPause, type TimingResult } from "../lib/pause";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import FollowUpTimeModal from "../components/FollowUpTimeModal";
 import NotesSidebar from "../components/NotesSidebar";
-import { useConfirm } from "../lib/useConfirm";
+import { useConfirm, type AlertOptions } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 import { buildHolidayNameMap, nonWorkingDayConfirmMessage, toISO as toISOWorkingDay, type HolidayNameMap } from "../lib/workingDays";
 import { InlineText, InlineSelect, InlineDate, InlineNumber } from "../components/InlineCell";
 import ProgressCell, { ProgressDisplayToggle } from "../components/ProgressCell";
@@ -1411,7 +1412,7 @@ export default function Projects() {
     const { error } = await supabase.from("tasks").update(patch).in("id", ids);
     setCancelTaskBusy(false);
     if (error) {
-      alert(`Couldn't cancel: ${error.message}`);
+      alert(friendlyError("cancel these tasks", error));
       loadAll();
       setCancelTaskDialog(null);
       return;
@@ -1811,25 +1812,27 @@ export default function Projects() {
       (t) => t.project_id === projectId && !t.is_archived && t.status !== "Done" && t.status !== "Cancelled" && !hasChildren(t.id)
     );
   }
-  function completeBlockedMessage(p: ProjectRow, open: TaskRow[]): string {
-    const lines = open
-      .slice(0, 8)
-      .map((t) => `• ${t.task_number ? `T-${String(t.task_number).padStart(4, "0")} ` : ""}${t.name} (${t.status ?? "no status"})`);
-    return `**Can't mark "${p.name}" Completed yet**\n\n${open.length} task${open.length === 1 ? " is" : "s are"} still open:\n${lines.join("\n")}${open.length > 8 ? `\n…and ${open.length - 8} more` : ""}\n\nFinish them, or cancel the ones that are no longer needed, then set the project to Completed.`;
+  function completeBlockedMessage(p: ProjectRow, open: TaskRow[]): AlertOptions {
+    const lines = open.map((t) => `${t.task_number ? `T-${String(t.task_number).padStart(4, "0")} ` : ""}${t.name} (${t.status ?? "no status"})`);
+    return {
+      title: "Can't complete this project yet",
+      message: `"${p.name}" still has ${open.length} open task${open.length === 1 ? "" : "s"}. Finish or cancel ${open.length === 1 ? "it" : "them"}, then set the project to Completed.`,
+      items: lines,
+    };
   }
 
   function changeProjectStatus(p: ProjectRow, newStatus: string | null) {
     if (p.wbs_status === "draft") {
-      alert(`"${p.name}" hasn't started yet -- Status stays "Not Started" until Start Project is run on its WBS page.`);
+      alert({ title: "Project hasn't started yet", message: `"${p.name}" stays Not Started until you use Start Project on its WBS page.` });
       return;
     }
     // phase135 (Sandra 2026-10-04): no tasks = nothing happened. Add the
     // tasks if work was done, otherwise delete the project.
     if (newStatus === "Completed" && projectStatusOf(p) !== "Completed" && !tasks.some((t) => t.project_id === p.id && !t.is_archived)) {
       void confirm({
-        title: "This project has no tasks",
-        message: `"${p.name}" can't be completed without tasks.\n\nWas there any work on it? If yes, add the tasks on its WBS page first. If nothing happened, delete the project instead.`,
-        confirmLabel: "Delete project",
+        title: "Complete a project with no tasks?",
+        message: `"${p.name}" can't be completed without tasks. If work happened, add the tasks on its WBS page. If not, move it to Archive.`,
+        confirmLabel: "Move to Archive",
         cancelLabel: "I'll add tasks",
         danger: true,
       }).then((del) => {
@@ -2256,9 +2259,11 @@ export default function Projects() {
   async function guardDesignPhaseLock(p: ProjectRow): Promise<boolean> {
     if (p.wbs_status !== "draft") return true;
     if (
-      await confirm(
-        `Moving "${p.name}" to Design first needs its WBS Baseline locked -- that's now done from the WBS Planning page (it needs the full task plan, not just a quick toggle here).\n\nGo to WBS Planning now to Start Project?`
-      )
+      await confirm({
+        title: "Start the project first?",
+        message: `"${p.name}" needs Start Project before it can move to Design. Start Project is done on the WBS Planning page, with the full task plan.`,
+        confirmLabel: "Go to WBS Planning",
+      })
     ) {
       navigate(`/projects/${p.id}/wbs`);
     }
@@ -2269,7 +2274,7 @@ export default function Projects() {
     setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
     const { error } = await supabase.from("projects").update(patch).eq("id", id);
     if (error) {
-      alert(`Couldn't save: ${error.message}`);
+      alert(friendlyError("save your change", error));
       loadAll();
     }
   }
@@ -2278,7 +2283,7 @@ export default function Projects() {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
     const { error } = await supabase.from("tasks").update(patch).eq("id", id);
     if (error) {
-      alert(`Couldn't save: ${error.message}`);
+      alert(friendlyError("save your change", error));
       loadAll();
     }
   }
@@ -2347,7 +2352,7 @@ export default function Projects() {
       reason_notes: reasonNotes,
     }).select("id").single();
     if (error) {
-      await alert(`Couldn't submit extension request: ${error.message}`);
+      await alert(friendlyError("submit the Extension request", error));
       return;
     }
     setExtensionTask(null);
@@ -2364,13 +2369,14 @@ export default function Projects() {
       reason_notes: reasonNotes,
     });
     if (error) {
-      await alert(`Couldn't submit timeline change request: ${error.message}`);
+      await alert(friendlyError("submit the Extension request", error));
       return;
     }
     setExtensionProject(null);
-    await alert(
-      "Extension request submitted -- it goes to your supervisor (or Full Access) for approval. The project's due date only moves once it's approved."
-    );
+    await alert({
+      title: "Extension request submitted",
+      message: "It goes to your supervisor in Approval Center. The project's due date moves once it's approved.",
+    });
   }
 
   async function bulkUpdateProjects(patch: Partial<ProjectRow>) {
@@ -2379,7 +2385,7 @@ export default function Projects() {
     setProjects((prev) => prev.map((p) => (ids.includes(p.id) ? { ...p, ...patch } : p)));
     const { error } = await supabase.from("projects").update(patch).in("id", ids);
     if (error) {
-      alert(`Couldn't update: ${error.message}`);
+      alert(friendlyError("update these projects", error));
       loadAll();
     }
   }
@@ -2402,34 +2408,34 @@ export default function Projects() {
     if (newStatus === "Completed") {
       const empty = projects.filter((p) => ids.includes(p.id) && projectStatusOf(p) !== "Completed" && !tasks.some((t) => t.project_id === p.id && !t.is_archived));
       if (empty.length > 0) {
-        alert(
-          `**Can't mark ${empty.length === 1 ? "this project" : `${empty.length} projects`} Completed** -- no tasks:\n` +
-            empty.map((p) => `• ${p.name}`).join("\n") +
-            `\n\nIf work happened, add the tasks first. If nothing happened, delete the project instead. Nothing was changed.`
-        );
+        alert({
+          title: `Can't complete ${empty.length === 1 ? "this project" : `${empty.length} projects`}`,
+          message: `${empty.length === 1 ? "This project has" : "These projects have"} no tasks. If work happened, add the tasks first; if not, move ${empty.length === 1 ? "it" : "them"} to Archive. Nothing was changed.`,
+          items: empty.map((p) => p.name),
+        });
         return;
       }
       const blocked = projects.filter((p) => ids.includes(p.id) && projectStatusOf(p) !== "Completed" && openTasksOf(p.id).length > 0);
       if (blocked.length > 0) {
-        alert(
-          `**Can't mark ${blocked.length === 1 ? "this project" : `${blocked.length} projects`} Completed yet** -- they still have open tasks:\n` +
-            blocked.map((p) => `• ${p.name}: ${openTasksOf(p.id).length} open`).join("\n") +
-            `\n\nFinish or cancel those tasks first. Nothing was changed.`
-        );
+        alert({
+          title: `Can't complete ${blocked.length === 1 ? "this project" : `${blocked.length} projects`} yet`,
+          message: "They still have open tasks. Finish or cancel those tasks first. Nothing was changed.",
+          items: blocked.map((p) => `${p.name}: ${openTasksOf(p.id).length} open`),
+        });
         return;
       }
     }
     const skippedDraft = projects.some((p) => ids.includes(p.id) && p.wbs_status === "draft");
     const targets = projects.filter((p) => ids.includes(p.id) && p.wbs_status !== "draft");
     if (targets.length === 0) {
-      if (skippedDraft) alert(`Status stays "Not Started" for Draft projects until Start Project is run on their WBS page -- nothing was changed.`);
+      if (skippedDraft) alert({ title: "Nothing was changed", message: "Draft projects stay Not Started until you use Start Project on their WBS page." });
       return;
     }
     // phase118: bulk pause -> one Pause dialog for all eligible projects.
     if (newStatus === "Paused") {
       const pausable = targets.filter((p) => projectStatusOf(p) !== "Paused" && p.status !== "Completed" && p.status !== "Cancelled" && p.wbs_status !== "closed");
       if (pausable.length === 0) {
-        alert("None of the selected projects can be paused (already paused, completed, cancelled or closed).");
+        alert({ title: "Nothing to pause", message: "None of the selected projects can be paused. They're already paused, completed, cancelled or closed." });
         return;
       }
       setPauseTargets(pausable);
@@ -2443,10 +2449,10 @@ export default function Projects() {
       targets.map((p) => supabase.from("projects").update({ status: newStatus, phase: nextPhaseById.get(p.id) ?? p.phase }).eq("id", p.id))
     );
     if (results.some((r) => r.error)) {
-      alert(`Couldn't update some projects.`);
+      alert({ title: "Couldn't update some projects", message: "Some projects weren't updated. Refresh and try again." });
       loadAll();
     } else if (skippedDraft) {
-      alert(`Status stays "Not Started" for any Draft projects in the selection until Start Project is run on their WBS page -- the rest were updated.`);
+      alert({ title: "Draft projects were skipped", message: "The rest were updated. Draft projects stay Not Started until you use Start Project on their WBS page." });
     }
   }
 
@@ -2461,24 +2467,26 @@ export default function Projects() {
     // phase117: flag projects this person can't delete, with who to contact.
     const { allowed: ids, blocked } = await splitByArchivePermission("project", requestedIds);
     if (blocked.length) {
-      await alert({ title: "You can't delete this", message: blockedDeleteMessage("project", blocked.map((b) => projects.find((p) => p.id === b.id)?.name ?? "Project"), ids.length) });
+      await alert({ title: "Can't move to Archive", message: blockedDeleteMessage("project", blocked.map((b) => projects.find((p) => p.id === b.id)?.name ?? "Project"), ids.length) });
       if (ids.length === 0) return;
     }
     const logged = await loggedHoursOnTasks(tasks.filter((t) => ids.includes(t.project_id)).map((t) => t.id));
     const loggedNote = logged.entries > 0
-      ? ` **Heads up: ${logged.hours.toFixed(2)}h of logged time** (${logged.entries} time log${logged.entries === 1 ? "" : "s"}) will be removed from Productivity and Utilization until restored.`
+      ? `**${logged.hours.toFixed(2)} Logged hours** (${logged.entries} time log${logged.entries === 1 ? "" : "s"}) leave Productivity and Utilization until restored.`
       : "";
     const childTaskCount = tasks.filter((t) => ids.includes(t.project_id)).length;
     // phase104 (Sandra: no hard deletes, Archive page = recycle bin): each
     // project archives server-side as ONE bundle with its tasks and their
     // time entries, restorable from the Archive page for 90 days.
     const ok = await confirm({
-      title: ids.length > 1 ? "Archive projects" : "Archive project",
+      title: ids.length > 1 ? `Move ${ids.length} projects to Archive?` : "Move this project to Archive?",
       message:
         childTaskCount > 0
-          ? `Archive ${ids.length} project${ids.length > 1 ? "s" : ""}? This will also archive ${childTaskCount} task${childTaskCount > 1 ? "s" : ""} in them and their time entries.${loggedNote} ${ARCHIVE_MOVE_NOTE}`
-          : `Archive ${ids.length > 1 ? `${ids.length} projects` : "this project"}? ${ARCHIVE_MOVE_NOTE}`,
-      confirmLabel: "Archive",
+          ? `Their ${childTaskCount} task${childTaskCount > 1 ? "s" : ""} and time entries go too. ${ARCHIVE_MOVE_NOTE}`
+          : ARCHIVE_MOVE_NOTE,
+      items: loggedNote ? [loggedNote] : undefined,
+      confirmLabel: "Move to Archive",
+      danger: true,
     });
     if (!ok) return;
     const failures: string[] = [];
@@ -2486,7 +2494,7 @@ export default function Projects() {
       const { error } = await archiveItem("project", id);
       if (error) failures.push(`${projects.find((p) => p.id === id)?.name ?? "Project"}: ${error.message}`);
     }
-    if (failures.length) await alert(`Couldn't archive:\n${failures.join("\n")}`);
+    if (failures.length) await alert({ title: "Couldn't archive some projects", message: "These projects weren't moved to Archive. Try again, or send the details to Sandra.", items: failures });
     setSelectedProjectIds((prev) => prev.filter((id) => !ids.includes(id)));
     loadAll();
   }
@@ -2497,13 +2505,13 @@ export default function Projects() {
 
   async function reorderProjects(draggedId: string, targetId: string) {
     if (projectViews.activeView.systemView) {
-      await alert("Rows can't be reordered in a System View. Duplicate this view as a personal view to set your own order.");
+      await alert({ title: "Can't reorder a System View", message: "Duplicate this view as a personal view to set your own order." });
       return;
     }
     if (projectViews.activeView.sorts.length > 0) {
       const ok = await confirm({
-        title: "Clear sort to reorder",
-        message: "This view is currently sorted. Dragging to reorder will clear that sort so your manual order can show. Continue?",
+        title: "Clear the sort to reorder?",
+        message: "This view is sorted. Dragging clears the sort so your own order can show.",
         confirmLabel: "Clear sort & reorder",
       });
       if (!ok) return;
@@ -2514,7 +2522,7 @@ export default function Projects() {
     setProjects((prev) => prev.map((p) => (p.id === draggedId ? { ...p, sort_order: newVal } : p)).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)));
     const { error } = await supabase.from("projects").update({ sort_order: newVal }).eq("id", draggedId);
     if (error) {
-      alert(`Couldn't reorder: ${error.message}`);
+      alert(friendlyError("reorder", error));
       loadAll();
     }
   }
@@ -2551,15 +2559,16 @@ export default function Projects() {
     const countsDeliverable = !!outType && outType.counts_deliverable !== false;
     const missing: string[] = [];
     if (ownHoursFor(timeEntries, t.id) <= 0) {
-      missing.push("- **Logged Hours** -- no Confirmed/Approved time logged on this task yet. Log time first.");
+      missing.push("**Logged hours**: no Final time on this task yet. Log time first.");
     }
     if (countsDeliverable && (outputCount === null || outputCount === undefined || outputCount < 1)) {
-      missing.push(`- **Output Count** -- enter how many ${outType?.name ?? "outputs"} this task produced (1 or more) in the Output Count column first.`);
+      missing.push(`**Output Count**: enter how many ${outType?.name ?? "outputs"} this task produced (1 or more).`);
     }
     if (missing.length) {
       await alert({
-        title: "Can't set Reported Completion Date yet",
-        message: `This task is missing required information before it can be tagged complete:\n\n${missing.join("\n")}`,
+        title: "Can't mark this task Done yet",
+        message: "Fill in the missing information first:",
+        items: missing,
       });
       return;
     }
@@ -2574,12 +2583,10 @@ export default function Projects() {
     // here aborts the whole commit so nothing gets saved.
     if (outputCount === 0 && countsDeliverable) {
       const zeroOk = await confirm({
-        title: "Output Count is 0",
-        message:
-          `**Output Count** is set to 0 for this task. Confirm that this task genuinely produced no output.\n\n` +
-          `If that's not right, cancel and enter the actual number in the Output Count column first.`,
+        title: "No output for this task?",
+        message: "**Output Count** is 0. Confirm this task really produced no output, or go back and enter the actual number.",
         confirmLabel: "Yes, 0 is correct",
-        cancelLabel: "Cancel, let me fix it",
+        cancelLabel: "Let me fix it",
       });
       if (!zeroOk) return;
     }
@@ -2589,13 +2596,14 @@ export default function Projects() {
     // two required fields bolded, before it locks Status to
     // Done.
     const ok = await confirm({
-      title: "Confirm task completion",
-      message:
-        `Estimated Hours: ${scoped != null ? scoped : "—"}\n` +
-        `**Logged Hours**: ${logged.toFixed(2)}\n` +
-        `**Output Count**: ${outputCount}\n\n` +
-        `Marking ${formatDate(v)} as the Reported Completion Date will move this task's Status to Done. Confirm these are correct?${fromBoard ? "\n\nFor a different date, cancel and set **Reported Completion** in the table." : ""}`,
-      confirmLabel: "Confirm & mark Done",
+      title: "Mark this task Done?",
+      message: `Reported Completion will be ${formatDate(v)} and Status moves to Done. Check these numbers are right.${fromBoard ? " For a different date, set **Reported Completion** in the table instead." : ""}`,
+      items: [
+        `Estimated hours: ${scoped != null ? scoped : "—"}`,
+        `**Logged hours**: ${logged.toFixed(2)}`,
+        `**Output Count**: ${outputCount}`,
+      ],
+      confirmLabel: "Mark Done",
     });
     if (!ok) return;
     const patch: Partial<TaskRow> = {
@@ -2626,7 +2634,7 @@ export default function Projects() {
     setTasks((prev) => prev.map((t) => (ids.includes(t.id) ? { ...t, ...patch } : t)));
     const { error } = await supabase.from("tasks").update(patch).in("id", ids);
     if (error) {
-      alert(`Couldn't update: ${error.message}`);
+      alert(friendlyError("update these tasks", error));
       loadAll();
       return;
     }
@@ -2643,7 +2651,7 @@ export default function Projects() {
     // phase117: flag tasks this person can't delete, with who to contact.
     const { allowed: ids, blocked } = await splitByArchivePermission("task", selectedTaskIds);
     if (blocked.length) {
-      await alert({ title: "You can't delete this", message: blockedDeleteMessage("task", blocked.map((b) => tasks.find((t) => t.id === b.id)?.name ?? "Task"), ids.length) });
+      await alert({ title: "Can't move to Archive", message: blockedDeleteMessage("task", blocked.map((b) => tasks.find((t) => t.id === b.id)?.name ?? "Task"), ids.length) });
       if (ids.length === 0) return;
     }
     // phase104: archive, never hard-delete. Each selected task archives
@@ -2655,9 +2663,9 @@ export default function Projects() {
     });
     const childIds = tasks.filter((t) => t.parent_task_id && roots.includes(t.parent_task_id) && !ids.includes(t.id)).map((t) => t.id);
     const ok = await confirm({
-      title: "Delete tasks",
-      message: `Delete ${ids.length} task${ids.length > 1 ? "s" : ""}${childIds.length ? ` (and ${childIds.length} sub-task${childIds.length > 1 ? "s" : ""})` : ""}? ${ARCHIVE_MOVE_NOTE}`,
-      confirmLabel: "Delete",
+      title: `Move ${ids.length} task${ids.length > 1 ? "s" : ""} to Archive?`,
+      message: `${childIds.length ? `Their ${childIds.length} sub-task${childIds.length > 1 ? "s" : ""} and time entries go too. ` : "Their time entries go too. "}${ARCHIVE_MOVE_NOTE}`,
+      confirmLabel: "Move to Archive",
       danger: true,
     });
     if (!ok) return;
@@ -2666,20 +2674,20 @@ export default function Projects() {
       const { error } = await archiveItem("task", id);
       if (error) failures.push(`${tasks.find((t) => t.id === id)?.name ?? "Task"}: ${error.message}`);
     }
-    if (failures.length) alert(`Couldn't delete:\n${failures.join("\n")}`);
+    if (failures.length) alert({ title: "Couldn't archive some tasks", message: "These tasks weren't moved to Archive. Try again, or send the details to Sandra.", items: failures });
     setSelectedTaskIds([]);
     loadAll();
   }
 
   async function reorderTasks(draggedId: string, targetId: string) {
     if (taskActiveView.systemView) {
-      await alert("Rows can't be reordered in a System View. Duplicate this view as your own to set a manual order.");
+      await alert({ title: "Can't reorder a System View", message: "Duplicate this view as a personal view to set your own order." });
       return;
     }
     if (taskActiveView.sorts.length > 0) {
       const ok = await confirm({
-        title: "Clear sort to reorder",
-        message: "This view is currently sorted. Dragging to reorder will clear that sort so your manual order can show. Continue?",
+        title: "Clear the sort to reorder?",
+        message: "This view is sorted. Dragging clears the sort so your own order can show.",
         confirmLabel: "Clear sort & reorder",
       });
       if (!ok) return;
@@ -2690,7 +2698,7 @@ export default function Projects() {
     setTasks((prev) => prev.map((t) => (t.id === draggedId ? { ...t, sort_order: newVal } : t)).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)));
     const { error } = await supabase.from("tasks").update({ sort_order: newVal }).eq("id", draggedId);
     if (error) {
-      alert(`Couldn't reorder: ${error.message}`);
+      alert(friendlyError("reorder", error));
       loadAll();
     }
   }
@@ -2756,10 +2764,9 @@ export default function Projects() {
       // First personal change on this System View -> one confirmation.
       if (!projectViews.isSystemViewCustomized()) {
         void confirm({
-          title: "Modify this System View?",
-          message: `Your changes to "${active.name}" are kept for you only. Everyone else keeps the standard layout, and you can switch back any time with Restore default.`,
-          confirmLabel: "Yes, keep my changes",
-          cancelLabel: "Cancel",
+          title: "Change this System View for you?",
+          message: `Your changes to "${active.name}" are for you only. Use Restore default to switch back any time.`,
+          confirmLabel: "Keep my changes",
         }).then((ok) => {
           if (ok) projectViews.updateActiveView(patch);
         });
@@ -2769,12 +2776,11 @@ export default function Projects() {
       return;
     }
     void confirm({
-      title: "Not available on a System View",
+      title: "Save as a personal view?",
       message: patch.viewType
-        ? `Switching "${active.name}" to ${patch.viewType === "board" ? "Board" : patch.viewType === "timeline" ? "Timeline" : patch.viewType === "calendar" ? "Calendar" : "Table"} creates your own personal view. Save it as a personal view?`
-        : `Filters, shown columns and card fields are fixed on System Views. Save "${active.name}" with this change as your own personal view?`,
-      confirmLabel: "Save as Personal View",
-      cancelLabel: "Cancel",
+        ? `Switching "${active.name}" to ${patch.viewType === "board" ? "Board" : patch.viewType === "timeline" ? "Timeline" : patch.viewType === "calendar" ? "Calendar" : "Table"} creates your own personal view.`
+        : `Filters, columns and card fields are fixed on System Views. This change saves "${active.name}" as your own personal view.`,
+      confirmLabel: "Save as personal view",
     }).then((ok) => {
       if (ok) projectViews.saveActiveViewAsPersonal(`${active.name} - Personal`, patch);
     });
@@ -3196,7 +3202,7 @@ export default function Projects() {
               // write-site guard on this page) rather than trusting the
               // picker alone.
               if (p.wbs_status === "draft" && !phaseOptionsForStatus("Not Started", p.phase).includes(v)) {
-                alert(`"${p.name}" hasn't started yet -- while still Draft, Phase can only be set to a "Not Started" phase (e.g. Scoping, Queued, Backlog).`);
+                alert({ title: "Project hasn't started yet", message: `Until Start Project, "${p.name}" can only use a Not Started phase, like Scoping, Queued or Backlog.` });
                 return;
               }
               if (v === "Design" && p.phase !== "Design" && !(await guardDesignPhaseLock(p))) return;
@@ -3967,7 +3973,7 @@ export default function Projects() {
     if (groupBy === "category")
       return (p, v) => {
         if (p.wbs_status !== "draft") {
-          alert(`"${p.name}" has already started -- change its Category from the WBS page instead.`);
+          alert({ title: "Change this on the WBS page", message: `"${p.name}" has already started, so change its Category on the WBS page.` });
           return;
         }
         updateProject(p.id, { category: v || null });
@@ -3975,7 +3981,7 @@ export default function Projects() {
     if (groupBy === "source")
       return (p, v) => {
         if (p.wbs_status !== "draft") {
-          alert(`"${p.name}" has already started -- change its Source from the WBS page instead.`);
+          alert({ title: "Change this on the WBS page", message: `"${p.name}" has already started, so change its Source on the WBS page.` });
           return;
         }
         updateProject(p.id, { source_id: v || null });
@@ -3985,7 +3991,7 @@ export default function Projects() {
     if (groupBy === "effort_level")
       return (p, v) => {
         if (p.wbs_status !== "draft") {
-          alert(`"${p.name}" has already started -- change its Complexity from the WBS page instead.`);
+          alert({ title: "Change this on the WBS page", message: `"${p.name}" has already started, so change its Complexity on the WBS page.` });
           return;
         }
         updateProject(p.id, { effort_level: v || null });
@@ -4005,7 +4011,7 @@ export default function Projects() {
       // onCommit above -- a Board drag has to re-check the same thing
       // since it writes phase directly, bypassing that cell entirely.
       if (p.wbs_status === "draft" && !phaseOptionsForStatus("Not Started", p.phase).includes(v)) {
-        alert(`"${p.name}" hasn't started yet -- while still Draft, Phase can only be moved to a "Not Started" phase (e.g. Scoping, Queued, Backlog).`);
+        alert({ title: "Project hasn't started yet", message: `Until Start Project, "${p.name}" can only use a Not Started phase, like Scoping, Queued or Backlog.` });
         return;
       }
       updateProject(p.id, { phase: v || null });
@@ -4076,7 +4082,7 @@ export default function Projects() {
       .select("id")
       .single();
     if (error || !data) {
-      alert(`Couldn't create project: ${error?.message ?? "unknown error"}`);
+      alert(friendlyError("create the project", error));
       return;
     }
     navigate(`/projects/${data.id}/wbs`);
@@ -4096,7 +4102,7 @@ export default function Projects() {
     // Phase 26: closure is final -- also enforced by
     // enforce_closed_project_lock, this is just the friendlier message.
     if (isProjectClosed(parent.project_id)) {
-      await alert("This project is closed -- its scope is final, so no more tasks can be added to it.");
+      await alert({ title: "This project is closed", message: "No more tasks can be added to a closed project." });
       return;
     }
     // phase127f: project needs a Start date before any task is added.
@@ -4119,7 +4125,7 @@ export default function Projects() {
       created_by: me?.id ?? null,
     });
     if (error) {
-      alert(`Couldn't add subtask: ${error.message}`);
+      alert(friendlyError("add the sub-task", error));
       return;
     }
     loadAll();
@@ -4262,18 +4268,15 @@ export default function Projects() {
               <button
                 onClick={async () => {
                   const ok = await confirm({
-                    title: "Uncancel task",
-                    message:
-                      `Restore "${t.name}" to In Progress? This clears its cancellation reason and puts it back into scheduling.` +
-                      (projects.find((pp) => pp.id === t.project_id)?.status === "Completed"
-                        ? `\n\n**This project is marked Completed.** Restoring this task moves the project back to In Progress.`
-                        : ""),
-                    confirmLabel: "Uncancel",
+                    title: "Restore this task?",
+                    message: `"${t.name}" goes back to In Progress and its cancellation reason is cleared.`,
+                    items: projects.find((pp) => pp.id === t.project_id)?.status === "Completed" ? ["The project moves back to In Progress."] : undefined,
+                    confirmLabel: "Restore task",
                   });
                   if (!ok) return;
                   const { error } = await supabase.rpc("reopen_task", { p_task_id: t.id });
                   if (error) {
-                    alert(`Couldn't uncancel: ${error.message}`);
+                    alert(friendlyError("restore the task", error));
                     return;
                   }
                   await recomputeAncestorStatus(t.id, tasks.map((row) => (row.id === t.id ? { ...row, status: "In Progress", cancellation_reason: null } : row)));
@@ -4332,7 +4335,7 @@ export default function Projects() {
                 // longer allowed; the dropdown reverts (no patch) and
                 // points the person at the field that actually drives it.
                 if (v === "Done") {
-                  await alert("Set this task's Reported Completion Date instead -- Status moves to Done automatically once that's entered.");
+                  await alert({ title: "Set Reported Completion instead", message: "Status moves to Done on its own once **Reported Completion** is entered." });
                   return;
                 }
                 // Moving to any other status clears the Done-related
@@ -4477,7 +4480,7 @@ export default function Projects() {
                 editable={false}
                 onCommit={(v) => {
                   if (v && t.current_due_date && v > t.current_due_date) {
-                    alert("Start date can't be after the due date.");
+                    alert({ title: "Check the start date", message: "Start date can't be after the due date." });
                     return;
                   }
                   updateTask(t.id, { start_date: v || null });
@@ -4678,20 +4681,17 @@ export default function Projects() {
           // button") -- see emphasizeCancel on ConfirmDialog.
           async function doReopen() {
             const ok = await confirm({
-              title: "Reopen task",
-              message:
-                `Reopen "${t.name}"? This clears its validation${locked ? " and lock" : ""} and sets Status back to In Progress, unlocking its fields for editing again.` +
-                (projects.find((pp) => pp.id === t.project_id)?.status === "Completed"
-                  ? `\n\n**This project is marked Completed.** Reopening this task means Actual Progress drops below 100% and the project moves back to In Progress.`
-                  : ""),
-              confirmLabel: "Reopen",
+              title: "Reopen this task?",
+              message: `"${t.name}" goes back to In Progress and will need validating again.`,
+              items: projects.find((pp) => pp.id === t.project_id)?.status === "Completed" ? ["The project moves back to In Progress."] : undefined,
+              confirmLabel: "Reopen task",
               cancelLabel: "Cancel",
               emphasizeCancel: locked,
             });
             if (!ok) return;
             const { error } = await supabase.rpc("reopen_task", { p_task_id: t.id });
             if (error) {
-              alert(`Couldn't reopen: ${error.message}`);
+              alert(friendlyError("reopen the task", error));
               return;
             }
             // 2026-09-07: reopen_task is a direct server-side RPC, not a
@@ -4761,7 +4761,7 @@ export default function Projects() {
                 <button
                   onClick={async () => {
                     const { error } = await supabase.rpc("lock_task_validation", { p_task_id: t.id });
-                    if (error) alert(`Couldn't lock: ${error.message}`);
+                    if (error) alert(friendlyError("lock the validation", error));
                     else loadAll();
                   }}
                   title="Lock this validation -- freezes the date until reopened"
@@ -4973,7 +4973,7 @@ export default function Projects() {
                   onClick={async () => {
                     if (isRunningHere) {
                       const res = await stopRunningTimer();
-                      if (res.error) alert(`Couldn't stop timer: ${res.error}`);
+                      if (res.error) alert(friendlyError("stop the timer", res.error));
                     } else {
                       // 2026-09-23 (Sandra: same weekend/holiday soft
                       // check as My Dashboard's Start Timer, now also
@@ -4981,9 +4981,9 @@ export default function Projects() {
                       // list -- checked against today, the day a timer
                       // actually logs against.
                       const warnMsg = nonWorkingDayConfirmMessage(toISOWorkingDay(new Date()), holidayNames);
-                      if (warnMsg && !(await confirm({ message: warnMsg, confirmLabel: "Yes, start" }))) return;
+                      if (warnMsg && !(await confirm({ title: "Start on a non-working day?", message: warnMsg, confirmLabel: "Start anyway" }))) return;
                       const res = await startTaskTimer({ id: t.id, name: t.name });
-                      if (res.error) alert(`Couldn't start timer: ${res.error}`);
+                      if (res.error) alert(friendlyError("start the timer", res.error));
                     }
                   }}
                   disabled={disabled}
@@ -5536,10 +5536,9 @@ export default function Projects() {
       // First personal change on this System View -> one confirmation.
       if (!taskViews.isSystemViewCustomized()) {
         void confirm({
-          title: "Modify this System View?",
-          message: `Your changes to "${active.name}" are kept for you only. Everyone else keeps the standard layout, and you can switch back any time with Restore default.`,
-          confirmLabel: "Yes, keep my changes",
-          cancelLabel: "Cancel",
+          title: "Change this System View for you?",
+          message: `Your changes to "${active.name}" are for you only. Use Restore default to switch back any time.`,
+          confirmLabel: "Keep my changes",
         }).then((ok) => {
           if (ok) taskViews.updateActiveView(patch);
         });
@@ -5549,12 +5548,11 @@ export default function Projects() {
       return;
     }
     void confirm({
-      title: "Not available on a System View",
+      title: "Save as a personal view?",
       message: patch.viewType
-        ? `Switching "${active.name}" to ${patch.viewType === "board" ? "Board" : patch.viewType === "timeline" ? "Timeline" : patch.viewType === "calendar" ? "Calendar" : "Table"} creates your own personal view. Save it as a personal view?`
-        : `Filters, shown columns and card fields are fixed on System Views. Save "${active.name}" with this change as your own personal view?`,
-      confirmLabel: "Save as Personal View",
-      cancelLabel: "Cancel",
+        ? `Switching "${active.name}" to ${patch.viewType === "board" ? "Board" : patch.viewType === "timeline" ? "Timeline" : patch.viewType === "calendar" ? "Calendar" : "Table"} creates your own personal view.`
+        : `Filters, columns and card fields are fixed on System Views. This change saves "${active.name}" as your own personal view.`,
+      confirmLabel: "Save as personal view",
     }).then((ok) => {
       if (ok) taskViews.saveActiveViewAsPersonal(`${active.name} - Personal`, patch);
     });
@@ -5707,12 +5705,12 @@ export default function Projects() {
   // multi-field add form.
   async function createBlankTask(projectId: string) {
     if (!projectId) {
-      alert("Create a project first before adding tasks.");
+      alert({ title: "Create a project first", message: "Tasks need a project. Create one, then add tasks to it." });
       return;
     }
     // Phase 26: see addSubtask above.
     if (isProjectClosed(projectId)) {
-      await alert("This project is closed -- its scope is final, so no more tasks can be added to it.");
+      await alert({ title: "This project is closed", message: "No more tasks can be added to a closed project." });
       return;
     }
     // Default to the project's own due date rather than "today" -- a
@@ -5741,7 +5739,7 @@ export default function Projects() {
       created_by: me?.id ?? null,
     });
     if (error) {
-      alert(`Couldn't create task: ${error.message}`);
+      alert(friendlyError("create the task", error));
       return;
     }
     loadAll();
@@ -6239,7 +6237,7 @@ export default function Projects() {
                   const skippedDraft = projects.some((p) => ids.includes(p.id) && p.wbs_status === "draft");
                   const nonDraftIds = projects.filter((p) => ids.includes(p.id) && p.wbs_status !== "draft").map((p) => p.id);
                   if (nonDraftIds.length === 0) {
-                    if (skippedDraft) alert(`Draft projects can only have their Phase changed from the table row (restricted to "Not Started" phases) -- nothing was changed.`);
+                    if (skippedDraft) alert({ title: "Nothing was changed", message: "Change a Draft project's Phase in its own row. It can only use a Not Started phase." });
                     return;
                   }
                   setProjects((prev) => prev.map((p) => (nonDraftIds.includes(p.id) ? { ...p, phase: v || null } : p)));
@@ -6249,10 +6247,10 @@ export default function Projects() {
                     .in("id", nonDraftIds)
                     .then(({ error }) => {
                       if (error) {
-                        alert(`Couldn't update: ${error.message}`);
+                        alert(friendlyError("update these projects", error));
                         loadAll();
                       } else if (skippedDraft) {
-                        alert(`Draft projects in the selection were skipped (Phase there is restricted to "Not Started" phases and changed from the table row instead) -- the rest were updated.`);
+                        alert({ title: "Draft projects were skipped", message: "The rest were updated. Change a Draft project's Phase in its own row, using a Not Started phase." });
                       }
                     });
                 }}
@@ -6596,7 +6594,7 @@ export default function Projects() {
                   // 2026-10-07 (item L): Done needs each task's own Reported
                   // Completion checks, so it can't be bulk-set.
                   if (v === "Done") {
-                    alert({ title: "Mark tasks Done one at a time", message: "Done needs each task's logged hours and Output Count checked. Set **Reported Completion** on each task instead." });
+                    alert({ title: "Mark tasks Done one at a time", message: "Each task needs its Logged hours and Output Count checked. Set **Reported Completion** on each task instead." });
                     return;
                   }
                   bulkUpdateTasks({ status: v || null, ...(v !== "Done" ? { submitted_on: null, submitted_by: null, actual_completion_date: null } : {}) });
@@ -6731,7 +6729,7 @@ export default function Projects() {
           onClose={() => setFollowUpTask(null)}
           onSaved={async () => {
             setFollowUpTask(null);
-            await alert("Follow-up time submitted. It'll count toward the task once approved in the Approval Center.");
+            await alert({ title: "Follow-up time submitted", message: "It counts toward the task once it's approved in Approval Center." });
             loadAll();
           }}
         />
@@ -6944,7 +6942,7 @@ export default function Projects() {
                       });
                       setRescheduleBusy(false);
                       if (error) {
-                        await alert(`Couldn't reschedule: ${error.message}`);
+                        await alert(friendlyError("reschedule the sessions", error));
                         return;
                       }
                       setRescheduleStartDate("");

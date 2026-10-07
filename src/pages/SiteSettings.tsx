@@ -6,6 +6,7 @@ import { archiveItem } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import ListColorPicker from "../components/ListColorPicker";
 import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_ICON_NAMES, CATEGORY_TONE_NAMES, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 
 function AccessDenied() {
@@ -37,20 +38,34 @@ function AccessDenied() {
 // cascadePlainTextRename fix that -- confirmFkRename is the lighter
 // version for the three FK-based lists, where nothing needs migrating
 // since every read already joins live off the id.
-function confirmFkRename(oldName: string, newName: string, label: string): boolean {
-  if (oldName === newName) return true;
-  return window.confirm(`Rename "${oldName}" to "${newName}"? Every ${label} already using it will show "${newName}" immediately -- nothing else to update.`);
+type ConfirmFn = (opts: { title: string; message: string; confirmLabel: string }) => Promise<boolean>;
+
+function plural(label: string, n: number): string {
+  if (n === 1) return label;
+  return label.endsWith("y") ? `${label.slice(0, -1)}ies` : `${label}s`;
 }
 
-async function confirmPlainTextRename(table: string, column: string, oldName: string, newName: string, label: string): Promise<boolean> {
+async function confirmFkRename(confirmFn: ConfirmFn, oldName: string, newName: string, label: string): Promise<boolean> {
+  if (oldName === newName) return true;
+  return confirmFn({
+    title: `Rename "${oldName}"?`,
+    message: `Every ${label} using it will show "${newName}" right away. Nothing else to update.`,
+    confirmLabel: "Rename",
+  });
+}
+
+async function confirmPlainTextRename(confirmFn: ConfirmFn, table: string, column: string, oldName: string, newName: string, label: string): Promise<boolean> {
   if (oldName === newName) return true;
   const { count } = await supabase.from(table).select("id", { count: "exact", head: true }).eq(column, oldName);
   const n = count ?? 0;
-  return window.confirm(
-    n > 0
-      ? `Rename "${oldName}" to "${newName}"? ${n} ${label}${n === 1 ? "" : "s"} currently tagged "${oldName}" will be updated to show "${newName}" instead. Continue?`
-      : `Rename "${oldName}" to "${newName}"? No ${label}s currently use "${oldName}".`
-  );
+  return confirmFn({
+    title: `Rename "${oldName}"?`,
+    message:
+      n > 0
+        ? `${n} ${plural(label, n)} tagged "${oldName}" will be updated to show "${newName}".`
+        : `No ${plural(label, 2)} use "${oldName}" yet, so nothing else changes.`,
+    confirmLabel: "Rename",
+  });
 }
 
 async function cascadePlainTextRename(table: string, column: string, oldName: string, newName: string): Promise<string | undefined> {
@@ -224,7 +239,7 @@ interface OutputTypeRow {
 }
 
 export default function SiteSettings() {
-  const { confirm: confirmDlg, dialog: confirmDialogEl } = useConfirm();
+  const { confirm: confirmDlg, alert: alertDlg, dialog: confirmDialogEl } = useConfirm();
   const { person: me, loading: sessionLoading } = useSession();
 
   // Work Types (Phase 12, 2026-08-20): admin-configurable lookup backing
@@ -400,7 +415,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("app_settings").update({ historical_locking_enabled: next }).eq("id", true);
     setHistoricalLockingSaving(false);
     if (error) {
-      window.alert(`Couldn't save: ${error.message}`);
+      alertDlg(friendlyError("save this setting", error));
       return;
     }
     setHistoricalLockingEnabled(next);
@@ -420,7 +435,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("app_settings").update({ time_tracking_start_date: v }).eq("id", true);
     setTrackingStartSaving(false);
     if (error) {
-      window.alert(`Couldn't save: ${error.message}`);
+      alertDlg(friendlyError("save this setting", error));
       return;
     }
     setTrackingStartDate(v);
@@ -441,7 +456,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("work_types").insert({ name, sort_order: nextSortOrder });
     setWorkTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't add: ${error.message}`);
+      alertDlg(friendlyError("add this item", error));
       return;
     }
     setNewWorkTypeName("");
@@ -457,7 +472,7 @@ export default function SiteSettings() {
     const name = editWorkTypeName.trim();
     if (!name) return;
     const current = workTypes.find((w) => w.id === id);
-    if (current && !confirmFkRename(current.name, name, "task")) {
+    if (current && !(await confirmFkRename(confirmDlg, current.name, name, "task"))) {
       setEditingWorkTypeId(null);
       return;
     }
@@ -465,7 +480,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("work_types").update({ name }).eq("id", id);
     setWorkTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't rename: ${error.message}`);
+      alertDlg(friendlyError("rename this item", error));
       return;
     }
     setEditingWorkTypeId(null);
@@ -477,7 +492,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("work_types").update({ is_active: !w.is_active }).eq("id", w.id);
     setWorkTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadWorkTypes();
@@ -496,7 +511,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("work_types").update({ is_fixed_schedule: !w.is_fixed_schedule }).eq("id", w.id);
     setWorkTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadWorkTypes();
@@ -516,7 +531,7 @@ export default function SiteSettings() {
     ]);
     setWorkTypeBusy(false);
     if (e1 || e2) {
-      window.alert(`Couldn't reorder: ${(e1 ?? e2)?.message}`);
+      alertDlg(friendlyError("reorder the list", e1 ?? e2));
       return;
     }
     loadWorkTypes();
@@ -543,24 +558,32 @@ export default function SiteSettings() {
       .eq("work_type_id", w.id);
     if (countError) {
       setWorkTypeBusy(false);
-      window.alert(`Couldn't check usage: ${countError.message}`);
+      alertDlg(friendlyError("check where this is used", countError));
       return;
     }
     if ((count ?? 0) > 0) {
       setWorkTypeBusy(false);
-      window.alert(
-        `Can't delete -- ${count} task${count === 1 ? "" : "s"} still use this Work Type. Deactivate it instead, or reassign those tasks first.`
-      );
+      alertDlg({
+        title: "Still in use",
+        message: `${count} task${count === 1 ? "" : "s"} still use this Work Type. Deactivate it instead, or reassign those tasks first.`,
+      });
       return;
     }
-    if (!window.confirm(`Delete "${w.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no task currently uses it -- Work Types in use can't be deleted.)`)) {
+    if (
+      !(await confirmDlg({
+        title: `Move "${w.name}" to Archive?`,
+        message: "You can restore it from the Archive within 90 days.",
+        confirmLabel: "Move to Archive",
+        danger: true,
+      }))
+    ) {
       setWorkTypeBusy(false);
       return;
     }
     const { error } = await archiveItem("work_type", w.id);
     setWorkTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't delete: ${error.message}`);
+      alertDlg(friendlyError("move this to Archive", error));
       return;
     }
     loadWorkTypes();
@@ -581,7 +604,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_sources").insert({ name, sort_order: nextSortOrder });
     setProjectSourceBusy(false);
     if (error) {
-      window.alert(`Couldn't add: ${error.message}`);
+      alertDlg(friendlyError("add this item", error));
       return;
     }
     setNewProjectSourceName("");
@@ -597,7 +620,7 @@ export default function SiteSettings() {
     const name = editProjectSourceName.trim();
     if (!name) return;
     const current = projectSources.find((s) => s.id === id);
-    if (current && !confirmFkRename(current.name, name, "project")) {
+    if (current && !(await confirmFkRename(confirmDlg, current.name, name, "project"))) {
       setEditingProjectSourceId(null);
       return;
     }
@@ -605,7 +628,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_sources").update({ name }).eq("id", id);
     setProjectSourceBusy(false);
     if (error) {
-      window.alert(`Couldn't rename: ${error.message}`);
+      alertDlg(friendlyError("rename this item", error));
       return;
     }
     setEditingProjectSourceId(null);
@@ -617,7 +640,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_sources").update({ is_active: !s.is_active }).eq("id", s.id);
     setProjectSourceBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadProjectSources();
@@ -635,7 +658,7 @@ export default function SiteSettings() {
     ]);
     setProjectSourceBusy(false);
     if (e1 || e2) {
-      window.alert(`Couldn't reorder: ${(e1 ?? e2)?.message}`);
+      alertDlg(friendlyError("reorder the list", e1 ?? e2));
       return;
     }
     loadProjectSources();
@@ -651,24 +674,32 @@ export default function SiteSettings() {
       .eq("source_id", s.id);
     if (countError) {
       setProjectSourceBusy(false);
-      window.alert(`Couldn't check usage: ${countError.message}`);
+      alertDlg(friendlyError("check where this is used", countError));
       return;
     }
     if ((count ?? 0) > 0) {
       setProjectSourceBusy(false);
-      window.alert(
-        `Can't delete -- ${count} project${count === 1 ? "" : "s"} still use this Source. Deactivate it instead, or reassign those projects first.`
-      );
+      alertDlg({
+        title: "Still in use",
+        message: `${count} project${count === 1 ? "" : "s"} still use this Source. Deactivate it instead, or reassign those projects first.`,
+      });
       return;
     }
-    if (!window.confirm(`Delete "${s.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no project currently uses it -- Sources in use can't be deleted.)`)) {
+    if (
+      !(await confirmDlg({
+        title: `Move "${s.name}" to Archive?`,
+        message: "You can restore it from the Archive within 90 days.",
+        confirmLabel: "Move to Archive",
+        danger: true,
+      }))
+    ) {
       setProjectSourceBusy(false);
       return;
     }
     const { error } = await archiveItem("project_source", s.id);
     setProjectSourceBusy(false);
     if (error) {
-      window.alert(`Couldn't delete: ${error.message}`);
+      alertDlg(friendlyError("move this to Archive", error));
       return;
     }
     loadProjectSources();
@@ -690,7 +721,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_planning_types").insert({ name, sort_order: nextSortOrder });
     setProjectPlanningTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't add: ${error.message}`);
+      alertDlg(friendlyError("add this item", error));
       return;
     }
     setNewProjectPlanningTypeName("");
@@ -706,7 +737,7 @@ export default function SiteSettings() {
     const name = editProjectPlanningTypeName.trim();
     if (!name) return;
     const current = projectPlanningTypes.find((t) => t.id === id);
-    if (current && !confirmFkRename(current.name, name, "project")) {
+    if (current && !(await confirmFkRename(confirmDlg, current.name, name, "project"))) {
       setEditingProjectPlanningTypeId(null);
       return;
     }
@@ -714,7 +745,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_planning_types").update({ name }).eq("id", id);
     setProjectPlanningTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't rename: ${error.message}`);
+      alertDlg(friendlyError("rename this item", error));
       return;
     }
     setEditingProjectPlanningTypeId(null);
@@ -726,7 +757,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_planning_types").update({ is_active: !t.is_active }).eq("id", t.id);
     setProjectPlanningTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadProjectPlanningTypes();
@@ -740,7 +771,7 @@ export default function SiteSettings() {
     setProjectPlanningTypeBusy(false);
     const err = results.find((r) => r.error)?.error;
     if (err) {
-      window.alert(`Couldn't reorder: ${err.message}`);
+      alertDlg(friendlyError("reorder the list", err));
       return;
     }
     loadProjectPlanningTypes();
@@ -756,24 +787,32 @@ export default function SiteSettings() {
       .eq("planning_type_id", t.id);
     if (countError) {
       setProjectPlanningTypeBusy(false);
-      window.alert(`Couldn't check usage: ${countError.message}`);
+      alertDlg(friendlyError("check where this is used", countError));
       return;
     }
     if ((count ?? 0) > 0) {
       setProjectPlanningTypeBusy(false);
-      window.alert(
-        `Can't delete -- ${count} project${count === 1 ? "" : "s"} still use this Planning Type. Deactivate it instead, or reassign those projects first.`
-      );
+      alertDlg({
+        title: "Still in use",
+        message: `${count} project${count === 1 ? "" : "s"} still use this Planning Type. Deactivate it instead, or reassign those projects first.`,
+      });
       return;
     }
-    if (!window.confirm(`Delete "${t.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no project currently uses it -- Planning Types in use can't be deleted.)`)) {
+    if (
+      !(await confirmDlg({
+        title: `Move "${t.name}" to Archive?`,
+        message: "You can restore it from the Archive within 90 days.",
+        confirmLabel: "Move to Archive",
+        danger: true,
+      }))
+    ) {
       setProjectPlanningTypeBusy(false);
       return;
     }
     const { error } = await archiveItem("project_planning_type", t.id);
     setProjectPlanningTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't delete: ${error.message}`);
+      alertDlg(friendlyError("move this to Archive", error));
       return;
     }
     loadProjectPlanningTypes();
@@ -794,7 +833,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_types").insert({ name, sort_order: nextSortOrder });
     setProjectTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't add: ${error.message}`);
+      alertDlg(friendlyError("add this item", error));
       return;
     }
     setNewProjectTypeName("");
@@ -810,7 +849,7 @@ export default function SiteSettings() {
     const name = editProjectTypeName.trim();
     if (!name) return;
     const current = projectTypes.find((t) => t.id === id);
-    if (current && !confirmFkRename(current.name, name, "project")) {
+    if (current && !(await confirmFkRename(confirmDlg, current.name, name, "project"))) {
       setEditingProjectTypeId(null);
       return;
     }
@@ -818,7 +857,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_types").update({ name }).eq("id", id);
     setProjectTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't rename: ${error.message}`);
+      alertDlg(friendlyError("rename this item", error));
       return;
     }
     setEditingProjectTypeId(null);
@@ -830,7 +869,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_types").update({ is_active: !t.is_active }).eq("id", t.id);
     setProjectTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadProjectTypes();
@@ -841,18 +880,19 @@ export default function SiteSettings() {
   async function toggleProjectTypeOperational(t: ProjectTypeRow) {
     const turningOn = !t.is_operational;
     const ok = await confirmDlg({
-      title: turningOn ? "Make every project of this type Ongoing?" : "Turn off Ongoing?",
-      confirmLabel: turningOn ? "Make Ongoing" : "Turn off",
+      title: turningOn ? `Make "${t.name}" projects Ongoing?` : "Turn off Ongoing?",
+      confirmLabel: turningOn ? "Make Ongoing" : "Turn off Ongoing",
       message: turningOn
-        ? `Every project with this type will show Health and WBS Status as "Ongoing" (no date-based health or baseline variance), and anyone can add their own sessions to it once it's started. Task validation stays the same.`
-        : `"${t.name}" projects go back to normal Health and baseline tracking.`,
+        ? `Their Health and WBS Status show "Ongoing" instead of date-based tracking, and anyone can add sessions once a project is started.`
+        : `"${t.name}" projects go back to normal date-based Health tracking.`,
+      items: turningOn ? ["Task validation stays the same."] : undefined,
     });
     if (!ok) return;
     setProjectTypeBusy(true);
     const { error } = await supabase.from("project_types").update({ is_operational: turningOn }).eq("id", t.id);
     setProjectTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadProjectTypes();
@@ -866,7 +906,7 @@ export default function SiteSettings() {
     setProjectTypeBusy(false);
     const err = results.find((r) => r.error)?.error;
     if (err) {
-      window.alert(`Couldn't reorder: ${err.message}`);
+      alertDlg(friendlyError("reorder the list", err));
       return;
     }
     loadProjectTypes();
@@ -882,24 +922,32 @@ export default function SiteSettings() {
       .eq("project_type_id", t.id);
     if (countError) {
       setProjectTypeBusy(false);
-      window.alert(`Couldn't check usage: ${countError.message}`);
+      alertDlg(friendlyError("check where this is used", countError));
       return;
     }
     if ((count ?? 0) > 0) {
       setProjectTypeBusy(false);
-      window.alert(
-        `Can't delete -- ${count} project${count === 1 ? "" : "s"} still use this Project Type. Deactivate it instead, or reassign those projects first.`
-      );
+      alertDlg({
+        title: "Still in use",
+        message: `${count} project${count === 1 ? "" : "s"} still use this Project Type. Deactivate it instead, or reassign those projects first.`,
+      });
       return;
     }
-    if (!window.confirm(`Delete "${t.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no project currently uses it -- Project Types in use can't be deleted.)`)) {
+    if (
+      !(await confirmDlg({
+        title: `Move "${t.name}" to Archive?`,
+        message: "You can restore it from the Archive within 90 days.",
+        confirmLabel: "Move to Archive",
+        danger: true,
+      }))
+    ) {
       setProjectTypeBusy(false);
       return;
     }
     const { error } = await archiveItem("project_type", t.id);
     setProjectTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't delete: ${error.message}`);
+      alertDlg(friendlyError("move this to Archive", error));
       return;
     }
     loadProjectTypes();
@@ -923,7 +971,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_categories").update({ icon }).eq("id", c.id);
     setProjectCategoryBusy(false);
     if (error) {
-      window.alert(`Couldn't update icon: ${error.message}`);
+      alertDlg(friendlyError("update the icon", error));
       return;
     }
     loadProjectCategories();
@@ -934,7 +982,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_categories").update({ color }).eq("id", c.id);
     setProjectCategoryBusy(false);
     if (error) {
-      window.alert(`Couldn't update color: ${error.message}`);
+      alertDlg(friendlyError("update the color", error));
       return;
     }
     loadProjectCategories();
@@ -948,7 +996,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_categories").insert({ name, sort_order: nextSortOrder });
     setProjectCategoryBusy(false);
     if (error) {
-      window.alert(`Couldn't add: ${error.message}`);
+      alertDlg(friendlyError("add this item", error));
       return;
     }
     setNewProjectCategoryName("");
@@ -965,7 +1013,7 @@ export default function SiteSettings() {
     if (!name) return;
     const current = projectCategories.find((c) => c.id === id);
     if (current && current.name !== name) {
-      const ok = await confirmPlainTextRename("projects", "category", current.name, name, "project");
+      const ok = await confirmPlainTextRename(confirmDlg, "projects", "category", current.name, name, "project");
       if (!ok) {
         setEditingProjectCategoryId(null);
         return;
@@ -975,12 +1023,12 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_categories").update({ name }).eq("id", id);
     if (error) {
       setProjectCategoryBusy(false);
-      window.alert(`Couldn't rename: ${error.message}`);
+      alertDlg(friendlyError("rename this item", error));
       return;
     }
     if (current && current.name !== name) {
       const cascadeError = await cascadePlainTextRename("projects", "category", current.name, name);
-      if (cascadeError) window.alert(`Category renamed, but couldn't update tagged projects: ${cascadeError}. Please check manually.`);
+      if (cascadeError) alertDlg({ title: "Category renamed, tags not updated", message: "Some tagged projects still show the old name. Please check them.", details: cascadeError });
     }
     setProjectCategoryBusy(false);
     setEditingProjectCategoryId(null);
@@ -992,7 +1040,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_categories").update({ is_active: !c.is_active }).eq("id", c.id);
     setProjectCategoryBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadProjectCategories();
@@ -1010,24 +1058,32 @@ export default function SiteSettings() {
       .eq("category", c.name);
     if (countError) {
       setProjectCategoryBusy(false);
-      window.alert(`Couldn't check usage: ${countError.message}`);
+      alertDlg(friendlyError("check where this is used", countError));
       return;
     }
     if ((count ?? 0) > 0) {
       setProjectCategoryBusy(false);
-      window.alert(
-        `Can't delete -- ${count} project${count === 1 ? "" : "s"} still use this Category. Deactivate it instead, or reassign those projects first.`
-      );
+      alertDlg({
+        title: "Still in use",
+        message: `${count} project${count === 1 ? "" : "s"} still use this Category. Deactivate it instead, or reassign those projects first.`,
+      });
       return;
     }
-    if (!window.confirm(`Delete "${c.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no project currently uses it -- Categories in use can't be deleted.)`)) {
+    if (
+      !(await confirmDlg({
+        title: `Move "${c.name}" to Archive?`,
+        message: "You can restore it from the Archive within 90 days.",
+        confirmLabel: "Move to Archive",
+        danger: true,
+      }))
+    ) {
       setProjectCategoryBusy(false);
       return;
     }
     const { error } = await archiveItem("project_category", c.id);
     setProjectCategoryBusy(false);
     if (error) {
-      window.alert(`Couldn't delete: ${error.message}`);
+      alertDlg(friendlyError("move this to Archive", error));
       return;
     }
     loadProjectCategories();
@@ -1049,7 +1105,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_phases").insert({ name, sort_order: nextSortOrder });
     setProjectPhaseBusy(false);
     if (error) {
-      window.alert(`Couldn't add: ${error.message}`);
+      alertDlg(friendlyError("add this item", error));
       return;
     }
     setNewProjectPhaseName("");
@@ -1066,7 +1122,7 @@ export default function SiteSettings() {
     if (!name) return;
     const current = projectPhases.find((ph) => ph.id === id);
     if (current && current.name !== name) {
-      const ok = await confirmPlainTextRename("projects", "phase", current.name, name, "project");
+      const ok = await confirmPlainTextRename(confirmDlg, "projects", "phase", current.name, name, "project");
       if (!ok) {
         setEditingProjectPhaseId(null);
         return;
@@ -1076,12 +1132,12 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_phases").update({ name }).eq("id", id);
     if (error) {
       setProjectPhaseBusy(false);
-      window.alert(`Couldn't rename: ${error.message}`);
+      alertDlg(friendlyError("rename this item", error));
       return;
     }
     if (current && current.name !== name) {
       const cascadeError = await cascadePlainTextRename("projects", "phase", current.name, name);
-      if (cascadeError) window.alert(`Phase renamed, but couldn't update tagged projects: ${cascadeError}. Please check manually.`);
+      if (cascadeError) alertDlg({ title: "Phase renamed, tags not updated", message: "Some tagged projects still show the old name. Please check them.", details: cascadeError });
     }
     setProjectPhaseBusy(false);
     setEditingProjectPhaseId(null);
@@ -1093,7 +1149,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("project_phases").update({ is_active: !ph.is_active }).eq("id", ph.id);
     setProjectPhaseBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadProjectPhases();
@@ -1109,24 +1165,32 @@ export default function SiteSettings() {
       .eq("phase", ph.name);
     if (countError) {
       setProjectPhaseBusy(false);
-      window.alert(`Couldn't check usage: ${countError.message}`);
+      alertDlg(friendlyError("check where this is used", countError));
       return;
     }
     if ((count ?? 0) > 0) {
       setProjectPhaseBusy(false);
-      window.alert(
-        `Can't delete -- ${count} project${count === 1 ? "" : "s"} still use this Phase. Deactivate it instead, or reassign those projects first.`
-      );
+      alertDlg({
+        title: "Still in use",
+        message: `${count} project${count === 1 ? "" : "s"} still use this Phase. Deactivate it instead, or reassign those projects first.`,
+      });
       return;
     }
-    if (!window.confirm(`Delete "${ph.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no project currently uses it -- Phases in use can't be deleted.)`)) {
+    if (
+      !(await confirmDlg({
+        title: `Move "${ph.name}" to Archive?`,
+        message: "You can restore it from the Archive within 90 days.",
+        confirmLabel: "Move to Archive",
+        danger: true,
+      }))
+    ) {
       setProjectPhaseBusy(false);
       return;
     }
     const { error } = await archiveItem("project_phase", ph.id);
     setProjectPhaseBusy(false);
     if (error) {
-      window.alert(`Couldn't delete: ${error.message}`);
+      alertDlg(friendlyError("move this to Archive", error));
       return;
     }
     loadProjectPhases();
@@ -1140,7 +1204,7 @@ export default function SiteSettings() {
     setProjectPhaseBusy(false);
     const err = results.find((r) => r.error)?.error;
     if (err) {
-      window.alert(`Couldn't reorder: ${err.message}`);
+      alertDlg(friendlyError("reorder the list", err));
       return;
     }
     loadProjectPhases();
@@ -1161,7 +1225,7 @@ export default function SiteSettings() {
       : await supabase.from("project_status_phase_mapping").insert({ status, phase_id: phaseId });
     setPhaseMappingBusy(false);
     if (error) {
-      window.alert(`Couldn't update mapping: ${error.message}`);
+      alertDlg(friendlyError("update the mapping", error));
       return;
     }
     loadPhaseStatusMapping();
@@ -1182,7 +1246,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("output_types").insert({ name, sort_order: nextSortOrder });
     setOutputTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't add: ${error.message}`);
+      alertDlg(friendlyError("add this item", error));
       return;
     }
     setNewOutputTypeName("");
@@ -1198,7 +1262,7 @@ export default function SiteSettings() {
     const name = editOutputTypeName.trim();
     if (!name) return;
     const current = outputTypes.find((o) => o.id === id);
-    if (current && !confirmFkRename(current.name, name, "task")) {
+    if (current && !(await confirmFkRename(confirmDlg, current.name, name, "task"))) {
       setEditingOutputTypeId(null);
       return;
     }
@@ -1206,7 +1270,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("output_types").update({ name }).eq("id", id);
     setOutputTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't rename: ${error.message}`);
+      alertDlg(friendlyError("rename this item", error));
       return;
     }
     setEditingOutputTypeId(null);
@@ -1219,9 +1283,9 @@ export default function SiteSettings() {
     const turningOff = o.counts_deliverable !== false;
     const ok = await confirmDlg({
       title: turningOff ? `Stop counting "${o.name}"?` : `Count "${o.name}" as a deliverable?`,
-      confirmLabel: turningOff ? "Not counted (always 0)" : "Count it",
+      confirmLabel: turningOff ? "Stop counting" : "Count it",
       message: turningOff
-        ? `Tasks with this Output Type will always have Output Count 0, and nobody will be asked for a number. Existing counts on these tasks are set to 0 and leave Materials Output.`
+        ? `Tasks with this Output Type always show Output Count 0. Existing counts are set to 0 and drop out of Materials Output.`
         : `Tasks with this Output Type will need an Output Count of 1 or more when they're marked complete.`,
     });
     if (!ok) return;
@@ -1230,7 +1294,7 @@ export default function SiteSettings() {
     if (!error && turningOff) await supabase.from("tasks").update({ output_count: 0 }).eq("output_type_id", o.id);
     setOutputTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadOutputTypes();
@@ -1241,7 +1305,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("output_types").update({ is_active: !o.is_active }).eq("id", o.id);
     setOutputTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadOutputTypes();
@@ -1259,7 +1323,7 @@ export default function SiteSettings() {
     ]);
     setOutputTypeBusy(false);
     if (e1 || e2) {
-      window.alert(`Couldn't reorder: ${(e1 ?? e2)?.message}`);
+      alertDlg(friendlyError("reorder the list", e1 ?? e2));
       return;
     }
     loadOutputTypes();
@@ -1275,24 +1339,32 @@ export default function SiteSettings() {
       .eq("output_type_id", o.id);
     if (countError) {
       setOutputTypeBusy(false);
-      window.alert(`Couldn't check usage: ${countError.message}`);
+      alertDlg(friendlyError("check where this is used", countError));
       return;
     }
     if ((count ?? 0) > 0) {
       setOutputTypeBusy(false);
-      window.alert(
-        `Can't delete -- ${count} task${count === 1 ? "" : "s"} still use this Output Type. Deactivate it instead, or reassign those tasks first.`
-      );
+      alertDlg({
+        title: "Still in use",
+        message: `${count} task${count === 1 ? "" : "s"} still use this Output Type. Deactivate it instead, or reassign those tasks first.`,
+      });
       return;
     }
-    if (!window.confirm(`Delete "${o.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no task currently uses it -- Output Types in use can't be deleted.)`)) {
+    if (
+      !(await confirmDlg({
+        title: `Move "${o.name}" to Archive?`,
+        message: "You can restore it from the Archive within 90 days.",
+        confirmLabel: "Move to Archive",
+        danger: true,
+      }))
+    ) {
       setOutputTypeBusy(false);
       return;
     }
     const { error } = await archiveItem("output_type", o.id);
     setOutputTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't delete: ${error.message}`);
+      alertDlg(friendlyError("move this to Archive", error));
       return;
     }
     loadOutputTypes();
@@ -1315,7 +1387,7 @@ export default function SiteSettings() {
       : await supabase.from("work_type_output_types").insert({ work_type_id: workTypeId, output_type_id: outputTypeId });
     setMappingBusy(false);
     if (error) {
-      window.alert(`Couldn't update mapping: ${error.message}`);
+      alertDlg(friendlyError("update the mapping", error));
       return;
     }
     loadMappings();
@@ -1333,7 +1405,7 @@ export default function SiteSettings() {
     setWorkTypeBusy(false);
     const err = results.find((r) => r.error)?.error;
     if (err) {
-      window.alert(`Couldn't reorder: ${err.message}`);
+      alertDlg(friendlyError("reorder the list", err));
       return;
     }
     loadWorkTypes();
@@ -1347,7 +1419,7 @@ export default function SiteSettings() {
     setOutputTypeBusy(false);
     const err = results.find((r) => r.error)?.error;
     if (err) {
-      window.alert(`Couldn't reorder: ${err.message}`);
+      alertDlg(friendlyError("reorder the list", err));
       return;
     }
     loadOutputTypes();
@@ -1364,7 +1436,7 @@ export default function SiteSettings() {
     setProjectSourceBusy(false);
     const err = results.find((r) => r.error)?.error;
     if (err) {
-      window.alert(`Couldn't reorder: ${err.message}`);
+      alertDlg(friendlyError("reorder the list", err));
       return;
     }
     loadProjectSources();
@@ -1389,7 +1461,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("time_entry_reasons").insert({ name, sort_order: nextSortOrder });
     setTimeEntryReasonBusy(false);
     if (error) {
-      window.alert(`Couldn't add: ${error.message}`);
+      alertDlg(friendlyError("add this item", error));
       return;
     }
     setNewTimeEntryReasonName("");
@@ -1406,7 +1478,7 @@ export default function SiteSettings() {
     if (!name) return;
     const current = timeEntryReasons.find((r) => r.id === id);
     if (current && current.name !== name) {
-      const ok = await confirmPlainTextRename("time_entries", "reason_category", current.name, name, "time entry");
+      const ok = await confirmPlainTextRename(confirmDlg, "time_entries", "reason_category", current.name, name, "time entry");
       if (!ok) {
         setEditingTimeEntryReasonId(null);
         return;
@@ -1416,12 +1488,12 @@ export default function SiteSettings() {
     const { error } = await supabase.from("time_entry_reasons").update({ name }).eq("id", id);
     if (error) {
       setTimeEntryReasonBusy(false);
-      window.alert(`Couldn't rename: ${error.message}`);
+      alertDlg(friendlyError("rename this item", error));
       return;
     }
     if (current && current.name !== name) {
       const cascadeError = await cascadePlainTextRename("time_entries", "reason_category", current.name, name);
-      if (cascadeError) window.alert(`Reason renamed, but couldn't update tagged time entries: ${cascadeError}. Please check manually.`);
+      if (cascadeError) alertDlg({ title: "Reason renamed, tags not updated", message: "Some tagged time entries still show the old name. Please check them.", details: cascadeError });
     }
     setTimeEntryReasonBusy(false);
     setEditingTimeEntryReasonId(null);
@@ -1433,7 +1505,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("time_entry_reasons").update({ is_active: !r.is_active }).eq("id", r.id);
     setTimeEntryReasonBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadTimeEntryReasons();
@@ -1449,24 +1521,32 @@ export default function SiteSettings() {
       .eq("reason_category", r.name);
     if (countError) {
       setTimeEntryReasonBusy(false);
-      window.alert(`Couldn't check usage: ${countError.message}`);
+      alertDlg(friendlyError("check where this is used", countError));
       return;
     }
     if ((count ?? 0) > 0) {
       setTimeEntryReasonBusy(false);
-      window.alert(
-        `Can't delete -- ${count} time ${count === 1 ? "entry" : "entries"} still use this Reason. Deactivate it instead.`
-      );
+      alertDlg({
+        title: "Still in use",
+        message: `${count} time ${count === 1 ? "entry" : "entries"} still use this Reason. Deactivate it instead.`,
+      });
       return;
     }
-    if (!window.confirm(`Delete "${r.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no time entry currently uses it -- Reasons in use can't be deleted.)`)) {
+    if (
+      !(await confirmDlg({
+        title: `Move "${r.name}" to Archive?`,
+        message: "You can restore it from the Archive within 90 days.",
+        confirmLabel: "Move to Archive",
+        danger: true,
+      }))
+    ) {
       setTimeEntryReasonBusy(false);
       return;
     }
     const { error } = await archiveItem("time_entry_reason", r.id);
     setTimeEntryReasonBusy(false);
     if (error) {
-      window.alert(`Couldn't delete: ${error.message}`);
+      alertDlg(friendlyError("move this to Archive", error));
       return;
     }
     loadTimeEntryReasons();
@@ -1480,7 +1560,7 @@ export default function SiteSettings() {
     setTimeEntryReasonBusy(false);
     const err = results.find((r) => r.error)?.error;
     if (err) {
-      window.alert(`Couldn't reorder: ${err.message}`);
+      alertDlg(friendlyError("reorder the list", err));
       return;
     }
     loadTimeEntryReasons();
@@ -1505,7 +1585,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("non_project_activity_types").insert({ name, sort_order: nextSortOrder });
     setNonProjectActivityTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't add: ${error.message}`);
+      alertDlg(friendlyError("add this item", error));
       return;
     }
     setNewNonProjectActivityTypeName("");
@@ -1521,7 +1601,7 @@ export default function SiteSettings() {
     const name = editNonProjectActivityTypeName.trim();
     if (!name) return;
     const current = nonProjectActivityTypes.find((a) => a.id === id);
-    if (current && !confirmFkRename(current.name, name, "non-project time entry")) {
+    if (current && !(await confirmFkRename(confirmDlg, current.name, name, "non-project time entry"))) {
       setEditingNonProjectActivityTypeId(null);
       return;
     }
@@ -1529,7 +1609,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("non_project_activity_types").update({ name }).eq("id", id);
     setNonProjectActivityTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't rename: ${error.message}`);
+      alertDlg(friendlyError("rename this item", error));
       return;
     }
     setEditingNonProjectActivityTypeId(null);
@@ -1541,7 +1621,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("non_project_activity_types").update({ is_active: !a.is_active }).eq("id", a.id);
     setNonProjectActivityTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadNonProjectActivityTypes();
@@ -1559,7 +1639,7 @@ export default function SiteSettings() {
     ]);
     setNonProjectActivityTypeBusy(false);
     if (e1 || e2) {
-      window.alert(`Couldn't reorder: ${(e1 ?? e2)?.message}`);
+      alertDlg(friendlyError("reorder the list", e1 ?? e2));
       return;
     }
     loadNonProjectActivityTypes();
@@ -1573,7 +1653,7 @@ export default function SiteSettings() {
     setNonProjectActivityTypeBusy(false);
     const err = results.find((r) => r.error)?.error;
     if (err) {
-      window.alert(`Couldn't reorder: ${err.message}`);
+      alertDlg(friendlyError("reorder the list", err));
       return;
     }
     loadNonProjectActivityTypes();
@@ -1589,24 +1669,32 @@ export default function SiteSettings() {
       .eq("activity_type_id", a.id);
     if (countError) {
       setNonProjectActivityTypeBusy(false);
-      window.alert(`Couldn't check usage: ${countError.message}`);
+      alertDlg(friendlyError("check where this is used", countError));
       return;
     }
     if ((count ?? 0) > 0) {
       setNonProjectActivityTypeBusy(false);
-      window.alert(
-        `Can't delete -- ${count} time ${count === 1 ? "entry" : "entries"} still use this Activity Type. Deactivate it instead.`
-      );
+      alertDlg({
+        title: "Still in use",
+        message: `${count} time ${count === 1 ? "entry" : "entries"} still use this Activity Type. Deactivate it instead.`,
+      });
       return;
     }
-    if (!window.confirm(`Delete "${a.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no time entry currently uses it -- Activity Types in use can't be deleted.)`)) {
+    if (
+      !(await confirmDlg({
+        title: `Move "${a.name}" to Archive?`,
+        message: "You can restore it from the Archive within 90 days.",
+        confirmLabel: "Move to Archive",
+        danger: true,
+      }))
+    ) {
       setNonProjectActivityTypeBusy(false);
       return;
     }
     const { error } = await archiveItem("activity_type", a.id);
     setNonProjectActivityTypeBusy(false);
     if (error) {
-      window.alert(`Couldn't delete: ${error.message}`);
+      alertDlg(friendlyError("move this to Archive", error));
       return;
     }
     loadNonProjectActivityTypes();
@@ -1631,7 +1719,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("baseline_decline_reasons").insert({ name, sort_order: nextSortOrder });
     setBaselineDeclineReasonBusy(false);
     if (error) {
-      window.alert(`Couldn't add: ${error.message}`);
+      alertDlg(friendlyError("add this item", error));
       return;
     }
     setNewBaselineDeclineReasonName("");
@@ -1648,7 +1736,7 @@ export default function SiteSettings() {
     if (!name) return;
     const current = baselineDeclineReasons.find((r) => r.id === id);
     if (current && current.name !== name) {
-      const ok = await confirmPlainTextRename("project_baseline_requests", "decline_reason", current.name, name, "Start Project request");
+      const ok = await confirmPlainTextRename(confirmDlg, "project_baseline_requests", "decline_reason", current.name, name, "Start Project request");
       if (!ok) {
         setEditingBaselineDeclineReasonId(null);
         return;
@@ -1658,12 +1746,12 @@ export default function SiteSettings() {
     const { error } = await supabase.from("baseline_decline_reasons").update({ name }).eq("id", id);
     if (error) {
       setBaselineDeclineReasonBusy(false);
-      window.alert(`Couldn't rename: ${error.message}`);
+      alertDlg(friendlyError("rename this item", error));
       return;
     }
     if (current && current.name !== name) {
       const cascadeError = await cascadePlainTextRename("project_baseline_requests", "decline_reason", current.name, name);
-      if (cascadeError) window.alert(`Reason renamed, but couldn't update past declined requests: ${cascadeError}. Please check manually.`);
+      if (cascadeError) alertDlg({ title: "Reason renamed, tags not updated", message: "Some past declined requests still show the old name. Please check them.", details: cascadeError });
     }
     setBaselineDeclineReasonBusy(false);
     setEditingBaselineDeclineReasonId(null);
@@ -1675,7 +1763,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("baseline_decline_reasons").update({ is_active: !r.is_active }).eq("id", r.id);
     setBaselineDeclineReasonBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadBaselineDeclineReasons();
@@ -1692,24 +1780,32 @@ export default function SiteSettings() {
       .eq("decline_reason", r.name);
     if (countError) {
       setBaselineDeclineReasonBusy(false);
-      window.alert(`Couldn't check usage: ${countError.message}`);
+      alertDlg(friendlyError("check where this is used", countError));
       return;
     }
     if ((count ?? 0) > 0) {
       setBaselineDeclineReasonBusy(false);
-      window.alert(
-        `Can't delete -- ${count} past declined request${count === 1 ? "" : "s"} still use this Reason. Deactivate it instead.`
-      );
+      alertDlg({
+        title: "Still in use",
+        message: `${count} past declined request${count === 1 ? "" : "s"} still use this Reason. Deactivate it instead.`,
+      });
       return;
     }
-    if (!window.confirm(`Delete "${r.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no declined request currently uses it -- Reasons in use can't be deleted.)`)) {
+    if (
+      !(await confirmDlg({
+        title: `Move "${r.name}" to Archive?`,
+        message: "You can restore it from the Archive within 90 days.",
+        confirmLabel: "Move to Archive",
+        danger: true,
+      }))
+    ) {
       setBaselineDeclineReasonBusy(false);
       return;
     }
     const { error } = await archiveItem("decline_reason", r.id);
     setBaselineDeclineReasonBusy(false);
     if (error) {
-      window.alert(`Couldn't delete: ${error.message}`);
+      alertDlg(friendlyError("move this to Archive", error));
       return;
     }
     loadBaselineDeclineReasons();
@@ -1723,7 +1819,7 @@ export default function SiteSettings() {
     setBaselineDeclineReasonBusy(false);
     const err = results.find((r) => r.error)?.error;
     if (err) {
-      window.alert(`Couldn't reorder: ${err.message}`);
+      alertDlg(friendlyError("reorder the list", err));
       return;
     }
     loadBaselineDeclineReasons();
@@ -1748,7 +1844,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("task_cancellation_reasons").insert({ name, sort_order: nextSortOrder });
     setTaskCancellationReasonBusy(false);
     if (error) {
-      window.alert(`Couldn't add: ${error.message}`);
+      alertDlg(friendlyError("add this item", error));
       return;
     }
     setNewTaskCancellationReasonName("");
@@ -1765,7 +1861,7 @@ export default function SiteSettings() {
     if (!name) return;
     const current = taskCancellationReasons.find((r) => r.id === id);
     if (current && current.name !== name) {
-      const ok = await confirmPlainTextRename("tasks", "cancellation_reason", current.name, name, "cancelled task");
+      const ok = await confirmPlainTextRename(confirmDlg, "tasks", "cancellation_reason", current.name, name, "cancelled task");
       if (!ok) {
         setEditingTaskCancellationReasonId(null);
         return;
@@ -1775,12 +1871,12 @@ export default function SiteSettings() {
     const { error } = await supabase.from("task_cancellation_reasons").update({ name }).eq("id", id);
     if (error) {
       setTaskCancellationReasonBusy(false);
-      window.alert(`Couldn't rename: ${error.message}`);
+      alertDlg(friendlyError("rename this item", error));
       return;
     }
     if (current && current.name !== name) {
       const cascadeError = await cascadePlainTextRename("tasks", "cancellation_reason", current.name, name);
-      if (cascadeError) window.alert(`Reason renamed, but couldn't update past cancelled tasks: ${cascadeError}. Please check manually.`);
+      if (cascadeError) alertDlg({ title: "Reason renamed, tags not updated", message: "Some past cancelled tasks still show the old name. Please check them.", details: cascadeError });
     }
     setTaskCancellationReasonBusy(false);
     setEditingTaskCancellationReasonId(null);
@@ -1792,7 +1888,7 @@ export default function SiteSettings() {
     const { error } = await supabase.from("task_cancellation_reasons").update({ is_active: !r.is_active }).eq("id", r.id);
     setTaskCancellationReasonBusy(false);
     if (error) {
-      window.alert(`Couldn't update: ${error.message}`);
+      alertDlg(friendlyError("save this change", error));
       return;
     }
     loadTaskCancellationReasons();
@@ -1808,24 +1904,32 @@ export default function SiteSettings() {
       .eq("cancellation_reason", r.name);
     if (countError) {
       setTaskCancellationReasonBusy(false);
-      window.alert(`Couldn't check usage: ${countError.message}`);
+      alertDlg(friendlyError("check where this is used", countError));
       return;
     }
     if ((count ?? 0) > 0) {
       setTaskCancellationReasonBusy(false);
-      window.alert(
-        `Can't delete -- ${count} task${count === 1 ? "" : "s"} cancelled with this reason still exist. Deactivate it instead.`
-      );
+      alertDlg({
+        title: "Still in use",
+        message: `${count} task${count === 1 ? "" : "s"} cancelled with this reason still exist. Deactivate it instead.`,
+      });
       return;
     }
-    if (!window.confirm(`Delete "${r.name}"? It moves to the Archive and can be restored within 90 days. (Only possible because no task currently uses it -- Reasons in use can't be deleted.)`)) {
+    if (
+      !(await confirmDlg({
+        title: `Move "${r.name}" to Archive?`,
+        message: "You can restore it from the Archive within 90 days.",
+        confirmLabel: "Move to Archive",
+        danger: true,
+      }))
+    ) {
       setTaskCancellationReasonBusy(false);
       return;
     }
     const { error } = await archiveItem("cancellation_reason", r.id);
     setTaskCancellationReasonBusy(false);
     if (error) {
-      window.alert(`Couldn't delete: ${error.message}`);
+      alertDlg(friendlyError("move this to Archive", error));
       return;
     }
     loadTaskCancellationReasons();
@@ -1839,7 +1943,7 @@ export default function SiteSettings() {
     setTaskCancellationReasonBusy(false);
     const err = results.find((r) => r.error)?.error;
     if (err) {
-      window.alert(`Couldn't reorder: ${err.message}`);
+      alertDlg(friendlyError("reorder the list", err));
       return;
     }
     loadTaskCancellationReasons();
@@ -1855,7 +1959,7 @@ export default function SiteSettings() {
     setProjectCategoryBusy(false);
     const err = results.find((r) => r.error)?.error;
     if (err) {
-      window.alert(`Couldn't reorder: ${err.message}`);
+      alertDlg(friendlyError("reorder the list", err));
       return;
     }
     loadProjectCategories();

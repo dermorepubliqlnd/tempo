@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Send, CornerDownRight } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 
 interface NotePersonOption {
   id: string;
@@ -87,6 +89,7 @@ function renderBodyWithMentions(body: string, people: NotePersonOption[]) {
 }
 
 export default function NotesSidebar({ projectId, projectName, people, currentPersonId, onClose, onCountChange, taskId, taskLabel }: NotesSidebarProps) {
+  const { alert, dialog } = useConfirm();
   const [taskLabels, setTaskLabels] = useState<Record<string, string>>({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -184,7 +187,7 @@ export default function NotesSidebar({ projectId, projectName, people, currentPe
     });
     setPosting(false);
     if (error) {
-      window.alert(`Couldn't post note: ${error.message}`);
+      await alert(friendlyError("post this note", error));
       return;
     }
     setComposeText("");
@@ -249,6 +252,7 @@ export default function NotesSidebar({ projectId, projectName, people, currentPe
 
   return createPortal(
     <>
+      {dialog}
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,41,66,0.25)", zIndex: 150 }} />
       <div
         style={{

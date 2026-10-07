@@ -84,26 +84,27 @@ export async function runAutoValidations(projectId: string, ignoreWait: boolean)
 
 /** After an extension request is inserted, read back what the DB decided
  * (the auto-approval runs in an AFTER INSERT trigger). */
-export async function extensionOutcomeMessage(requestId: string | null | undefined): Promise<{ title: string; message: string }> {
-  const fallback = { title: "Extension request submitted", message: "It goes to your supervisor in Approval Center. The due date moves once it's approved." };
+export async function extensionOutcomeMessage(requestId: string | null | undefined): Promise<{ title: string; message: string; items?: string[] }> {
+  const fallback = { title: "Extension request sent", message: "Your supervisor reviews it in Approval Center. The due date changes once it's approved." };
   if (!requestId) return fallback;
   const { data } = await supabase.from("extension_requests").select("status, auto_approved, auto_check_note, requested_new_due_date").eq("id", requestId).maybeSingle();
   const r = data as { status: string; auto_approved?: boolean; auto_check_note?: string | null; requested_new_due_date: string } | null;
   if (!r) return fallback;
   if (r.auto_approved && r.status === "Approved") {
-    return { title: "Extension approved automatically", message: `The new due date is now ${r.requested_new_due_date}. Small first extensions (2 working days or less) that don't push the project end date are approved automatically. Your supervisor sees it in their Auto-approved list.` };
+    return { title: "Extension approved automatically", message: `The new due date is ${r.requested_new_due_date}. A first extension of 2 working days or less that doesn't move the project end date is approved automatically.`, items: ["Your supervisor still sees it in their Auto-approved list."] };
   }
-  return { ...fallback, message: fallback.message + (r.auto_check_note ? `\n\nWhy it needs approval: ${r.auto_check_note}.` : "") };
+  return { ...fallback, items: r.auto_check_note ? [`**Why it needs approval:** ${r.auto_check_note}.`] : undefined };
 }
 
 /** After a manual time entry is submitted, read back whether it was auto-approved. */
-export async function timeEntryOutcomeMessage(entryId: string | null | undefined, clampedNote: string): Promise<string> {
-  const pending = `Time entry submitted${clampedNote} -- it goes to your supervisor for approval.`;
+export async function timeEntryOutcomeMessage(entryId: string | null | undefined, clampedNote: string): Promise<{ title: string; message: string; items?: string[] }> {
+  const items = clampedNote ? [clampedNote] : undefined;
+  const pending = { title: "Time entry sent for approval", message: "Your supervisor reviews it in Approval Center.", items };
   if (!entryId) return pending;
   const { data } = await supabase.from("time_entries").select("status, auto_approved").eq("id", entryId).maybeSingle();
   const r = data as { status: string; auto_approved?: boolean } | null;
   if (r?.auto_approved && r.status === "approved") {
-    return `Time entry saved and approved automatically${clampedNote}. Entries of 2 hrs or less logged within 2 working days are auto-approved (up to 5 hrs a week).`;
+    return { title: "Time entry approved automatically", message: "Entries of 2 hours or less, logged within 2 working days, are approved automatically (up to 5 hours a week).", items };
   }
   return pending;
 }

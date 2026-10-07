@@ -27,6 +27,7 @@ import { supabase } from "../lib/supabaseClient";
 import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_ICON_NAMES, CATEGORY_TONE_NAMES, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 
 interface KbCategory {
@@ -549,7 +550,7 @@ export default function KnowledgeBase() {
     }
     setSaving(false);
     if (error) {
-      await alert(`Couldn't save topic: ${error.message}`);
+      await alert(friendlyError("save the topic", error));
       return;
     }
     setCategoryFormFor(null);
@@ -559,15 +560,15 @@ export default function KnowledgeBase() {
   async function deleteCategory(cat: KbCategory) {
     const count = entriesByCategory.get(cat.id)?.length ?? 0;
     const ok = await confirm({
-      title: "Delete topic",
-      message: `Delete "${cat.name}"${count > 0 ? ` and its ${count} ${count === 1 ? "article" : "articles"}` : ""}? ${ARCHIVE_MOVE_NOTE}`,
-      confirmLabel: "Delete",
+      title: "Move topic to Archive?",
+      message: `"${cat.name}"${count > 0 ? ` and its ${count} ${count === 1 ? "article" : "articles"}` : ""} will be removed from the Knowledge Base. ${ARCHIVE_MOVE_NOTE}`,
+      confirmLabel: "Move to Archive",
       danger: true,
     });
     if (!ok) return;
     const { error } = await archiveItem("kb_category", cat.id);
     if (error) {
-      await alert(`Couldn't delete: ${error.message}`);
+      await alert(friendlyError("move this to Archive", error));
       return;
     }
     navigate("/knowledge-base");
@@ -585,7 +586,7 @@ export default function KnowledgeBase() {
       .select("id")
       .single();
     if (error) {
-      await alert(`Couldn't create article: ${error.message}`);
+      await alert(friendlyError("create the article", error));
       return;
     }
     setNewEntryTitle("");
@@ -605,7 +606,7 @@ export default function KnowledgeBase() {
     const { error } = await supabase.from("kb_entries").update({ title, content, updated_by: me.id, updated_at: new Date().toISOString() }).eq("id", entry.id);
     setSaving(false);
     if (error) {
-      await alert(`Couldn't save: ${error.message}`);
+      await alert(friendlyError("save the article", error));
       return;
     }
     setEditingEntryId(null);
@@ -615,18 +616,18 @@ export default function KnowledgeBase() {
   async function togglePin(entry: KbEntry) {
     const { error } = await supabase.from("kb_entries").update({ is_pinned: !entry.is_pinned }).eq("id", entry.id);
     if (error) {
-      await alert(`Couldn't update: ${error.message}`);
+      await alert(friendlyError("update the pin", error));
       return;
     }
     loadAll();
   }
 
   async function deleteEntry(entry: KbEntry) {
-    const ok = await confirm({ title: "Delete article", message: `Delete "${entry.title}"? ${ARCHIVE_MOVE_NOTE}`, confirmLabel: "Delete", danger: true });
+    const ok = await confirm({ title: "Move article to Archive?", message: `"${entry.title}" will be removed from the Knowledge Base. ${ARCHIVE_MOVE_NOTE}`, confirmLabel: "Move to Archive", danger: true });
     if (!ok) return;
     const { error } = await archiveItem("kb_entry", entry.id);
     if (error) {
-      await alert(`Couldn't delete: ${error.message}`);
+      await alert(friendlyError("move this to Archive", error));
       return;
     }
     navigate(`/knowledge-base/category/${entry.category_id}`);

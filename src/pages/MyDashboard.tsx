@@ -36,6 +36,7 @@ import NonProjectTimerQuickStart from "../components/NonProjectTimerQuickStart";
 import { useSession } from "../lib/useSession";
 import { useApprovalAuthority } from "../lib/useApprovalAuthority";
 import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 import { formatDate } from "../lib/formatDate";
 import { buildHolidaySet, buildHolidayNameMap, nonWorkingDayConfirmMessage } from "../lib/workingDays";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
@@ -554,13 +555,13 @@ export default function MyDashboard() {
                       onClick={async () => {
                         if (isRunningHere) {
                           const res = await requestStop();
-                          if (res.error) alert(`Couldn't stop timer: ${res.error}`);
+                          if (res.error) alert(friendlyError("stop the timer", res.error));
                         } else {
                           // Weekend/holiday soft check (never blocks), checked against TODAY.
                           const warnMsg = nonWorkingDayConfirmMessage(todayIso, holidayNames);
-                          if (warnMsg && !(await confirm({ message: warnMsg, confirmLabel: "Yes, start" }))) return;
+                          if (warnMsg && !(await confirm({ title: "Start a timer on a day off?", message: warnMsg, confirmLabel: "Start anyway" }))) return;
                           const res = await startTaskTimer({ id: t.id, name: t.name });
-                          if (res.error) alert(`Couldn't start timer: ${res.error}`);
+                          if (res.error) alert(friendlyError("start the timer", res.error));
                         }
                       }}
                       disabled={timerDisabled}
@@ -605,7 +606,7 @@ export default function MyDashboard() {
     if (error) {
       // Roll back the optimistic update if the write failed.
       setHiddenToday((prev) => prev.filter((h) => !(h.task_id === taskId && h.hidden_date === todayIso)));
-      alert(`Couldn't hide task: ${error.message}`);
+      alert(friendlyError("hide this task", error));
     }
   }
   async function unhideTaskFromToday(taskId: string) {
@@ -613,7 +614,7 @@ export default function MyDashboard() {
     setHiddenToday((prev) => prev.filter((h) => !(h.task_id === taskId && h.hidden_date === todayIso)));
     setJustHidden((cur) => (cur?.id === taskId ? null : cur));
     const { error } = await supabase.from("task_daily_hidden").delete().eq("person_id", me.id).eq("task_id", taskId).eq("hidden_date", todayIso);
-    if (error) alert(`Couldn't restore task: ${error.message}`);
+    if (error) alert(friendlyError("show this task again", error));
   }
   // Auto-dismiss the "Task hidden from Today. Undo" banner -- the hide
   // itself already took effect; this just stops offering an undo after
@@ -640,7 +641,7 @@ export default function MyDashboard() {
       reason_notes: reasonNotes,
     }).select("id").single();
     if (error) {
-      await alert(`Couldn't submit extension request: ${error.message}`);
+      await alert(friendlyError("send the Extension request", error));
       return;
     }
     setExtensionTask(null);

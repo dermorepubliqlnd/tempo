@@ -3,6 +3,7 @@ import { X, Pencil } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { Person } from "../lib/useSession";
 import { defaultColorFor, isValidHex } from "../lib/personColors";
+import { useConfirm } from "../lib/useConfirm";
 
 // Right-side user-details drawer for User Management (2026-08-20
 // redesign). Follows the same drawer convention as NotesSidebar.tsx --
@@ -139,12 +140,14 @@ export default function UserDrawer({
   onSaveColor,
   onToggleTracksTime,
 }: UserDrawerProps) {
+  const { alert, dialog } = useConfirm();
   const manager = people.find((x) => x.id === person.reports_to);
   const approvalCount = [person.can_approve_closures, person.can_approve_rebaseline].filter(Boolean).length;
   const isEdit = mode === "edit";
 
   return createPortal(
     <>
+      {dialog}
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,41,66,0.25)", zIndex: 150 }} />
       <div
         style={{
@@ -282,7 +285,7 @@ export default function UserDrawer({
                     onBlur={(e) => {
                       const v = e.target.value.trim();
                       if (v && !isValidHex(v)) {
-                        window.alert(`"${v}" isn't a valid hex color (expected format: #3b82f6). Not saved.`);
+                        void alert({ title: "Color not saved", message: `"${v}" isn't a valid hex color. Use the format #3b82f6.` });
                         e.target.value = person.color ?? "";
                         return;
                       }

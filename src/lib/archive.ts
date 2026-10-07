@@ -84,10 +84,10 @@ export function blockedDeleteMessage(kind: "project" | "task", blockedNames: str
   const noun = kind === "project" ? "project" : "task";
   const head =
     blockedNames.length === 1
-      ? `You can't delete this ${noun}${allowedCount > 0 ? ` (${blockedNames[0]})` : ""}.`
-      : `You can't delete ${blockedNames.length} of the selected ${noun}s:\n${blockedNames.map((n) => `- ${n}`).join("\n")}`;
-  const tail = allowedCount > 0 ? `\n\nThe other ${allowedCount} can still be deleted -- you'll be asked to confirm next.` : "";
-  return `${head}\nPlease reach out to the project owner or your supervisor.${tail}`;
+      ? `You can't move this ${noun} to Archive${allowedCount > 0 ? ` (${blockedNames[0]})` : ""}.`
+      : `You can't move ${blockedNames.length} of the selected ${noun}s to Archive:\n${blockedNames.map((n) => `- ${n}`).join("\n")}`;
+  const tail = allowedCount > 0 ? `\n\nThe other ${allowedCount} can still be moved. You'll be asked to confirm next.` : "";
+  return `${head}\nAsk the project owner or your supervisor.${tail}`;
 }
 
 // Hours logged on a set of tasks (live, non-rejected entries), for the
@@ -105,5 +105,5 @@ export async function loggedHoursOnTasks(taskIds: string[]): Promise<{ hours: nu
 }
 
 export function loggedTimeDeleteWarning(what: string, hours: number, entries: number): string {
-  return `**${what} has ${hours.toFixed(2)}h of logged time** (${entries} time log${entries === 1 ? "" : "s"}).\n\nDeleting removes those hours from Productivity and Utilization until it's restored from the Archive. If the work was stopped or is no longer needed, use **Cancel** on the task instead -- it keeps the logged history.\n\nAre you sure you want to delete?`;
+  return `**${what} has ${hours.toFixed(2)} logged hours** (${entries} time log${entries === 1 ? "" : "s"}).\n\nMoving to Archive removes those hours from Productivity and Utilization until it's restored. If the work stopped or isn't needed, **Cancel** the task instead to keep its logged history.`;
 }

@@ -111,7 +111,7 @@ export function nonWorkingDayConfirmMessage(dateStr: string, holidayNames: Holid
   const dow = d.getDay();
   if (dow === 0 || dow === 6) {
     const dayName = dow === 0 ? "Sunday" : "Saturday";
-    return `You're logging time on a **${dayName}** (${shortDate}) -- a non-working day. Are you sure?`;
+    return `You're logging time on a **${dayName}** (${shortDate}), a non-working day. Are you sure?`;
   }
   return null;
 }

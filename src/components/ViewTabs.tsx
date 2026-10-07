@@ -400,8 +400,8 @@ export default function ViewTabs<T>({
                         onClick={async () => {
                           setMenuOpenId(null);
                           const ok = await confirm({
-                            title: "Delete view",
-                            message: `Delete the view "${v.name}"? This can't be undone.`,
+                            title: "Delete this view?",
+                            message: `The view "${v.name}" is deleted for good. This can't be undone.`,
                             confirmLabel: "Delete view",
                             danger: true,
                           });

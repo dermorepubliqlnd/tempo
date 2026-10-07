@@ -9,6 +9,7 @@ import Modal from "../components/Modal";
 import UserDrawer from "../components/UserDrawer";
 import UserRowMenu from "../components/UserRowMenu";
 import { useConfirm } from "../lib/useConfirm";
+import { friendlyError } from "../lib/prompts";
 
 // CSV bulk-import (Sandra, 2026-08-14): "data only for now, no emails sent
 // -- I'll give pilot users the link and a randomly-generated password
@@ -247,8 +248,8 @@ export default function Admin() {
   async function resetPassword(p: Person) {
     if (
       !(await confirm({
-        title: "Reset password",
-        message: `Reset ${p.name}'s password? Their old password stops working immediately -- you'll need to share the new one with them yourself.`,
+        title: "Reset this password?",
+        message: `${p.name}'s old password stops working right away. You'll need to share the new one with them yourself.`,
         confirmLabel: "Reset password",
         danger: true,
       }))
@@ -263,7 +264,7 @@ export default function Admin() {
     const result = data as { error?: string; password?: string } | null;
     if (error || result?.error) {
       const message = await extractFunctionError(error, data, "Failed to reset password.");
-      await alert(`Couldn't reset password for ${p.name}: ${message}`);
+      await alert(friendlyError(`reset ${p.name}'s password`, message));
       return;
     }
     setCsvResults([{ rowNumber: 1, name: p.name, email: p.email, action: "updated", message: "Password reset.", password: result?.password }]);
@@ -277,8 +278,8 @@ export default function Admin() {
   async function grantLogin(p: Person) {
     if (
       !(await confirm({
-        title: "Create login",
-        message: `Create a login for ${p.name} (${p.email})? You'll get a password to share with them.`,
+        title: "Create a login?",
+        message: `Create a login for ${p.name} (${p.email}). You'll get a password to share with them.`,
         confirmLabel: "Create login",
       }))
     ) {
@@ -292,7 +293,7 @@ export default function Admin() {
     const result = data as { error?: string; password?: string } | null;
     if (error || result?.error) {
       const message = await extractFunctionError(error, data, "Failed to create login.");
-      await alert(`Couldn't create a login for ${p.name}: ${message}`);
+      await alert(friendlyError(`create a login for ${p.name}`, message));
       return;
     }
     setCsvResults([{ rowNumber: 1, name: p.name, email: p.email, action: "created", password: result?.password }]);
@@ -301,22 +302,21 @@ export default function Admin() {
 
   async function toggleActive(p: Person) {
     if (p.id === me?.id && p.is_active) {
-      await alert(
-        "You can't deactivate your own account from here \u2014 it would immediately lock you out of Admin, " +
-          "since deactivating removes Full Access on the spot. Ask another Full Access team member to do it, or deactivate " +
-          "yourself last."
-      );
+      await alert({
+        title: "Can't deactivate yourself",
+        message: "Deactivating removes Full Access at once and would lock you out. Ask another Full Access team member to do it.",
+      });
       return;
     }
 
     const verb = p.is_active ? "deactivate" : "reactivate";
     const warning = p.is_active
-      ? `Deactivate ${p.name}? They'll immediately lose access to Tempo. You can reactivate them any time.`
-      : `Reactivate ${p.name}? They'll regain the access level shown (${p.access_level === "full" ? "Full" : "Limited"}).`;
+      ? `${p.name} loses access to Tempo right away. You can reactivate them any time.`
+      : `${p.name} gets back ${p.access_level === "full" ? "Full" : "Limited"} access.`;
 
     if (
       !(await confirm({
-        title: p.is_active ? "Deactivate account" : "Reactivate account",
+        title: p.is_active ? `Deactivate ${p.name}?` : `Reactivate ${p.name}?`,
         message: warning,
         confirmLabel: p.is_active ? "Deactivate" : "Reactivate",
         danger: p.is_active,
@@ -326,7 +326,7 @@ export default function Admin() {
 
     const { error } = await supabase.from("people").update({ is_active: !p.is_active }).eq("id", p.id);
     if (error) {
-      await alert(`Couldn't ${verb} ${p.name}: ${error.message}`);
+      await alert(friendlyError(`${verb} ${p.name}`, error));
       return;
     }
     loadPeople();
@@ -334,10 +334,10 @@ export default function Admin() {
 
   async function changeAccessLevel(p: Person, level: "limited" | "full") {
     if (p.id === me?.id && level === "limited") {
-      await alert(
-        "You can't demote your own account from here \u2014 it would immediately drop you to Limited access " +
-          "and lock you out of Admin. Ask another Full Access team member to do it, or change your own level last."
-      );
+      await alert({
+        title: "Can't demote yourself",
+        message: "Dropping to Limited access would lock you out of Admin. Ask another Full Access team member to do it.",
+      });
       loadPeople();
       return;
     }
@@ -345,8 +345,8 @@ export default function Admin() {
     const verb = level === "full" ? "Promote" : "Demote";
     if (
       !(await confirm({
-        title: `${verb} access`,
-        message: `${verb} ${p.name} to ${level === "full" ? "Full" : "Limited"} access?`,
+        title: `${verb} ${p.name}?`,
+        message: `${p.name} moves to ${level === "full" ? "Full" : "Limited"} access.`,
         confirmLabel: verb,
         danger: level === "limited",
       }))
@@ -357,7 +357,7 @@ export default function Admin() {
 
     const { error } = await supabase.from("people").update({ access_level: level }).eq("id", p.id);
     if (error) {
-      await alert(`Couldn't change access level for ${p.name}: ${error.message}`);
+      await alert(friendlyError(`change ${p.name}'s access level`, error));
     }
     loadPeople();
   }
@@ -378,7 +378,7 @@ export default function Admin() {
     setPeople((prev) => prev.map((x) => (x.id === p.id ? { ...x, [field]: value } : x)));
     const { error } = await supabase.from("people").update({ [field]: value }).eq("id", p.id);
     if (error) {
-      window.alert(`Couldn't save: ${error.message}`);
+      alert(friendlyError("save this setting", error));
       loadPeople();
     }
   }
@@ -388,7 +388,7 @@ export default function Admin() {
     setPeople((prev) => prev.map((x) => (x.id === p.id ? { ...x, tracks_time: value } : x)));
     const { error } = await supabase.from("people").update({ tracks_time: value }).eq("id", p.id);
     if (error) {
-      window.alert(`Couldn't save: ${error.message}`);
+      alert(friendlyError("save this setting", error));
       loadPeople();
     }
   }
@@ -401,7 +401,7 @@ export default function Admin() {
     setPeople((prev) => prev.map((x) => (x.id === p.id ? { ...x, color: value } : x)));
     const { error } = await supabase.from("people").update({ color: value }).eq("id", p.id);
     if (error) {
-      window.alert(`Couldn't save color: ${error.message}`);
+      alert(friendlyError("save the color", error));
       loadPeople();
     }
   }
@@ -440,7 +440,7 @@ export default function Admin() {
 
   async function saveEdit(p: Person) {
     if (p.id === editReportsTo) {
-      window.alert("Someone can't report to themselves.");
+      alert({ title: "Pick a different supervisor", message: "Someone can't report to themselves." });
       return;
     }
     setEditSaving(true);
@@ -457,7 +457,7 @@ export default function Admin() {
       if (error || (data as { error?: string })?.error) {
         const message = await extractFunctionError(error, data, "Failed to update email.");
         setEditSaving(false);
-        window.alert(`Couldn't update email: ${message}`);
+        alert(friendlyError("update the email", message));
         return;
       }
     }
@@ -474,7 +474,7 @@ export default function Admin() {
       .eq("id", p.id);
     setEditSaving(false);
     if (error) {
-      window.alert(`Couldn't save changes: ${error.message}`);
+      alert(friendlyError("save changes", error));
       return;
     }
     setDrawerMode("view");
@@ -490,16 +490,13 @@ export default function Admin() {
   // instead. This keeps the ownership/utilization history features intact.
   async function deletePerson(p: Person) {
     if (p.id === me?.id) {
-      await alert("You can't delete your own account. Ask another Full Access team member to do it.");
+      await alert({ title: "Can't delete yourself", message: "Ask another Full Access team member to delete your account." });
       return;
     }
     if (
       !(await confirm({
-        title: "Delete team member",
-        message:
-          `Permanently delete ${p.name}? This removes their login and record entirely and can't be undone. ` +
-          `Only do this for a mistaken entry (wrong CSV row, duplicate, test account) -- if they have any real ` +
-          `history in the system, this will be rejected and you should use Deactivate instead.`,
+        title: `Permanently delete ${p.name}?`,
+        message: `This removes their login for good and can't be undone. Use it only for mistakes (duplicate, test account); anyone with real history must be deactivated instead.`,
         confirmLabel: "Delete permanently",
         danger: true,
       }))
@@ -513,11 +510,11 @@ export default function Admin() {
     setDeletingId(null);
     if (error || (data as { error?: string })?.error) {
       const message = await extractFunctionError(error, data, "Failed to delete team member.");
-      await alert(`Couldn't delete ${p.name}: ${message}`);
+      await alert(friendlyError(`delete ${p.name}`, message));
       return;
     }
     if ((data as { warning?: string })?.warning) {
-      await alert((data as { warning: string }).warning);
+      await alert({ title: "Team member deleted", message: (data as { warning: string }).warning });
     }
     if (selectedPersonId === p.id) {
       setSelectedPersonId(null);
@@ -533,7 +530,7 @@ export default function Admin() {
       const text = await file.text();
       const { headers, rows } = parseCsvToObjects(text);
       if (headers.length === 0 || rows.length === 0) {
-        window.alert("That file looks empty. Use \"Download template\" for the expected format.");
+        alert({ title: "This file looks empty", message: "Use **Download template** to see the expected format." });
         setCsvBusy(false);
         return;
       }
@@ -649,7 +646,7 @@ export default function Admin() {
       setCsvResults(results);
       loadPeople();
     } catch (e) {
-      window.alert(`Couldn't read that file: ${e instanceof Error ? e.message : "unknown error"}`);
+      alert(friendlyError("read that file", e instanceof Error ? e.message : "unknown error"));
     }
     setCsvBusy(false);
   }
