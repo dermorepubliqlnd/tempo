@@ -23,6 +23,7 @@ import { timingWithPause, type TimingResult } from "../lib/pause";
 import { METRIC_DEFINITIONS, isActiveProject, isOverdueProject, isOverdueTask, isDueThisWeek } from "../lib/metrics";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import LogTimeModal from "../components/LogTimeModal";
+import { PROJECT_STAGES, PROJECT_STAGE_TONES, PROJECT_STAGE_HINTS, projectStageOf, normalizeStageFilter } from "../lib/projectStage";
 import NotesSidebar from "../components/NotesSidebar";
 import { useConfirm, type AlertOptions } from "../lib/useConfirm";
 import { useAutoApprovalsOn } from "../lib/autoApprovals";
@@ -209,6 +210,8 @@ interface ProjectPhaseOption {
 }
 
 export interface ProjectRow {
+  /** phase178: one lifecycle -- see lib/projectStage.ts */
+  stage?: string | null;
   id: string;
   name: string;
   owner_id: string | null;
@@ -373,14 +376,14 @@ const PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "pha
 // (WBS Status), delivery (Status/Health/Phase/Due/Progress), effort
 // (Scoped/Spent/Variance) and schedule slippage (Days Extended). Owner
 // column hidden in "I own" views (it's always you); Created dropped.
-const PROJECT_SYSTEM_LEAD = ["project_number", "name", "owner", "wbs_status", "status", "health", "phase", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
+const PROJECT_SYSTEM_LEAD = ["project_number", "name", "owner", "status", "health", "phase", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
 const PROJECT_SYSTEM_COLUMN_ORDER = [...PROJECT_SYSTEM_LEAD, ...PROJECT_COLUMN_ORDER.filter((k) => !PROJECT_SYSTEM_LEAD.includes(k))];
-const PROJECT_OWNER_VISIBLE = new Set(["project_number", "name", "wbs_status", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "committed_slip"]);
+const PROJECT_OWNER_VISIBLE = new Set(["project_number", "name", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "committed_slip"]);
 // 2026-10-04 (Sandra): portfolio lens = "what am I involved in and what do
 // I owe on each" -- grouped by My Role, soonest Due first, with the
 // viewer's own open tasks / next due / hours instead of owner metrics.
-const PROJECT_ACTIVE_PORTFOLIO_VISIBLE = new Set(["project_number", "name", "owner", "wbs_status", "health", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours"]);
-const PROJECT_FULL_PORTFOLIO_VISIBLE = new Set([...PROJECT_ACTIVE_PORTFOLIO_VISIBLE, "status"]);
+const PROJECT_ACTIVE_PORTFOLIO_VISIBLE = new Set(["project_number", "name", "owner", "status", "health", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours"]);
+const PROJECT_FULL_PORTFOLIO_VISIBLE = new Set([...PROJECT_ACTIVE_PORTFOLIO_VISIBLE]);
 const PROJECT_ORG_VISIBLE = new Set([...PROJECT_OWNER_VISIBLE, "owner", "category", "planning_type", "project_type"]);
 
 // phase157c (2026-10-06, Sandra): no hidden scopes. A view's row set comes
@@ -391,7 +394,7 @@ function scopeToProjectFilters(scope: ProjectScope): Partial<TableView> {
   const active = scope === "my_active_owned" || scope === "my_active_portfolio" || scope === "org_active";
   const role: TableView["filterMyRole"] =
     scope === "my_active_owned" || scope === "my_owned_all" ? ["owner"] : scope === "my_active_portfolio" || scope === "my_full_portfolio" ? ["owner", "contributor"] : [];
-  return { filterStatuses: active ? ["In Progress"] : [], filterMyRole: role, filterPersonIds: [] };
+  return { filterStatuses: active ? ["Active", "Closing"] : [], filterMyRole: role, filterPersonIds: [] };
 }
 const TASK_OPEN_STATUSES = ["Not Started", "In Progress"];
 function scopeToTaskFilters(scope: TaskScope): Partial<TableView> {
@@ -421,7 +424,10 @@ function andList(existing: string[] | undefined, fromScope: string[] | undefined
   const both = e.filter((x) => f.includes(x));
   return both.length ? both : f;
 }
-function migrateProjectScope(v: TableView): TableView {
+function migrateProjectScope(v0: TableView): TableView {
+  // phase178: the Projects "Status" filter is now the Stage filter.
+  const st = normalizeStageFilter(v0.filterStatuses);
+  const v = JSON.stringify(st) === JSON.stringify(v0.filterStatuses ?? []) ? v0 : { ...v0, filterStatuses: st };
   if (!v.projectScope) return v;
   const f = scopeToProjectFilters(v.projectScope);
   return {
@@ -953,10 +959,11 @@ function statusTone(group: "to_do" | "in_progress" | "complete" | "cancelled" | 
 // for a Kanban-style board (it's literally "where in production is this"),
 // but Status stays available too since it's still a real, board-groupable
 // field.
-const PROJECT_BOARD_STATUS_COLUMNS: BoardColumnDef[] = PROJECT_STATUS_OPTIONS.map((value) => ({
+// phase178: the "status" grouping shows Stage (one lifecycle).
+const PROJECT_BOARD_STATUS_COLUMNS: BoardColumnDef[] = PROJECT_STAGES.map((value) => ({
   value,
   label: value,
-  tone: PROJECT_STATUS_TONES[value] ?? "neutral",
+  tone: PROJECT_STAGE_TONES[value] ?? "neutral",
 }));
 
 const TASK_BOARD_COLUMNS: BoardColumnDef[] = TASK_STATUS_GROUPED.flatMap((group) =>
@@ -1865,6 +1872,31 @@ export default function Projects() {
   // Should we show the "Mark as Done?" suggestion chip for this project?
   // Deliberately a suggestion, not an auto-set of status -- see the
   // dismissal-helper comment above for why.
+  // phase178: what a person can do to a project's Stage from the list.
+  // Start / Close go through the WBS page (checklist + approval).
+  function stageActionsFor(p: ProjectRow): string[] {
+    const stage = projectStageOf(p);
+    if (stage === "Active" || stage === "Closing") return ["Pause", "Cancel project"];
+    if (stage === "Paused") return ["Resume", "Cancel project"];
+    return [];
+  }
+  function runStageAction(p: ProjectRow, action: string) {
+    if (action === "Pause") changeProjectStatus(p, "Paused");
+    else if (action === "Resume") changeProjectStatus(p, "In Progress");
+    else if (action === "Cancel project") changeProjectStatus(p, "Cancelled");
+  }
+  function stageBadgesFor(p: ProjectRow): { label: string; tone: string; hint: string }[] {
+    const stage = projectStageOf(p);
+    const out: { label: string; tone: string; hint: string }[] = [];
+    if (stage !== "Active") return out;
+    if (p.is_operational) out.push({ label: "Ongoing", tone: "slate", hint: "Training Delivery or Ongoing container -- not judged on dates." });
+    const leaf = tasks.filter((t) => t.project_id === p.id && !t.is_archived && !hasChildren(t.id));
+    if (!p.is_operational && leaf.length > 0 && leaf.every((t) => t.status === "Done" || t.status === "Cancelled")) {
+      out.push({ label: "Ready to close", tone: "gold", hint: "Every task is Done or Cancelled -- send the Close Project request from the WBS page." });
+    }
+    return out;
+  }
+
   function shouldSuggestDone(p: ProjectRow): boolean {
     if (projectStatusOf(p) === "Completed" || projectStatusOf(p) === "Cancelled") return false;
     if (dismissedDoneSuggestions.has(p.id)) return false;
@@ -2516,7 +2548,7 @@ export default function Projects() {
       }
     }
     const skippedDraft = projects.some((p) => ids.includes(p.id) && p.wbs_status === "draft");
-    const targets = projects.filter((p) => ids.includes(p.id) && p.wbs_status !== "draft");
+    const targets = projects.filter((p) => ids.includes(p.id) && p.wbs_status !== "draft" && p.wbs_status !== "closed" && p.status !== "Cancelled"); // phase178: Closed/Cancelled are final
     if (targets.length === 0) {
       if (skippedDraft) alert({ title: "Nothing was changed", message: "Draft projects stay Not Started until you use Start Project on their WBS page." });
       return;
@@ -2911,8 +2943,8 @@ export default function Projects() {
       out = out.filter((p) => (roles.includes("owner") && isMine(p)) || (roles.includes("contributor") && isContribution(p)));
     }
     if (legacy.filterStatuses && legacy.filterStatuses.length > 0) {
-      const st = legacy.filterStatuses;
-      out = out.filter((p) => st.includes(projectStatusOf(p) ?? ""));
+      const st = normalizeStageFilter(legacy.filterStatuses);
+      out = out.filter((p) => st.includes(projectStageOf(p)));
     }
     // 2026-10-04: person/status filters apply on top of any scope, so a
     // personal copy of a system view honours the filters its pills show.
@@ -2922,8 +2954,8 @@ export default function Projects() {
         out = out.filter((p) => personIds.some((id) => (id === "me" ? p.owner_id === me?.id : p.owner_id === id)));
       }
       if (view.filterStatuses && view.filterStatuses.length > 0) {
-        const statuses = view.filterStatuses;
-        out = out.filter((p) => statuses.includes(projectStatusOf(p) ?? ""));
+        const statuses = normalizeStageFilter(view.filterStatuses);
+        out = out.filter((p) => statuses.includes(projectStageOf(p)));
       }
     }
 
@@ -3219,57 +3251,39 @@ export default function Projects() {
         ),
       },
       {
+        // phase178 (Sandra item G): ONE lifecycle. This column (key kept as
+        // "status" so saved views keep it) shows the project's Stage. Stage
+        // isn't typed in: Start Project, Close Project, Pause/Resume and
+        // Cancel move it. Completed is set by Close Project approval only.
         key: "status",
-        label: "Status",
-        defaultWidth: 140,
-        maxWidth: 200,
-        render: (p) => (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-            <InlineSelect
-              value={projectStatusOf(p) ?? ""}
-              editable={canEditStatus(p)}
-              allowEmpty
-              options={PROJECT_STATUS_OPTIONS}
-              renderReadOnly={() => {
-                const status = projectStatusOf(p);
-                return status ? <span className={`status-pill ${PROJECT_STATUS_TONES[status] ?? "neutral"}`}>{status}</span> : "—";
-              }}
-              onCommit={(v) => changeProjectStatus(p, v || null)}
-            />
-            {shouldSuggestDone(p) && canEditProject(p) && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    changeProjectStatus(p, "Completed");
-                  }}
-                  title="Mark as Done"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    color: "var(--success-text)",
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: 0,
-                  }}
-                >
-                  <CheckCircle2 size={14} />
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    dismissDoneSuggestion(p.id);
-                  }}
-                  title="Dismiss"
-                  style={{ display: "flex", alignItems: "center", color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: 0 }}
-                >
-                  <X size={11} />
-                </button>
-              </span>
-            )}
-          </div>
-        ),
+        label: "Stage",
+        defaultWidth: 150,
+        maxWidth: 220,
+        render: (p) => {
+          const stage = projectStageOf(p);
+          const actions = stageActionsFor(p);
+          const badges = stageBadgesFor(p);
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+              <InlineSelect
+                value=""
+                editable={actions.length > 0 && canEditStatus(p)}
+                options={actions}
+                renderReadOnly={() => (
+                  <span className={`status-pill ${PROJECT_STAGE_TONES[stage] ?? "neutral"}`} title={PROJECT_STAGE_HINTS[stage]}>
+                    {stage}
+                  </span>
+                )}
+                onCommit={(v) => runStageAction(p, v)}
+              />
+              {badges.map((b) => (
+                <span key={b.label} className={`status-pill ${b.tone}`} style={{ fontSize: 10, flexShrink: 0 }} title={b.hint}>
+                  {b.label}
+                </span>
+              ))}
+            </div>
+          );
+        },
       },
       {
         // New 2026-07-23: Phase used to be baked into the same field as
@@ -3616,11 +3630,7 @@ export default function Projects() {
                 {meta?.label ?? p.wbs_status}
               </span>
               {/* phase114: Completed but not closed yet -> nudge to close. */}
-              {p.status === "Completed" && p.wbs_status !== "closed" && p.wbs_status !== "draft" && (
-                <span className="status-pill gold" style={{ fontSize: 10 }} title="Project is Completed -- review the WBS and request closure">
-                  Ready to close
-                </span>
-              )}
+
               {/* Sandra, 2026-07-29: removed the separate "WBS" button --
                   the Project name cell (Round 21) already navigates to
                   /projects/:id/wbs, so this was a duplicate affordance. */}
@@ -3823,16 +3833,16 @@ export default function Projects() {
   const projectGroupOptions: GroupOption<ProjectRow>[] = [
     {
       key: "status",
-      label: "Status",
-      getGroup: (p) => projectStatusOf(p) ?? "No status",
-      getTone: (p) => PROJECT_STATUS_TONES[projectStatusOf(p) ?? ""] ?? "neutral",
+      label: "Stage",
+      getGroup: (p) => projectStageOf(p),
+      getTone: (p) => PROJECT_STAGE_TONES[projectStageOf(p)] ?? "neutral",
       // Phase 23 follow-up (2026-08-25, Sandra: "that's ok to fix too to
       // avoid confusion"): same treatment as taskGroupOptions above --
       // every groupable field gets its own canonical section order
       // instead of incidental row-encounter order. Deliberately-ordered
       // scales (Status/Priority/Complexity/Phase/WBS Status) keep their
       // workflow/severity order rather than being alphabetized.
-      allGroups: () => [...PROJECT_STATUS_OPTIONS, "No status"],
+      allGroups: () => [...PROJECT_STAGES],
     },
     {
       key: "phase",
@@ -3948,9 +3958,9 @@ export default function Projects() {
     },
     {
       key: "status",
-      label: "Status",
-      getGroup: (p) => projectStatusOf(p) ?? "No status",
-      getTone: (p) => PROJECT_STATUS_TONES[projectStatusOf(p) ?? ""] ?? "neutral",
+      label: "Stage",
+      getGroup: (p) => projectStageOf(p),
+      getTone: (p) => PROJECT_STAGE_TONES[projectStageOf(p)] ?? "neutral",
       boardGroupable: true,
     },
     {
@@ -4067,7 +4077,7 @@ export default function Projects() {
     if (groupBy === "effort_level") return p.effort_level;
     if (groupBy === "owner") return p.owner_id;
     if (groupBy === "wbs_status") return p.wbs_status;
-    if (groupBy === "status") return projectStatusOf(p);
+    if (groupBy === "status") return projectStageOf(p);
     if (groupBy === "health") return healthBucket(healthOf(p, tasks, holidayDates).label);
     return p.phase;
   }
@@ -4113,7 +4123,7 @@ export default function Projects() {
     // Dragging a card between Status columns goes through changeProjectStatus
     // so Phase cascades correctly (see its own doc comment); dragging
     // between Phase columns writes phase directly and never touches Status.
-    if (groupBy === "status") return (p, v) => changeProjectStatus(p, v || null);
+    if (groupBy === "status") return undefined; // phase178: Stage changes through Start/Pause/Resume/Cancel/Close, not drag-drop
     return (p, v) => {
       // 2026-09-08: Phase is now editable while Draft (restricted to
       // "Not Started"-mapped phases), same rule as the Phase column's own
@@ -4146,7 +4156,7 @@ export default function Projects() {
     },
     { key: "owner", label: "Owner", getValue: (p) => ownerName(p.owner_id) },
     { key: "priority", label: "Priority", getValue: (p) => PROJECT_PRIORITY_OPTIONS.indexOf(p.priority ?? "") },
-    { key: "status", label: "Status", getValue: (p) => PROJECT_STATUS_OPTIONS.indexOf(projectStatusOf(p) ?? "") },
+    { key: "status", label: "Stage", getValue: (p) => (PROJECT_STAGES as readonly string[]).indexOf(projectStageOf(p)) },
     { key: "phase", label: "Phase", getValue: (p) => activePhaseNames.indexOf(p.phase ?? "") },
     { key: "category", label: "Category", getValue: (p) => p.category ?? "" },
     { key: "source", label: "Source", getValue: (p) => projectSources.find((s) => s.id === p.source_id)?.name ?? "" },
@@ -6255,7 +6265,8 @@ export default function Projects() {
               people={people}
               filterPersonIds={resolveFilterPersonIds(projectViews.activeView)}
               onFilterPersonIdsChange={(filterPersonIds) => updateProjectView({ filterPersonIds })}
-              statusOptions={PROJECT_STATUS_OPTIONS}
+              statusOptions={[...PROJECT_STAGES]}
+              statusFilterLabel="Stage"
               filterStatuses={projectViews.activeView.filterStatuses ?? []}
               onFilterStatusesChange={(filterStatuses) => updateProjectView({ filterStatuses })}
               personFilterLabel="Owner"
@@ -6321,6 +6332,7 @@ export default function Projects() {
           people={people}
           filterPersonIds={resolveFilterPersonIds(projectViews.activeView)}
           filterStatuses={projectViews.activeView.filterStatuses ?? []}
+          statusFilterLabel="Stage"
           extraFilterParts={(projectViews.activeView.filterMyRole ?? []).length ? [`My role: ${(projectViews.activeView.filterMyRole ?? []).map((r) => (r === "owner" ? "Owner" : "Contributor")).join(", ")}`] : []}
           onClearFilter={() => updateProjectView({ filterPersonIds: [], filterStatuses: [], filterMyRole: [] })}
           containerRef={setProjectPillsRowEl}
@@ -6363,12 +6375,12 @@ export default function Projects() {
                 }}
               />
               <FieldPickerButton
-                label="Status"
-                options={PROJECT_STATUS_OPTIONS}
+                label="Stage"
+                options={["Pause", "Resume", "Cancel project"]}
                 // 2026-09-08: now cascades Phase per-row via
                 // bulkChangeProjectStatus/nextPhaseForStatusLive instead of
                 // sending one flat patch -- see that function's doc comment.
-                onPick={(v) => bulkChangeProjectStatus(v || null)}
+                onPick={(v) => bulkChangeProjectStatus(v === "Pause" ? "Paused" : v === "Resume" ? "In Progress" : v === "Cancel project" ? "Cancelled" : null)}
               />
               <FieldPickerButton
                 label="Phase"

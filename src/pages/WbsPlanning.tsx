@@ -1,3 +1,4 @@
+import { projectStageOf } from "../lib/projectStage";
 import { useAssigneePicker } from "../components/AssigneePicker";
 import Modal from "../components/Modal";
 import { useProjectStartDatePrompt } from "../components/ProjectStartDatePrompt";
@@ -45,6 +46,7 @@ import AddSessionModal from "../components/AddSessionModal";
 import BulkUploadSessionsModal from "../components/BulkUploadSessionsModal";
 
 interface ProjectRow {
+  stage?: string | null; // phase178
   id: string;
   name: string;
   owner_id: string | null;
@@ -1113,7 +1115,7 @@ export default function WbsPlanning() {
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
     const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }, { data: planningTypes }, { data: ptypes }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,scoping_effort_mode,wbs_status,category,source_id,planning_type_id,project_type_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required,is_operational,is_ongoing_container").eq("id", projectId).single(),
+      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,stage,scoping_effort_mode,wbs_status,category,source_id,planning_type_id,project_type_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required,is_operational,is_ongoing_container").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -2568,7 +2570,6 @@ export default function WbsPlanning() {
     // letting a project close with silently-blank properties.
     const missingProjectFields: string[] = [];
     if (!project.status) missingProjectFields.push("Status");
-    if (!project.phase) missingProjectFields.push("Phase");
     if (!project.category) missingProjectFields.push("Category");
     if (!project.priority) missingProjectFields.push("Priority");
     if (!project.source_id) missingProjectFields.push("Source");
@@ -2671,7 +2672,6 @@ export default function WbsPlanning() {
       // itself slipped through before this gate existed.
       const missingProjectFields: string[] = [];
       if (!project.status) missingProjectFields.push("Status");
-      if (!project.phase) missingProjectFields.push("Phase");
       if (!project.category) missingProjectFields.push("Category");
       if (!project.priority) missingProjectFields.push("Priority");
       if (!project.source_id) missingProjectFields.push("Source");
@@ -3838,7 +3838,7 @@ export default function WbsPlanning() {
       : wasBaselineLocked
       ? {
           title: `Save timelines using ${verb}?`,
-          message: "Every task's End date is saved, and the project is marked Changed After Baseline because it was edited after it started.",
+          message: "Every task's End date is saved. The change is recorded in the project's Audit Trail because it was edited after it started.",
           confirmLabel: "Save timelines",
         }
       : {
@@ -4110,13 +4110,20 @@ export default function WbsPlanning() {
   // Computed once here (rather than re-called with the same args at every
   // banner/JSX read site below) -- see wbsStatusMetaFor's own doc comment
   // for the Awaiting Approval / Declined overlay rules this drives.
+  // phase178: "Plan changed" is back-end only (Sandra 10-08) -- display it like a locked baseline.
   const wbsMeta = wbsStatusMetaFor(
-    project.wbs_status,
+    project.wbs_status === "changed_after_baseline" ? "baseline_locked" : project.wbs_status,
     !!pendingBaselineRequest,
     !pendingBaselineRequest && !!declinedBaselineRequest,
     declinedBaselineRequest?.decline_reason,
     !!project.is_operational
   );
+  // phase178: one lifecycle -- the page shows the project's Stage.
+  const stageLabel: string = pendingBaselineRequest && project.wbs_status === "draft"
+    ? "Awaiting Start"
+    : project.wbs_status === "draft"
+      ? (declinedBaselineRequest ? "Draft · Start declined" : "Draft")
+      : projectStageOf(project);
   const isOperationalStarted = !!project.is_operational && project.wbs_status !== "draft" && project.wbs_status !== "closed";
   // phase161: session behaviour (Add Session, bulk upload, reschedule without
   // approval) is a Project Type feature (Training Delivery). An "Ongoing
@@ -5607,7 +5614,7 @@ export default function WbsPlanning() {
               border: `1px solid ${wbsMeta.border}`,
             }}>
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: wbsMeta.color }} />
-              {wbsMeta.label}
+              {stageLabel}
             </span>
           </div>
           <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
@@ -7877,7 +7884,7 @@ export default function WbsPlanning() {
           borderColor: wbsMeta.border,
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 700, color: wbsMeta.color }}>{wbsMeta.label}</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: wbsMeta.color }}>{stageLabel}</span>
         <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
           {project.wbs_status === "draft" && !pendingBaselineRequest && !declinedBaselineRequest && "Start Project once scoping is final to start tracking against it."}
           {project.wbs_status === "draft" && !!pendingBaselineRequest && "Waiting on an approver to lock this in as the Baseline."}

@@ -92,6 +92,9 @@ export function wbsStatusMetaFor(
   if (isOperational && (status === "baseline_locked" || status === "changed_after_baseline" || status === "revision_in_progress")) {
     return OPERATIONAL_WBS_META;
   }
+  // phase178 (Sandra 10-08): "plan changed" is back-end only (wbs_status +
+  // Audit Trail) -- never shown as a status. Display it as a started project.
+  if (status === "changed_after_baseline") status = "baseline_locked";
   if (status === "draft" && hasPendingBaselineRequest) {
     return {
       label: "Awaiting Start",

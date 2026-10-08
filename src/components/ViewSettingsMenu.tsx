@@ -67,6 +67,8 @@ interface ViewControlsProps<T> {
   statusOptions: string[];
   filterStatuses: string[];
   onFilterStatusesChange: (statuses: string[]) => void;
+  /** phase178: "Stage" on Projects. */
+  statusFilterLabel?: string;
   // phase157c: label for the person section ("Assigned to" / "Owner") and
   // extra checkbox filter sections (My role, Project owner, Attention).
   personFilterLabel?: string;
@@ -277,6 +279,7 @@ export default function ViewSettingsMenu<T>({
   statusOptions,
   filterStatuses,
   onFilterStatusesChange,
+  statusFilterLabel = "Status",
   personFilterLabel = "Assigned to",
   extraFilters = [],
   propertyLockInfo,
@@ -372,7 +375,7 @@ export default function ViewSettingsMenu<T>({
               ))}
             </div>
             <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3, color: "var(--muted)", marginBottom: 4 }}>
-              Status
+              {statusFilterLabel}
             </div>
             <div style={{ maxHeight: 160, overflowY: "auto" }}>
               {statusOptions.map((s) => (
@@ -863,6 +866,7 @@ export function ViewFilterPills<T>({
   people,
   filterPersonIds,
   filterStatuses,
+  statusFilterLabel = "Status",
   extraFilterParts = [],
   onClearFilter,
   containerRef,
@@ -881,6 +885,7 @@ export function ViewFilterPills<T>({
   people: { id: string; name: string }[];
   filterPersonIds: string[];
   filterStatuses: string[];
+  statusFilterLabel?: string;
   extraFilterParts?: string[];
   onClearFilter: () => void;
   // Sandra ("what i meant was the collapse and expand in the projects and
@@ -906,7 +911,7 @@ export function ViewFilterPills<T>({
     const names = filterPersonIds.map((id) => (id === "me" ? "Me" : people.find((p) => p.id === id)?.name ?? "Unknown"));
     filterParts.push(names.join(", "));
   }
-  if (filterStatuses.length > 0) filterParts.push(`Status: ${filterStatuses.join(", ")}`);
+  if (filterStatuses.length > 0) filterParts.push(`${statusFilterLabel}: ${filterStatuses.join(", ")}`);
   filterParts.push(...extraFilterParts);
 
   return (
