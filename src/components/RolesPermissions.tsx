@@ -1,7 +1,7 @@
 // 2026-10-08 (Sandra): Site Settings > Roles & Permissions. Create roles and
 // tick what each one can do; people get ONE role in User Management.
 // Saving a role updates everyone who has it (phase174 trigger).
-import { Fragment, useEffect, useState, type CSSProperties } from "react";
+import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useConfirm } from "../lib/useConfirm";
@@ -115,33 +115,30 @@ export default function RolesPermissions({ meRoleId }: { meRoleId: string | null
         <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
           <thead>
             <tr>
-              <th style={{ textAlign: "left", padding: "6px 8px", minWidth: 220 }}></th>
+              <th style={{ textAlign: "left", padding: "6px 8px", minWidth: 200 }}></th>
               {roles.map((r) => (
-                <th key={r.id} style={{ padding: "6px 8px", minWidth: 130, verticalAlign: "bottom" }}>
-                  <input
-                    defaultValue={r.name}
-                    onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== r.name) save(r, { name: v }); }}
-                    style={{ ...input, fontWeight: 700, width: 120, textAlign: "center" }}
-                    title="Rename"
-                  />
-                  <div style={{ fontSize: 10.5, color: "var(--muted)", fontWeight: 400, marginTop: 3 }}>
-                    {counts[r.id] ?? 0} {(counts[r.id] ?? 0) === 1 ? "person" : "people"}
-                    <button onClick={() => removeRole(r)} title="Delete role" style={{ marginLeft: 6, background: "none", border: "none", cursor: "pointer", color: "var(--muted)", verticalAlign: "middle" }}><Trash2 size={11} /></button>
+                <th key={r.id} style={{ padding: "6px 6px 10px", minWidth: 190, width: `${Math.floor(70 / Math.max(roles.length, 1))}%`, verticalAlign: "top", fontWeight: 400 }}>
+                  {/* 2026-10-09 (Sandra): role header as a small card -- name, people, description. */}
+                  <div className="role-card" style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface, #fff)", padding: "10px 12px", textAlign: "left", height: "100%" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <input
+                        className="role-inline-edit"
+                        defaultValue={r.name}
+                        onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== r.name) save(r, { name: v }); }}
+                        title="Click to rename"
+                        style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--navy)", fontFamily: "inherit" }}
+                      />
+                      <button onClick={() => removeRole(r)} title="Delete role" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", display: "flex", padding: 2 }}><Trash2 size={13} /></button>
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", margin: "2px 0 8px 6px" }}>
+                      {counts[r.id] ?? 0} {(counts[r.id] ?? 0) === 1 ? "person" : "people"}
+                    </div>
+                    <AutoGrowNote
+                      value={r.description ?? ""}
+                      onSave={(v) => { if (v !== (r.description ?? "")) save(r, { description: v || null }); }}
+                    />
                   </div>
                 </th>
-              ))}
-            </tr>
-            <tr>
-              <td style={{ padding: "4px 8px", fontSize: 11, color: "var(--muted)" }}>What this role is for</td>
-              {roles.map((r) => (
-                <td key={r.id} style={{ padding: "4px 8px" }}>
-                  <textarea
-                    defaultValue={r.description ?? ""}
-                    onBlur={(e) => { const v = e.target.value.trim(); if (v !== (r.description ?? "")) save(r, { description: v || null }); }}
-                    rows={3}
-                    style={{ ...input, width: 130, fontSize: 11, resize: "vertical" }}
-                  />
-                </td>
               ))}
             </tr>
           </thead>
@@ -178,5 +175,29 @@ export default function RolesPermissions({ meRoleId }: { meRoleId: string | null
       </div>
       {dialog}
     </div>
+  );
+}
+
+// Description field that looks like text until you click it, and grows with its content.
+function AutoGrowNote({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  const fit = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + 2}px`;
+  };
+  useEffect(fit, [value]);
+  return (
+    <textarea
+      ref={ref}
+      className="role-inline-edit"
+      defaultValue={value}
+      placeholder="What is this role for?"
+      rows={2}
+      onInput={fit}
+      onBlur={(e) => onSave(e.target.value.trim())}
+      style={{ width: "100%", boxSizing: "border-box", fontFamily: "inherit", fontSize: 12, lineHeight: 1.45, color: "var(--text-secondary)", resize: "none", overflow: "hidden" }}
+    />
   );
 }

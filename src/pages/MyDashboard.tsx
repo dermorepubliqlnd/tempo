@@ -227,6 +227,19 @@ export default function MyDashboard() {
 
   const [people, setPeople] = useState<PersonLite[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
+  // 2026-10-09 (Sandra): remind owners to set Phase on Active projects.
+  const [phaseNames, setPhaseNames] = useState<string[]>([]);
+  useEffect(() => {
+    void Promise.all([
+      supabase.from("project_phases").select("id,name,is_active,sort_order").eq("is_active", true).order("sort_order"),
+      supabase.from("project_status_phase_mapping").select("phase_id,status"),
+    ]).then(([ph, map]) => {
+      const rows = (ph.data ?? []) as { id: string; name: string }[];
+      const ip = new Set(((map.data ?? []) as { phase_id: string; status: string }[]).filter((m) => m.status === "In Progress").map((m) => m.phase_id));
+      const names = rows.filter((r) => r.name !== "Done" && (ip.size === 0 || ip.has(r.id))).map((r) => r.name);
+      setPhaseNames(names.length ? names : rows.filter((r) => r.name !== "Done").map((r) => r.name));
+    });
+  }, []);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [holidays, setHolidays] = useState<HolidayRow[]>([]);
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
@@ -258,7 +271,7 @@ export default function MyDashboard() {
   const [hiddenToday, setHiddenToday] = useState<{ task_id: string; hidden_date: string }[]>([]);
   // 2026-09-23 (Sandra: lightbox for Tasks due today / Overdue tasks --
   // see AttentionPill below) -- which list is open, or null when closed.
-  const [attentionModal, setAttentionModal] = useState<"due_today" | "overdue" | "ready_to_close" | "completed_open" | "work_done" | "draft_planning" | "new_assignments" | "planned" | null>(null);
+  const [attentionModal, setAttentionModal] = useState<"no_phase" | "due_today" | "overdue" | "ready_to_close" | "completed_open" | "work_done" | "draft_planning" | "new_assignments" | "planned" | null>(null);
   // 2026-09-23 (My Work Today "Logged" column, Sandra: "show logged
   // hours against the tasks") -- same confirmed/approved, not-archived
   // definition Projects.tsx's own Spent Hrs column uses, just scoped to
@@ -904,6 +917,14 @@ export default function MyDashboard() {
     .filter((x) => x.tasks.length > 0);
   const newAssignmentCount = newAssignmentProjects.reduce((n, x) => n + x.tasks.length, 0);
   const scheduleReviewProjects = projects.filter((p) => p.owner_id === me?.id && (p as { schedule_review_required?: boolean }).schedule_review_required);
+  const noPhaseProjects = projects.filter(
+    (p) => p.owner_id === me?.id && !(p as { phase?: string | null }).phase && (projectStageOf(p) === "Active" || projectStageOf(p) === "Closing")
+  );
+  async function setProjectPhase(id: string, phase: string) {
+    const { error } = await supabase.from("projects").update({ phase }).eq("id", id);
+    if (error) { await alert(friendlyError("set the Phase", error)); return; }
+    setProjects((prev) => prev.map((p) => (p.id === id ? ({ ...p, phase } as ProjectRow) : p)));
+  }
   const readyToCloseProjects = myCompletedProjects
     .filter((p) => !completedOpenProjects.some((x) => x.p.id === p.id))
     .map((p) => ({
@@ -1027,7 +1048,7 @@ export default function MyDashboard() {
           dashboard -- same numbers as Approval Center > Mine to approve. */}
       {hasApprovalAuthority && <ApprovalCenter summaryOnly />}
 
-      {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || draftPlanningProjects.length > 0 || newAssignmentCount > 0 || plannedInvolvement.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
+      {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || draftPlanningProjects.length > 0 || newAssignmentCount > 0 || plannedInvolvement.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || noPhaseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
           {/* 2026-09-23 (Sandra: "Pending approvals, remove and use the
@@ -1101,6 +1122,9 @@ export default function MyDashboard() {
               onClick={() => setAttentionModal("work_done")}
             />
           )}
+          {noPhaseProjects.length > 0 && (
+            <AttentionPill tone="warning" icon={<AlertTriangle size={12} />} value={noPhaseProjects.length} label={noPhaseProjects.length === 1 ? "Active project needs a Phase" : "Active projects need a Phase"} onClick={() => setAttentionModal("no_phase")} />
+          )}
           {readyToCloseProjects.length > 0 && (
             <AttentionPill tone="success" icon={<CheckCircle2 size={12} />} value={readyToCloseProjects.length} label={readyToCloseProjects.length === 1 ? "Project ready to close" : "Projects ready to close"} onClick={() => setAttentionModal("ready_to_close")} />
           )}
@@ -1149,6 +1173,27 @@ export default function MyDashboard() {
               <Link to={`/projects/${x.p.id}/wbs`} style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
                 Review WBS →
               </Link>
+            </div>
+          ))}
+        </Modal>
+      )}
+
+      {attentionModal === "no_phase" && (
+        <Modal title="Set the Phase" onClose={() => setAttentionModal(null)} width={600}>
+          <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 0 }}>
+            Phase shows where an Active project is in production. It feeds the Phase board and the Team Dashboard. Pick one for each project below.
+          </p>
+          {noPhaseProjects.length === 0 && <p style={{ fontSize: 12, color: "var(--success-text)" }}>All set.</p>}
+          {noPhaseProjects.map((p) => (
+            <div key={p.id} style={{ display: "grid", gridTemplateColumns: "60px minmax(0, 1fr) 170px", alignItems: "center", columnGap: 12, padding: "9px 4px", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+              <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+                {p.project_number ? `P-${String(p.project_number).padStart(4, "0")}` : "—"}
+              </span>
+              <span style={{ fontWeight: 600, color: "var(--navy)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>{p.name}</span>
+              <select defaultValue="" onChange={(e) => e.target.value && void setProjectPhase(p.id, e.target.value)} style={{ fontSize: 12, padding: "5px 6px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }}>
+                <option value="" disabled>Choose a Phase…</option>
+                {phaseNames.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
             </div>
           ))}
         </Modal>

@@ -935,7 +935,9 @@ export default function TeamDashboard() {
         return { p, last, late, age: last ? workingDaysSince(last) : 0 };
       })
       .sort((a, b) => b.age - a.age);
-    return { overdueProjects, atRisk, pausedReview, approvals, validations, readyToClose, planningGaps, workDone };
+    // 2026-10-09 (Sandra): Active projects (not ongoing) with no Phase set.
+    const noPhase = open.filter((p) => !p.is_operational && (projectStageOf(p) === "Active" || projectStageOf(p) === "Closing") && !p.phase);
+    return { overdueProjects, atRisk, pausedReview, approvals, validations, readyToClose, planningGaps, workDone, noPhase };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopedProjects, scopedProjectIds, tasks, leafTasks, holidayDates, holidaySet, todayIso, pendingTime, pendingExt, pendingBaseline, pendingClosure, popIds, popIsAll, people]);
 
@@ -986,6 +988,9 @@ export default function TeamDashboard() {
       { key: "gaps", tier: 4, tone: "amber", icon: <FileWarning size={16} />, label: "Planning gaps", context: "Started projects", value: a.planningGaps.length, sub: "No assignee or hours",
         definition: "Open tasks in started projects with no Assignee or no Estimated Hours -- invisible to Utilization. Draft projects are not counted.", columns: ["Task", "Project", "Assignee", "Missing"], to: "/projects", toLabel: "Projects & Tasks",
         rows: a.planningGaps.map((t) => taskRow(t, [[!t.assignee_id && "Assignee", !t.estimated_hours && "Estimated Hours"].filter(Boolean).join(", ")])) },
+      { key: "nophase", tier: 4, tone: "amber", icon: <FileWarning size={16} />, label: "Phase not set", context: "Active projects", value: a.noPhase.length, sub: "Owner to pick a Phase",
+        definition: "Active projects (not Training Delivery / ongoing) with no Phase. Phase shows where the project is in production (Scoping to Delivery) and feeds the Phase donut. Owners get the same reminder on My Dashboard.", columns: ["Project", "Owner"], to: "/projects", toLabel: "Projects & Tasks",
+        rows: a.noPhase.map((p) => projRow(p, [])) },
     ];
   }
 
@@ -1054,7 +1059,7 @@ export default function TeamDashboard() {
             <div className="exec-grid exec-grid-3">
               <Kpi to="/projects?tab=projects" tone="blue" icon={<Folder size={18} />} label="Total Projects" value={t} sub={`Completed + open in period${opInTotal ? ` · incl. ${opInTotal} ${opLabel}` : ""}`} title={METRIC_DEFINITIONS.totalProjectsInPeriod} />
               <Kpi to="/projects?tab=projects" tone="green" icon={<CheckCircle2 size={18} />} label="Completed" share={pctOf(portfolio.completed.length, t)} value={portfolio.completed.length} sub={`${pctOf(portfolio.completed.length, t)}% of total`} trend={trend(completedIn)} title="Projects whose Actual Close Date (or completion stamp) falls in the period." />
-              <Kpi to="/projects?tab=projects" tone="indigo" icon={<Activity size={18} />} label="Active" share={pctOf(portfolio.active.length, t)} value={portfolio.active.length} sub={`${pctOf(portfolio.active.length, t)}% of total${portfolio.operationalActive.length ? ` · incl. ${portfolio.operationalActive.length} ${opLabel}` : ""}`} title={METRIC_DEFINITIONS.activeProject} />
+              <Kpi to="/projects?tab=projects" tone="indigo" icon={<Activity size={18} />} label="Active" share={pctOf(portfolio.active.length, t)} value={portfolio.active.length} sub={`${pctOf(portfolio.active.length, t)}% of total${portfolio.operationalActive.length ? ` · incl. ${portfolio.operationalActive.length} ${opLabel}` : ""}${(() => { const n = portfolio.active.filter((p) => projectStageOf(p) === "Closing").length; return n ? ` · incl. ${n} Closing` : ""; })()}`} title={METRIC_DEFINITIONS.activeProject} />
               <Kpi to="/projects?tab=projects" tone="slate" icon={<CircleDashed size={18} />} label="Not Started" share={pctOf(portfolio.notStarted.length, t)} value={portfolio.notStarted.length} sub={`${pctOf(portfolio.notStarted.length, t)}% of total`} title="Status = Not Started, or WBS still in Draft." />
               <Kpi to="/projects?tab=projects" tone="orange" icon={<PauseCircle size={18} />} label="Paused" share={pctOf(portfolio.paused.length, t)} value={portfolio.paused.length} sub={`${pctOf(portfolio.paused.length, t)}% of total`} />
               <Kpi to="/projects?tab=projects" tone="red" icon={<Clock3 size={18} />} label="Overdue Projects" value={portfolio.overdue.length} share={pctOf(portfolio.overdue.length, portfolio.active.length)} sub={`${pctOf(portfolio.overdue.length, portfolio.active.length)}% of active`} title={METRIC_DEFINITIONS.overdueProject} />

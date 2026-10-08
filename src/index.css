@@ -1932,3 +1932,15 @@ mark.kb-mark { background: #fff3c4; color: inherit; padding: 0 1px; border-radiu
 /* phase127i: gentle pulse on the sidebar timer's clock icon */
 @keyframes timerPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .timer-pulse { animation: timerPulse 2s ease-in-out infinite; flex-shrink: 0; }
+
+/* 2026-10-09: Roles & Permissions -- text that edits in place. */
+.role-inline-edit {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 6px;
+  padding: 4px 6px;
+  transition: border-color 0.12s, background 0.12s;
+}
+.role-inline-edit:hover { border-color: var(--border); }
+.role-inline-edit:focus { outline: none; border-color: var(--accent, #2f6fed); background: var(--surface, #fff); }
+.role-inline-edit::placeholder { color: var(--muted); font-style: italic; }
