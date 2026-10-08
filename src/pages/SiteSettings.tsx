@@ -353,7 +353,7 @@ export default function SiteSettings() {
   // matrix directly ("add by row or by column then just check"), so
   // Output Type rename/activate/delete/add all happen from inside that
   // matrix's column headers instead of a separate list.
-  const [manageDrawer, setManageDrawer] = useState<"sources" | "categories" | "phases" | "phase_mapping" | "work_types" | "reasons" | "planning_types" | "project_types" | "decline_reasons" | "cancellation_reasons" | "non_project_activity_types" | null>(null);
+  const [manageDrawer, setManageDrawer] = useState<"roles" | "sources" | "categories" | "phases" | "phase_mapping" | "work_types" | "reasons" | "planning_types" | "project_types" | "decline_reasons" | "cancellation_reasons" | "non_project_activity_types" | null>(null);
   const [draggedWorkTypeId, setDraggedWorkTypeId] = useState<string | null>(null);
   const [draggedOutputTypeId, setDraggedOutputTypeId] = useState<string | null>(null);
   const [draggedProjectSourceId, setDraggedProjectSourceId] = useState<string | null>(null);
@@ -2005,25 +2005,39 @@ export default function SiteSettings() {
         <p className="subtitle">Full Access only. Configure options shared across the whole app.</p>
       </div>
 
-      {/* 2026-10-08 (Sandra): Roles & Permissions -- staging only until go-live. */}
-      {autoApprovalsOn && <RolesPermissions meRoleId={(me as { role_id?: string | null }).role_id ?? null} />}
-
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600 }}>Lists</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600 }}>Customizations</div>
           <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
-            Dropdown options used across Projects, Tasks, and WBS Planning.
+            Roles and the dropdown options used across Projects, Tasks, Time Tracking and WBS Planning.
           </div>
         </div>
         <table className="data-table" style={{ width: "100%" }}>
           <thead>
             <tr>
-              <th>List</th>
+              <th>Customization</th>
               <th style={{ width: 150 }}>Items</th>
               <th style={{ width: 120 }} />
             </tr>
           </thead>
           <tbody>
+            {/* 2026-10-09 (Sandra): Roles & Permissions lives in Customizations, opened like a list. */}
+            {autoApprovalsOn && (
+              <tr>
+                <td>
+                  <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>Roles &amp; Permissions</div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                    What each role can do: access, approvals, admin pages, sidebar pages and ready-made views. Each person gets one role in User Management.
+                  </div>
+                </td>
+                <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>Roles</td>
+                <td>
+                  <button onClick={() => setManageDrawer("roles")} style={manageButtonStyle}>
+                    Manage
+                  </button>
+                </td>
+              </tr>
+            )}
             <tr>
               <td>
                 <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>Project Sources</div>
@@ -2201,7 +2215,7 @@ export default function SiteSettings() {
               top: 0,
               right: 0,
               height: "100vh",
-              width: manageDrawer === "work_types" || manageDrawer === "phase_mapping" ? "min(1120px, 94vw)" : 480,
+              width: manageDrawer === "work_types" || manageDrawer === "phase_mapping" || manageDrawer === "roles" ? "min(1120px, 94vw)" : 480,
               maxWidth: "94vw",
               background: "var(--surface, #fff)",
               boxShadow: "-8px 0 24px rgba(0,0,0,0.18)",
@@ -2212,7 +2226,16 @@ export default function SiteSettings() {
               overflowY: "auto",
             }}
           >
-            {manageDrawer === "sources" ? (
+            {manageDrawer === "roles" ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+                  <button onClick={() => setManageDrawer(null)} style={{ display: "flex", background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+                    <X size={16} />
+                  </button>
+                </div>
+                <RolesPermissions meRoleId={(me as { role_id?: string | null }).role_id ?? null} />
+              </>
+            ) : manageDrawer === "sources" ? (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>Manage Project Sources</div>
