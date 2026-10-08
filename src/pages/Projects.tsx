@@ -427,7 +427,16 @@ function andList(existing: string[] | undefined, fromScope: string[] | undefined
 function migrateProjectScope(v0: TableView): TableView {
   // phase178: the Projects "Status" filter is now the Stage filter.
   const st = normalizeStageFilter(v0.filterStatuses);
-  const v = JSON.stringify(st) === JSON.stringify(v0.filterStatuses ?? []) ? v0 : { ...v0, filterStatuses: st };
+  let v = JSON.stringify(st) === JSON.stringify(v0.filterStatuses ?? []) ? v0 : { ...v0, filterStatuses: st };
+  // 2026-10-09 (Sandra): WBS Status is gone -- saved views grouped/sorted by it use Phase.
+  if (v.groupBy === "wbs_status" || v.groupBy2 === "wbs_status" || (v.sorts ?? []).some((x) => x.key === "wbs_status")) {
+    v = {
+      ...v,
+      groupBy: v.groupBy === "wbs_status" ? "phase" : v.groupBy,
+      groupBy2: v.groupBy2 === "wbs_status" ? (v.groupBy === "phase" ? null : "phase") : v.groupBy2,
+      sorts: (v.sorts ?? []).map((x) => (x.key === "wbs_status" ? { ...x, key: "phase" } : x)),
+    };
+  }
   if (!v.projectScope) return v;
   const f = scopeToProjectFilters(v.projectScope);
   return {
