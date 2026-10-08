@@ -167,10 +167,10 @@ export default function ConfirmTimeEntryModal({
           <input
             type="text"
             value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            onChange={(e) => { setNotes(e.target.value); if (error) setError(null); }}
             autoFocus={notesRequired}
             placeholder={notesRequired ? "e.g. Weekly team huddle -- Q4 training calendar" : "e.g. forgot to stop for lunch"}
-            style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
+            style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: `1px solid ${notesRequired && error && !notes.trim() ? "var(--danger-text)" : "var(--border)"}`, borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
           />
         </label>
 
@@ -198,8 +198,9 @@ export default function ConfirmTimeEntryModal({
           </button>
           <button
             onClick={handleConfirm}
-            disabled={saving || resuming || discarding || (notesRequired && !notes.trim())}
-            style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 14px", cursor: "pointer" }}
+            disabled={saving || resuming || discarding}
+            title={notesRequired && !notes.trim() ? "Add a note first -- what was this time for?" : undefined}
+            style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 14px", cursor: "pointer", opacity: notesRequired && !notes.trim() ? 0.55 : 1 }}
           >
             {saving ? "Confirming…" : "Confirm -- lock it in"}
           </button>
