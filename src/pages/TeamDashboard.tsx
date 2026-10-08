@@ -11,6 +11,7 @@
 //   * Current state      -> overdue tasks (as of today); Missing Hours = this week
 // All utilization / capacity numbers come from the shared allocation engine
 // (lib/dailyAllocation.ts) so they can never disagree with the Utilization page.
+import { projectStageOf } from "../lib/projectStage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
@@ -910,9 +911,10 @@ export default function TeamDashboard() {
       .map((x) => ({ ...x, age: workingDaysSince(x.reported) }))
       .sort((a, b) => b.age - a.age);
     const readyToClose = scopedProjects
-      .filter((p) => statusOf(p) === "Completed" && p.wbs_status !== "closed")
+      // phase178: Stage "Closing" = a Close Project request is waiting.
+      .filter((p) => projectStageOf(p) === "Closing")
       .map((p) => {
-        const since = (p.completed_at ?? p.end_date ?? "").slice(0, 10);
+        const since = (projectCompletionDate(p.id, tasks, p) ?? "").slice(0, 10);
         const days = since ? Math.round((today.getTime() - parseLocalDate(since).getTime()) / 86400000) : 0;
         return { p, since, days };
       })
@@ -970,13 +972,13 @@ export default function TeamDashboard() {
       { key: "valid", tier: 3, tone: "purple", icon: <BadgeCheck size={16} />, label: "Validations overdue", context: `Done ${AGING_DAYS}+ working days`, value: a.validations.length, sub: "Not yet validated",
         definition: `Tasks marked Done whose Reported Completion Date is ${AGING_DAYS}+ working days ago and nobody has confirmed (validated) yet.`, columns: ["Task", "Project", "Assignee", "Reported done", "Waiting"], to: "/approval-center", toLabel: "Approval Center",
         rows: a.validations.map((x) => taskRow(x.t, [fmtLong(x.reported), `${x.age} days`])) },
-      { key: "workdone", tier: 4, tone: "amber", icon: <CheckCheck size={16} />, label: "Complete, ready to close", context: "100% done · still In Progress", value: a.workDone.length,
-        sub: `${a.workDone.filter((x) => x.late).length} done late · mark Completed`,
-        definition: "Every task is Done (100% progress) but the project's Status is still In Progress. These are complete and ready to be marked Completed, then closed. Waiting = working days since the last task was completed.",
+      { key: "workdone", tier: 4, tone: "amber", icon: <CheckCheck size={16} />, label: "Ready to close", context: "100% done · no Close Project request yet", value: a.workDone.length,
+        sub: `${a.workDone.filter((x) => x.late).length} done late · send Close Project`,
+        definition: "Every task is Done (100% progress) but nobody has sent the Close Project request yet. Approving that request sets the project to Closed (Completed). Waiting = working days since the last task was completed.",
         columns: ["Project", "Owner", "Last task done", "End date", "Result", "Waiting"], to: "/projects", toLabel: "Projects & Tasks",
         rows: a.workDone.map((x) => projRow(x.p, [x.last ? fmtLong(x.last) : "—", x.p.end_date ? fmtLong(x.p.end_date.slice(0, 10)) : "—", x.late ? "Done late" : "Done on time", `${x.age} days`])) },
-      { key: "rtc", tier: 4, tone: "amber", icon: <Flag size={16} />, label: "Ready to close", context: "Completed, not closed", value: a.readyToClose.length, sub: rtc14 ? `${rtc14} waiting 14+ days` : "None waiting 14+ days",
-        definition: "Projects with Status Completed whose WBS hasn't been closed yet.", columns: ["Project", "Owner", "Completed", "Days waiting"], to: "/projects", toLabel: "Projects & Tasks",
+      { key: "rtc", tier: 4, tone: "amber", icon: <Flag size={16} />, label: "Closing", context: "Close Project request waiting", value: a.readyToClose.length, sub: rtc14 ? `${rtc14} done 14+ days ago` : "None done 14+ days ago",
+        definition: "Projects at Stage Closing: the Close Project request is waiting for approval.", columns: ["Project", "Owner", "Last task done", "Days since"], to: "/projects", toLabel: "Projects & Tasks",
         rows: a.readyToClose.map((x) => projRow(x.p, [x.since ? fmtLong(x.since) : "—", String(x.days)])) },
       { key: "miss", tier: 4, tone: "blue", icon: <Hourglass size={16} />, label: "Missing hours", context: missing.rangeLabel ? `${missing.label} · ${missing.rangeLabel}` : missing.label, value: missing.members.length, sub: `members · ${fmtH(missing.total)}`,
         definition: `Members with missing hours. ${METRIC_DEFINITIONS.missingHours} On a Monday this shows last week.`, columns: ["Member", "Missing"], to: "/time-tracking?scope=all", toLabel: "Time Tracking",
