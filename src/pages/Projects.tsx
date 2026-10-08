@@ -1856,7 +1856,9 @@ export default function Projects() {
   // Draft; phaseOptionsForStatus below is what actually restricts the
   // picker to only "Not Started"-mapped phases in that case (see its call
   // sites), this flag just governs whether the picker opens at all.
-  const canEditPhase = (p: ProjectRow) => canEditProject(p);
+  // phase179 (Sandra 10-09): Phase = production step of an ACTIVE project
+  // only (Stage covers Draft/Closed). Paused/Cancelled freeze it.
+  const canEditPhase = (p: ProjectRow) => canEditProject(p) && (projectStageOf(p) === "Active" || projectStageOf(p) === "Closing");
   // 2026-09-03 (Sandra: "add these 3 new fields in the WBS UI... in the
   // project list view these are view only and can't be changed [once
   // locked]. but as long as the WBS is still draft, still allow change
@@ -3300,7 +3302,7 @@ export default function Projects() {
             value={p.phase ?? ""}
             editable={canEditPhase(p)}
             allowEmpty
-            options={phaseOptionsForStatus(projectStatusOf(p), p.phase)}
+            options={phaseOptionsForStatus("In Progress", p.phase).filter((x) => x !== "Done")}
             renderReadOnly={() => (p.phase ? <span className={`status-pill ${phaseTone(p.phase)}`}>{p.phase}</span> : "—")}
             onCommit={async (v) => {
               // 2026-09-08: Phase used to be fully locked while Draft (see
@@ -4129,8 +4131,13 @@ export default function Projects() {
       // "Not Started"-mapped phases), same rule as the Phase column's own
       // onCommit above -- a Board drag has to re-check the same thing
       // since it writes phase directly, bypassing that cell entirely.
-      if (p.wbs_status === "draft" && !phaseOptionsForStatus("Not Started", p.phase).includes(v)) {
-        alert({ title: "Project hasn't started yet", message: `Until Start Project, "${p.name}" can only use a Not Started phase, like Scoping, Queued or Backlog.` });
+      // phase179: Phase is only for Active projects.
+      if (!canEditPhase(p)) {
+        alert({ title: "Phase is for Active projects", message: `"${p.name}" is ${projectStageOf(p)}. Phase can be set once the project is Active.` });
+        return;
+      }
+      if (v === "Done") {
+        alert({ title: "Done is set by Close Project", message: "Send the Close Project request from the WBS page; approval sets Phase to Done." });
         return;
       }
       updateProject(p.id, { phase: v || null });
@@ -6384,7 +6391,7 @@ export default function Projects() {
               />
               <FieldPickerButton
                 label="Phase"
-                options={activePhaseNames}
+                options={activePhaseNames.filter((x) => x !== "Done")}
                 // Draft rows keep Phase restricted to "Not Started"-mapped
                 // values everywhere else on this page (table cell, Board
                 // drag) -- bulk-edit is the one path that can't show a
@@ -6393,10 +6400,11 @@ export default function Projects() {
                 // selection rather than risk writing an invalid Phase to one.
                 onPick={(v) => {
                   const ids = selectedProjectIds;
-                  const skippedDraft = projects.some((p) => ids.includes(p.id) && p.wbs_status === "draft");
-                  const nonDraftIds = projects.filter((p) => ids.includes(p.id) && p.wbs_status !== "draft").map((p) => p.id);
+                  const isActiveStage = (p: ProjectRow) => projectStageOf(p) === "Active" || projectStageOf(p) === "Closing";
+                  const skippedDraft = projects.some((p) => ids.includes(p.id) && !isActiveStage(p));
+                  const nonDraftIds = projects.filter((p) => ids.includes(p.id) && isActiveStage(p)).map((p) => p.id);
                   if (nonDraftIds.length === 0) {
-                    if (skippedDraft) alert({ title: "Nothing was changed", message: "Change a Draft project's Phase in its own row. It can only use a Not Started phase." });
+                    if (skippedDraft) alert({ title: "Nothing was changed", message: "Phase is only for Active projects." });
                     return;
                   }
                   setProjects((prev) => prev.map((p) => (nonDraftIds.includes(p.id) ? { ...p, phase: v || null } : p)));

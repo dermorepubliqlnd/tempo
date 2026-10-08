@@ -150,7 +150,6 @@ export function closeProjectApproverChecklist(
   const groups: ChecklistGroup[] = [];
   const missing: string[] = [];
   if (!project.status) missing.push("Status");
-  if (!project.phase) missing.push("Phase");
   if (!project.category) missing.push("Category");
   if (!project.priority) missing.push("Priority");
   if (!project.source_id) missing.push("Source");
