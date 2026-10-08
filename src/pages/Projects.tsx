@@ -370,7 +370,7 @@ function CategoryIcon({ iconName, tone, size = 13 }: { iconName?: string; tone?:
   return <Icon size={size} color={color} style={{ flexShrink: 0 }} />;
 }
 
-const PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "created_at", "owner", "category", "planning_type", "project_type", "source", "start_date", "closed_at", "wbs_status", "hours_variance_pct", "days_extended", "committed_end_date", "committed_slip", "effort_level", "baseline_approved_by", "baseline_approved_at", "my_open_tasks", "my_next_due", "my_hours"];
+const PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "created_at", "owner", "category", "planning_type", "project_type", "source", "start_date", "closed_at", "hours_variance_pct", "days_extended", "committed_end_date", "committed_slip", "effort_level", "baseline_approved_by", "baseline_approved_at", "my_open_tasks", "my_next_due", "my_hours"];
 
 // 2026-10-04 (Sandra): owner lens = what an owner acts on -- lifecycle
 // (WBS Status), delivery (Status/Health/Phase/Due/Progress), effort
@@ -1004,7 +1004,7 @@ const TASK_TIMING_BOARD_COLUMNS: BoardColumnDef[] = [
 // enumerable set of Kanban columns); anything else (free text, dates,
 // computed percentages) is marked boardGroupable: false on the relevant
 // GroupOption instead and falls back to this list's first/default entry.
-const PROJECT_BOARD_GROUPABLE_KEYS = ["status", "phase", "health", "priority", "category", "source", "planning_type", "project_type", "effort_level", "owner", "wbs_status"];
+const PROJECT_BOARD_GROUPABLE_KEYS = ["status", "phase", "health", "priority", "category", "source", "planning_type", "project_type", "effort_level", "owner"];
 
 // 2026-10-04 (Sandra): Board card spec -- title fixed; max 4 Primary + 4
 // Secondary properties; system indicators (column, colour stripe,
@@ -3592,63 +3592,6 @@ export default function Projects() {
         },
       },
       {
-        // Phase 4 (2026-07-28): the old "Timelines" column (Locked/Scoping
-        // pill + inline Lock/Unlock button) is replaced outright by the
-        // WBS Status badge -- Sandra's explicit call ("we can replace the
-        // timeline property now with the WBS status"). Baseline locking
-        // itself now only ever happens through the WBS Planning page's
-        // Lock Baseline action (it needs a full dependency-aware task
-        // snapshot -- see buildTaskSnapshotPayload -- that this table
-        // can't build), so there's no inline lock/unlock control here any
-        // more; this column is a status readout plus links into the page
-        // where the actual actions live. timelines_locked itself keeps
-        // working unchanged under the hood (Extension Requests, the
-        // Design-phase guardrail's date checks, and inline date editing
-        // all still read it directly), since the Phase 2 RPCs already
-        // keep it in sync with wbs_status one-for-one.
-        key: "wbs_status",
-        label: "WBS Status",
-        defaultWidth: 210,
-        maxWidth: 260,
-        render: (p) => {
-          const meta = wbsStatusMetaFor(p.wbs_status, pendingBaselineProjectIds.has(p.id), !pendingBaselineProjectIds.has(p.id) && p.id in declinedBaselineByProjectId, declinedBaselineByProjectId[p.id], !!p.is_operational);
-          return (
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span
-                title={meta?.hint}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "2px 8px",
-                  fontSize: 11,
-                  fontWeight: 500,
-                  borderRadius: "var(--radius-btn)",
-                  border: `1px solid ${meta?.border ?? "var(--border)"}`,
-                  background: meta?.bg ?? "var(--surface)",
-                  color: meta?.color ?? "var(--text-secondary)",
-                }}
-              >
-                {meta?.label ?? p.wbs_status}
-              </span>
-              {/* phase114: Completed but not closed yet -> nudge to close. */}
-
-              {/* Sandra, 2026-07-29: removed the separate "WBS" button --
-                  the Project name cell (Round 21) already navigates to
-                  /projects/:id/wbs, so this was a duplicate affordance. */}
-              {/* 2026-09-21 (Sandra: "remove this" -- the separate
-                  Report button, pointing at a screenshot of it):
-                  redundant now that the Project name cell already
-                  navigates to /wbs, and the WBS page renders the same
-                  report content in-place for closed projects (see
-                  ClosedProjectReportPanel) -- there's no longer a
-                  distinct destination for this button to justify
-                  existing alongside that link. */}
-            </div>
-          );
-        },
-      },
-      {
         key: "days_extended",
         label: "Days Extended",
         defaultWidth: 120,
@@ -3918,28 +3861,6 @@ export default function Projects() {
       // no safe canonical list to enumerate without risking a missing
       // bucket. Left on the previous row-encounter-order behavior.
     },
-    {
-      key: "wbs_status",
-      label: "WBS Status",
-      // 2026-09-03: same Awaiting-Baseline-Approval display override as
-      // the WBS Status cell -- a pending-request Draft project gets its
-      // own section here instead of blending into the plain "Draft"
-      // group. Not pre-seeded in allGroups (so it only appears when a
-      // project actually has one pending), same as any other
-      // encountered-but-not-canonical value elsewhere in this file.
-      getGroup: (p) =>
-        wbsStatusMetaFor(p.wbs_status, pendingBaselineProjectIds.has(p.id), !pendingBaselineProjectIds.has(p.id) && p.id in declinedBaselineByProjectId, declinedBaselineByProjectId[p.id], !!p.is_operational)
-          .label,
-      getTone: (p) =>
-        p.wbs_status === "draft" && pendingBaselineProjectIds.has(p.id)
-          ? "warning"
-          : p.wbs_status === "draft" && p.id in declinedBaselineByProjectId
-          ? "danger"
-          : p.is_operational && p.wbs_status !== "draft" && p.wbs_status !== "closed"
-          ? "success"
-          : WBS_STATUS_TONES[p.wbs_status] ?? "neutral",
-      allGroups: () => (Object.keys(WBS_STATUS_META) as WbsStatus[]).map((s) => WBS_STATUS_META[s].label),
-    },
   ];
 
   // Board's own Group-by list: every project property, in roughly column
@@ -4017,13 +3938,6 @@ export default function Projects() {
     },
     { key: "start_date", label: "Start", getGroup: () => "", boardGroupable: false },
     { key: "end_date", label: "Due", getGroup: () => "", boardGroupable: false },
-    {
-      key: "wbs_status",
-      label: "WBS Status",
-      getGroup: (p) => WBS_STATUS_META[p.wbs_status]?.label ?? p.wbs_status,
-      getTone: (p) => WBS_STATUS_TONES[p.wbs_status] ?? "neutral",
-      boardGroupable: true,
-    },
   ];
 
   // Computes Board's actual columns/getValue/drag-write-handler for
@@ -4189,7 +4103,6 @@ export default function Projects() {
       label: "% of estimate",
       getValue: (p) => projectHoursVarianceOf(projectEstimatedHoursTotal(p.id, tasks), projectSpentHoursTotal(p.id, tasks, timeEntries, deletedSpentHours))?.percent ?? -1,
     },
-    { key: "wbs_status", label: "WBS Status", getValue: (p) => (Object.keys(WBS_STATUS_META) as WbsStatus[]).indexOf(p.wbs_status) },
   ];
 
   // Round 21 (Sandra): "New project" now goes straight into the WBS page
@@ -5981,7 +5894,7 @@ export default function Projects() {
   // NOT the same left-to-right order as PROJECT_COLUMN_ORDER (which drives
   // Table view and lists Owner before Status), so Table's own column order
   // is untouched by this Timeline-only preference.
-  const PROJECT_TIMELINE_CHIP_ORDER = ["status", "phase", "owner", "priority", "health", "category", "source", "planning_type", "project_type", "effort_level", "wbs_status", "days_extended", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct"];
+  const PROJECT_TIMELINE_CHIP_ORDER = ["status", "phase", "owner", "priority", "health", "category", "source", "planning_type", "project_type", "effort_level", "days_extended", "estimated_hours", "time_spent_hours", "hours_variance", "hours_variance_pct"];
   const projectTimelinePropertyColumns = visibleOrderedColumns(projectColumns, projectViews.activeView)
     .filter((c) => !PROJECT_TIMELINE_EXCLUDED_KEYS.includes(c.key))
     .slice()
