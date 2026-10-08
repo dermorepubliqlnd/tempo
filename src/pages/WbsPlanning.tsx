@@ -4122,6 +4122,11 @@ export default function WbsPlanning() {
   // 2026-10-09 (Sandra, team ask): a task added AFTER Start Project can have
   // its Start/End typed until its first Save Changes (due_locked = false);
   // that save sets its Due date and it locks like every other task.
+  // 2026-10-09 quick fix (Sandra): on a started project, a task that hasn't
+  // started yet can still move its Start (not its Due -- that needs an
+  // extension). Every change is kept in the Audit Trail by the WBS save.
+  const isFlexibleStartTask = (t: TaskRow) =>
+    project.wbs_status !== "draft" && project.wbs_status !== "closed" && t.status === "Not Started";
   const isUncommittedNewTask = (t: TaskRow) =>
     project.wbs_status !== "draft" && project.wbs_status !== "closed" && !(t as { due_locked?: boolean }).due_locked && !isLockedStatus(t.status);
   // phase178: one lifecycle -- the page shows the project's Stage.
@@ -4578,8 +4583,17 @@ export default function WbsPlanning() {
                 // requests were removed 2026-08-27 the same day Re-baseline
                 // itself was removed entirely, so once locked a Start Date
                 // never moves again for the life of the project.
-                editable={canEditWbs && !isParent && (!project!.timelines_locked || isUncommittedNewTask(t))}
+                editable={canEditWbs && !isParent && (!project!.timelines_locked || isUncommittedNewTask(t) || isFlexibleStartTask(t))}
                 onCommit={(v) => {
+                  // 2026-10-09 quick fix: on a started project a saved task's Start can
+                  // move (Not Started tasks only) but never past its locked Due date.
+                  if (v && project!.timelines_locked && !isUncommittedNewTask(t) && t.current_due_date && v.slice(0, 10) > t.current_due_date.slice(0, 10)) {
+                    void alert({
+                      title: "Start is after the Due date",
+                      message: `"${t.name}" is due ${formatDate(t.current_due_date.slice(0, 10))}. Pick a Start on or before that, or request an extension to move the Due date.`,
+                    });
+                    return;
+                  }
                   // A manual edit here freezes this task's Forecasted date
                   // -- it stops mirroring the capacity queue from now on.
                   // Re-adding/re-selecting a dependency turns auto-pilot
