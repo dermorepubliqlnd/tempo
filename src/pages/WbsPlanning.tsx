@@ -1123,6 +1123,7 @@ export default function WbsPlanning() {
         )
         .eq("project_id", projectId)
         .eq("is_archived", false)
+        .eq("is_scoping", false) // phase180: Scoping task lives outside the plan/baseline
         .order("sort_order"),
       supabase.from("people").select("id,name,daily_capacity_hours,is_active,color").eq("is_active", true).order("name"),
       // Paged (audit Fix 8) -- these three feed the capacity schedulers and

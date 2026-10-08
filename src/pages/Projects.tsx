@@ -23,6 +23,7 @@ import { timingWithPause, type TimingResult } from "../lib/pause";
 import { METRIC_DEFINITIONS, isActiveProject, isOverdueProject, isOverdueTask, isDueThisWeek } from "../lib/metrics";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import LogTimeModal from "../components/LogTimeModal";
+import { fetchStagePhaseRules, type StagePhaseRules } from "../components/StagePhaseRules";
 import { PROJECT_STAGES, PROJECT_STAGE_TONES, PROJECT_STAGE_HINTS, projectStageOf, normalizeStageFilter } from "../lib/projectStage";
 import NotesSidebar from "../components/NotesSidebar";
 import { useConfirm, type AlertOptions } from "../lib/useConfirm";
@@ -1867,7 +1868,16 @@ export default function Projects() {
   // sites), this flag just governs whether the picker opens at all.
   // phase179 (Sandra 10-09): Phase = production step of an ACTIVE project
   // only (Stage covers Draft/Closed). Paused/Cancelled freeze it.
-  const canEditPhase = (p: ProjectRow) => canEditProject(p) && (projectStageOf(p) === "Active" || projectStageOf(p) === "Closing");
+  const [stagePhaseRules, setStagePhaseRules] = useState<StagePhaseRules | null>(null);
+  useEffect(() => { void fetchStagePhaseRules().then(setStagePhaseRules); }, []);
+  // Draft Phase is editable only when Site Settings says "Manual" for Draft.
+  const draftPhaseManual = stagePhaseRules?.draft?.auto === false;
+  const canEditPhase = (p: ProjectRow) => {
+    if (!canEditProject(p)) return false;
+    const st = projectStageOf(p);
+    if (st === "Active" || st === "Closing") return true;
+    return (st === "Draft" || st === "Awaiting Start") && draftPhaseManual;
+  };
   // 2026-09-03 (Sandra: "add these 3 new fields in the WBS UI... in the
   // project list view these are view only and can't be changed [once
   // locked]. but as long as the WBS is still draft, still allow change
@@ -5000,7 +5010,7 @@ export default function Projects() {
           // Sandra, 2026-08-24: can't log/track hours against a task
           // whose project baseline isn't locked yet -- same gate as
           // Status and Extension Requests.
-          const baselineBlocksStart = !isProjectLocked(t.project_id) && !isRunningHere;
+          const baselineBlocksStart = !isProjectLocked(t.project_id) && !isRunningHere && !(t as { is_scoping?: boolean }).is_scoping; // phase180: Scoping task takes time in Draft
           // Phase 26 (2026-08-28): and no new time against a project
           // whose close-out has already been approved -- the Final Scope
           // snapshot is frozen, so hours logged after it would never be

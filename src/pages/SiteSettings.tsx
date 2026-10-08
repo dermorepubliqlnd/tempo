@@ -1,4 +1,5 @@
 import RolesPermissions from "../components/RolesPermissions";
+import StagePhaseRulesPanel from "../components/StagePhaseRules";
 import { useAutoApprovalsOn } from "../lib/autoApprovals";
 import { canAccessPage } from "../lib/pageAccess";
 import { useEffect, useState, type CSSProperties } from "react";
@@ -353,7 +354,7 @@ export default function SiteSettings() {
   // matrix directly ("add by row or by column then just check"), so
   // Output Type rename/activate/delete/add all happen from inside that
   // matrix's column headers instead of a separate list.
-  const [manageDrawer, setManageDrawer] = useState<"roles" | "sources" | "categories" | "phases" | "phase_mapping" | "work_types" | "reasons" | "planning_types" | "project_types" | "decline_reasons" | "cancellation_reasons" | "non_project_activity_types" | null>(null);
+  const [manageDrawer, setManageDrawer] = useState<"roles" | "stage_phase" | "sources" | "categories" | "phases" | "phase_mapping" | "work_types" | "reasons" | "planning_types" | "project_types" | "decline_reasons" | "cancellation_reasons" | "non_project_activity_types" | null>(null);
   const [draggedWorkTypeId, setDraggedWorkTypeId] = useState<string | null>(null);
   const [draggedOutputTypeId, setDraggedOutputTypeId] = useState<string | null>(null);
   const [draggedProjectSourceId, setDraggedProjectSourceId] = useState<string | null>(null);
@@ -2040,6 +2041,20 @@ export default function SiteSettings() {
             )}
             <tr>
               <td>
+                <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>Stage → Phase rules</div>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                  Which Phase a project gets at Draft and at Closed, and whether Tempo sets it automatically or the owner picks it.
+                </div>
+              </td>
+              <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>Draft · Closed</td>
+              <td>
+                <button onClick={() => setManageDrawer("stage_phase")} style={manageButtonStyle}>
+                  Manage
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <td>
                 <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>Project Sources</div>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
                   How/why a project originated. Offered on every project and the Portfolio Dashboard's Source filter.
@@ -2213,7 +2228,7 @@ export default function SiteSettings() {
               top: 0,
               right: 0,
               height: "100vh",
-              width: manageDrawer === "work_types" || manageDrawer === "phase_mapping" || manageDrawer === "roles" ? "min(1120px, 94vw)" : 480,
+              width: manageDrawer === "work_types" || manageDrawer === "phase_mapping" || manageDrawer === "roles" ? "min(1120px, 94vw)" : manageDrawer === "stage_phase" ? 620 : 480,
               maxWidth: "94vw",
               background: "var(--surface, #fff)",
               boxShadow: "-8px 0 24px rgba(0,0,0,0.18)",
@@ -2224,7 +2239,16 @@ export default function SiteSettings() {
               overflowY: "auto",
             }}
           >
-            {manageDrawer === "roles" ? (
+            {manageDrawer === "stage_phase" ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+                  <button onClick={() => setManageDrawer(null)} style={{ display: "flex", background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>
+                    <X size={16} />
+                  </button>
+                </div>
+                <StagePhaseRulesPanel />
+              </>
+            ) : manageDrawer === "roles" ? (
               <>
                 <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
                   <button onClick={() => setManageDrawer(null)} style={{ display: "flex", background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}>

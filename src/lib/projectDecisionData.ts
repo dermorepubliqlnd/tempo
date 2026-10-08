@@ -75,7 +75,8 @@ export async function loadProjectPlanForDecision(projectId: string, holidays: Ho
       .from("tasks")
       .select("id,parent_task_id,name,assignee_id,status,start_date,start_date_full,start_date_standard,manual_end_date,current_due_date,estimated_hours,effort,output_type_id,output_count,sort_order")
       .eq("project_id", projectId)
-      .eq("is_archived", false),
+      .eq("is_archived", false)
+      .eq("is_scoping", false), // phase180
     supabase.from("people").select("id,name"),
     supabase.from("output_types").select("id,counts_deliverable"),
   ]);
