@@ -55,7 +55,8 @@ const WBS_STATUS_TONES: Record<WbsStatus, string> = {
   closed: "neutral",
 };
 import { rollupHoursFor, ownHoursFor, formatHours, timeLogId, rollupTimeLogStatusFor, TIME_LOG_STATUS_LABEL, TIME_LOG_STATUS_TONE, type TimeEntryRow, type TimeLogStatus } from "../lib/timeTracking";
-import { parseLocalDate, calendarDaysBetween, timingOf, timingVarianceDays, timingRank } from "../lib/taskTiming";
+import { parseLocalDate, calendarDaysBetween, timingOf, timingVarianceDays, timingRank, actualCompletionDateOf } from "../lib/taskTiming";
+import { slipVsCommitted, isEstimatedCommitted, ESTIMATED_COMMITTED_HINT, type SlipResult } from "../lib/committedSlip";
 // Deletion history archive (2026-08-14c): a permanently-deleted task's own
 // logged Spent Hrs are archived (supabase/policies.sql "Migration
 // 2026-08-14c") as a raw per-project-per-person hours total before the
@@ -248,6 +249,9 @@ export interface ProjectRow {
   schedule_review_required?: boolean | null;
   // phase149: mirrors the Project Type's Operational flag (DB trigger).
   is_operational?: boolean | null;
+  // phase175: end date in force when Start Project was approved (never moves).
+  committed_end_date?: string | null;
+  committed_end_source?: string | null;
 }
 
 export interface TaskRow {
@@ -260,6 +264,9 @@ export interface TaskRow {
   start_date: string | null;
   original_due_date: string;
   current_due_date: string;
+  // phase175: due date in force at Start Project approval (or when added after Start). Never moves.
+  committed_due_date?: string | null;
+  committed_due_source?: string | null;
   estimated_hours: number | null;
   time_spent_hours: number | null;
   // Self-reported by the assignee the moment status flips to Done --
@@ -360,7 +367,7 @@ function CategoryIcon({ iconName, tone, size = 13 }: { iconName?: string; tone?:
   return <Icon size={size} color={color} style={{ flexShrink: 0 }} />;
 }
 
-const PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "created_at", "owner", "category", "planning_type", "project_type", "source", "start_date", "closed_at", "wbs_status", "hours_variance_pct", "days_extended", "effort_level", "baseline_approved_by", "baseline_approved_at", "my_open_tasks", "my_next_due", "my_hours"];
+const PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "created_at", "owner", "category", "planning_type", "project_type", "source", "start_date", "closed_at", "wbs_status", "hours_variance_pct", "days_extended", "committed_end_date", "committed_slip", "effort_level", "baseline_approved_by", "baseline_approved_at", "my_open_tasks", "my_next_due", "my_hours"];
 
 // 2026-10-04 (Sandra): owner lens = what an owner acts on -- lifecycle
 // (WBS Status), delivery (Status/Health/Phase/Due/Progress), effort
@@ -368,7 +375,7 @@ const PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "pha
 // column hidden in "I own" views (it's always you); Created dropped.
 const PROJECT_SYSTEM_LEAD = ["project_number", "name", "owner", "wbs_status", "status", "health", "phase", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
 const PROJECT_SYSTEM_COLUMN_ORDER = [...PROJECT_SYSTEM_LEAD, ...PROJECT_COLUMN_ORDER.filter((k) => !PROJECT_SYSTEM_LEAD.includes(k))];
-const PROJECT_OWNER_VISIBLE = new Set(["project_number", "name", "wbs_status", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended"]);
+const PROJECT_OWNER_VISIBLE = new Set(["project_number", "name", "wbs_status", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "committed_slip"]);
 // 2026-10-04 (Sandra): portfolio lens = "what am I involved in and what do
 // I owe on each" -- grouped by My Role, soonest Due first, with the
 // viewer's own open tasks / next due / hours instead of owner metrics.
@@ -501,7 +508,7 @@ const TASK_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["project", "timing_variance_days",
 // own Calendar view doesn't support grouping either -- confirmed with
 // Sandra, not building it).
 const TASK_CALENDAR_DEFAULT_HIDDEN_COLUMNS = ["status", "timing", "validated_completion_date", "validated_by", "actual_completion_date", "estimated_hours", "time_spent_hours", "timing_variance_days", "hours_variance", "hours_variance_pct", "work_type", "output_type", "output_count"];
-const TASK_COLUMN_ORDER = ["name", "task_number", "project", "assignee", "status", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "time_log_status", "effort", "timing_variance_days", "due_date_ext", "work_type", "output_type", "output_count", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
+const TASK_COLUMN_ORDER = ["name", "task_number", "project", "assignee", "status", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "time_log_status", "effort", "timing_variance_days", "due_date_ext", "committed_due_date", "committed_slip", "work_type", "output_type", "output_count", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
 
 // 2026-10-04 (Sandra): Tasks system views answer "what needs doing, by whom,
 // and when" -- project health/progress stays on Projects + Overview.
@@ -511,7 +518,7 @@ const TASK_SYS_LEAD = ["task_number", "name", "project", "assignee", "status", "
 const TASK_SYSTEM_COLUMN_ORDER = [...TASK_SYS_LEAD, ...TASK_COLUMN_ORDER.filter((k) => !TASK_SYS_LEAD.includes(k))];
 const TASK_MY_VISIBLE = new Set(["task_number", "name", "project", "status", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext"]);
 const TASK_TEAM_VISIBLE = new Set([...TASK_MY_VISIBLE, "assignee"]);
-const TASK_DONE_VISIBLE = new Set(["task_number", "name", "project", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "hours_variance"]);
+const TASK_DONE_VISIBLE = new Set(["task_number", "name", "project", "current_due_date", "committed_due_date", "committed_slip", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "hours_variance"]);
 function taskSystemView(
   id: string,
   name: string,
@@ -1316,6 +1323,44 @@ export default function Projects() {
   function projectHasConfirmedBaseline(projectId: string): boolean {
     const project = projects.find((p) => p.id === projectId);
     return !!project && project.wbs_status !== "draft" && project.timelines_locked;
+  }
+  // phase175: slip vs the committed (Start Project) date.
+  function taskCommittedSlip(t: TaskRow & { _depth?: number }): SlipResult {
+    if (t._depth === 0 && hasChildren(t.id)) return { label: "N/A", tone: "neutral", days: null, hint: "Parent task -- see its sub-tasks." };
+    const group = statusGroupOf(TASK_STATUS_GROUPED, t.status);
+    return slipVsCommitted(t.committed_due_date, {
+      cancelled: group === "cancelled",
+      done: group === "complete",
+      finishedOn: group === "complete" ? actualCompletionDateOf(t) : null,
+      currentDue: t.current_due_date,
+      holidays: holidayDates,
+    });
+  }
+  function projectCommittedSlip(p: ProjectRow): SlipResult {
+    if (p.is_operational) return { label: "Ongoing", tone: "neutral", days: null, hint: "Operational project -- no committed end date is tracked." };
+    const st = projectStatusOf(p);
+    const done = st === "Completed" || actualProgress(p.id, tasks) === 100;
+    return slipVsCommitted(p.committed_end_date, {
+      cancelled: st === "Cancelled",
+      done,
+      finishedOn: done ? projectCompletionDate(p.id, tasks, p) : null,
+      currentDue: p.end_date,
+      holidays: holidayDates,
+    });
+  }
+  function committedDateCell(date: string | null | undefined, source: string | null | undefined) {
+    if (!date) return <span style={{ color: "var(--muted)" }} title="Set when Start Project is approved">—</span>;
+    const est = isEstimatedCommitted(source);
+    return (
+      <span title={est ? ESTIMATED_COMMITTED_HINT : "Date in force when Start Project was approved. Extensions and re-plans don't change it."} style={{ whiteSpace: "nowrap" }}>
+        {formatDate(date.slice(0, 10))}
+        {est && <span style={{ marginLeft: 4, fontSize: 10, color: "var(--muted)", fontStyle: "italic" }}>est.</span>}
+      </span>
+    );
+  }
+  function slipPill(r: SlipResult) {
+    if (r.tone === "neutral") return <span style={{ color: "var(--muted)", fontSize: 11.5 }} title={r.hint}>{r.label}</span>;
+    return <span className={`status-pill ${r.tone}`} title={r.hint} style={{ cursor: "help", whiteSpace: "nowrap" }}>{r.label}</span>;
   }
   const { person: me } = useSession();
   // 2026-10-07 (item E): System Views shown for this person's role.
@@ -3611,6 +3656,20 @@ export default function Projects() {
         },
       },
       {
+        key: "committed_end_date",
+        label: "Committed End",
+        defaultWidth: 130,
+        maxWidth: 160,
+        render: (p) => (p.is_operational ? <span style={{ color: "var(--muted)" }}>—</span> : committedDateCell(p.committed_end_date, p.committed_end_source)),
+      },
+      {
+        key: "committed_slip",
+        label: "vs Committed",
+        defaultWidth: 140,
+        maxWidth: 170,
+        render: (p) => slipPill(projectCommittedSlip(p)),
+      },
+      {
         key: "my_open_tasks",
         label: "My Open Tasks",
         defaultWidth: 110,
@@ -4071,6 +4130,8 @@ export default function Projects() {
   const projectSortOptions: SortOption<ProjectRow>[] = [
     { key: "name", label: "Project", getValue: (p) => p.name ?? "" },
     { key: "project_number", label: "Project ID", getValue: (p) => p.project_number },
+    { key: "committed_end_date", label: "Committed End", getValue: (p) => (p.committed_end_date ? new Date(p.committed_end_date).getTime() : null) },
+    { key: "committed_slip", label: "vs Committed", getValue: (p) => projectCommittedSlip(p).days },
     { key: "created_at", label: "Created", getValue: (p) => new Date(p.created_at).getTime() },
     { key: "closed_at", label: "Closed", getValue: (p) => (closedAtByProjectId[p.id] ? new Date(closedAtByProjectId[p.id]).getTime() : -1) },
     {
@@ -4598,6 +4659,24 @@ export default function Projects() {
           const label = days > 0 ? `+${days}d late` : `${Math.abs(days)}d early`;
           return <span className={`status-pill ${tone}`}>{label}</span>;
         },
+      },
+      {
+        key: "committed_due_date",
+        label: "Committed Due",
+        defaultWidth: 130,
+        minWidth: 110,
+        render: (t) => {
+          const isParent = t._depth === 0 && hasChildren(t.id);
+          if (isParent) return <span style={{ color: "var(--muted)", fontSize: 11.5 }}>N/A</span>;
+          return committedDateCell(t.committed_due_date, t.committed_due_source);
+        },
+      },
+      {
+        key: "committed_slip",
+        label: "vs Committed",
+        defaultWidth: 140,
+        maxWidth: 170,
+        render: (t) => slipPill(taskCommittedSlip(t)),
       },
       {
         key: "current_due_date",
@@ -5533,6 +5612,8 @@ export default function Projects() {
     { key: "start_date", label: "Start", getValue: (t) => (t.start_date ? new Date(t.start_date).getTime() : null) },
     { key: "timing", label: "Timing", getValue: (t) => (t._depth === 0 && hasChildren(t.id) ? -1 : timingRank(taskTiming(t).label)) },
     { key: "current_due_date", label: "Due", getValue: (t) => (t.current_due_date ? new Date(t.current_due_date).getTime() : null) },
+    { key: "committed_due_date", label: "Committed Due", getValue: (t) => (t.committed_due_date ? new Date(t.committed_due_date).getTime() : null) },
+    { key: "committed_slip", label: "vs Committed", getValue: (t) => taskCommittedSlip(t).days },
     { key: "estimated_hours", label: "Estimated Hours", getValue: (t) => t.estimated_hours ?? null },
     { key: "time_spent_hours", label: "Logged hrs", getValue: (t) => spentHoursFor(t.id) },
     {
