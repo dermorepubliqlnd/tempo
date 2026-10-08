@@ -1,3 +1,4 @@
+import { projectStageOf, PROJECT_STAGE_TONES, PROJECT_STAGE_HINTS } from "../lib/projectStage";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
@@ -272,8 +273,9 @@ export default function ProjectOverview() {
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <h1 style={{ marginBottom: 3 }}>{project.name}</h1>
-            <span className="status-pill" data-tone={displayStatus === "In Progress" ? "accent" : displayStatus === "Completed" ? "success" : displayStatus === "Paused" ? "purple" : "neutral"}>
-              {displayStatus ?? "Not Started"}
+            {/* phase178: one lifecycle -- show the Stage */}
+            <span className={`status-pill ${PROJECT_STAGE_TONES[projectStageOf(project)] ?? "neutral"}`} title={PROJECT_STAGE_HINTS[projectStageOf(project)]}>
+              {projectStageOf(project)}
             </span>
           </div>
           <div style={{ fontSize: 12.5, color: "var(--text-secondary)", maxWidth: 760 }}>{project.description || "No project description yet."}</div>

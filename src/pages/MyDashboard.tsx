@@ -1,3 +1,4 @@
+import { projectStageOf } from "../lib/projectStage";
 import { extensionOutcomeMessage } from "../lib/autoApprovals";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -850,7 +851,13 @@ export default function MyDashboard() {
   // that's Completed and at 100%, please review your WBS and close it").
   const parentTaskIdSet = new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
   const leafTasksOf = (projectId: string) => tasks.filter((t) => t.project_id === projectId && !parentTaskIdSet.has(t.id));
-  const myCompletedProjects = projects.filter((p) => p.owner_id === me?.id && p.status === "Completed" && p.wbs_status !== "closed" && p.wbs_status !== "draft");
+  // phase178 (one lifecycle): Completed is set only by Close Project approval,
+  // so "ready to close" = Active, not ongoing, and every task Done/Cancelled.
+  const myCompletedProjects = projects.filter((p) => {
+    if (p.owner_id !== me?.id || p.is_operational || projectStageOf(p) !== "Active") return false;
+    const leaf = leafTasksOf(p.id).filter((t) => !(t as { is_archived?: boolean }).is_archived);
+    return leaf.length > 0 && leaf.every((t) => t.status === "Done" || t.status === "Cancelled");
+  });
   const completedOpenProjects = myCompletedProjects
     .map((p) => ({ p, open: leafTasksOf(p.id).filter((t) => t.status !== "Done" && t.status !== "Cancelled") }))
     .filter((x) => x.open.length > 0);
@@ -902,14 +909,18 @@ export default function MyDashboard() {
     .map((p) => ({
       p,
       unvalidated: leafTasksOf(p.id).filter((t) => t.status === "Done" && !t.validated_completion_date).length,
-      days: p.completed_at ? Math.max(0, Math.floor((Date.now() - new Date(p.completed_at).getTime()) / 86400000)) : null,
+      days: (() => {
+        const last = projectCompletionDate(p.id, tasks as unknown as TaskRow[], p as unknown as ProjectRow);
+        return last ? Math.max(0, Math.floor((Date.now() - new Date(last + "T00:00:00").getTime()) / 86400000)) : null;
+      })(),
     }));
 
   // phase126p (Sandra 2026-10-01): owner reminder -- every task is Done but
   // the project is still In Progress. Shown to the OWNER regardless of who
   // marked the last task Done. Aging = days since the last task was done.
   const workDoneProjects = projects
-    .filter((p) => p.owner_id === me?.id && p.status === "In Progress" && p.wbs_status !== "closed" && p.wbs_status !== "draft" && actualProgress(p.id, tasks) === 100)
+    // phase178: replaced by "ready to close" (there's no manual Completed any more).
+    .filter(() => false)
     .map((p) => {
       const last = projectCompletionDate(p.id, tasks as unknown as TaskRow[], p as unknown as ProjectRow);
       return { p, last, days: last ? Math.max(0, Math.floor((Date.now() - new Date(last + "T00:00:00").getTime()) / 86400000)) : null };
@@ -1116,7 +1127,7 @@ export default function MyDashboard() {
         >
           <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 0 }}>
             {attentionModal === "ready_to_close"
-              ? "These projects are marked Completed and every task is Done or Cancelled. Review the WBS and request closure. Any Done task still awaiting validation has to be validated first."
+              ? "Every task on these projects is Done or Cancelled. Review the WBS and send the Close Project request -- approval sets the project to Closed. Any Done task still awaiting validation has to be validated first."
               : "These projects are marked Completed but still have open tasks. Finish or cancel those tasks, or set the project back to In Progress."}
           </p>
           {(attentionModal === "ready_to_close" ? readyToCloseProjects : completedOpenProjects).map((x) => (
@@ -1129,7 +1140,7 @@ export default function MyDashboard() {
                 {"open" in x
                   ? `${x.open.length} open task${x.open.length === 1 ? "" : "s"}`
                   : [
-                      x.days !== null ? `Completed ${x.days === 0 ? "today" : `${x.days}d ago`}` : null,
+                      x.days !== null ? `Last task done ${x.days === 0 ? "today" : `${x.days}d ago`}` : null,
                       x.unvalidated > 0 ? `${x.unvalidated} awaiting validation` : "All validated",
                     ]
                       .filter(Boolean)
