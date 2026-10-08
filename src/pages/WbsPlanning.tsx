@@ -1847,7 +1847,12 @@ export default function WbsPlanning() {
       // are now off-limits here; the picker also refuses to offer a
       // parent<->child link at all (isRelatedTask / DependsOnPicker).
       if (hasChildren(t.id)) continue;
-      const depIds = dependsOnIdsFor(t.id);
+      // phase176 HOTFIX (P-0031, 2026-10-08): ignore a link to the task's
+      // OWN parent (or sub-task). Such a link (made before the task was moved
+      // under that parent) made the forecast chase itself -- parent end =
+      // max(children), child start = after parent end -- and the dates grew
+      // on every render. The DB now refuses/drops these links too.
+      const depIds = dependsOnIdsFor(t.id).filter((d) => !isRelatedTask(t.id, d));
       if (!depIds.length) continue;
       for (const mode of MODES.filter((m) => m !== "standard")) {
         const autoField = mode === "full_capacity" ? "start_full_auto" : "start_standard_auto";
