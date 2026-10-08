@@ -26,6 +26,7 @@ import { Plus, Pencil, Trash2, ChevronRight, History, X, Search, Pin, PinOff, Fi
 import { supabase } from "../lib/supabaseClient";
 import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { useSession } from "../lib/useSession";
+import { IS_PREVIEW } from "../lib/supabaseClient";
 import { useConfirm } from "../lib/useConfirm";
 import { friendlyError } from "../lib/prompts";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_ICON_NAMES, CATEGORY_TONE_NAMES, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
@@ -49,6 +50,8 @@ interface KbEntry {
   updated_by: string | null;
   is_pinned: boolean;
   article_number?: number | null;
+  // 2026-10-08 (Sandra): drafts (is_active = false) show in the staging site for Full Access.
+  is_active?: boolean;
 }
 
 // 2026-10-04 (Sandra): permanent KB article IDs, shown as KB-0001.
@@ -348,6 +351,7 @@ function ArticleRow({ entry, category, to, showCategory = true, html }: { entry:
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>
           {kbId(entry) && <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", marginRight: 6, fontVariantNumeric: "tabular-nums" }}>{kbId(entry)}</span>}
+          {entry.is_active === false && <span className="status-pill gold" style={{ fontSize: 9.5, marginRight: 6 }}>DRAFT</span>}
           {entry.title}
         </div>
         {html !== undefined ? (
@@ -442,6 +446,9 @@ const READING_WIDTH = 860;
 
 export default function KnowledgeBase() {
   const { person: me } = useSession();
+  // 2026-10-08 (Sandra: "I cannot see the KB draft in the preview link"):
+  // the staging site shows draft articles to Full Access, marked DRAFT.
+  const showDrafts = IS_PREVIEW && me?.access_level === "full";
   const canEdit = me?.access_level === "full";
   const { confirm, alert, dialog } = useConfirm();
   const navigate = useNavigate();
@@ -466,7 +473,9 @@ export default function KnowledgeBase() {
   async function loadAll() {
     const [{ data: catData }, { data: entryData }, { data: peopleData }] = await Promise.all([
       supabase.from("kb_categories").select("id,name,sort_order,description,icon,color").eq("is_active", true).order("sort_order"),
-      supabase.from("kb_entries").select("id,category_id,title,content,sort_order,updated_at,updated_by,is_pinned,article_number").eq("is_active", true).order("sort_order"),
+      (showDrafts
+        ? supabase.from("kb_entries").select("id,category_id,title,content,sort_order,updated_at,updated_by,is_pinned,article_number,is_active").order("sort_order")
+        : supabase.from("kb_entries").select("id,category_id,title,content,sort_order,updated_at,updated_by,is_pinned,article_number,is_active").eq("is_active", true).order("sort_order")),
       supabase.from("people").select("id,name"),
     ]);
     setCategories((catData as KbCategory[]) ?? []);
@@ -477,7 +486,8 @@ export default function KnowledgeBase() {
 
   useEffect(() => {
     loadAll();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDrafts]);
 
   // Leaving an article/category resets transient edit state.
   useEffect(() => {
@@ -707,6 +717,7 @@ export default function KnowledgeBase() {
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 11, color: "var(--muted)", margin: "12px 0 18px", paddingBottom: 14, borderBottom: "1px solid var(--border)" }}>
                   {kbId(entry) && <span style={{ fontWeight: 600 }}>{kbId(entry)}</span>}
+                  {entry.is_active === false && <span className="status-pill gold" style={{ fontSize: 9.5 }}>DRAFT</span>}
                   <span>Last updated {fmtDate(entry.updated_at)}</span>
                   <span>Updated by {personName(entry.updated_by)}</span>
                   <span>{readMinutes(entry)} min read</span>
