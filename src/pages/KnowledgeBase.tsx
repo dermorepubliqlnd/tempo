@@ -504,8 +504,15 @@ export default function KnowledgeBase() {
       if (!map.has(e.category_id)) map.set(e.category_id, []);
       map.get(e.category_id)!.push(e);
     }
+    // 2026-10-09 (Sandra): Release Notes list the latest release on top
+    // (newest article first); other categories keep their sort order.
+    for (const [catId, list] of map) {
+      if (categories.find((c) => c.id === catId)?.name === "Release Notes") {
+        list.sort((a, b) => (b.article_number ?? 0) - (a.article_number ?? 0));
+      }
+    }
     return map;
-  }, [entries]);
+  }, [entries, categories]);
 
   const personName = (id: string | null) => (id ? people.find((p) => p.id === id)?.name ?? "—" : "—");
 
