@@ -1119,7 +1119,7 @@ export default function WbsPlanning() {
       supabase
         .from("tasks")
         .select(
-          "id,project_id,parent_task_id,name,assignee_id,status,start_date,start_date_full,start_date_standard,start_full_auto,start_standard_auto,manual_end_date,current_due_date,estimated_hours,effort,work_type_id,output_type_id,output_count,cancellation_reason,is_archived,sort_order,actual_completion_date,cancelled_at"
+          "id,project_id,parent_task_id,name,assignee_id,status,due_locked,start_date,start_date_full,start_date_standard,start_full_auto,start_standard_auto,manual_end_date,current_due_date,estimated_hours,effort,work_type_id,output_type_id,output_count,cancellation_reason,is_archived,sort_order,actual_completion_date,cancelled_at"
         )
         .eq("project_id", projectId)
         .eq("is_archived", false)
@@ -4119,6 +4119,11 @@ export default function WbsPlanning() {
     declinedBaselineRequest?.decline_reason,
     !!project.is_operational
   );
+  // 2026-10-09 (Sandra, team ask): a task added AFTER Start Project can have
+  // its Start/End typed until its first Save Changes (due_locked = false);
+  // that save sets its Due date and it locks like every other task.
+  const isUncommittedNewTask = (t: TaskRow) =>
+    project.wbs_status !== "draft" && project.wbs_status !== "closed" && !(t as { due_locked?: boolean }).due_locked && !isLockedStatus(t.status);
   // phase178: one lifecycle -- the page shows the project's Stage.
   const stageLabel: string = pendingBaselineRequest && project.wbs_status === "draft"
     ? "Awaiting Start"
@@ -4573,7 +4578,7 @@ export default function WbsPlanning() {
                 // requests were removed 2026-08-27 the same day Re-baseline
                 // itself was removed entirely, so once locked a Start Date
                 // never moves again for the life of the project.
-                editable={canEditWbs && !isParent && !project!.timelines_locked}
+                editable={canEditWbs && !isParent && (!project!.timelines_locked || isUncommittedNewTask(t))}
                 onCommit={(v) => {
                   // A manual edit here freezes this task's Forecasted date
                   // -- it stops mirroring the capacity queue from now on.
@@ -4653,7 +4658,7 @@ export default function WbsPlanning() {
                 // date behind an empty-looking input. Typing a new value
                 // still only ever writes manual_end_date.
                 value={t.manual_end_date ?? entry.end}
-                editable={canEditWbs && !isParent && !project!.timelines_locked}
+                editable={canEditWbs && !isParent && (!project!.timelines_locked || isUncommittedNewTask(t))}
                 onCommit={(v) => {
                   // Fix 6 (2026-08-31): guard Start > End. Without this,
                   // workingDaysBetween(start, end) returns [end] for an
