@@ -3266,15 +3266,15 @@ export default function Projects() {
           return (
             <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
               <InlineSelect
-                value=""
+                value={stage}
                 editable={actions.length > 0 && canEditStatus(p)}
-                options={actions}
+                options={[stage, ...actions]}
                 renderReadOnly={() => (
                   <span className={`status-pill ${PROJECT_STAGE_TONES[stage] ?? "neutral"}`} title={PROJECT_STAGE_HINTS[stage]}>
                     {stage}
                   </span>
                 )}
-                onCommit={(v) => runStageAction(p, v)}
+                onCommit={(v) => { if (v && v !== stage) runStageAction(p, v); }}
               />
               {badges.map((b) => (
                 <span key={b.label} className={`status-pill ${b.tone}`} style={{ fontSize: 10, flexShrink: 0 }} title={b.hint}>
