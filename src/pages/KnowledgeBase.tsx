@@ -100,7 +100,7 @@ function renderInline(text: string): string {
   // so a property's Options list reads with the same color coding a
   // person would already recognize from the table.
   out = out.replace(
-    /\{(success|warning|danger|neutral|accent|purple|pink|gold|mint|slate|available|blue|skyblue):([^}]+)\}/g,
+    /\{(success|warning|danger|neutral|accent|purple|pink|gold|mint|slate|available|blue|skyblue|orange):([^}]+)\}/g,
     '<span class="status-pill $1">$2</span>'
   );
   return out;
