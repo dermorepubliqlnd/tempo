@@ -2098,7 +2098,7 @@ export default function SiteSettings() {
               <td>
                 <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>Project Phases</div>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
-                  Pipeline stage. Offered on every project's Phase field and the Board's default (Phase) grouping.
+                  Production step of an Active project (Scoping to Delivery). Stage covers Draft and Closed; Done is set by Close Project. Used by the Board's default (Phase) grouping.
                 </div>
               </td>
               <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>{projectPhasesLoading ? "…" : listSummary(projectPhases)}</td>
@@ -2112,9 +2112,7 @@ export default function SiteSettings() {
               <td>
                 <div style={{ fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>Status &rarr; Phase Mapping</div>
                 <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
-                  Which Phases are offered when a project's Status is Not Started or In Progress. (Completed is always
-                  "Done"; Paused/Cancelled always offer every active Phase -- those three aren't editable here.)
-                </div>
+                  Which Phases are offered on Active projects (the In Progress row). Draft projects have no Phase; Done is set when a project is Closed.</div>
               </td>
               <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                 {phaseStatusMapping.length} pairing{phaseStatusMapping.length === 1 ? "" : "s"}
