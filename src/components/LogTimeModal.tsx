@@ -16,7 +16,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useConfirm } from "../lib/useConfirm";
 import { friendlyError } from "../lib/prompts";
 import { formatDate } from "../lib/formatDate";
-import { timeEntryOutcomeMessage } from "../lib/autoApprovals";
+import { timeEntryOutcomeMessage, useAutoTimeHint, formatMins } from "../lib/autoApprovals";
 import { buildHolidayNameMap, nonWorkingDayConfirmMessage, type HolidayNameMap } from "../lib/workingDays";
 import {
   FOLLOW_UP_REASON_LABEL,
@@ -322,6 +322,8 @@ export default function LogTimeModal({
   const end = new Date(`${date}T${endTime}`);
   const validTimes = !isNaN(start.getTime()) && !isNaN(end.getTime());
   const minutes = validTimes ? Math.round((end.getTime() - start.getTime()) / 60000) : 0;
+  // Auto-approval hint (manual entries only; follow-up always needs approval).
+  const autoHint = useAutoTimeHint(personId, date, minutes, !isFollowUp);
 
   function clearMessages() {
     setError(null);
@@ -543,6 +545,17 @@ export default function LogTimeModal({
           </div>
           <div style={{ fontSize: 10.5, color: minutes > 0 ? "var(--muted)" : "var(--danger-text)", marginBottom: 8 }}>
             {minutes > 0 ? `${h > 0 ? `${h}h ` : ""}${m}m` : "The end time must be after the start time, on the same day."}
+            {autoHint && minutes > 0 && (
+              <span style={{ color: autoHint.reason ? "var(--warning-text, #9a6700)" : "var(--success-text, #1a7f37)" }}>
+                {" · "}
+                {autoHint.reason ? `Needs approval: ${autoHint.reason}` : "Will be approved automatically."}
+              </span>
+            )}
+            {autoHint && (
+              <span style={{ display: "block", color: "var(--muted)", marginTop: 2 }}>
+                Auto-approval left this week: {formatMins(autoHint.left)} of 5h
+              </span>
+            )}
           </div>
 
           {mode === "project" && isFollowUp && (
