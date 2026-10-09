@@ -17,6 +17,7 @@ import { useEffect, useState } from "react";
 import { supabase, IS_PREVIEW } from "./supabaseClient";
 import { addDays, isWorkingDay, parseLocalDate, toISO, type HolidaySet } from "./workingDays";
 import { nearestActiveManagerOf, type ChainPerson } from "./approvalRouting";
+import { formatDate } from "./formatDate";
 
 let cached: boolean | null = null;
 export function useAutoApprovalsOn(): boolean {
