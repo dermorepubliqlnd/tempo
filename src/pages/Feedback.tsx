@@ -20,6 +20,8 @@ interface FeedbackRow {
   admin_response: string | null;
   responded_by: string | null;
   responded_at: string | null;
+  target_release_date?: string | null;
+  released_on?: string | null;
 }
 type Status = "New" | "Under review" | "Planned" | "Done" | "Declined" | "Cancelled";
 // Admin-settable statuses. "Cancelled" is set only by the submitter (while New).
@@ -96,7 +98,8 @@ export default function Feedback() {
   }
 
   async function setStatus(r: FeedbackRow, status: Status) {
-    setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, status } : x)));
+    const today = new Date().toISOString().slice(0, 10);
+    setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, status, released_on: status === "Done" && !x.released_on ? today : x.released_on } : x)));
     const { error } = await supabase.from("feedback_requests").update({ status, updated_at: new Date().toISOString() }).eq("id", r.id);
     if (error) {
       setNotice(`Couldn't update status: ${error.message}`);
@@ -127,6 +130,22 @@ export default function Feedback() {
       load();
     }
   }
+
+  // 2026-10-09 (Sandra): target release + released date, shown to everyone.
+  async function setReleaseDate(r: FeedbackRow, field: "target_release_date" | "released_on", value: string) {
+    const v = value || null;
+    setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, [field]: v } : x)));
+    const { error } = await supabase.from("feedback_requests").update({ [field]: v, updated_at: new Date().toISOString() }).eq("id", r.id);
+    if (error) { setNotice(`Couldn't save the date: ${error.message}`); load(); }
+  }
+  const releaseCell = (r: FeedbackRow) =>
+    r.released_on ? (
+      <span className="status-pill success" title="Released">Released {fmtDate(r.released_on + "T00:00:00")}</span>
+    ) : r.target_release_date ? (
+      <span className="status-pill purple" title="Target release">Target {fmtDate(r.target_release_date + "T00:00:00")}</span>
+    ) : (
+      <span style={{ color: "var(--muted)" }}>—</span>
+    );
 
   const cards: { label: string; value: number; icon: typeof Lightbulb; color: string; bg: string }[] = [
     { label: "New", value: count("New"), icon: Lightbulb, color: "#2563eb", bg: "#eaf2ff" },
@@ -223,17 +242,18 @@ export default function Feedback() {
               <th style={{ width: 120 }}>Submitted</th>
               <th>Subject</th>
               <th style={{ width: 210 }}>Status</th>
+              <th style={{ width: 170 }}>Release</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={5} style={{ color: "var(--muted)" }}>Loading…</td>
+                <td colSpan={6} style={{ color: "var(--muted)" }}>Loading…</td>
               </tr>
             )}
             {!loading && visible.length === 0 && (
               <tr>
-                <td colSpan={5} style={{ color: "var(--muted)" }}>
+                <td colSpan={6} style={{ color: "var(--muted)" }}>
                   {rows.length === 0 ? "No requests yet. Use “Submit a request” to share an idea." : "No requests match."}
                 </td>
               </tr>
@@ -282,12 +302,29 @@ export default function Feedback() {
                         )}
                       </div>
                     </td>
+                    <td>{releaseCell(r)}</td>
                   </tr>
                   {open && (
                     <tr>
-                      <td colSpan={5} style={{ background: "var(--hover-bg)", fontSize: 12.5, lineHeight: 1.5, padding: "12px 14px" }}>
+                      <td colSpan={6} style={{ background: "var(--hover-bg)", fontSize: 12.5, lineHeight: 1.5, padding: "12px 14px" }}>
                         <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Details</div>
                         <div style={{ whiteSpace: "pre-wrap", marginBottom: 12 }}>{r.details}</div>
+                        <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Release</div>
+                        {isFullAccess ? (
+                          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 12, fontSize: 12 }}>
+                            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              Target release
+                              <input type="date" value={r.target_release_date ?? ""} onChange={(e) => setReleaseDate(r, "target_release_date", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--border)", borderRadius: 6 }} />
+                            </label>
+                            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              Released on
+                              <input type="date" value={r.released_on ?? ""} onChange={(e) => setReleaseDate(r, "released_on", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--border)", borderRadius: 6 }} />
+                            </label>
+                            <span style={{ fontSize: 11, color: "var(--muted)" }}>Setting the status to Done fills in Released on with today.</span>
+                          </div>
+                        ) : (
+                          <div style={{ marginBottom: 12 }}>{releaseCell(r)}</div>
+                        )}
                         <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Admin response</div>
                         {r.admin_response ? (
                           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px", marginBottom: isFullAccess ? 8 : 0 }}>
