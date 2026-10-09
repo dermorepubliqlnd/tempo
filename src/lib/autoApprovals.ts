@@ -93,6 +93,9 @@ export async function extensionOutcomeMessage(requestId: string | null | undefin
   if (r.auto_approved && r.status === "Approved") {
     return { title: "Extension approved automatically", message: `The new due date is ${r.requested_new_due_date}. A first extension of 2 working days or less that doesn't move the project end date is approved automatically.`, items: ["Your supervisor still sees it in their Auto-approved list."] };
   }
+  if (r.status === "Approved") {
+    return { title: "Extension approved", message: `The new due date is ${r.requested_new_due_date}. There's no one above you in the reporting line, so it's approved automatically.` };
+  }
   return { ...fallback, items: r.auto_check_note ? [`**Why it needs approval:** ${r.auto_check_note}.`] : undefined };
 }
 
@@ -101,10 +104,15 @@ export async function timeEntryOutcomeMessage(entryId: string | null | undefined
   const items = clampedNote ? [clampedNote] : undefined;
   const pending = { title: "Time entry sent for approval", message: "Your supervisor reviews it in Approval Center.", items };
   if (!entryId) return pending;
-  const { data } = await supabase.from("time_entries").select("status, auto_approved").eq("id", entryId).maybeSingle();
-  const r = data as { status: string; auto_approved?: boolean } | null;
+  const { data } = await supabase.from("time_entries").select("status, auto_approved, decision_notes").eq("id", entryId).maybeSingle();
+  const r = data as { status: string; auto_approved?: boolean; decision_notes?: string | null } | null;
   if (r?.auto_approved && r.status === "approved") {
     return { title: "Time entry approved automatically", message: "Entries of 2 hours or less, logged within 2 working days, are approved automatically (up to 5 hours a week).", items };
+  }
+  // Top of the reporting line (phase121): no one above to review it, so the
+  // DB approves it on insert. Say so instead of "sent for approval".
+  if (r?.status === "approved" || r?.status === "confirmed") {
+    return { title: "Time logged", message: "Approved automatically. There's no one above you in the reporting line to review it.", items };
   }
   return pending;
 }
