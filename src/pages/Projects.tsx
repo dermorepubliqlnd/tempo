@@ -39,7 +39,7 @@ import { PROJECT_PRIORITY_SYMBOLS, PROJECT_EFFORT_LEVEL_SYMBOLS } from "../lib/n
 import type { ColumnDef, GroupOption, SortOption, TableView } from "../lib/tableTypes";
 import { sortRows, sortRowsHierarchical, visibleOrderedColumns, resolveFilterPersonIds, GROUP_EXCLUDE } from "../lib/tableTypes";
 import { formatDate } from "../lib/formatDate";
-import { extensionOutcomeMessage } from "../lib/autoApprovals";
+import { selfApprovedExtensionConfirm, extensionOutcomeMessage } from "../lib/autoApprovals";
 import { useNavAccess } from "../lib/navAccess";
 import RecycleBinLink from "../components/RecycleBinLink";
 import { WBS_STATUS_META, wbsStatusMetaFor, type WbsStatus } from "../lib/wbsStatus";
@@ -2487,6 +2487,8 @@ export default function Projects() {
   // project owner (or their manager, if the owner is the requester) or
   // Full Access approves it on the Extension Requests page.
   async function submitExtensionRequest(task: TaskWithDepth, newDueDate: string, reasonCategory: string, reasonNotes: string) {
+    const selfConfirm = await selfApprovedExtensionConfirm(me?.id, task, newDueDate);
+    if (selfConfirm && !(await confirm(selfConfirm))) return;
     const { data: inserted, error } = await supabase.from("extension_requests").insert({
       task_id: task.id,
       requested_by: me?.id,

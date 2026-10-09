@@ -88,9 +88,13 @@ export async function runAutoValidations(projectId: string, ignoreWait: boolean)
 export async function extensionOutcomeMessage(requestId: string | null | undefined): Promise<{ title: string; message: string; items?: string[] }> {
   const fallback = { title: "Extension request sent", message: "Your supervisor reviews it in Approval Center. The due date changes once it's approved." };
   if (!requestId) return fallback;
-  const { data } = await supabase.from("extension_requests").select("status, auto_approved, auto_check_note, requested_new_due_date").eq("id", requestId).maybeSingle();
-  const r = data as { status: string; auto_approved?: boolean; auto_check_note?: string | null; requested_new_due_date: string } | null;
+  const { data } = await supabase.from("extension_requests").select("status, auto_approved, auto_check_note, requested_new_due_date, decision_notes").eq("id", requestId).maybeSingle();
+  const r = data as { status: string; auto_approved?: boolean; auto_check_note?: string | null; requested_new_due_date: string; decision_notes?: string | null } | null;
   if (!r) return fallback;
+  // phase182: no one above the requester -> approved on submit.
+  if (r.status === "Approved" && (r.decision_notes ?? "").includes("no one above")) {
+    return { title: "Extension approved", message: `The new due date is ${formatDate(r.requested_new_due_date)}. Dependent tasks moved with it.`, items: ["It's recorded in the project's Audit Trail."] };
+  }
   if (r.auto_approved && r.status === "Approved") {
     return { title: "Extension approved automatically", message: `The new due date is ${r.requested_new_due_date}. A first extension of 2 working days or less that doesn't move the project end date is approved automatically.`, items: ["Your supervisor still sees it in their Auto-approved list."] };
   }
@@ -249,4 +253,25 @@ export function useAutoTimeHint(personId: string, workDate: string, minutes: num
   if (!enabled || !base?.on || base.top || used === null || !workDate) return null;
   const reason = minutes > 0 ? manualTimeReason({ minutes, workDate, today: toISO(new Date()), usedThisWeek: used, holidays: base.holidays }) : null;
   return { left: Math.max(0, AUTO_TIME_WEEK_CAP_MIN - used), reason };
+}
+
+/** phase182: someone with no one above them in the reporting line gets their
+ * extension approved on submit, so ask them to confirm first. Returns null
+ * (no confirm needed) for everyone else. */
+export async function selfApprovedExtensionConfirm(
+  personId: string | null | undefined,
+  task: { name: string; current_due_date: string | null },
+  newDueDate: string
+): Promise<{ title: string; message: string; items?: string[]; confirmLabel: string } | null> {
+  if (!personId || !task.current_due_date) return null;
+  if (!(await isTopOfChain(personId))) return null;
+  const holidays = await loadHolidaySet();
+  const due = task.current_due_date.slice(0, 10);
+  const wd = workingDaysAfter(due, newDueDate, holidays);
+  const items = [
+    `**${formatDate(due)} → ${formatDate(newDueDate)}** (${wd} working day${wd === 1 ? "" : "s"}).`,
+    "There's no one above you in the reporting line, so it's approved as soon as you confirm. Dependent tasks move with it.",
+  ];
+  if (wd > 2) items.unshift(`You're requesting more than 2 working days (${wd}).`);
+  return { title: `Extend "${task.name}"?`, message: "Check the new due date before you confirm.", items, confirmLabel: "Confirm extension" };
 }

@@ -1,5 +1,5 @@
 import { projectStageOf } from "../lib/projectStage";
-import { extensionOutcomeMessage } from "../lib/autoApprovals";
+import { selfApprovedExtensionConfirm, extensionOutcomeMessage } from "../lib/autoApprovals";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -654,6 +654,8 @@ export default function MyDashboard() {
   const pendingExtTaskIds = new Set(extensions.filter((e) => e.requester?.id === me?.id && e.task?.id).map((e) => e.task!.id));
   async function submitExtension(newDueDate: string, reasonCategory: string, reasonNotes: string) {
     if (!extensionTask || !me) return;
+    const selfConfirm = await selfApprovedExtensionConfirm(me.id, extensionTask, newDueDate);
+    if (selfConfirm && !(await confirm(selfConfirm))) return;
     const { data: inserted, error } = await supabase.from("extension_requests").insert({
       task_id: extensionTask.id,
       requested_by: me.id,
