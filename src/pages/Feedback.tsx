@@ -49,6 +49,9 @@ export default function Feedback() {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // 2026-10-09 (Sandra): Planned needs a Target release date.
+  const [planFor, setPlanFor] = useState<FeedbackRow | null>(null);
+  const [planDate, setPlanDate] = useState("");
 
   async function load() {
     setLoading(true);
@@ -97,10 +100,17 @@ export default function Feedback() {
     load();
   }
 
-  async function setStatus(r: FeedbackRow, status: Status) {
+  async function setStatus(r: FeedbackRow, status: Status, targetDate?: string) {
+    if (status === "Planned" && !targetDate) {
+      setPlanDate(r.target_release_date ?? "");
+      setPlanFor(r);
+      return;
+    }
     const today = new Date().toISOString().slice(0, 10);
-    setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, status, released_on: status === "Done" && !x.released_on ? today : x.released_on } : x)));
-    const { error } = await supabase.from("feedback_requests").update({ status, updated_at: new Date().toISOString() }).eq("id", r.id);
+    const patch: Record<string, string> = { status, updated_at: new Date().toISOString() };
+    if (targetDate) patch.target_release_date = targetDate;
+    setRows((prev) => prev.map((x) => (x.id === r.id ? { ...x, status, target_release_date: targetDate ?? x.target_release_date, released_on: status === "Done" && !x.released_on ? today : x.released_on } : x)));
+    const { error } = await supabase.from("feedback_requests").update(patch).eq("id", r.id);
     if (error) {
       setNotice(`Couldn't update status: ${error.message}`);
       load();
@@ -143,6 +153,14 @@ export default function Feedback() {
       <span className="status-pill success" title="Released">Released {fmtDate(r.released_on + "T00:00:00")}</span>
     ) : r.target_release_date ? (
       <span className="status-pill purple" title="Target release">Target {fmtDate(r.target_release_date + "T00:00:00")}</span>
+    ) : isFullAccess && r.status === "Planned" ? (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setPlanDate(""); setPlanFor(r); }}
+        style={{ fontSize: 11, border: "1px dashed #7c3aed", background: "none", color: "#7c3aed", borderRadius: 6, padding: "2px 8px", cursor: "pointer", width: "auto" }}
+      >
+        + Set target
+      </button>
     ) : (
       <span style={{ color: "var(--muted)" }}>—</span>
     );
@@ -368,6 +386,32 @@ export default function Feedback() {
         </table>
       </div>
 
+      {planFor && (
+        <Modal title="Set a target release" onClose={() => setPlanFor(null)} width={420}>
+          <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
+            <div>
+              <b>FB-{String(planFor.request_number).padStart(4, "0")}</b> {planFor.subject}
+            </div>
+            <div style={{ color: "var(--muted)" }}>Planned requests show their target release to everyone on this page.</div>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>Target release date (required)</span>
+              <input type="date" value={planDate} onChange={(e) => setPlanDate(e.target.value)} style={{ fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }} />
+            </label>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" className="btn-secondary" onClick={() => setPlanFor(null)} style={{ width: "auto" }}>Cancel</button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={!planDate}
+                onClick={() => { const r = planFor; setPlanFor(null); void setStatus(r, "Planned", planDate); }}
+                style={{ width: "auto" }}
+              >
+                {planFor.status === "Planned" ? "Save target" : "Mark as Planned"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {formOpen && (
         <Modal title="Submit a request" onClose={() => setFormOpen(false)} width={520}>
           <div style={{ display: "grid", gap: 12 }}>
