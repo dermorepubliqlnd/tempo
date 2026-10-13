@@ -879,6 +879,8 @@ export default function WbsPlanning() {
   const [milestones, setMilestones] = useState<ProjectMilestone[]>([]);
   const [milestoneDeps, setMilestoneDeps] = useState<MilestoneDependency[]>([]);
   const [taskPhaseById, setTaskPhaseById] = useState<Map<string, string | null>>(new Map());
+  // phase187: task descriptions (shown on hover next to the task name).
+  const [taskDescById, setTaskDescById] = useState<Map<string, string>>(new Map());
   const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());
   const [milestonePicker, setMilestonePicker] = useState<{ milestoneId: string; x: number; y: number } | null>(null);
   const isLifecycle = lifecycleVersion === 2;
@@ -1133,12 +1135,13 @@ export default function WbsPlanning() {
     const [{ data: lp }, { data: ms }, { data: tp }] = await Promise.all([
       supabase.from("lifecycle_phases").select("*").order("sort_order"),
       supabase.from("project_milestones").select("*").eq("project_id", projectId).order("sort_order"),
-      taskIds.length ? supabase.from("tasks").select("id,wbs_phase").in("id", taskIds) : Promise.resolve({ data: [] as { id: string; wbs_phase: string | null }[] }),
+      taskIds.length ? supabase.from("tasks").select("id,wbs_phase,description").in("id", taskIds) : Promise.resolve({ data: [] as { id: string; wbs_phase: string | null; description: string | null }[] }),
     ]);
     if (lp && (lp as LifecyclePhase[]).length) setLifecyclePhases(lp as LifecyclePhase[]);
     const msRows = (ms as ProjectMilestone[]) ?? [];
     setMilestones(msRows);
     setTaskPhaseById(new Map(((tp as { id: string; wbs_phase: string | null }[]) ?? []).map((r) => [r.id, r.wbs_phase])));
+    setTaskDescById(new Map(((tp as { id: string; description: string | null }[]) ?? []).filter((r) => r.description).map((r) => [r.id, r.description as string])));
     if (msRows.length) {
       const { data: md } = await supabase.from("milestone_dependencies").select("milestone_id,task_id").in("milestone_id", msRows.map((m) => m.id));
       setMilestoneDeps((md as MilestoneDependency[]) ?? []);
@@ -7590,6 +7593,11 @@ export default function WbsPlanning() {
                               }}
                             />
                           </div>
+                          {taskDescById.get(t.id) && (
+                            <span title={taskDescById.get(t.id)} style={{ display: "inline-flex", flexShrink: 0, color: "var(--muted)", cursor: "help" }}>
+                              <Info size={12} />
+                            </span>
+                          )}
                           {!!wbsNoteCounts.byTask[t.id] && (
                             <button
                               type="button"

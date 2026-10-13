@@ -267,6 +267,8 @@ export interface TaskRow {
   project_id: string;
   /** R2.1 (phase183): lifecycle phase group, new-lifecycle projects only. */
   wbs_phase?: string | null;
+  /** phase187: optional description, shown on hover next to the task name. */
+  description?: string | null;
   parent_task_id: string | null;
   name: string;
   status: string | null;
@@ -4288,6 +4290,11 @@ export default function Projects() {
                     -- structural additions belong in WBS Planning. */}
                 <InlineText value={t.name} editable={false} bold={t._depth === 0} onCommit={(v) => updateTask(t.id, { name: v })} />
               </div>
+              {t.description && (
+                <span title={t.description} style={{ display: "inline-flex", flexShrink: 0, color: "var(--muted)", cursor: "help", marginRight: 2 }}>
+                  <Info size={12} />
+                </span>
+              )}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
