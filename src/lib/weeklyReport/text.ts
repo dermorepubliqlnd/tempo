@@ -106,7 +106,7 @@ export type ActiveLine =
   | { kind: "group"; label: string; operational: boolean; count: number; cont: boolean }
   | { kind: "row"; row: WeeklyReportData["activeList"]["groups"][number]["rows"][number]; operational: boolean };
 /** Page 1 holds the KPI cards, so it takes fewer lines. */
-export const ACTIVE_LINES_FIRST_PAGE = 12;
+export const ACTIVE_LINES_FIRST_PAGE = 11;
 export function paginateActiveList(d: WeeklyReportData, per = ACTIVE_LINES_PER_PAGE, first = ACTIVE_LINES_FIRST_PAGE): ActiveLine[][] {
   const pages: ActiveLine[][] = [];
   let cur: ActiveLine[] = [];

@@ -362,8 +362,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     for (const g of d.activeList.groups) groupColor.set(g.label, g.operational ? B.clarify : GROUP_COLORS[gi++ % GROUP_COLORS.length]);
     const X0 = 0.33, W = 12.67;
     const cols: { key: string; label: string; w: number; align?: "left" | "right" | "center" }[] = [
-      { key: "num", label: "#", w: 0.55 },
-      { key: "name", label: "Project", w: 4.6 },
+      { key: "name", label: "Project", w: 5.15 },
       { key: "category", label: "Category", w: 2.0 },
       { key: "planning", label: "Planning", w: 0.95 },
       { key: "health", label: "Health", w: 1.45 },
@@ -377,22 +376,42 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     pages.forEach((lines, pi) => {
       const multi = pages.length > 1;
       const s = content(`Appendix · Active projects${multi ? ` · ${pi + 1} of ${pages.length}` : ""}`, `${t.titles.activeList}${pi ? " (cont.)" : ""}`, pi === 0 ? "activeList" : undefined);
-      // KPI cards on the first page (Sandra 2026-10-13): total active, one per group, overdue.
+      // Page 1 top band (Sandra 2026-10-13): KPI cards (total + one per
+      // Project Type group) on the left, Category distribution doughnut right.
       let HY = 1.5;
       if (pi === 0) {
         const al = d.activeList;
-        const kp: [string, string, string][] = [["Total active projects", String(al.total), B.onyx]];
+        const BY = 1.42, BH = 1.2;
+        const kp: [string, string, string][] = [["Total active projects", String(al.total), B.mahogany]];
         for (const g of al.groups) if (g.rows.length && kp.length < 5) kp.push([g.label, String(g.rows.length), groupColor.get(g.label) ?? B.taupe]);
-        kp.push(["Overdue", String(al.overdue), al.overdue ? B.renew : B.taupe]);
-        const gap = 0.15, kw = (W - gap * (kp.length - 1)) / kp.length;
+        const KW = 7.1, gap = 0.15, kw = (KW - gap * (kp.length - 1)) / kp.length;
         kp.forEach(([lab, val, col], i) => {
           const x = X0 + i * (kw + gap);
-          box(s, x, 1.45, kw, 0.8, i === 0 ? B.panel : B.white);
-          box(s, x, 1.45, 0.07, 0.8, i === 0 ? B.mahogany : col, null, false);
-          txt(s, x + 0.2, 1.47, kw - 1.1, 0.76, lab, { fontSize: 10.5, color: B.mahogany, valign: "middle" });
-          txt(s, x + kw - 1.0, 1.47, 0.85, 0.76, val, { fontFace: FB, fontSize: 26, color: i === 0 ? B.onyx : col === B.taupe ? B.onyx : col, align: "right", valign: "middle" });
+          box(s, x, BY, kw, BH, i === 0 ? B.panel : B.white);
+          box(s, x, BY, 0.07, BH, col, null, false);
+          txt(s, x + 0.2, BY + 0.1, kw - 0.3, 0.45, lab, { fontSize: 10, color: B.mahogany, valign: "top", fit: "shrink" });
+          txt(s, x + 0.2, BY + 0.52, kw - 0.3, 0.6, val, { fontFace: FB, fontSize: 28, color: B.onyx, valign: "middle" });
         });
-        HY = 2.4;
+        // Category distribution
+        const cx = X0 + KW + 0.2, cw = W - KW - 0.2;
+        box(s, cx, BY, cw, BH);
+        const cc = new Map<string, number>();
+        for (const g of al.groups) for (const r of g.rows) cc.set(r.category, (cc.get(r.category) ?? 0) + 1);
+        const cats = Array.from(cc.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+        const CAT_COLORS = [B.hydrate, B.calm, B.clarify, B.rewind, B.protect, B.repair, B.brighten, B.taupe];
+        const shown = cats.length > 6 ? [...cats.slice(0, 5), ["Other", cats.slice(5).reduce((n, c) => n + c[1], 0)] as [string, number]] : cats;
+        const colOf = (i: number) => (shown[i][0] === "Other" ? B.linen : CAT_COLORS[i % CAT_COLORS.length]);
+        addChart(s, pptx.ChartType.doughnut, [{ name: "Category", labels: shown.map((c) => c[0]), values: shown.map((c) => c[1]) }],
+          { x: cx + 0.05, y: BY + 0.05, w: 1.1, h: 1.1, holeSize: 58, showLegend: false, showValue: false, showPercent: false, showTitle: false, chartColors: shown.map((_, i) => colOf(i)), dataBorder: { pt: 1, color: B.white } });
+        txt(s, cx + 1.2, BY + 0.05, cw - 1.3, 0.26, "By category", { fontFace: FB, fontSize: 9.5, color: B.onyx });
+        const lw = (cw - 1.3) / 2;
+        shown.forEach(([lab, n], i) => {
+          const lx = cx + 1.2 + Math.floor(i / 3) * lw, ly = BY + 0.33 + (i % 3) * 0.27;
+          box(s, lx, ly + 0.08, 0.11, 0.11, colOf(i), null, false);
+          txt(s, lx + 0.15, ly, lw - 0.45, 0.27, cut(lab, 26), { fontSize: 8, color: B.mahogany, valign: "middle" });
+          txt(s, lx + lw - 0.38, ly, 0.33, 0.27, String(n), { fontFace: FB, fontSize: 8.5, align: "right", valign: "middle" });
+        });
+        HY = BY + BH + 0.15;
       }
       // column header
       box(s, X0, HY, W, 0.3, B.linen, null, false);
@@ -412,8 +431,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
         const r = ln.row;
         if (zebra++ % 2) box(s, X0, y, W, LH, B.clinical, null, false);
         const cell = (k: string, text: string | Run[], o: Record<string, unknown> = {}) => txt(s, colX[k] + 0.04, y, colW(k) - 0.08, LH, text, { fontSize: 9, valign: "middle", ...o });
-        cell("num", r.num != null ? String(r.num) : "", { color: B.taupe });
-        cell("name", cut(r.name, 62));
+        cell("name", cut(r.name, 70));
         cell("category", cut(r.category, 28), { color: B.mahogany });
         cell("planning", r.planning, { color: B.mahogany });
         cell("health", r.health, { fontFace: FB, color: HC[r.health] ?? B.mahogany });
