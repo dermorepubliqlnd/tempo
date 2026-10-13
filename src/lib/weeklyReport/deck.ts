@@ -363,9 +363,8 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     const X0 = 0.33, W = 12.67;
     const cols: { key: string; label: string; w: number; align?: "left" | "right" | "center" }[] = [
       { key: "num", label: "#", w: 0.55 },
-      { key: "name", label: "Project", w: 3.75 },
-      { key: "owner", label: "Owner", w: 1.25 },
-      { key: "category", label: "Category", w: 1.6 },
+      { key: "name", label: "Project", w: 4.6 },
+      { key: "category", label: "Category", w: 2.0 },
       { key: "planning", label: "Planning", w: 0.95 },
       { key: "health", label: "Health", w: 1.45 },
       { key: "progress", label: "Progress", w: 1.75 },
@@ -374,13 +373,31 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     const colX: Record<string, number> = {};
     { let x = X0; for (const c of cols) { colX[c.key] = x; x += c.w; } }
     const colW = (k: string) => cols.find((c) => c.key === k)!.w;
-    const LH = 0.295, Y0 = 1.82;
+    const LH = 0.295;
     pages.forEach((lines, pi) => {
       const multi = pages.length > 1;
       const s = content(`Appendix · Active projects${multi ? ` · ${pi + 1} of ${pages.length}` : ""}`, `${t.titles.activeList}${pi ? " (cont.)" : ""}`, pi === 0 ? "activeList" : undefined);
+      // KPI cards on the first page (Sandra 2026-10-13): total active, one per group, overdue.
+      let HY = 1.5;
+      if (pi === 0) {
+        const al = d.activeList;
+        const kp: [string, string, string][] = [["Total active projects", String(al.total), B.onyx]];
+        for (const g of al.groups) if (g.rows.length && kp.length < 5) kp.push([g.label, String(g.rows.length), groupColor.get(g.label) ?? B.taupe]);
+        kp.push(["Overdue", String(al.overdue), al.overdue ? B.renew : B.taupe]);
+        const gap = 0.15, kw = (W - gap * (kp.length - 1)) / kp.length;
+        kp.forEach(([lab, val, col], i) => {
+          const x = X0 + i * (kw + gap);
+          box(s, x, 1.45, kw, 0.8, i === 0 ? B.panel : B.white);
+          box(s, x, 1.45, 0.07, 0.8, i === 0 ? B.mahogany : col, null, false);
+          txt(s, x + 0.2, 1.47, kw - 1.1, 0.76, lab, { fontSize: 10.5, color: B.mahogany, valign: "middle" });
+          txt(s, x + kw - 1.0, 1.47, 0.85, 0.76, val, { fontFace: FB, fontSize: 26, color: i === 0 ? B.onyx : col === B.taupe ? B.onyx : col, align: "right", valign: "middle" });
+        });
+        HY = 2.4;
+      }
       // column header
-      box(s, X0, 1.5, W, 0.3, B.linen, null, false);
-      for (const c of cols) txt(s, colX[c.key] + 0.04, 1.5, c.w - 0.08, 0.3, c.label, { fontFace: FB, fontSize: 9, color: B.mahogany, valign: "middle", align: c.align ?? "left" });
+      box(s, X0, HY, W, 0.3, B.linen, null, false);
+      for (const c of cols) txt(s, colX[c.key] + 0.04, HY, c.w - 0.08, 0.3, c.label, { fontFace: FB, fontSize: 9, color: B.mahogany, valign: "middle", align: c.align ?? "left" });
+      const Y0 = HY + 0.32;
       let zebra = 0;
       lines.forEach((ln, li) => {
         const y = Y0 + li * LH;
@@ -396,9 +413,8 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
         if (zebra++ % 2) box(s, X0, y, W, LH, B.clinical, null, false);
         const cell = (k: string, text: string | Run[], o: Record<string, unknown> = {}) => txt(s, colX[k] + 0.04, y, colW(k) - 0.08, LH, text, { fontSize: 9, valign: "middle", ...o });
         cell("num", r.num != null ? String(r.num) : "", { color: B.taupe });
-        cell("name", cut(r.name, 50));
-        cell("owner", cut(r.owner, 18), { color: B.mahogany });
-        cell("category", cut(r.category, 22), { color: B.mahogany });
+        cell("name", cut(r.name, 62));
+        cell("category", cut(r.category, 28), { color: B.mahogany });
         cell("planning", r.planning, { color: B.mahogany });
         cell("health", r.health, { fontFace: FB, color: HC[r.health] ?? B.mahogany });
         // progress bar + %
@@ -411,7 +427,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
         if (r.moved) runs.push({ text: `  +${r.moved}d`, options: { fontFace: F, fontSize: 8, color: B.renew } });
         cell("target", runs);
       });
-      txt(s, X0, 6.42, W, 0.3, rich([["How to read: ", true], ["Progress = Actual Progress in Tempo (hours-weighted task completion) · Target = current End Date, red when past · +Nd = days moved from the date committed at Start Project · as of " + fmtMD(d.generatedOn), false]], 8.5, B.taupe), { valign: "middle" });
+      txt(s, X0, 6.42, W, 0.3, rich([["How to read: ", true], ["Sorted by Health, then Progress (highest first), then Target · Progress = Actual Progress in Tempo · red = past target · +Nd = days moved since Start Project · as of " + fmtMD(d.generatedOn), false]], 8.5, B.taupe), { valign: "middle" });
     });
   }
 

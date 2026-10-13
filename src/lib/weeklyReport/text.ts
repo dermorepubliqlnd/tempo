@@ -84,7 +84,7 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
         ? `${plural(d.training.thisWeek, "session")} scheduled this week`
         : "No training sessions logged last week",
       appendix: "Overall portfolio mix — all projects to date",
-      activeList: `${d.activeList.total} active projects: ${d.activeList.project} project work, ${d.activeList.operational} operational`,
+      activeList: "Where every active project stands: progress and target completion",
     },
     cards: [
       { tag: "DELIVERY · LAST WEEK", head: `${plural(nDone, "project")} completed`, bullets: deliveryBul, color: B.calm },
@@ -105,16 +105,19 @@ export const ACTIVE_LINES_PER_PAGE = 15;
 export type ActiveLine =
   | { kind: "group"; label: string; operational: boolean; count: number; cont: boolean }
   | { kind: "row"; row: WeeklyReportData["activeList"]["groups"][number]["rows"][number]; operational: boolean };
-export function paginateActiveList(d: WeeklyReportData, per = ACTIVE_LINES_PER_PAGE): ActiveLine[][] {
+/** Page 1 holds the KPI cards, so it takes fewer lines. */
+export const ACTIVE_LINES_FIRST_PAGE = 12;
+export function paginateActiveList(d: WeeklyReportData, per = ACTIVE_LINES_PER_PAGE, first = ACTIVE_LINES_FIRST_PAGE): ActiveLine[][] {
   const pages: ActiveLine[][] = [];
   let cur: ActiveLine[] = [];
+  const cap = () => (pages.length ? per : first);
   const flush = () => { if (cur.length) pages.push(cur); cur = []; };
   for (const g of d.activeList.groups) {
     if (!g.rows.length) continue;
-    if (per - cur.length < 2) flush();
+    if (cap() - cur.length < 2) flush();
     cur.push({ kind: "group", label: g.label, operational: g.operational, count: g.rows.length, cont: false });
     for (const r of g.rows) {
-      if (cur.length >= per) { flush(); cur.push({ kind: "group", label: g.label, operational: g.operational, count: g.rows.length, cont: true }); }
+      if (cur.length >= cap()) { flush(); cur.push({ kind: "group", label: g.label, operational: g.operational, count: g.rows.length, cont: true }); }
       cur.push({ kind: "row", row: r, operational: g.operational });
     }
   }

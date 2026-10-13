@@ -663,7 +663,12 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       daysLate: !isOpA(p) && target && target < todayIso ? daysBetween(target, todayIso) : 0,
     };
   };
-  const byTarget = (a: ActiveRow, b: ActiveRow) => (a.target || "9999").localeCompare(b.target || "9999") || a.name.localeCompare(b.name);
+  // Sandra 2026-10-13: sort = Health (needs attention first), then Actual
+  // Progress high to low, then Target completion (earliest first).
+  const HEALTH_RANK = ["Overdue", "Off track", "At risk", "Schedule review", "On track", "Done late · close pending", "Done on time · close pending", "Not started", "Ongoing"];
+  const hRank = (h: string) => { const i = HEALTH_RANK.indexOf(h); return i < 0 ? HEALTH_RANK.length : i; };
+  const byTarget = (a: ActiveRow, b: ActiveRow) =>
+    hRank(a.health) - hRank(b.health) || (b.progress ?? -1) - (a.progress ?? -1) || (a.target || "9999").localeCompare(b.target || "9999") || a.name.localeCompare(b.name);
   const activeGroups: ActiveGroup[] = [];
   const opRows = activeAll.filter(isOp).map(activeRow).sort(byTarget);
   if (opRows.length) activeGroups.push({ label: "Operational", operational: true, rows: opRows });
@@ -743,7 +748,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     appendix: `All projects to date (excluding Cancelled) by Project Type, Planned vs Ad Hoc.${overall.untyped ? ` ${overall.untyped} project(s) have no Project Type yet: ${live.filter((p) => typeOf(p) === "No type").map((p) => p.name).slice(0, 8).join(", ")}.` : ""}`,
     activeList: [
       `All ${activeAll.length} active projects as of ${md(todayIso)} (In Progress, Start Project approved). Operational = ongoing containers such as Training Delivery; the rest are grouped by Project Type. Progress = Actual Progress (hours-weighted task completion). Target = current End Date; "+Nd" = days moved from the date committed at Start Project.`,
-      ...activeGroups.map((g) => `${g.label} (${g.rows.length}):\n${bl(g.rows.map((r) => `${r.name} — ${r.owner}; ${r.progress ?? "–"}% · target ${md(r.target)}${r.moved ? ` (committed ${md(r.committed)})` : ""}${r.daysLate ? `; ${r.daysLate} days past target` : ""}`))}`),
+      ...activeGroups.map((g) => `${g.label} (${g.rows.length}):\n${bl(g.rows.map((r) => `${r.name} — ${r.health}; ${r.progress ?? "–"}% · target ${md(r.target)}${r.moved ? ` (committed ${md(r.committed)})` : ""}${r.daysLate ? `; ${r.daysLate} days past target` : ""}`))}`),
     ].join("\n"),
   };
 
