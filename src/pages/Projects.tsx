@@ -269,6 +269,8 @@ export interface TaskRow {
   wbs_phase?: string | null;
   /** phase187: optional description, shown on hover next to the task name. */
   description?: string | null;
+  /** phase188: how many times a reviewer returned this task. */
+  revision_count?: number | null;
   parent_task_id: string | null;
   name: string;
   status: string | null;
@@ -537,13 +539,13 @@ const TASK_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["project", "timing_variance_days",
 // own Calendar view doesn't support grouping either -- confirmed with
 // Sandra, not building it).
 const TASK_CALENDAR_DEFAULT_HIDDEN_COLUMNS = ["status", "timing", "validated_completion_date", "validated_by", "actual_completion_date", "estimated_hours", "time_spent_hours", "timing_variance_days", "hours_variance", "hours_variance_pct", "work_type", "output_type", "output_count"];
-const TASK_COLUMN_ORDER = ["name", "task_number", "project", "assignee", "status", "readiness", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "time_log_status", "effort", "timing_variance_days", "due_date_ext", "committed_due_date", "committed_slip", "work_type", "output_type", "output_count", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
+const TASK_COLUMN_ORDER = ["name", "task_number", "project", "assignee", "status", "readiness", "revision_count", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "time_log_status", "effort", "timing_variance_days", "due_date_ext", "committed_due_date", "committed_slip", "work_type", "output_type", "output_count", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
 
 // 2026-10-04 (Sandra): Tasks system views answer "what needs doing, by whom,
 // and when" -- project health/progress stays on Projects + Overview.
 // System groups: "my" -> My Tasks (incl. the owner lens over projects I
 // own), "organization" -> Team Views. Personal views land under My Views.
-const TASK_SYS_LEAD = ["task_number", "name", "project", "assignee", "status", "readiness", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext", "actual_completion_date", "validated_completion_date", "validated_by", "hours_variance"];
+const TASK_SYS_LEAD = ["task_number", "name", "project", "assignee", "status", "readiness", "revision_count", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext", "actual_completion_date", "validated_completion_date", "validated_by", "hours_variance"];
 const TASK_SYSTEM_COLUMN_ORDER = [...TASK_SYS_LEAD, ...TASK_COLUMN_ORDER.filter((k) => !TASK_SYS_LEAD.includes(k))];
 const TASK_MY_VISIBLE = new Set(["task_number", "name", "project", "status", "readiness", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext"]);
 const TASK_TEAM_VISIBLE = new Set([...TASK_MY_VISIBLE, "assignee"]);
@@ -1435,6 +1437,14 @@ export default function Projects() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   // R1 Actionable To-Do: Depends-on links, read-only here.
   const [taskDeps, setTaskDeps] = useState<ReadinessDep[]>([]);
+  // phase188 Return / request revision: latest "returned" event per task.
+  type ReturnEvent = { task_id: string; comment: string | null; round: number; actor_id: string | null; created_at: string };
+  const [lastReturnByTask, setLastReturnByTask] = useState<Map<string, ReturnEvent>>(new Map());
+  const [returnDialog, setReturnDialog] = useState<{ reviewTaskId: string; reviewName: string; candidates: { id: string; name: string }[] } | null>(null);
+  const [returnTarget, setReturnTarget] = useState<string>("");
+  const [returnComment, setReturnComment] = useState("");
+  const [returnBusy, setReturnBusy] = useState(false);
+  const [returnError, setReturnError] = useState("");
   const [people, setPeople] = useState<PersonOption[]>([]);
   const assigneePicker = useAssigneePicker(people);
   const startDatePrompt = useProjectStartDatePrompt();
@@ -1798,6 +1808,11 @@ export default function Projects() {
     setProjects(nextProjects);
     setTasks(nextTasks);
     fetchAllRows<ReadinessDep>((f, t) => supabase.from("task_dependencies").select("task_id,depends_on_task_id").order("task_id").order("depends_on_task_id").range(f, t)).then(({ data }) => setTaskDeps(data));
+    fetchAllRows<ReturnEvent>((f, t) => supabase.from("task_review_events").select("task_id,comment,round,actor_id,created_at").eq("action", "returned").order("created_at", { ascending: false }).order("id").range(f, t)).then(({ data }) => {
+      const m = new Map<string, ReturnEvent>();
+      for (const e of data) if (!m.has(e.task_id)) m.set(e.task_id, e);
+      setLastReturnByTask(m);
+    });
     setPeople((peopleData as PersonOption[]) ?? []);
     setChainPeople((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []);
     loadRoutingData((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []).then(setRouting);
@@ -1875,6 +1890,40 @@ export default function Projects() {
   const r1ProjectIds = useMemo(() => new Set(projects.filter((p) => isR1Project(p)).map((p) => p.id)), [projects]);
   const readinessById = useMemo(() => computeReadiness(tasks, taskDeps, (t) => r1ProjectIds.has((t as TaskRow).project_id)), [tasks, taskDeps, r1ProjectIds]);
   const isWaitingTask = (t: TaskRow) => readinessById.get(t.id)?.state === "waiting";
+  // phase188: finished tasks this task depends on -- what a reviewer can return.
+  const returnableFor = (t: TaskRow) =>
+    taskDeps
+      .filter((d) => d.task_id === t.id)
+      .map((d) => tasks.find((x) => x.id === d.depends_on_task_id))
+      .filter((x): x is TaskRow => !!x && x.status === "Done" && !x.is_archived);
+  const canReturnFrom = (t: TaskRow) =>
+    statusGroupOf(TASK_STATUS_GROUPED, t.status) !== "complete" &&
+    statusGroupOf(TASK_STATUS_GROUPED, t.status) !== "cancelled" &&
+    (t.assignee_id === me?.id || me?.access_level === "full" || projects.find((p) => p.id === t.project_id)?.owner_id === me?.id) &&
+    returnableFor(t).length > 0;
+  function openReturnDialog(t: TaskRow) {
+    const c = returnableFor(t).map((x) => ({ id: x.id, name: x.name }));
+    setReturnDialog({ reviewTaskId: t.id, reviewName: t.name, candidates: c });
+    setReturnTarget(c[0]?.id ?? "");
+    setReturnComment("");
+    setReturnError("");
+  }
+  async function submitReturn() {
+    if (!returnDialog) return;
+    if (!returnComment.trim()) {
+      setReturnError("Add a comment so the owner knows what to change.");
+      return;
+    }
+    setReturnBusy(true);
+    const { error } = await supabase.rpc("r2_return_task", { p_review_task_id: returnDialog.reviewTaskId, p_work_task_id: returnTarget, p_comment: returnComment.trim() });
+    setReturnBusy(false);
+    if (error) {
+      setReturnError(friendlyError("return the task", error).message ?? "Couldn't return the task.");
+      return;
+    }
+    setReturnDialog(null);
+    loadAll();
+  }
   const needsLink = (t: TaskRow) => r1ProjectIds.has(t.project_id) && needsDependencyLink(t, taskDeps, tasks.some((x) => x.parent_task_id === t.id && !x.is_archived));
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? "—";
   const taskName = (id: string | null) => tasks.find((t) => t.id === id)?.name ?? "—";
@@ -5273,7 +5322,33 @@ export default function Projects() {
         render: (t) => {
           if (statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete" || statusGroupOf(TASK_STATUS_GROUPED, t.status) === "cancelled") return <span style={{ color: "var(--muted)" }}>—</span>;
           const r = readinessById.get(t.id);
-          if (!r || r.state === "action") return <span className="status-pill success">Action needed</span>;
+          // phase188: returned for revision -- show the reviewer's comment.
+          const ret = lastReturnByTask.get(t.id);
+          if (ret && (t.revision_count ?? 0) > 0 && t.status === "In Progress") {
+            const by = people.find((p) => p.id === ret.actor_id)?.name ?? "Reviewer";
+            return (
+              <span className="status-pill warning" title={`Returned by ${by} (round ${ret.round}):\n${ret.comment ?? ""}`} style={{ cursor: "help" }}>
+                Returned · {by}
+              </span>
+            );
+          }
+          if (!r || r.state === "action") {
+            return (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span className="status-pill success">Action needed</span>
+                {canReturnFrom(t) && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); openReturnDialog(t); }}
+                    title="Send the finished work back to its owner with a comment"
+                    style={{ border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 6, padding: "1px 7px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "var(--warning-text)" }}
+                  >
+                    ↺ Return
+                  </button>
+                )}
+              </span>
+            );
+          }
           const label = waitingOnLabel(r, (id) => (id ? people.find((p) => p.id === id)?.name ?? null : null));
           const exp = expectedUnlockDate(r);
           return (
@@ -5283,8 +5358,16 @@ export default function Projects() {
           );
         },
       },
+      {
+        // phase188: times a reviewer returned this task.
+        key: "revision_count",
+        label: "Revisions",
+        defaultWidth: 90,
+        maxWidth: 110,
+        render: (t) => ((t.revision_count ?? 0) > 0 ? <span className="status-pill warning">{t.revision_count}</span> : <span style={{ color: "var(--muted)" }}>0</span>),
+      },
     ],
-    [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents, taskNoteCounts, routing, autoOn, readinessById]
+    [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents, taskNoteCounts, routing, autoOn, readinessById, lastReturnByTask, taskDeps]
   );
 
   // Board cards get their own name renderer rather than reusing the table
@@ -6150,6 +6233,45 @@ export default function Projects() {
             loadAll();
           }}
         />
+      )}
+      {returnDialog && (
+        <Modal title="Return for revision" onClose={() => (returnBusy ? undefined : setReturnDialog(null))} width={460}>
+          <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
+            <div style={{ color: "var(--muted)" }}>
+              From <strong style={{ color: "var(--text)" }}>{returnDialog.reviewName}</strong>. The task goes back to its owner as In Progress, and the revision is counted.
+            </div>
+            {returnDialog.candidates.length > 1 && (
+              <label style={{ display: "grid", gap: 4 }}>
+                <span style={{ fontWeight: 600 }}>Task to return</span>
+                <select value={returnTarget} onChange={(e) => setReturnTarget(e.target.value)}>
+                  {returnDialog.candidates.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {returnDialog.candidates.length === 1 && (
+              <div>
+                <span style={{ fontWeight: 600 }}>Task to return:</span> {returnDialog.candidates[0].name}
+              </div>
+            )}
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontWeight: 600 }}>What needs to change</span>
+              <textarea
+                value={returnComment}
+                onChange={(e) => { setReturnComment(e.target.value); if (returnError) setReturnError(""); }}
+                rows={4}
+                placeholder="Scenario 2 doesn't follow the SOP order. Swap steps 3 and 4."
+                style={{ width: "100%", boxSizing: "border-box", fontFamily: "inherit", fontSize: 12.5, padding: 8, borderRadius: 6, border: "1px solid var(--border)" }}
+              />
+            </label>
+            {returnError && <div style={{ color: "var(--danger-text)", fontSize: 12 }}>{returnError}</div>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn-secondary" disabled={returnBusy} onClick={() => setReturnDialog(null)}>Cancel</button>
+              <button className="btn-primary" disabled={returnBusy} onClick={() => void submitReturn()}>{returnBusy ? "Returning…" : "Return task"}</button>
+            </div>
+          </div>
+        </Modal>
       )}
       <CancelTaskDialog
         open={Boolean(cancelTaskDialog)}
