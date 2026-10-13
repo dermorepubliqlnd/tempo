@@ -4758,6 +4758,14 @@ export default function WbsPlanning() {
   // indistinguishable from static text. A permanent, subtle border makes
   // clear these are fillable fields even at rest; an unfilled field gets
   // a dashed border in the muted/warning tone as a nudge to fill it in.
+  // 2026-10-13 (Sandra): Project Information fields stay light blue until
+  // filled, then turn white -- a quiet "still to do" signal.
+  function infoFieldBoxStyle(isFilled: boolean, minWidth = 110, locked = false): CSSProperties {
+    const base = fieldBoxStyle(isFilled, minWidth, locked);
+    if (locked || isFilled) return base;
+    return { ...base, background: "#eaf3ff", border: "1px solid #b9d4f5" };
+  }
+
   function fieldBoxStyle(isFilled: boolean, minWidth = 110, locked = false): CSSProperties {
     if (locked) {
       return {
@@ -6270,21 +6278,21 @@ export default function WbsPlanning() {
               <div className="wbs-project-info-grid" style={{ display: "grid", gridTemplateColumns: showProjectDetails ? "repeat(5, minmax(0, 1fr))" : "repeat(4, minmax(0, 220px))", gap: "12px 16px", alignContent: "start" }}>
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project ID</span>
-                <div className="wbs-field-box" style={{ ...fieldBoxStyle(true, undefined, true), width: "100%" }}>
+                <div className="wbs-field-box" style={{ ...infoFieldBoxStyle(true, undefined, true), width: "100%" }}>
                   <span style={{ fontSize: 12.5 }}>P-{String(project.project_number).padStart(4, "0")}</span>
                 </div>
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Name <span style={{ color: "#d92d20" }}>*</span></span>
-                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.name, undefined, !canEditWbs), width: "100%" }}>
+                <div className="wbs-field-box" style={{ ...infoFieldBoxStyle(!!project.name, undefined, !canEditWbs), width: "100%" }}>
                   <InlineText value={project.name} editable={canEditWbs} onCommit={(v) => saveProjectField({ name: v })} />
                 </div>
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Owner <span style={{ color: "#d92d20" }}>*</span></span>
-                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!owner, undefined, !canEditWbs), width: "100%" }}>
+                <div className="wbs-field-box" style={{ ...infoFieldBoxStyle(!!owner, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
                                         value={owner?.name ?? ""}
@@ -6306,7 +6314,7 @@ export default function WbsPlanning() {
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Start Date <span style={{ color: "#d92d20" }}>*</span></span>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.start_date, undefined, !canEditWbs || anyTaskDone), width: "100%" }}>
+                  <div className="wbs-field-box" style={{ ...infoFieldBoxStyle(!!project.start_date, undefined, !canEditWbs || anyTaskDone), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
                     <InlineDate value={project.start_date} editable={canEditWbs && !anyTaskDone} onCommit={(v) => saveProjectField({ start_date: v })} />
                       <Calendar size={14} style={{ color: "var(--muted)", marginLeft: "auto", marginRight: 4, pointerEvents: "none" }} />
@@ -6328,7 +6336,7 @@ export default function WbsPlanning() {
               {showProjectDetails && (<>
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Priority <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
-                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.priority, undefined, !canEditWbs), width: "100%" }}>
+                <div className="wbs-field-box" style={{ ...infoFieldBoxStyle(!!project.priority, undefined, !canEditWbs), width: "100%" }}>
                   <InlineSelect
                     value={project.priority ?? ""}
                     editable={canEditWbs}
@@ -6344,7 +6352,7 @@ export default function WbsPlanning() {
 
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Category <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
-                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.category, undefined, !canEditWbs), width: "100%" }}>
+                <div className="wbs-field-box" style={{ ...infoFieldBoxStyle(!!project.category, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect value={project.category ?? ""} editable={canEditWbs}
                                         alwaysSelect
@@ -6355,7 +6363,7 @@ export default function WbsPlanning() {
 
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Source <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
-                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.source_id, undefined, !canEditWbs), width: "100%" }}>
+                <div className="wbs-field-box" style={{ ...infoFieldBoxStyle(!!project.source_id, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
                                         value={projectSourceOptions.find((s) => s.id === project.source_id)?.name ?? ""}
@@ -6376,7 +6384,7 @@ export default function WbsPlanning() {
 
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Planning Type <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
-                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.planning_type_id, undefined, !canEditWbs), width: "100%" }}>
+                <div className="wbs-field-box" style={{ ...infoFieldBoxStyle(!!project.planning_type_id, undefined, !canEditWbs), width: "100%" }}>
                   <InlineSelect
                     value={projectPlanningTypeOptions.find((t) => t.id === project.planning_type_id)?.name ?? ""}
                     editable={canEditWbs}
@@ -6395,7 +6403,7 @@ export default function WbsPlanning() {
 
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Type <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
-                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.project_type_id, undefined, !canEditWbs), width: "100%" }}>
+                <div className="wbs-field-box" style={{ ...infoFieldBoxStyle(!!project.project_type_id, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
                                         value={projectTypeOptions.find((t) => t.id === project.project_type_id)?.name ?? ""}
@@ -6437,7 +6445,7 @@ export default function WbsPlanning() {
 
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Complexity <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
-                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.effort_level, undefined, !canEditWbs), width: "100%" }}>
+                <div className="wbs-field-box" style={{ ...infoFieldBoxStyle(!!project.effort_level, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
                                         value={project.effort_level ? effortLevelLabel(project.effort_level) : ""}
@@ -6460,7 +6468,7 @@ export default function WbsPlanning() {
               {activeBaseline && (
                 <label style={{ display: "grid", gap: 5 }}>
                   <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Baseline</span>
-                  <div className="wbs-field-box" style={{ ...fieldBoxStyle(true, undefined, true), width: "100%" }}>
+                  <div className="wbs-field-box" style={{ ...infoFieldBoxStyle(true, undefined, true), width: "100%" }}>
                     <span style={{ fontSize: 12.5 }}>V{activeBaseline.version_number} · {formatDate(activeBaseline.captured_at.slice(0, 10))}</span>
                   </div>
                 </label>
@@ -6470,7 +6478,7 @@ export default function WbsPlanning() {
               {showProjectDetails && (
               <div style={{ display: "grid", gridTemplateRows: "auto 1fr", minWidth: 0 }}>
                 <div style={{ fontSize: 10.5, fontWeight: 700, color: "#304963", marginBottom: 5 }}>Description <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></div>
-                <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.description, undefined, !canEditWbs), width: "100%", minHeight: 0, height: "100%", alignItems: "stretch" }}>
+                <div className="wbs-field-box" style={{ ...infoFieldBoxStyle(!!project.description, undefined, !canEditWbs), width: "100%", minHeight: 0, height: "100%", alignItems: "stretch" }}>
                   <InlineTextArea
                     value={project.description ?? ""}
                     editable={canEditWbs}
