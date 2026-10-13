@@ -232,9 +232,9 @@ export interface TableView {
   // projectScope/taskScope (kept below only to migrate saved views).
   filterMyRole?: ("owner" | "contributor")[];
   filterProjectOwnerIds?: string[];
-  filterFlags?: "at_risk"[];
+  filterFlags?: ("at_risk" | "action_needed" | "waiting" | "needs_dependency")[];
   // DEPRECATED (migrated to filters on load): which task set the view covers.
-  taskScope?: "my_open" | "my_done" | "owner_open" | "owner_at_risk" | "org_open" | "org_all";
+  taskScope?: "my_open" | "my_coming_up" | "my_done" | "owner_open" | "owner_needs_link" | "owner_at_risk" | "org_open" | "org_all";
   projectScope?: "my_active_owned" | "my_active_portfolio" | "my_owned_all" | "my_full_portfolio" | "org_active" | "org_all";
   // Which layout this view renders as. Only "table" is actually built right
   // now -- Board/Calendar/Timeline exist as a forward-compatible field plus

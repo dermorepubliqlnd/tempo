@@ -75,6 +75,7 @@ import { parseLocalDate, calendarDaysBetween } from "../lib/taskTiming";
 // Dashboard.tsx already follows) so this page's numbers can never drift
 // out of sync with what the Projects table itself shows for a project.
 import { wbsStatusMetaFor } from "../lib/wbsStatus";
+import { computeReadiness, waitingOnLabel, expectedUnlockDate, type ReadinessDep } from "../lib/taskReadiness";
 import { healthOf, actualProgress, countWorkingDays, projectCompletionDate, type ProjectRow, type TaskRow } from "./Projects";
 import {
   createAllocationEngine,
@@ -241,6 +242,8 @@ export default function MyDashboard() {
     });
   }, []);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  // R1 Actionable To-Do: Depends-on links (read-only).
+  const [taskDeps, setTaskDeps] = useState<ReadinessDep[]>([]);
   const [holidays, setHolidays] = useState<HolidayRow[]>([]);
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
   const [ownerHistory, setOwnerHistory] = useState<OwnerHistoryRow[]>([]);
@@ -386,6 +389,7 @@ export default function MyDashboard() {
     setPeople((peopleData as PersonLite[]) ?? []);
     setProjects((projectData as ProjectRow[]) ?? []);
     setTasks((taskData as TaskRow[]) ?? []);
+    fetchAllRows<ReadinessDep>((f, t) => supabase.from("task_dependencies").select("task_id,depends_on_task_id").order("task_id").order("depends_on_task_id").range(f, t)).then(({ data }) => setTaskDeps(data));
     setHolidays((holidayData as HolidayRow[]) ?? []);
     setAvailability((availabilityData as AvailabilityRow[]) ?? []);
     const historicalLockingEnabled = (settingsData as { historical_locking_enabled?: boolean } | null)?.historical_locking_enabled ?? false;
@@ -436,6 +440,11 @@ export default function MyDashboard() {
   const todayIso = toISO(new Date());
 
   // ---- My active projects & tasks ----------------------------------
+  // R1 Actionable To-Do (2026-10-13, Sandra: review tasks showed up before
+  // the materials were sent). Tasks still waiting on another task go to the
+  // Coming Up card instead of My Work Today / Due lists.
+  const readinessById = useMemo(() => computeReadiness(tasks, taskDeps), [tasks, taskDeps]);
+  const isWaiting = (t: { id: string }) => readinessById.get(t.id)?.state === "waiting";
   const myOpenTasks = useMemo(() => {
     if (!me) return [];
     return tasks
@@ -449,9 +458,11 @@ export default function MyDashboard() {
   // 2026-10-08 (Sandra, item I): one rule everywhere -- lib/metrics.ts
   // isOverdueTask (started project, not paused, leaf tasks only).
   const myParentIds = useMemo(() => new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string)), [tasks]);
-  const overdueTasks = myOpenTasks.filter((t) => isOverdueTask(t, t.project, todayIso, myParentIds.has(t.id)));
+  const myActionTasks = myOpenTasks.filter((t) => !isWaiting(t));
+  const myComingUp = myOpenTasks.filter((t) => isWaiting(t) && (t.project as ProjectRow | null)?.wbs_status !== "draft");
+  const overdueTasks = myActionTasks.filter((t) => isOverdueTask(t, t.project, todayIso, myParentIds.has(t.id)));
   const isPausedTask = (t: { project?: unknown }) => (t.project as PauseProjectInfo | null)?.status === "Paused";
-  const tasksDueToday = myOpenTasks.filter((t) => hasConfirmedBaseline(t) && t.current_due_date && t.current_due_date.slice(0, 10) === todayIso);
+  const tasksDueToday = myActionTasks.filter((t) => hasConfirmedBaseline(t) && t.current_due_date && t.current_due_date.slice(0, 10) === todayIso);
 
   // ---- My Work Today (2026-09-23) ------------------------------------
   // NOT the same as "due today"/"due this week" -- tasks whose SCHEDULE
@@ -463,8 +474,9 @@ export default function MyDashboard() {
   const hiddenTodayIds = useMemo(() => new Set(hiddenToday.filter((h) => h.hidden_date === todayIso).map((h) => h.task_id)), [hiddenToday, todayIso]);
   const myWorkTodayAll = useMemo(
     // phase118: tasks of paused projects are hidden here (Sandra).
-    () => myOpenTasks.filter((t) => !isPausedTask(t) && t.start_date && t.start_date.slice(0, 10) <= todayIso && t.current_due_date && t.current_due_date.slice(0, 10) >= todayIso),
-    [myOpenTasks, todayIso]
+    () => myActionTasks.filter((t) => !isPausedTask(t) && t.start_date && t.start_date.slice(0, 10) <= todayIso && t.current_due_date && t.current_due_date.slice(0, 10) >= todayIso),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [myOpenTasks, todayIso, readinessById]
   );
   const myWorkTodayHiddenCount = myWorkTodayAll.filter((t) => hiddenTodayIds.has(t.id)).length;
   const myWorkTodayVisible = showHiddenToday ? myWorkTodayAll : myWorkTodayAll.filter((t) => !hiddenTodayIds.has(t.id));
@@ -647,7 +659,7 @@ export default function MyDashboard() {
   // 2026-10-08 (Sandra, item I): Due this week = today through Sunday,
   // overdue not included (lib/metrics.ts) -- same as the Tasks KPI card.
   // Was Mon-Fri including past days (which double-counted overdue tasks).
-  const tasksThisWeek = myOpenTasks.filter((t) => isDueThisWeek(t, t.project, new Date(), myParentIds.has(t.id)));
+  const tasksThisWeek = myActionTasks.filter((t) => isDueThisWeek(t, t.project, new Date(), myParentIds.has(t.id)));
   // 2026-10-02 (Sandra): full-width deadline card -- overdue first, then
   // the rest of this week (today onward; past days this week are overdue).
   const dueRestOfWeek = tasksThisWeek;
@@ -1458,6 +1470,45 @@ export default function MyDashboard() {
               {dueRestOfWeek.map((t) => renderWorkRow(t, "deadline"))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* R1 Actionable To-Do (2026-10-13): assigned to me, but waiting on
+          someone else's task. Visible so I can plan, not counted as to-do. */}
+      {myComingUp.length > 0 && (
+        <div className="dash-card">
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
+            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>Coming Up ({myComingUp.length})</h2>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>Waiting on someone else's task. Moves to your to-do once it's done.</span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.6fr) auto", alignItems: "center" }}>
+            {["Task ID", "Task", "Project", "Waiting on", "Expected"].map((h, i) => (
+              <span key={`cu${i}`} style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "8px 14px 6px 0", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{h}</span>
+            ))}
+            {myComingUp.slice(0, 12).map((t) => {
+              const r = readinessById.get(t.id);
+              const who = waitingOnLabel(r, (id) => (id ? people.find((p) => p.id === id)?.name ?? null : null));
+              const exp = expectedUnlockDate(r);
+              const late = !!exp && exp < todayIso;
+              const cell: CSSProperties = { padding: "8px 14px 8px 0", borderBottom: "1px solid var(--border)", fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+              return (
+                <div key={t.id} style={{ display: "contents" }}>
+                  <span style={{ ...cell, color: "var(--muted)" }}>{t.task_number ? `T-${String(t.task_number).padStart(4, "0")}` : "—"}</span>
+                  <span style={{ ...cell, fontWeight: 600 }} title={t.name}>{t.name}</span>
+                  <span style={cell} title={t.project?.name ?? ""}>{t.project?.name ?? "—"}</span>
+                  <span style={cell} title={r?.waitingOn.map((w) => w.name).join(", ")}>{who}</span>
+                  <span style={{ ...cell, color: late ? "var(--danger-text)" : undefined, fontWeight: late ? 600 : undefined }} title={late ? "The task you're waiting on is past its due date" : undefined}>
+                    {exp ? `${formatDate(exp)}${late ? " · late" : ""}` : "—"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {myComingUp.length > 12 && (
+            <Link to="/projects" style={{ display: "inline-block", marginTop: 8, fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
+              See all {myComingUp.length} in Projects &amp; Tasks → Coming Up
+            </Link>
+          )}
         </div>
       )}
       {extensionTask && (

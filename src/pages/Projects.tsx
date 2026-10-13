@@ -75,6 +75,7 @@ interface DeletedSpentHourRow {
 import { useTimeTracking } from "../lib/TimeTrackingContext";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 import { Play, Square, Info } from "lucide-react";
+import { computeReadiness, waitingOnLabel, expectedUnlockDate, needsDependencyLink, type ReadinessDep } from "../lib/taskReadiness";
 import {
   PROJECT_EFFORT_LEVEL_OPTIONS,
   PROJECT_EFFORT_LEVEL_TONES,
@@ -401,7 +402,12 @@ const TASK_OPEN_STATUSES = ["Not Started", "In Progress"];
 function scopeToTaskFilters(scope: TaskScope): Partial<TableView> {
   switch (scope) {
     case "my_open":
-      return { filterPersonIds: ["me"], filterStatuses: TASK_OPEN_STATUSES, filterProjectOwnerIds: [], filterFlags: [] };
+      // R1 (2026-10-13): My Open Tasks = only tasks I can act on now.
+      return { filterPersonIds: ["me"], filterStatuses: TASK_OPEN_STATUSES, filterProjectOwnerIds: [], filterFlags: ["action_needed"] };
+    case "my_coming_up":
+      return { filterPersonIds: ["me"], filterStatuses: TASK_OPEN_STATUSES, filterProjectOwnerIds: [], filterFlags: ["waiting"] };
+    case "owner_needs_link":
+      return { filterPersonIds: [], filterStatuses: TASK_OPEN_STATUSES, filterProjectOwnerIds: ["me"], filterFlags: ["needs_dependency"] };
     case "my_done":
       return { filterPersonIds: ["me"], filterStatuses: ["Done"], filterProjectOwnerIds: [], filterFlags: [] };
     case "owner_open":
@@ -524,15 +530,15 @@ const TASK_TIMELINE_DEFAULT_HIDDEN_COLUMNS = ["project", "timing_variance_days",
 // own Calendar view doesn't support grouping either -- confirmed with
 // Sandra, not building it).
 const TASK_CALENDAR_DEFAULT_HIDDEN_COLUMNS = ["status", "timing", "validated_completion_date", "validated_by", "actual_completion_date", "estimated_hours", "time_spent_hours", "timing_variance_days", "hours_variance", "hours_variance_pct", "work_type", "output_type", "output_count"];
-const TASK_COLUMN_ORDER = ["name", "task_number", "project", "assignee", "status", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "time_log_status", "effort", "timing_variance_days", "due_date_ext", "committed_due_date", "committed_slip", "work_type", "output_type", "output_count", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
+const TASK_COLUMN_ORDER = ["name", "task_number", "project", "assignee", "status", "readiness", "timing", "start_date", "current_due_date", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "time_log_status", "effort", "timing_variance_days", "due_date_ext", "committed_due_date", "committed_slip", "work_type", "output_type", "output_count", "hours_variance", "hours_variance_pct", "created_at", "created_by"];
 
 // 2026-10-04 (Sandra): Tasks system views answer "what needs doing, by whom,
 // and when" -- project health/progress stays on Projects + Overview.
 // System groups: "my" -> My Tasks (incl. the owner lens over projects I
 // own), "organization" -> Team Views. Personal views land under My Views.
-const TASK_SYS_LEAD = ["task_number", "name", "project", "assignee", "status", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext", "actual_completion_date", "validated_completion_date", "validated_by", "hours_variance"];
+const TASK_SYS_LEAD = ["task_number", "name", "project", "assignee", "status", "readiness", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext", "actual_completion_date", "validated_completion_date", "validated_by", "hours_variance"];
 const TASK_SYSTEM_COLUMN_ORDER = [...TASK_SYS_LEAD, ...TASK_COLUMN_ORDER.filter((k) => !TASK_SYS_LEAD.includes(k))];
-const TASK_MY_VISIBLE = new Set(["task_number", "name", "project", "status", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext"]);
+const TASK_MY_VISIBLE = new Set(["task_number", "name", "project", "status", "readiness", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext"]);
 const TASK_TEAM_VISIBLE = new Set([...TASK_MY_VISIBLE, "assignee"]);
 const TASK_DONE_VISIBLE = new Set(["task_number", "name", "project", "current_due_date", "committed_due_date", "committed_slip", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "hours_variance"]);
 function taskSystemView(
@@ -564,10 +570,17 @@ function taskSystemView(
 }
 const TASK_SYSTEM_VIEWS: TableView[] = [
   taskSystemView("system_tasks_my_open", "My Open Tasks", "my_open", "my", TASK_MY_VISIBLE, { groupBy: "due_window", isDefault: true }),
+  // R1 (2026-10-13): companion to My Open Tasks -- assigned to me but still
+  // waiting on someone else's task. Shown whenever My Open Tasks is allowed
+  // for the role (no app_roles change needed).
+  taskSystemView("system_tasks_my_coming_up", "Coming Up (Waiting on Others)", "my_coming_up", "my", TASK_MY_VISIBLE, { groupBy: "project" }),
   taskSystemView("system_tasks_my_by_project", "My Tasks by Project", "my_open", "my", TASK_MY_VISIBLE, { groupBy: "project" }),
   taskSystemView("system_tasks_my_calendar", "My Task Calendar", "my_open", "my", TASK_MY_VISIBLE, { viewType: "calendar" }),
   taskSystemView("system_tasks_my_done", "My Completed Tasks", "my_done", "my", TASK_DONE_VISIBLE, { groupBy: "validation" }),
   taskSystemView("system_tasks_owner_open", "Tasks in My Projects", "owner_open", "my", TASK_TEAM_VISIBLE, { groupBy: "assignee" }),
+  // R1 clean-up: review/QA/sign-off tasks in my projects with no Depends-on
+  // link, so they can't be held back until the work is submitted.
+  taskSystemView("system_tasks_owner_needs_link", "Review Tasks Missing a Dependency", "owner_needs_link", "my", TASK_TEAM_VISIBLE, { groupBy: "project", sortKey: "task_number" }),
   taskSystemView("system_tasks_owner_at_risk", "At-Risk Tasks in My Projects", "owner_at_risk", "my", TASK_TEAM_VISIBLE, { groupBy: "project" }),
   taskSystemView("system_tasks_org_open", "All Open Tasks", "org_open", "organization", TASK_TEAM_VISIBLE, { groupBy: "assignee" }),
   taskSystemView("system_tasks_org_all", "All Tasks", "org_all", "organization", TASK_TEAM_VISIBLE, { groupBy: "project", sortKey: "task_number" }),
@@ -1413,6 +1426,8 @@ export default function Projects() {
 
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  // R1 Actionable To-Do: Depends-on links, read-only here.
+  const [taskDeps, setTaskDeps] = useState<ReadinessDep[]>([]);
   const [people, setPeople] = useState<PersonOption[]>([]);
   const assigneePicker = useAssigneePicker(people);
   const startDatePrompt = useProjectStartDatePrompt();
@@ -1775,6 +1790,7 @@ export default function Projects() {
     const nextTasks = (taskData as TaskRow[]) ?? [];
     setProjects(nextProjects);
     setTasks(nextTasks);
+    fetchAllRows<ReadinessDep>((f, t) => supabase.from("task_dependencies").select("task_id,depends_on_task_id").order("task_id").order("depends_on_task_id").range(f, t)).then(({ data }) => setTaskDeps(data));
     setPeople((peopleData as PersonOption[]) ?? []);
     setChainPeople((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []);
     loadRoutingData((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []).then(setRouting);
@@ -1847,6 +1863,10 @@ export default function Projects() {
   }, [timeTrackingVersion]);
 
   const ownerName = (id: string | null) => people.find((p) => p.id === id)?.name ?? "—";
+  // R1 Actionable To-Do (2026-10-13): assigned != actionable.
+  const readinessById = useMemo(() => computeReadiness(tasks, taskDeps), [tasks, taskDeps]);
+  const isWaitingTask = (t: TaskRow) => readinessById.get(t.id)?.state === "waiting";
+  const needsLink = (t: TaskRow) => needsDependencyLink(t, taskDeps, tasks.some((x) => x.parent_task_id === t.id && !x.is_archived));
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? "—";
   const taskName = (id: string | null) => tasks.find((t) => t.id === id)?.name ?? "—";
   const isProjectOwner = (projectId: string) => projects.find((p) => p.id === projectId)?.owner_id === me?.id;
@@ -5211,8 +5231,27 @@ export default function Projects() {
         maxWidth: 150,
         render: (t) => <span>{ownerName(t.created_by)}</span>,
       },
+      {
+        // R1 Actionable To-Do: can the assignee act on this now?
+        key: "readiness",
+        label: "Readiness",
+        defaultWidth: 200,
+        maxWidth: 320,
+        render: (t) => {
+          if (statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete" || statusGroupOf(TASK_STATUS_GROUPED, t.status) === "cancelled") return <span style={{ color: "var(--muted)" }}>—</span>;
+          const r = readinessById.get(t.id);
+          if (!r || r.state === "action") return <span className="status-pill success">Action needed</span>;
+          const label = waitingOnLabel(r, (id) => (id ? people.find((p) => p.id === id)?.name ?? null : null));
+          const exp = expectedUnlockDate(r);
+          return (
+            <span className="status-pill neutral" title={`Waiting on: ${r.waitingOn.map((w) => w.name).join(", ")}${exp ? `\nExpected by ${formatDate(exp)}` : ""}`} style={{ cursor: "help" }}>
+              Waiting · {label}
+            </span>
+          );
+        },
+      },
     ],
-    [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents, taskNoteCounts, routing, autoOn]
+    [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents, taskNoteCounts, routing, autoOn, readinessById]
   );
 
   // Board cards get their own name renderer rather than reusing the table
@@ -5308,6 +5347,13 @@ export default function Projects() {
     return "Later";
   }
   const taskGroupOptions: GroupOption<TaskWithDepth>[] = [
+    {
+      key: "readiness",
+      label: "Readiness",
+      getGroup: (t) => (statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete" || statusGroupOf(TASK_STATUS_GROUPED, t.status) === "cancelled" ? "Finished" : isWaitingTask(t) ? "Coming up (waiting)" : "Action needed"),
+      getTone: (t) => (isWaitingTask(t) ? "neutral" : "success"),
+      allGroups: () => ["Action needed", "Coming up (waiting)", "Finished"],
+    },
     {
       key: "due_window",
       label: "Due Window",
@@ -5621,7 +5667,9 @@ export default function Projects() {
 
   useEffect(() => {
     if (!taskViews.loaded || !navAccess.loaded) return;
-    const allowed = TASK_SYSTEM_VIEWS.filter((v) => navAccess.views.has(v.id));
+    // R1: companion views ride along with the view they extend.
+    const COMPANION: Record<string, string> = { system_tasks_my_coming_up: "system_tasks_my_open", system_tasks_owner_needs_link: "system_tasks_owner_open" };
+    const allowed = TASK_SYSTEM_VIEWS.filter((v) => navAccess.views.has(v.id) || (COMPANION[v.id] && navAccess.views.has(COMPANION[v.id])));
     const list = allowed.length ? allowed : TASK_SYSTEM_VIEWS.filter((v) => v.id === "system_tasks_my_open");
     const def = list.find((v) => v.id === "system_tasks_my_open") ?? list[0];
     taskViews.installSystemViews(list, def.id, migrateTaskScope);
@@ -5795,6 +5843,9 @@ export default function Projects() {
       }
       const flags = andList(view.filterFlags, legacy.filterFlags);
       if (flags.includes("at_risk")) out = out.filter(atRisk);
+      if (flags.includes("action_needed")) out = out.filter((t) => !isWaitingTask(t));
+      if (flags.includes("waiting")) out = out.filter((t) => isWaitingTask(t));
+      if (flags.includes("needs_dependency")) out = out.filter((t) => needsLink(t));
       const lp = legacy.filterPersonIds ?? [];
       if (lp.length > 0) out = out.filter((t) => lp.some((id) => (id === "me" ? t.assignee_id === me?.id : t.assignee_id === id)));
       const ls = legacy.filterStatuses ?? [];
@@ -5810,7 +5861,7 @@ export default function Projects() {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleTasks, taskActiveView, me?.id, projects, tasks, quickList, myOwnedProjectIds]);
+  }, [visibleTasks, taskActiveView, me?.id, projects, tasks, quickList, myOwnedProjectIds, readinessById, taskDeps]);
 
   // Instant, Notion-style row creation (mirrors createBlankProject): insert
   // a sensibly-defaulted task immediately and let the person fill it in via
@@ -6617,7 +6668,12 @@ export default function Projects() {
                 {
                   key: "attention",
                   label: "Attention",
-                  options: [{ value: "at_risk", label: "At risk (overdue, due soon or unassigned)" }],
+                  options: [
+                    { value: "at_risk", label: "At risk (overdue, due soon or unassigned)" },
+                    { value: "action_needed", label: "Action needed (ready to work on)" },
+                    { value: "waiting", label: "Coming up (waiting on another task)" },
+                    { value: "needs_dependency", label: "Review task missing a dependency" },
+                  ],
                   selected: taskActiveView.filterFlags ?? [],
                   onChange: (next) => updateTaskView({ filterFlags: next as TableView["filterFlags"] }),
                 },
@@ -6677,6 +6733,9 @@ export default function Projects() {
               ? [`Project owner: ${(taskActiveView.filterProjectOwnerIds ?? []).map((id) => (id === "me" ? "Me" : people.find((p) => p.id === id)?.name ?? "Unknown")).join(", ")}`]
               : []),
             ...((taskActiveView.filterFlags ?? []).includes("at_risk") ? ["At risk"] : []),
+            ...((taskActiveView.filterFlags ?? []).includes("action_needed") ? ["Action needed"] : []),
+            ...((taskActiveView.filterFlags ?? []).includes("waiting") ? ["Coming up"] : []),
+            ...((taskActiveView.filterFlags ?? []).includes("needs_dependency") ? ["Missing dependency"] : []),
           ]}
           onClearFilter={() => updateTaskView({ filterPersonIds: [], filterStatuses: [], filterProjectOwnerIds: [], filterFlags: [] })}
           containerRef={setTaskPillsRowEl}
