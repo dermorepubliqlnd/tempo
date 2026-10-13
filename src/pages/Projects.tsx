@@ -1904,7 +1904,7 @@ export default function Projects() {
   // R2.2 #3 (2026-10-14, Sandra): explicit hand-off buttons on today's tasks.
   // A work task whose finish unlocks a review / QA / sign-off task gets
   // "Ready for Review"; the review task gets "Pass QA" or "Approve" (plus
-  // Return above). All of them go through markTaskDone, so the logged-hours
+  // For Revision above). All of them go through markTaskDone, so the logged-hours
   // and Output Count checks still apply. New (R1) projects only.
   const canActOnTask = (t: TaskRow) =>
     t.assignee_id === me?.id || me?.access_level === "full" || projects.find((p) => p.id === t.project_id)?.owner_id === me?.id;
@@ -1937,7 +1937,7 @@ export default function Projects() {
     const { error } = await supabase.rpc("r2_return_task", { p_review_task_id: returnDialog.reviewTaskId, p_work_task_id: returnTarget, p_comment: returnComment.trim() });
     setReturnBusy(false);
     if (error) {
-      setReturnError(friendlyError("return the task", error).message ?? "Couldn't return the task.");
+      setReturnError(friendlyError("send the task for revision", error).message ?? "Couldn't send the task for revision.");
       return;
     }
     setReturnDialog(null);
@@ -5363,8 +5363,8 @@ export default function Projects() {
           if (ret && (t.revision_count ?? 0) > 0 && t.status === "In Progress") {
             const by = people.find((p) => p.id === ret.actor_id)?.name ?? "Reviewer";
             return (
-              <span className="status-pill warning" title={`Returned by ${by} (round ${ret.round}):\n${ret.comment ?? ""}`} style={{ cursor: "help" }}>
-                Returned · {by}
+              <span className="status-pill warning" title={`Sent for revision by ${by} (round ${ret.round}):\n${ret.comment ?? ""}`} style={{ cursor: "help" }}>
+                For Revision · {by}
               </span>
             );
           }
@@ -5396,10 +5396,10 @@ export default function Projects() {
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); openReturnDialog(t); }}
-                    title="Send the finished work back to its owner with a comment"
+                    title="Send the work back to its owner for revision, with a comment"
                     style={{ border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 6, padding: "1px 7px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "var(--warning-text)" }}
                   >
-                    ↺ Return
+                    ↺ For Revision
                   </button>
                 )}
               </span>
@@ -6291,14 +6291,14 @@ export default function Projects() {
         />
       )}
       {returnDialog && (
-        <Modal title="Return for revision" onClose={() => (returnBusy ? undefined : setReturnDialog(null))} width={460}>
+        <Modal title="For Revision" onClose={() => (returnBusy ? undefined : setReturnDialog(null))} width={460}>
           <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
             <div style={{ color: "var(--muted)" }}>
               From <strong style={{ color: "var(--text)" }}>{returnDialog.reviewName}</strong>. The task goes back to its owner as In Progress, and the revision is counted.
             </div>
             {returnDialog.candidates.length > 1 && (
               <label style={{ display: "grid", gap: 4 }}>
-                <span style={{ fontWeight: 600 }}>Task to return</span>
+                <span style={{ fontWeight: 600 }}>Task to revise</span>
                 <select value={returnTarget} onChange={(e) => setReturnTarget(e.target.value)}>
                   {returnDialog.candidates.map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
@@ -6308,7 +6308,7 @@ export default function Projects() {
             )}
             {returnDialog.candidates.length === 1 && (
               <div>
-                <span style={{ fontWeight: 600 }}>Task to return:</span> {returnDialog.candidates[0].name}
+                <span style={{ fontWeight: 600 }}>Task to revise:</span> {returnDialog.candidates[0].name}
               </div>
             )}
             <label style={{ display: "grid", gap: 4 }}>
@@ -6324,7 +6324,7 @@ export default function Projects() {
             {returnError && <div style={{ color: "var(--danger-text)", fontSize: 12 }}>{returnError}</div>}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button className="btn-secondary" disabled={returnBusy} onClick={() => setReturnDialog(null)}>Cancel</button>
-              <button className="btn-primary" disabled={returnBusy} onClick={() => void submitReturn()}>{returnBusy ? "Returning…" : "Return task"}</button>
+              <button className="btn-primary" disabled={returnBusy} onClick={() => void submitReturn()}>{returnBusy ? "Sending…" : "Send for revision"}</button>
             </div>
           </div>
         </Modal>
