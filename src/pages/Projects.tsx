@@ -5293,68 +5293,84 @@ export default function Projects() {
       },
       {
         // R1 Actionable To-Do: can the assignee act on this now?
+        // 2026-10-14 (Sandra): shown as "Next step" -- the action itself
+        // (a button) instead of an "Action needed" pill, on new projects.
         key: "readiness",
-        label: "Readiness",
-        defaultWidth: 200,
-        maxWidth: 320,
+        label: "Next step",
+        defaultWidth: 240,
+        maxWidth: 360,
         render: (t) => {
-          // R2.2 #3: a finished hand-off shows where the work is now.
-          if (t.status === "Done" && r1ProjectIds.has(t.project_id)) {
+          const isNew = r1ProjectIds.has(t.project_id);
+          // A finished hand-off shows where the work is now.
+          if (t.status === "Done" && isNew) {
             const kind = reviewStepKind(t);
             if (kind) return <span className="status-pill success">{kind === "approve" ? "Approved" : "QA passed"}</span>;
             const open = reviewersOf(t).filter((x) => x.status !== "Done");
             if (open.length) {
               const who = people.find((p) => p.id === open[0].assignee_id)?.name ?? open[0].name;
-              return <span className="status-pill accent" title={open.map((x) => x.name).join("\n")}>In review · {who}{open.length > 1 ? ` (+${open.length - 1})` : ""}</span>;
+              return <span style={{ color: "var(--muted)", fontSize: 12 }} title={open.map((x) => x.name).join("\n")}>In review · {who}{open.length > 1 ? ` (+${open.length - 1})` : ""}</span>;
             }
           }
           if (statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete" || statusGroupOf(TASK_STATUS_GROUPED, t.status) === "cancelled") return <span style={{ color: "var(--muted)" }}>—</span>;
           const r = readinessById.get(t.id);
-          // phase188: returned for revision -- show the reviewer's comment.
-          const ret = lastReturnByTask.get(t.id);
-          if (ret && (t.revision_count ?? 0) > 0 && t.status === "In Progress") {
-            const by = people.find((p) => p.id === ret.actor_id)?.name ?? "Reviewer";
-            return (
-              <span className="status-pill warning" title={`Sent for revision by ${by} (round ${ret.round}):\n${ret.comment ?? ""}`} style={{ cursor: "help" }}>
-                For Revision · {by}
-              </span>
-            );
-          }
+          const btn = (primary: boolean): React.CSSProperties => ({
+            border: `1px solid ${primary ? "var(--accent)" : "var(--border)"}`,
+            background: primary ? "var(--accent)" : "var(--surface)",
+            color: primary ? "#fff" : "var(--warning-text)",
+            borderRadius: 6, padding: "2px 9px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+          });
           if (!r || r.state === "action") {
+            if (!isNew) return <span className="status-pill success">Action needed</span>;
+            if (!isLeafTask(t)) return <span style={{ color: "var(--muted)", fontSize: 12 }} title="Finish the sub-tasks; this row follows them.">In sub-tasks</span>;
+            const mine = canActOnTask(t);
+            const who = people.find((p) => p.id === t.assignee_id)?.name ?? "Unassigned";
+            // Returned for revision: resubmit, with the reviewer's comment.
+            const ret = lastReturnByTask.get(t.id);
+            if (ret && (t.revision_count ?? 0) > 0 && t.status === "In Progress") {
+              const by = people.find((p) => p.id === ret.actor_id)?.name ?? "Reviewer";
+              return (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                  {mine && isHandoffTask(t) && (
+                    <button type="button" style={btn(true)} onClick={(e) => { e.stopPropagation(); void markTaskDone(t, handoffToday(), false, "review"); }} title="Send the revised work back to the reviewer">
+                      Resubmit
+                    </button>
+                  )}
+                  <span className="status-pill warning" title={`For revision from ${by} (round ${ret.round}):\n${ret.comment ?? ""}`} style={{ cursor: "help", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    For Revision · {ret.comment ? `"${ret.comment}"` : by}
+                  </span>
+                </span>
+              );
+            }
+            if (t.status !== "In Progress") {
+              return <span style={{ color: "var(--accent)", fontSize: 12, fontWeight: 600 }} title="Starts automatically when time is logged on this task.">{mine ? "Ready · your turn" : `Ready · ${who}`}</span>;
+            }
+            if (!mine) return <span style={{ color: "var(--muted)", fontSize: 12 }}>In progress · {who}</span>;
+            const kind = reviewStepKind(t);
+            if (kind) {
+              return (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <button type="button" style={btn(true)} onClick={(e) => { e.stopPropagation(); void markTaskDone(t, handoffToday(), false, kind); }}>
+                    ✓ {kind === "approve" ? "Approve" : "Pass QA"}
+                  </button>
+                  {canReturnFrom(t) && (
+                    <button type="button" style={btn(false)} onClick={(e) => { e.stopPropagation(); openReturnDialog(t); }} title="Send the work back to its owner for revision, with a comment">
+                      ↺ For Revision
+                    </button>
+                  )}
+                </span>
+              );
+            }
+            if (isHandoffTask(t)) {
+              return (
+                <button type="button" style={btn(true)} onClick={(e) => { e.stopPropagation(); void markTaskDone(t, handoffToday(), false, "review"); }} title="Hand the work to the reviewer">
+                  ➤ Ready for Review
+                </button>
+              );
+            }
             return (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <span className="status-pill success">Action needed</span>
-                {canActOnTask(t) && reviewStepKind(t) && (
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); void markTaskDone(t, handoffToday(), false, reviewStepKind(t)); }}
-                    title={reviewStepKind(t) === "approve" ? "Sign off: marks this approval Done" : "QA passed: marks this review Done and unlocks the next step"}
-                    style={{ border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 6, padding: "1px 7px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "var(--accent)" }}
-                  >
-                    ✓ {reviewStepKind(t) === "approve" ? "Approve" : "Pass QA"}
-                  </button>
-                )}
-                {canActOnTask(t) && isHandoffTask(t) && (
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); void markTaskDone(t, handoffToday(), false, "review"); }}
-                    title="Hand the work to the reviewer: marks this task Done and unlocks the review"
-                    style={{ border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 6, padding: "1px 7px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "var(--accent)" }}
-                  >
-                    → Ready for Review
-                  </button>
-                )}
-                {canReturnFrom(t) && (
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); openReturnDialog(t); }}
-                    title="Send the work back to its owner for revision, with a comment"
-                    style={{ border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 6, padding: "1px 7px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "var(--warning-text)" }}
-                  >
-                    ↺ For Revision
-                  </button>
-                )}
-              </span>
+              <button type="button" style={btn(true)} onClick={(e) => { e.stopPropagation(); void markTaskDone(t, handoffToday()); }}>
+                ✓ Mark Done
+              </button>
             );
           }
           const label = waitingOnLabel(r, (id) => (id ? people.find((p) => p.id === id)?.name ?? null : null));
