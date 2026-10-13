@@ -911,6 +911,9 @@ export default function WbsPlanning() {
   // Phase 10: no longer a single selected preview -- all 4 scenarios
   // render simultaneously as rows now, see effectiveForMode below.
   const [saving, setSaving] = useState(false);
+  // 2026-10-13 (Sandra: "not clear which to fill out first"): a new draft
+  // shows only the 3 fields needed to save; the rest open on request.
+  const [showDetailsEarly, setShowDetailsEarly] = useState(false);
   // Most WBS users do not need the bandwidth diagnostic by default.
   // Keep it opt-in while preserving the existing calculation and controls
   // when someone explicitly opens it.
@@ -4232,6 +4235,20 @@ export default function WbsPlanning() {
   // canEditWbs was always purely a status check, same as before.)
   const canEditWbs = project.wbs_status !== "closed";
 
+  // Project Information completeness (2026-10-13).
+  const basicsMissing = [!project.name?.trim() || project.name === "Untitled" ? "Project Name" : null, !project.owner_id ? "Owner" : null, !project.start_date ? "Start Date" : null].filter((x): x is string => !!x);
+  const PROJECT_DETAIL_FIELDS: [string, unknown][] = [
+    ["Priority", project.priority],
+    ["Category", project.category],
+    ["Source", project.source_id],
+    ["Planning Type", project.planning_type_id],
+    ["Project Type", project.project_type_id],
+    ["Complexity", project.effort_level],
+    ["Description", project.description],
+  ];
+  const detailsMissing = PROJECT_DETAIL_FIELDS.filter(([, v]) => !v).map(([k]) => k);
+  const showProjectDetails = !project.is_unsaved || showDetailsEarly;
+
   // ---- R2.1 L&D lifecycle: phases + milestones (new projects only) ----
   const isDraftProject = (project.wbs_status ?? "draft") === "draft";
   const includedMilestones = milestones.filter((m) => m.is_included);
@@ -6056,7 +6073,7 @@ export default function WbsPlanning() {
           {(() => {
             const isDraft = project.wbs_status === "draft";
             const isActivePlan = project.wbs_status === "baseline_locked" || project.wbs_status === "changed_after_baseline";
-            const canRequestStart = canManageWbs && isDraft && !pendingBaselineRequest;
+            const canRequestStart = canManageWbs && isDraft && !pendingBaselineRequest && !project.is_unsaved;
             const canRequestClosure = canManageWbs && isActivePlan && !pendingClosure;
             const canReopenProject = isFullAccess && project.wbs_status === "closed";
             const saveLabel = isDraft ? (project.is_unsaved ? "Save & Continue" : "Save Draft") : "Save Changes";
@@ -6225,16 +6242,33 @@ export default function WbsPlanning() {
               <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800, flexShrink: 0 }}>1</span>
               <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Project Information</div>
               <div style={{ fontSize: 10.5, color: "var(--muted)" }}>
-                {project.is_unsaved ? "Complete the basic details, then save to continue planning." : "Basic project details."}
+                {project.is_unsaved ? "Step 1 of 2: fill in the 3 basics below and save your draft." : "Basic project details."}
               </div>
-              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12, fontSize: 10.5, color: "var(--muted)" }}>
-                <span><span style={{ color: "#d92d20", fontWeight: 800 }}>*</span> Required to save draft</span>
-                <span><span style={{ color: "#d97706", fontWeight: 900 }}>●</span> Required before Start Project</span>
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, fontSize: 11, fontWeight: 700 }}>
+                {project.is_unsaved ? (
+                  <span style={{ padding: "3px 10px", borderRadius: 999, background: basicsMissing.length ? "#eef4ff" : "#ecfdf3", color: basicsMissing.length ? "#1d4ed8" : "#15803d" }}>
+                    {3 - basicsMissing.length} of 3 basics done
+                  </span>
+                ) : project.wbs_status === "draft" ? (
+                  <span
+                    title={detailsMissing.length ? `Still needed before Start Project: ${detailsMissing.join(", ")}` : "All project details are complete"}
+                    style={{ padding: "3px 10px", borderRadius: 999, background: detailsMissing.length ? "#fff7ed" : "#ecfdf3", color: detailsMissing.length ? "#b45309" : "#15803d", cursor: "help" }}
+                  >
+                    Before Start Project: {PROJECT_DETAIL_FIELDS.length - detailsMissing.length} of {PROJECT_DETAIL_FIELDS.length} details done
+                  </span>
+                ) : null}
               </div>
             </div>
+            {project.is_unsaved && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "-4px 0 12px 38px", fontSize: 11.5, color: "#304963" }}>
+                <span>
+                  You only need <strong>Project Name</strong>, <strong>Owner</strong> and <strong>Start Date</strong> to save a draft. The other details are needed later, before Start Project.
+                </span>
+              </div>
+            )}
 
-            <div className="wbs-project-setup-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(300px, 1fr)", gap: 18, alignItems: "stretch" }}>
-              <div className="wbs-project-info-grid" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: "12px 16px", alignContent: "start" }}>
+            <div className="wbs-project-setup-layout" style={{ display: "grid", gridTemplateColumns: showProjectDetails ? "minmax(0, 2fr) minmax(300px, 1fr)" : "minmax(0, 1fr)", gap: 18, alignItems: "stretch" }}>
+              <div className="wbs-project-info-grid" style={{ display: "grid", gridTemplateColumns: showProjectDetails ? "repeat(5, minmax(0, 1fr))" : "repeat(4, minmax(0, 220px))", gap: "12px 16px", alignContent: "start" }}>
               <label style={{ display: "grid", gap: 5 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project ID</span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(true, undefined, true), width: "100%" }}>
@@ -6282,8 +6316,22 @@ export default function WbsPlanning() {
                 </div>
               </label>
 
+              {!showProjectDetails && (
+                <div style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
+                  {canEditWbs && (
+                    <button type="button" className="btn-primary" disabled={saving || basicsMissing.length > 0} onClick={saveDraft} title={basicsMissing.length ? `Still needed: ${basicsMissing.join(", ")}` : "Save the draft and open WBS planning"}>
+                      {saving ? "Saving…" : "Save draft & continue"}
+                    </button>
+                  )}
+                  {basicsMissing.length > 0 && <span style={{ fontSize: 11, color: "var(--muted)" }}>Still needed: {basicsMissing.join(", ")}</span>}
+                  <button type="button" onClick={() => setShowDetailsEarly(true)} style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--accent)", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
+                    Fill in the other project details now (optional)
+                  </button>
+                </div>
+              )}
+              {showProjectDetails && (<>
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Priority <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Priority <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.priority, undefined, !canEditWbs), width: "100%" }}>
                   <InlineSelect
                     value={project.priority ?? ""}
@@ -6299,7 +6347,7 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Category <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Category <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.category, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect value={project.category ?? ""} editable={canEditWbs}
@@ -6310,7 +6358,7 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Source <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Source <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.source_id, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
@@ -6331,7 +6379,7 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Planning Type <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Planning Type <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.planning_type_id, undefined, !canEditWbs), width: "100%" }}>
                   <InlineSelect
                     value={projectPlanningTypeOptions.find((t) => t.id === project.planning_type_id)?.name ?? ""}
@@ -6350,7 +6398,7 @@ export default function WbsPlanning() {
               </label>
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Type <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Project Type <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.project_type_id, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
@@ -6392,7 +6440,7 @@ export default function WbsPlanning() {
               )}
 
               <label style={{ display: "grid", gap: 5 }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Complexity <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Complexity <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></span>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.effort_level, undefined, !canEditWbs), width: "100%" }}>
 <div style={{ display: "flex", alignItems: "center", width: "100%", minWidth: 0 }}>
                                       <InlineSelect
@@ -6412,6 +6460,7 @@ export default function WbsPlanning() {
                 </div>
               </label>
 
+              </>)}
               {activeBaseline && (
                 <label style={{ display: "grid", gap: 5 }}>
                   <span style={{ fontSize: 10.5, fontWeight: 700, color: "#304963" }}>Baseline</span>
@@ -6422,8 +6471,9 @@ export default function WbsPlanning() {
               )}
             </div>
 
+              {showProjectDetails && (
               <div style={{ display: "grid", gridTemplateRows: "auto 1fr", minWidth: 0 }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#304963", marginBottom: 5 }}>Description <span title="Required before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></div>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#304963", marginBottom: 5 }}>Description <span title="Needed before Start Project" style={{ color: "#d97706", fontWeight: 900 }}>●</span></div>
                 <div className="wbs-field-box" style={{ ...fieldBoxStyle(!!project.description, undefined, !canEditWbs), width: "100%", minHeight: 0, height: "100%", alignItems: "stretch" }}>
                   <InlineTextArea
                     value={project.description ?? ""}
@@ -6433,6 +6483,7 @@ export default function WbsPlanning() {
                   />
                 </div>
               </div>
+              )}
             </div>
           </section>
 
