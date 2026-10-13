@@ -76,7 +76,7 @@ import { useTimeTracking } from "../lib/TimeTrackingContext";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 import { Play, Square, Info } from "lucide-react";
 import { isLifecycleProject, lifecycleLabelForProjectPhase } from "../lib/lifecycle";
-import { computeReadiness, waitingOnLabel, expectedUnlockDate, needsDependencyLink, isR1Project, type ReadinessDep } from "../lib/taskReadiness";
+import { computeReadiness, waitingOnLabel, expectedUnlockDate, needsDependencyLink, isR1Project, looksLikeReviewTask, reviewKindOf, type ReadinessDep } from "../lib/taskReadiness";
 import {
   PROJECT_EFFORT_LEVEL_OPTIONS,
   PROJECT_EFFORT_LEVEL_TONES,
@@ -1901,6 +1901,25 @@ export default function Projects() {
     statusGroupOf(TASK_STATUS_GROUPED, t.status) !== "cancelled" &&
     (t.assignee_id === me?.id || me?.access_level === "full" || projects.find((p) => p.id === t.project_id)?.owner_id === me?.id) &&
     returnableFor(t).length > 0;
+  // R2.2 #3 (2026-10-14, Sandra): explicit hand-off buttons on today's tasks.
+  // A work task whose finish unlocks a review / QA / sign-off task gets
+  // "Ready for Review"; the review task gets "Pass QA" or "Approve" (plus
+  // Return above). All of them go through markTaskDone, so the logged-hours
+  // and Output Count checks still apply. New (R1) projects only.
+  const canActOnTask = (t: TaskRow) =>
+    t.assignee_id === me?.id || me?.access_level === "full" || projects.find((p) => p.id === t.project_id)?.owner_id === me?.id;
+  const isLeafTask = (t: TaskRow) => !tasks.some((x) => x.parent_task_id === t.id && !x.is_archived);
+  /** Open review tasks that wait on this task. */
+  const reviewersOf = (t: TaskRow) =>
+    taskDeps
+      .filter((d) => d.depends_on_task_id === t.id)
+      .map((d) => tasks.find((x) => x.id === d.task_id))
+      .filter((x): x is TaskRow => !!x && !x.is_archived && x.status !== "Cancelled" && looksLikeReviewTask(x.name));
+  /** "qa" | "approve" when this task is itself a review step with a Depends-on link. */
+  const reviewStepKind = (t: TaskRow) =>
+    r1ProjectIds.has(t.project_id) && isLeafTask(t) && taskDeps.some((d) => d.task_id === t.id) ? reviewKindOf(t.name) : null;
+  const isHandoffTask = (t: TaskRow) => r1ProjectIds.has(t.project_id) && isLeafTask(t) && !reviewStepKind(t) && reviewersOf(t).length > 0;
+  const handoffToday = () => toISOWorkingDay(new Date());
   function openReturnDialog(t: TaskRow) {
     const c = returnableFor(t).map((x) => ({ id: x.id, name: x.name }));
     setReturnDialog({ reviewTaskId: t.id, reviewName: t.name, candidates: c });
@@ -2781,7 +2800,10 @@ export default function Projects() {
   // 2026-10-07 (Sandra, item L): the ONE path into Done -- Reported
   // Completion cell, board drag and bulk Status all go through here, so the
   // logged-hours / Output Count checks and the confirm can't be skipped.
-  async function markTaskDone(t: TaskRow, v: string, fromBoard = false): Promise<void> {
+  async function markTaskDone(t: TaskRow, v: string, fromBoard = false, handoff: "review" | "qa" | "approve" | null = null): Promise<void> {
+    // R2.2 #3: wording for the hand-off buttons; the checks are the same.
+    const hoTitle = handoff === "review" ? "Send for review?" : handoff === "qa" ? "Pass QA?" : handoff === "approve" ? "Approve?" : null;
+    const hoLabel = handoff === "review" ? "Ready for Review" : handoff === "qa" ? "Pass QA" : handoff === "approve" ? "Approve" : null;
     // 2026-09-22 (Sandra: "make output count a hard
     // requirement too" + "when there's missing information
     // before tagging completion date, all needed information
@@ -2807,7 +2829,7 @@ export default function Projects() {
     }
     if (missing.length) {
       await alert({
-        title: "Can't mark this task Done yet",
+        title: hoTitle ? `Can't ${hoLabel === "Ready for Review" ? "send this for review" : hoLabel?.toLowerCase()} yet` : "Can't mark this task Done yet",
         message: "Fill in the missing information first:",
         items: missing,
       });
@@ -2837,14 +2859,18 @@ export default function Projects() {
     // two required fields bolded, before it locks Status to
     // Done.
     const ok = await confirm({
-      title: "Mark this task Done?",
-      message: `Reported Completion will be ${formatDate(v)} and Status moves to Done. Check these numbers are right.${fromBoard ? " For a different date, set **Reported Completion** in the table instead." : ""}`,
+      title: hoTitle ?? "Mark this task Done?",
+      message: handoff === "review"
+        ? `Status moves to Done with Reported Completion ${formatDate(v)}, and the review unlocks for ${reviewersOf(t).map((x) => people.find((p) => p.id === x.assignee_id)?.name ?? x.name).filter((n, i, a) => a.indexOf(n) === i).join(", ")}. Check these numbers are right.`
+        : handoff
+          ? `Status moves to Done with Reported Completion ${formatDate(v)}, and the next step unlocks. Check these numbers are right.`
+          : `Reported Completion will be ${formatDate(v)} and Status moves to Done. Check these numbers are right.${fromBoard ? " For a different date, set **Reported Completion** in the table instead." : ""}`,
       items: [
         `Estimated hours: ${scoped != null ? scoped : "—"}`,
         `**Logged hours**: ${logged.toFixed(2)}`,
         `**Output Count**: ${outputCount}`,
       ],
-      confirmLabel: "Mark Done",
+      confirmLabel: hoLabel ?? "Mark Done",
     });
     if (!ok) return;
     const patch: Partial<TaskRow> = {
@@ -5320,6 +5346,16 @@ export default function Projects() {
         defaultWidth: 200,
         maxWidth: 320,
         render: (t) => {
+          // R2.2 #3: a finished hand-off shows where the work is now.
+          if (t.status === "Done" && r1ProjectIds.has(t.project_id)) {
+            const kind = reviewStepKind(t);
+            if (kind) return <span className="status-pill success">{kind === "approve" ? "Approved" : "QA passed"}</span>;
+            const open = reviewersOf(t).filter((x) => x.status !== "Done");
+            if (open.length) {
+              const who = people.find((p) => p.id === open[0].assignee_id)?.name ?? open[0].name;
+              return <span className="status-pill accent" title={open.map((x) => x.name).join("\n")}>In review · {who}{open.length > 1 ? ` (+${open.length - 1})` : ""}</span>;
+            }
+          }
           if (statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete" || statusGroupOf(TASK_STATUS_GROUPED, t.status) === "cancelled") return <span style={{ color: "var(--muted)" }}>—</span>;
           const r = readinessById.get(t.id);
           // phase188: returned for revision -- show the reviewer's comment.
@@ -5336,6 +5372,26 @@ export default function Projects() {
             return (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span className="status-pill success">Action needed</span>
+                {canActOnTask(t) && reviewStepKind(t) && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); void markTaskDone(t, handoffToday(), false, reviewStepKind(t)); }}
+                    title={reviewStepKind(t) === "approve" ? "Sign off: marks this approval Done" : "QA passed: marks this review Done and unlocks the next step"}
+                    style={{ border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 6, padding: "1px 7px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "var(--accent)" }}
+                  >
+                    ✓ {reviewStepKind(t) === "approve" ? "Approve" : "Pass QA"}
+                  </button>
+                )}
+                {canActOnTask(t) && isHandoffTask(t) && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); void markTaskDone(t, handoffToday(), false, "review"); }}
+                    title="Hand the work to the reviewer: marks this task Done and unlocks the review"
+                    style={{ border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 6, padding: "1px 7px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "var(--accent)" }}
+                  >
+                    → Ready for Review
+                  </button>
+                )}
                 {canReturnFrom(t) && (
                   <button
                     type="button"
@@ -5367,7 +5423,7 @@ export default function Projects() {
         render: (t) => ((t.revision_count ?? 0) > 0 ? <span className="status-pill warning">{t.revision_count}</span> : <span style={{ color: "var(--muted)" }}>0</span>),
       },
     ],
-    [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents, taskNoteCounts, routing, autoOn, readinessById, lastReturnByTask, taskDeps]
+    [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents, taskNoteCounts, routing, autoOn, readinessById, lastReturnByTask, taskDeps, r1ProjectIds]
   );
 
   // Board cards get their own name renderer rather than reusing the table

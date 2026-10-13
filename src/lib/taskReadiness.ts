@@ -148,6 +148,15 @@ export function looksLikeReviewTask(name: string | null | undefined): boolean {
   return !!name && REVIEW_NAME_RE.test(name);
 }
 
+// R2.2 #3: which hand-off button a review step gets. Sign-off / approval /
+// validation steps get "Approve"; every other review-type name gets "Pass QA".
+const APPROVE_NAME_RE = /\b(sign[- ]?off|approv\w*|validat\w*)\b/i;
+
+export function reviewKindOf(name: string | null | undefined): "qa" | "approve" | null {
+  if (!looksLikeReviewTask(name)) return null;
+  return APPROVE_NAME_RE.test(name as string) ? "approve" : "qa";
+}
+
 /** Names of open review-type leaf tasks with no Depends-on link (Start Project check). */
 export function reviewTasksMissingDependency(tasks: (ReadinessTask & { parent_task_id?: string | null })[], deps: ReadinessDep[]): string[] {
   const parents = new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
