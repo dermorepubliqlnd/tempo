@@ -463,7 +463,11 @@ export default function MyDashboard() {
   // isOverdueTask (started project, not paused, leaf tasks only).
   const myParentIds = useMemo(() => new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string)), [tasks]);
   const myActionTasks = myOpenTasks.filter((t) => !isWaiting(t));
-  const myComingUp = myOpenTasks.filter((t) => isWaiting(t) && (t.project as ProjectRow | null)?.wbs_status !== "draft");
+  // Draft projects' tasks stay out (still being planned) -- except Analysis &
+  // Scoping tasks of new-lifecycle projects, which run before Start Project.
+  const myComingUp = myOpenTasks.filter(
+    (t) => isWaiting(t) && ((t.project as ProjectRow | null)?.wbs_status !== "draft" || (t as { wbs_phase?: string | null }).wbs_phase === "analysis")
+  );
   const overdueTasks = myActionTasks.filter((t) => isOverdueTask(t, t.project, todayIso, myParentIds.has(t.id)));
   const isPausedTask = (t: { project?: unknown }) => (t.project as PauseProjectInfo | null)?.status === "Paused";
   const tasksDueToday = myActionTasks.filter((t) => hasConfirmedBaseline(t) && t.current_due_date && t.current_due_date.slice(0, 10) === todayIso);
