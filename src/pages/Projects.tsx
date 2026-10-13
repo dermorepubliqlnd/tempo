@@ -75,7 +75,7 @@ interface DeletedSpentHourRow {
 import { useTimeTracking } from "../lib/TimeTrackingContext";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 import { Play, Square, Info } from "lucide-react";
-import { computeReadiness, waitingOnLabel, expectedUnlockDate, needsDependencyLink, type ReadinessDep } from "../lib/taskReadiness";
+import { computeReadiness, waitingOnLabel, expectedUnlockDate, needsDependencyLink, isR1Project, type ReadinessDep } from "../lib/taskReadiness";
 import {
   PROJECT_EFFORT_LEVEL_OPTIONS,
   PROJECT_EFFORT_LEVEL_TONES,
@@ -1864,9 +1864,11 @@ export default function Projects() {
 
   const ownerName = (id: string | null) => people.find((p) => p.id === id)?.name ?? "—";
   // R1 Actionable To-Do (2026-10-13): assigned != actionable.
-  const readinessById = useMemo(() => computeReadiness(tasks, taskDeps), [tasks, taskDeps]);
+  // New projects only (created on/after R1_START_DATE); older ones unchanged.
+  const r1ProjectIds = useMemo(() => new Set(projects.filter((p) => isR1Project(p)).map((p) => p.id)), [projects]);
+  const readinessById = useMemo(() => computeReadiness(tasks, taskDeps, (t) => r1ProjectIds.has((t as TaskRow).project_id)), [tasks, taskDeps, r1ProjectIds]);
   const isWaitingTask = (t: TaskRow) => readinessById.get(t.id)?.state === "waiting";
-  const needsLink = (t: TaskRow) => needsDependencyLink(t, taskDeps, tasks.some((x) => x.parent_task_id === t.id && !x.is_archived));
+  const needsLink = (t: TaskRow) => r1ProjectIds.has(t.project_id) && needsDependencyLink(t, taskDeps, tasks.some((x) => x.parent_task_id === t.id && !x.is_archived));
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? "—";
   const taskName = (id: string | null) => tasks.find((t) => t.id === id)?.name ?? "—";
   const isProjectOwner = (projectId: string) => projects.find((p) => p.id === projectId)?.owner_id === me?.id;

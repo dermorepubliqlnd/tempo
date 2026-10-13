@@ -75,7 +75,7 @@ import { parseLocalDate, calendarDaysBetween } from "../lib/taskTiming";
 // Dashboard.tsx already follows) so this page's numbers can never drift
 // out of sync with what the Projects table itself shows for a project.
 import { wbsStatusMetaFor } from "../lib/wbsStatus";
-import { computeReadiness, waitingOnLabel, expectedUnlockDate, type ReadinessDep } from "../lib/taskReadiness";
+import { computeReadiness, waitingOnLabel, expectedUnlockDate, isR1Project, type ReadinessDep } from "../lib/taskReadiness";
 import { healthOf, actualProgress, countWorkingDays, projectCompletionDate, type ProjectRow, type TaskRow } from "./Projects";
 import {
   createAllocationEngine,
@@ -443,7 +443,11 @@ export default function MyDashboard() {
   // R1 Actionable To-Do (2026-10-13, Sandra: review tasks showed up before
   // the materials were sent). Tasks still waiting on another task go to the
   // Coming Up card instead of My Work Today / Due lists.
-  const readinessById = useMemo(() => computeReadiness(tasks, taskDeps), [tasks, taskDeps]);
+  // New projects only (created on/after R1_START_DATE); older ones unchanged.
+  const readinessById = useMemo(() => {
+    const r1 = new Set(projects.filter((p) => isR1Project(p)).map((p) => p.id));
+    return computeReadiness(tasks, taskDeps, (t) => r1.has((t as TaskRow).project_id));
+  }, [tasks, taskDeps, projects]);
   const isWaiting = (t: { id: string }) => readinessById.get(t.id)?.state === "waiting";
   const myOpenTasks = useMemo(() => {
     if (!me) return [];

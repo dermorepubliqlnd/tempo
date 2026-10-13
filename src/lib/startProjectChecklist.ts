@@ -50,6 +50,8 @@ export interface StartChecklistInput {
   /** Names of open leaf tasks whose End date is already in the past. */
   pastDated: string[];
   hasUnsavedChanges?: boolean;
+  /** R1 (new projects only): review/QA/sign-off tasks with no Depends-on link. */
+  reviewTasksMissingDependency?: string[];
   /** The approver's run of the list. Skips Description: Sandra 2026-09-07
    * made Description the requester's job only ("not the approver of
    * baseline"), so it is never re-checked on approval. */
@@ -109,6 +111,19 @@ export function startProjectChecklist(input: StartChecklistInput): ChecklistGrou
   const noOutput = tasks.filter((t) => !t.output_type_id && !isTopParent(t));
   if (noOutput.length) {
     groups.push({ key: "output_type", label: "Output Type missing", hint: "Output Count can stay blank until you close the project.", items: noOutput.map(taskLabel), blocking: true });
+  }
+
+  // R1 Actionable To-Do (2026-10-13): a review task with no Depends-on link
+  // would show in the reviewer's to-do before anything was sent to them.
+  if (!forApprover && input.reviewTasksMissingDependency && input.reviewTasksMissingDependency.length) {
+    groups.push({
+      key: "review_dependency",
+      label: "Review tasks not linked",
+      hint: "Set Depends On to the task each one reviews, so it reaches the reviewer only after that work is Done.",
+      items: input.reviewTasksMissingDependency,
+      blocking: true,
+      overridable: true,
+    });
   }
 
   // phase157d: past dates are a warning, not a blocker.

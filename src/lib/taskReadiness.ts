@@ -12,6 +12,17 @@
 
 export type ReadinessState = "action" | "waiting";
 
+// 2026-10-13 (Sandra): apply to NEW projects only -- existing projects keep
+// working exactly as before, with no clean-up asked of anyone. A project
+// counts as new when it was created on or after this date (Manila time).
+export const R1_START_DATE = "2026-10-13";
+
+export function isR1Project(p: { created_at?: string | null } | null | undefined): boolean {
+  if (!p || !p.created_at) return false;
+  const manila = new Date(new Date(p.created_at).getTime() + 8 * 3600000).toISOString().slice(0, 10);
+  return manila >= R1_START_DATE;
+}
+
 export interface ReadinessDep {
   task_id: string;
   depends_on_task_id: string;
@@ -56,7 +67,7 @@ export function isFinishedStatus(status: string | null | undefined): boolean {
  *   longer block anything).
  * - A task with no predecessors is "action".
  */
-export function computeReadiness(tasks: ReadinessTask[], deps: ReadinessDep[]): Map<string, Readiness> {
+export function computeReadiness(tasks: ReadinessTask[], deps: ReadinessDep[], appliesTo: (t: ReadinessTask) => boolean = () => true): Map<string, Readiness> {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const predsOf = new Map<string, string[]>();
   for (const d of deps) {
@@ -72,6 +83,10 @@ export function computeReadiness(tasks: ReadinessTask[], deps: ReadinessDep[]): 
       const p = byId.get(pid);
       if (!p || p.is_archived || isFinishedStatus(p.status)) continue;
       open.push({ id: p.id, name: p.name, status: p.status, assigneeId: p.assignee_id, dueDate: p.current_due_date ?? null });
+    }
+    if (!appliesTo(t)) {
+      out.set(t.id, { state: "action", waitingOn: [] });
+      continue;
     }
     const started = t.status === "In Progress";
     out.set(t.id, { state: open.length > 0 && !started ? "waiting" : "action", waitingOn: open });
@@ -108,6 +123,12 @@ const REVIEW_NAME_RE = /\b(review|qa|q\.a\.|quality check|check|sign[- ]?off|app
 
 export function looksLikeReviewTask(name: string | null | undefined): boolean {
   return !!name && REVIEW_NAME_RE.test(name);
+}
+
+/** Names of open review-type leaf tasks with no Depends-on link (Start Project check). */
+export function reviewTasksMissingDependency(tasks: (ReadinessTask & { parent_task_id?: string | null })[], deps: ReadinessDep[]): string[] {
+  const parents = new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
+  return tasks.filter((t) => needsDependencyLink(t, deps, parents.has(t.id))).map((t) => (t.name && t.name.trim() ? t.name : "Untitled task"));
 }
 
 export function needsDependencyLink(t: ReadinessTask & { parent_task_id?: string | null }, deps: ReadinessDep[], hasChildren: boolean): boolean {

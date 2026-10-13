@@ -22,6 +22,7 @@ import { formatDate } from "../lib/formatDate";
 import { rollupHoursFor, formatHours, type TimeEntryRow } from "../lib/timeTracking";
 import { addDays, buildHolidaySet, isWorkingDay, parseLocalDate, toISO, workingDaysBetween, type HolidaySet } from "../lib/workingDays";
 import { fullCapacityScenario, capacityBasedScenario, packFullCapacityQueue, FULL_CAPACITY_DAILY_HOURS, type FullCapacityQueueTask } from "../lib/taskScheduling";
+import { isR1Project, reviewTasksMissingDependency } from "../lib/taskReadiness";
 import { buildForwardSchedule, type SchedTaskRow, type SchedProjectRow, type SchedAvailabilityRow } from "../lib/capacityScheduler";
 import { TASK_EFFORT_OPTIONS, TASK_EFFORT_DEFAULT_TONES, TASK_STATUS_GROUPED, statusGroupOf, PROJECT_EFFORT_LEVEL_OPTIONS, PROJECT_PRIORITY_OPTIONS, effortLevelLabel } from "../lib/notionOptions";
 // One shared allocation engine for all three utilization surfaces -- this
@@ -46,6 +47,7 @@ import AddSessionModal from "../components/AddSessionModal";
 import BulkUploadSessionsModal from "../components/BulkUploadSessionsModal";
 
 interface ProjectRow {
+  created_at?: string | null;
   stage?: string | null; // phase178
   id: string;
   name: string;
@@ -1115,7 +1117,7 @@ export default function WbsPlanning() {
     // state still updates underneath, but the page never unmounts.
     if (!silent) setLoading(true);
     const [{ data: proj }, { data: tks }, { data: ppl }, avail, hols, allTks, { data: allProjs }, { data: wts }, { data: ots }, { data: wtots }, { data: cats }, { data: srcs }, { data: planningTypes }, { data: ptypes }] = await Promise.all([
-      supabase.from("projects").select("id,name,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,stage,scoping_effort_mode,wbs_status,category,source_id,planning_type_id,project_type_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required,is_operational,is_ongoing_container").eq("id", projectId).single(),
+      supabase.from("projects").select("id,name,created_at,owner_id,is_unsaved,start_date,end_date,timelines_locked,phase,status,stage,scoping_effort_mode,wbs_status,category,source_id,planning_type_id,project_type_id,priority,effort_level,description,project_number,actual_close_date,lessons_learned_worked,lessons_learned_not_worked,reopened_at,reopened_by,paused_at,resumed_at,pause_reason,pause_expected_resume,schedule_review_required,is_operational,is_ongoing_container").eq("id", projectId).single(),
       supabase
         .from("tasks")
         .select(
@@ -2377,6 +2379,7 @@ export default function WbsPlanning() {
       pastDated: pastDatedOpenTasks().map((t) => t.name || "Untitled task"),
       hasUnsavedChanges: forApprover ? false : hasUnsavedChanges,
       forApprover,
+      reviewTasksMissingDependency: isR1Project(project) ? reviewTasksMissingDependency(orderedTasks, dependencies) : [],
     });
   }
 
