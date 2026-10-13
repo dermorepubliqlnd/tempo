@@ -23,6 +23,7 @@ import { timingWithPause, type TimingResult } from "../lib/pause";
 import { METRIC_DEFINITIONS, isActiveProject, isOverdueProject, isOverdueTask, isDueThisWeek } from "../lib/metrics";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import LogTimeModal from "../components/LogTimeModal";
+import CompleteTaskModal from "../components/CompleteTaskModal";
 import { fetchStagePhaseRules, type StagePhaseRules } from "../components/StagePhaseRules";
 import { PROJECT_STAGES, PROJECT_STAGE_TONES, PROJECT_STAGE_HINTS, projectStageOf, normalizeStageFilter } from "../lib/projectStage";
 import NotesSidebar from "../components/NotesSidebar";
@@ -1578,6 +1579,9 @@ export default function Projects() {
   // breakdown modal (if any) is currently open.
   const [hoursBreakdownTaskId, setHoursBreakdownTaskId] = useState<string | null>(null);
   // 2026-09-24 (phase110): "Log follow-up time" on a Done task.
+  // 2026-10-14 (Sandra): Complete task pop-up (see markTaskDone).
+  const [completeDlg, setCompleteDlg] = useState<{ taskId: string; date: string } | null>(null);
+  const [completeLogTime, setCompleteLogTime] = useState(false);
   const [followUpTask, setFollowUpTask] = useState<{ id: string; name: string; onBehalfOf: string | null } | null>(null);
   const [timeEntries, setTimeEntries] = useState<TimeEntryRow[]>([]);
   const [deletedSpentHours, setDeletedSpentHours] = useState<DeletedSpentHourRow[]>([]);
@@ -2701,83 +2705,36 @@ export default function Projects() {
   // 2026-10-07 (Sandra, item L): the ONE path into Done -- Reported
   // Completion cell, board drag and bulk Status all go through here, so the
   // logged-hours / Output Count checks and the confirm can't be skipped.
-  async function markTaskDone(t: TaskRow, v: string, fromBoard = false): Promise<void> {
-    // 2026-09-22 (Sandra: "make output count a hard
-    // requirement too" + "when there's missing information
-    // before tagging completion date, all needed information
-    // as asked" -- both gates now checked together, up front,
-    // with every missing item named at once rather than one
-    // alert per field) -- Logged Hours (Confirmed/Approved)
-    // and Output Count are both required before Actual
-    // Completion Date can be set at all.
-    const scoped = t.estimated_hours;
-    const logged = spentHoursFor(t.id);
-    const outputCount = t.output_count;
-    // phase163 (Sandra 2026-10-07): "No Deliverable" types are
-    // always 0 (no question asked); every other output type
-    // needs a whole number of 1 or more.
+  // 2026-10-14 (Sandra: "let them input it there"): opens the Complete
+  // task pop-up instead of the old alert/confirm chain. Reported Completion
+  // and Output Count are filled in right there; logged hours can be added
+  // through its Log time link. The same checks still apply on confirm.
+  async function markTaskDone(t: TaskRow, v: string, _fromBoard = false): Promise<void> {
+    setCompleteDlg({ taskId: t.id, date: v });
+  }
+
+  async function confirmTaskDone(t: TaskRow, date: string, outputCount: number): Promise<string | null> {
+    if (ownHoursFor(timeEntries, t.id) <= 0) return "Log your time on this task first.";
     const outType = outputTypes.find((o) => o.id === t.output_type_id);
     const countsDeliverable = !!outType && outType.counts_deliverable !== false;
-    const missing: string[] = [];
-    if (ownHoursFor(timeEntries, t.id) <= 0) {
-      missing.push("**Logged hours**: no Final time on this task yet. Log time first.");
+    if (countsDeliverable && (t.output_count ?? null) !== outputCount) {
+      const { error } = await supabase.from("tasks").update({ output_count: outputCount }).eq("id", t.id);
+      if (error) return friendlyError("save the Output Count", error).message ?? "Couldn't save the Output Count.";
+      setTasks((prev) => prev.map((row) => (row.id === t.id ? { ...row, output_count: outputCount } : row)));
     }
-    if (countsDeliverable && (outputCount === null || outputCount === undefined || outputCount < 1)) {
-      missing.push(`**Output Count**: enter how many ${outType?.name ?? "outputs"} this task produced (1 or more).`);
-    }
-    if (missing.length) {
-      await alert({
-        title: "Can't mark this task Done yet",
-        message: "Fill in the missing information first:",
-        items: missing,
-      });
-      return;
-    }
-    // 2026-09-22 (Sandra: "we have output count that is 0,
-    // can you add a verifying layer if output count is 0 to
-    // confirm there was really no output for this task") --
-    // Output Count = 0 passes the "is it set" check above (0
-    // is a real, deliberate value, not missing), but it's
-    // also the easiest value to leave behind by accident, so
-    // it gets its own extra confirmation, separate from and
-    // before the general completion confirm below. Cancelling
-    // here aborts the whole commit so nothing gets saved.
-    if (outputCount === 0 && countsDeliverable) {
-      const zeroOk = await confirm({
-        title: "No output for this task?",
-        message: "**Output Count** is 0. Confirm this task really produced no output, or go back and enter the actual number.",
-        confirmLabel: "Yes, 0 is correct",
-        cancelLabel: "Let me fix it",
-      });
-      if (!zeroOk) return;
-    }
-    // 2026-09-22 (Sandra: "before accepting completion date
-    // ask user to confirm logged hours and output count") --
-    // one last look at the numbers behind this task, with the
-    // two required fields bolded, before it locks Status to
-    // Done.
-    const ok = await confirm({
-      title: "Mark this task Done?",
-      message: `Reported Completion will be ${formatDate(v)} and Status moves to Done. Check these numbers are right.${fromBoard ? " For a different date, set **Reported Completion** in the table instead." : ""}`,
-      items: [
-        `Estimated hours: ${scoped != null ? scoped : "—"}`,
-        `**Logged hours**: ${logged.toFixed(2)}`,
-        `**Output Count**: ${outputCount}`,
-      ],
-      confirmLabel: "Mark Done",
-    });
-    if (!ok) return;
     const patch: Partial<TaskRow> = {
-      actual_completion_date: v,
+      actual_completion_date: date,
       status: "Done",
       submitted_on: new Date().toISOString(),
       submitted_by: me?.id ?? null,
     };
-    await updateTask(t.id, patch);
-    await recomputeAncestorStatus(
-      t.id,
-      tasks.map((row) => (row.id === t.id ? { ...row, ...patch } : row))
-    );
+    const { error } = await supabase.from("tasks").update(patch).eq("id", t.id);
+    if (error) return friendlyError("mark the task Done", error).message ?? "Couldn't mark the task Done.";
+    const next = tasks.map((row) => (row.id === t.id ? { ...row, ...patch, ...(countsDeliverable ? { output_count: outputCount } : {}) } : row));
+    setTasks(next);
+    setCompleteDlg(null);
+    await recomputeAncestorStatus(t.id, next);
+    return null;
   }
 
   async function bulkUpdateTasks(patch: Partial<TaskRow>) {
@@ -6837,6 +6794,48 @@ export default function Projects() {
         )}
       </div>
       </div>
+
+      {completeDlg && (() => {
+        const ct = tasks.find((x) => x.id === completeDlg.taskId);
+        if (!ct) return null;
+        const ot = outputTypes.find((o) => o.id === ct.output_type_id);
+        const pendingMin = timeEntries
+          .filter((e) => e.task_id === ct.id && !e.is_archived && (e.status === "pending_confirm" || e.status === "pending_approval"))
+          .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
+        return (
+          <CompleteTaskModal
+            key={ct.id}
+            info={{
+              name: ct.name,
+              dueDate: ct.current_due_date,
+              workTypeName: workTypes.find((w) => w.id === ct.work_type_id)?.name ?? null,
+              outputTypeName: ot?.name ?? null,
+              countsDeliverable: !!ot && ot.counts_deliverable !== false,
+              estimatedHours: ct.estimated_hours,
+              loggedHours: ownHoursFor(timeEntries, ct.id),
+              pendingHours: Math.round((pendingMin / 60) * 100) / 100,
+            }}
+            initialDate={completeDlg.date}
+            initialCount={ct.output_count}
+            today={toISOWorkingDay(new Date())}
+            onLogTime={() => setCompleteLogTime(true)}
+            onCancel={() => setCompleteDlg(null)}
+            onConfirm={(date, count) => confirmTaskDone(ct, date, count)}
+          />
+        );
+      })()}
+      {completeDlg && completeLogTime && me && (
+        <LogTimeModal
+          personId={me.id}
+          isFullAccess={me.access_level === "full"}
+          presetTaskId={completeDlg.taskId}
+          onClose={() => setCompleteLogTime(false)}
+          onSaved={() => {
+            setCompleteLogTime(false);
+            loadAll();
+          }}
+        />
+      )}
 
       {/* 2026-10-08 (Sandra, item H): the shared Log time form, pre-set to
           this Done task, so it logs as follow-up (same checks as everywhere). */}
