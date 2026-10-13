@@ -30,6 +30,7 @@ export interface ReadinessDep {
 
 export interface ReadinessTask {
   id: string;
+  parent_task_id?: string | null;
   name: string;
   status: string | null;
   assignee_id: string | null;
@@ -90,6 +91,28 @@ export function computeReadiness(tasks: ReadinessTask[], deps: ReadinessDep[], a
     }
     const started = t.status === "In Progress";
     out.set(t.id, { state: open.length > 0 && !started ? "waiting" : "action", waitingOn: open });
+  }
+  // A parent row only rolls up its sub-tasks (2026-10-13 test: "Needs
+  // analysis" showed Action needed while all its sub-tasks were waiting).
+  // It is "action" when any open sub-task is actionable, otherwise "waiting"
+  // on whatever its sub-tasks wait on.
+  const kids = new Map<string, ReadinessTask[]>();
+  for (const t of tasks) {
+    if (!t.parent_task_id || t.is_archived) continue;
+    const list = kids.get(t.parent_task_id);
+    if (list) list.push(t);
+    else kids.set(t.parent_task_id, [t]);
+  }
+  for (const [pid, list] of kids) {
+    const parent = byId.get(pid);
+    if (!parent || !appliesTo(parent)) continue;
+    const openKids = list.filter((k) => !isFinishedStatus(k.status));
+    if (!openKids.length) continue;
+    const anyAction = openKids.some((k) => out.get(k.id)?.state === "action");
+    if (anyAction) continue;
+    const waitingOn = openKids.flatMap((k) => out.get(k.id)?.waitingOn ?? []);
+    const seen = new Set<string>();
+    out.set(pid, { state: "waiting", waitingOn: waitingOn.filter((w) => (seen.has(w.id) ? false : (seen.add(w.id), true))) });
   }
   return out;
 }

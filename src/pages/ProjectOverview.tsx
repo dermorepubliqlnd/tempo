@@ -19,6 +19,7 @@ import { actualProgress, healthOf, projectStatusOf, type ProjectRow, type TaskRo
 import { formatDate } from "../lib/formatDate";
 import { TASK_STATUS_GROUPED, statusGroupOf } from "../lib/notionOptions";
 import { createAllocationEngine, dailyCapacityHours, type UtilProjectRow, type UtilTaskRow } from "../lib/dailyAllocation";
+import { isLifecycleProject, lifecycleLabelForProjectPhase } from "../lib/lifecycle";
 import { addDays, buildHolidaySet, isWorkingDay, parseLocalDate, toISO, workingDayDelta } from "../lib/workingDays";
 
 interface PersonRow {
@@ -321,7 +322,7 @@ export default function ProjectOverview() {
             <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 3 }}>{projectCode} · {project.category || "Uncategorized"}</div>
             <div style={{ display: "flex", gap: 20, marginTop: 10, flexWrap: "wrap" }}>
               <div><span style={{ fontSize: 10.5, color: "var(--muted)" }}>Project Owner</span><div style={{ fontSize: 12.5, fontWeight: 600 }}>{owner?.name ?? "Unassigned"}</div></div>
-              <div><span style={{ fontSize: 10.5, color: "var(--muted)" }}>Phase</span><div style={{ fontSize: 12.5, fontWeight: 600 }}>{project.phase ?? "—"}</div></div>
+              <div><span style={{ fontSize: 10.5, color: "var(--muted)" }}>Phase</span><div style={{ fontSize: 12.5, fontWeight: 600 }}>{(isLifecycleProject(project) ? lifecycleLabelForProjectPhase(project.phase) : project.phase) ?? "—"}</div></div>
               <div><span style={{ fontSize: 10.5, color: "var(--muted)" }}>Priority</span><div style={{ fontSize: 12.5, fontWeight: 600 }}>{project.priority ?? "—"}</div></div>
             </div>
           </div>
