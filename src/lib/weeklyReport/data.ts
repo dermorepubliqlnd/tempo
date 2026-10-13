@@ -14,7 +14,7 @@ import { supabase } from "../supabaseClient";
 import { fetchAllRows } from "../fetchAllRows";
 import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from "../workingDays";
 import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, type UtilTaskRow, type UtilProjectRow } from "../dailyAllocation";
-import { healthOf, type ProjectRow, type TaskRow } from "../../pages/Projects";
+import { healthOf, actualProgress, type ProjectRow, type TaskRow } from "../../pages/Projects";
 import { fmtMD } from "./format";
 import { projectStatus, isActiveProject, isOverdueProject, isStartedProject, portfolioInPeriod } from "../metrics";
 
@@ -33,6 +33,12 @@ type P = ProjectRow & { actual_close_date?: string | null; is_unsaved?: boolean 
 type T = TaskRow & { created_at?: string | null; actual_completion_date?: string | null; is_archived?: boolean | null };
 
 export interface WeekRange { start: string; end: string }
+/** Appendix: one active project (Sandra 2026-10-13, cross-department weekly update). */
+export interface ActiveRow {
+  num: number | null; name: string; owner: string; category: string; planning: string; type: string;
+  health: string; progress: number | null; target: string; committed: string; moved: number; daysLate: number;
+}
+export interface ActiveGroup { label: string; operational: boolean; rows: ActiveRow[] }
 export interface ProjLine { name: string; type: string; planning: string; date: string; extra?: string; warn?: boolean }
 
 export interface WeeklyReportData {
@@ -64,7 +70,11 @@ export interface WeeklyReportData {
     activeHealth: { total: number; operationalExcluded: number; health: { label: string; count: number }[]; phase: { label: string; count: number }[] };
   };
   // Speaker notes per slide (plain text; "- " lines are bullets). Editable on the Reports page.
-  notes: Record<"cover" | "glance" | "portfolio" | "health" | "drivers" | "mix" | "pipeline" | "util" | "training" | "appendix", string>;
+  notes: Record<"cover" | "glance" | "portfolio" | "health" | "drivers" | "mix" | "pipeline" | "util" | "training" | "appendix" | "activeList", string>;
+  // Sandra 2026-10-13: appendix list of every active project, Operational first,
+  // then one group per Project Type (e.g. Internal Development), for the
+  // cross-department weekly update.
+  activeList: { total: number; operational: number; project: number; overdue: number; groups: ActiveGroup[] };
   // phase151: sessions in operational projects (e.g. quarterly Training Delivery).
   training: {
     projects: number;
@@ -633,6 +643,35 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   // Training
   const sessionLine = (t: T) => `${t.name} — ${who(t.assignee_id)}, ${md(t.status === "Done" ? t.actual_completion_date ?? t.current_due_date : t.current_due_date)}${t.status === "Done" ? (t.validated_completion_date ? ", validated" : ", awaiting validation") : ""}`;
 
+  // ------------------------------------------------------------ active project list (appendix, 2026-10-13)
+  const ownerName = (id: string | null) => {
+    const n = (id && personById.get(id)?.name) || "";
+    if (!n) return "—";
+    const parts = n.trim().split(/\s+/);
+    return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0]}.` : parts[0];
+  };
+  const isOpA = (p: P) => !!(p as { is_operational?: boolean | null }).is_operational;
+  const activeRow = (p: P): ActiveRow => {
+    const target = d10(p.end_date);
+    const committed = d10((p as { committed_end_date?: string | null }).committed_end_date ?? p.original_due_date);
+    const health = isOpA(p) ? "Ongoing" : healthBy.get(p.id) ?? "—";
+    return {
+      num: (p as { project_number?: number }).project_number ?? null,
+      name: p.name, owner: ownerName(p.owner_id), category: (p.category ?? "").trim() || "—", planning: planOf(p), type: typeOf(p),
+      health, progress: actualProgress(p.id, tasks as TaskRow[]), target, committed,
+      moved: target && committed && target > committed ? daysBetween(committed, target) : 0,
+      daysLate: !isOpA(p) && target && target < todayIso ? daysBetween(target, todayIso) : 0,
+    };
+  };
+  const byTarget = (a: ActiveRow, b: ActiveRow) => (a.target || "9999").localeCompare(b.target || "9999") || a.name.localeCompare(b.name);
+  const activeGroups: ActiveGroup[] = [];
+  const opRows = activeAll.filter(isOp).map(activeRow).sort(byTarget);
+  if (opRows.length) activeGroups.push({ label: "Operational", operational: true, rows: opRows });
+  const projTypes = Array.from(new Set(activeP.map(typeOf)));
+  projTypes.sort((a, b) => (a === "No type" ? 1 : 0) - (b === "No type" ? 1 : 0) || activeP.filter((p) => typeOf(p) === b).length - activeP.filter((p) => typeOf(p) === a).length || a.localeCompare(b));
+  for (const t of projTypes) activeGroups.push({ label: t, operational: false, rows: activeP.filter((p) => typeOf(p) === t).map(activeRow).sort(byTarget) });
+  const activeList = { total: activeAll.length, operational: opRows.length, project: activeP.length, overdue: overdueP.length, groups: activeGroups };
+
   const notes: WeeklyReportData["notes"] = {
     cover: `Report week: ${md(week.start)} – ${md(week.end)} (Mon–Fri). "This week" = ${md(thisWeek.start)} – ${md(thisWeek.end)}. Generated ${md(todayIso)} from Tempo; health and paused figures are as of the generation date.`,
     glance: [
@@ -702,6 +741,10 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       tCancelled.length ? `Cancelled last week (${tCancelled.length}):\n${bl(tCancelled.map((t) => `${t.name} — ${who(t.assignee_id)}${t.cancellation_reason ? `; reason: ${t.cancellation_reason}` : ""}`))}` : "",
     ].filter(Boolean).join("\n"),
     appendix: `All projects to date (excluding Cancelled) by Project Type, Planned vs Ad Hoc.${overall.untyped ? ` ${overall.untyped} project(s) have no Project Type yet: ${live.filter((p) => typeOf(p) === "No type").map((p) => p.name).slice(0, 8).join(", ")}.` : ""}`,
+    activeList: [
+      `All ${activeAll.length} active projects as of ${md(todayIso)} (In Progress, Start Project approved). Operational = ongoing containers such as Training Delivery; the rest are grouped by Project Type. Progress = Actual Progress (hours-weighted task completion). Target = current End Date; "+Nd" = days moved from the date committed at Start Project.`,
+      ...activeGroups.map((g) => `${g.label} (${g.rows.length}):\n${bl(g.rows.map((r) => `${r.name} — ${r.owner}; ${r.progress ?? "–"}% · target ${md(r.target)}${r.moved ? ` (committed ${md(r.committed)})` : ""}${r.daysLate ? `; ${r.daysLate} days past target` : ""}`))}`),
+    ].join("\n"),
   };
 
   return {
@@ -727,6 +770,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       thisPlanned: team.tp, thisCap: team.tc, nextPlanned: team.np, nextCap: team.nc,
     },
     overall,
+    activeList,
   };
 }
 function round1(n: number) { return Math.round(n * 10) / 10; }

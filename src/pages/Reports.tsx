@@ -9,10 +9,10 @@ import { Presentation, Download, RotateCcw, Loader2, CalendarRange, ChevronDown,
 import { METRIC_DEFINITIONS, LOGGED_VS_EXPECTED_LABEL } from "../lib/metrics";
 import { useSession } from "../lib/useSession";
 import { loadWeeklyReport, defaultReportMonday, weekOf, type WeeklyReportData } from "../lib/weeklyReport/data";
-import { defaultDeckText, weekLabel, type DeckText, type SlideKey } from "../lib/weeklyReport/text";
+import { defaultDeckText, weekLabel, activeListPages, type DeckText, type SlideKey } from "../lib/weeklyReport/text";
 import { toISO, addDays, parseLocalDate } from "../lib/workingDays";
 
-const SLIDES: { key: SlideKey; eyebrow: string; optional?: "drivers" | "training" | "appendix" }[] = [
+const SLIDES: { key: SlideKey; eyebrow: string; optional?: "drivers" | "training" | "appendix" | "activeList" }[] = [
   { key: "glance", eyebrow: "Week at a glance" },
   { key: "portfolio", eyebrow: "Portfolio overview" },
   { key: "health", eyebrow: "Active project health" },
@@ -22,6 +22,8 @@ const SLIDES: { key: SlideKey; eyebrow: string; optional?: "drivers" | "training
   { key: "util", eyebrow: "Team utilization" },
   { key: "training", eyebrow: "Training delivery", optional: "training" },
   { key: "appendix", eyebrow: "Appendix", optional: "appendix" },
+  // Sandra 2026-10-13: every active project with progress + target date, for the cross-department update.
+  { key: "activeList", eyebrow: "Appendix · Active projects", optional: "activeList" },
 ];
 
 export default function Reports() {
@@ -101,7 +103,7 @@ export default function Reports() {
       <p className="subtitle">Generate PowerPoint decks from live Tempo data, on the Dermorepubliq template.</p>
 
       <div className="card rp-head">
-        <div className="rp-title"><Presentation size={18} /> <strong>L&amp;D Weekly Report</strong> <span className="rp-muted">· for Brad · {text ? 7 + (text.include.drivers && data?.drivers.rows.length ? 1 : 0) + (text.include.training ? 1 : 0) + (text.include.appendix ? 1 : 0) : 10} slides</span></div>
+        <div className="rp-title"><Presentation size={18} /> <strong>L&amp;D Weekly Report</strong> <span className="rp-muted">· for Brad · {text ? 7 + (text.include.drivers && data?.drivers.rows.length ? 1 : 0) + (text.include.training ? 1 : 0) + (text.include.appendix ? 1 : 0) + (text.include.activeList && data ? activeListPages(data) : 0) : 10} slides</span></div>
         <div className="rp-row">
           <label className="rp-field">
             <span><CalendarRange size={13} /> Report week (Mon–Fri)</span>
@@ -163,7 +165,7 @@ export default function Reports() {
                 <input className="rp-input" value={text.titles[s.key]} maxLength={70} onChange={(e) => set((t) => ({ ...t, titles: { ...t.titles, [s.key]: e.target.value } }))} />
                 {s.optional ? (
                   <label className="rp-check"><input type="checkbox" checked={text.include[s.optional]} disabled={s.optional === "drivers" && !data.drivers.rows.length}
-                    onChange={(e) => set((t) => ({ ...t, include: { ...t.include, [s.optional as "drivers" | "training" | "appendix"]: e.target.checked } }))} /> Include</label>
+                    onChange={(e) => set((t) => ({ ...t, include: { ...t.include, [s.optional as "drivers" | "training" | "appendix" | "activeList"]: e.target.checked } }))} /> Include</label>
                 ) : <span className="rp-check rp-muted">Always</span>}
               </div>
             ))}

@@ -12,7 +12,7 @@ import JSZip from "jszip";
 import type { WeeklyReportData, ProjLine } from "./data";
 import { fmtMD } from "./format";
 
-import { BRAND, utilColor, type DeckText, type SlideKey } from "./text";
+import { BRAND, utilColor, paginateActiveList, type DeckText, type SlideKey } from "./text";
 const B = BRAND;
 const F = "Poppins";
 const FB = "Poppins SemiBold";
@@ -346,6 +346,73 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     txt(s, 8.8, 1.75, 4.0, 0.35, "Read-out", { fontFace: FB, fontSize: 14 });
     const ro = o.rows.map((r) => `${r.label}: ${r.planned + r.adHoc} projects (${pct((r.planned + r.adHoc) / Math.max(1, o.total))}); ${r.adHoc} Ad Hoc (${pct(r.adHoc / Math.max(1, r.planned + r.adHoc))}).`);
     txt(s, 8.8, 2.2, 4.0, 4.2, bullets(ro.slice(0, 5), 11));
+  }
+
+  // ================================================================ 9 APPENDIX · ACTIVE PROJECTS (Sandra 2026-10-13)
+  // Every active project for the cross-department weekly update: Operational
+  // first, then one group per Project Type (e.g. Internal Development), each
+  // row with Category, Planning Type, health, Actual Progress and target date.
+  if (t.include.activeList && d.activeList.total) {
+    const pages = paginateActiveList(d);
+    const HC: Record<string, string> = { "On track": B.calm, "Done on time · close pending": B.hydrate, "Done late · close pending": B.clarify, "At risk": B.amberText, "Off track": B.renew, Overdue: B.renew, "Not started": B.taupe, "Schedule review": B.rewind, Ongoing: B.taupe };
+    const BAR: Record<string, string> = { ...HC, "At risk": B.protect, "Off track": B.brighten, Ongoing: B.clarify };
+    const GROUP_COLORS = [B.hydrate, B.rewind, B.calm, B.protect, B.repair, B.taupe];
+    const groupColor = new Map<string, string>();
+    let gi = 0;
+    for (const g of d.activeList.groups) groupColor.set(g.label, g.operational ? B.clarify : GROUP_COLORS[gi++ % GROUP_COLORS.length]);
+    const X0 = 0.33, W = 12.67;
+    const cols: { key: string; label: string; w: number; align?: "left" | "right" | "center" }[] = [
+      { key: "num", label: "#", w: 0.55 },
+      { key: "name", label: "Project", w: 3.75 },
+      { key: "owner", label: "Owner", w: 1.25 },
+      { key: "category", label: "Category", w: 1.6 },
+      { key: "planning", label: "Planning", w: 0.95 },
+      { key: "health", label: "Health", w: 1.45 },
+      { key: "progress", label: "Progress", w: 1.75 },
+      { key: "target", label: "Target completion", w: 1.37 },
+    ];
+    const colX: Record<string, number> = {};
+    { let x = X0; for (const c of cols) { colX[c.key] = x; x += c.w; } }
+    const colW = (k: string) => cols.find((c) => c.key === k)!.w;
+    const LH = 0.295, Y0 = 1.82;
+    pages.forEach((lines, pi) => {
+      const multi = pages.length > 1;
+      const s = content(`Appendix · Active projects${multi ? ` · ${pi + 1} of ${pages.length}` : ""}`, `${t.titles.activeList}${pi ? " (cont.)" : ""}`, pi === 0 ? "activeList" : undefined);
+      // column header
+      box(s, X0, 1.5, W, 0.3, B.linen, null, false);
+      for (const c of cols) txt(s, colX[c.key] + 0.04, 1.5, c.w - 0.08, 0.3, c.label, { fontFace: FB, fontSize: 9, color: B.mahogany, valign: "middle", align: c.align ?? "left" });
+      let zebra = 0;
+      lines.forEach((ln, li) => {
+        const y = Y0 + li * LH;
+        if (ln.kind === "group") {
+          zebra = 0;
+          const col = groupColor.get(ln.label) ?? B.taupe;
+          box(s, X0, y + 0.03, W, LH - 0.03, B.panel, null, false);
+          box(s, X0, y + 0.03, 0.07, LH - 0.03, col, null, false);
+          txt(s, X0 + 0.18, y + 0.02, 8, LH, rich([[ln.label + (ln.cont ? " (cont.)" : ""), true, 10.5], [`   ${plural(ln.count, "project")}${ln.operational ? "  ·  ongoing work kept open, e.g. Training Delivery" : ""}`, false, 9, B.taupe]], 10.5), { valign: "middle" });
+          return;
+        }
+        const r = ln.row;
+        if (zebra++ % 2) box(s, X0, y, W, LH, B.clinical, null, false);
+        const cell = (k: string, text: string | Run[], o: Record<string, unknown> = {}) => txt(s, colX[k] + 0.04, y, colW(k) - 0.08, LH, text, { fontSize: 9, valign: "middle", ...o });
+        cell("num", r.num != null ? String(r.num) : "", { color: B.taupe });
+        cell("name", cut(r.name, 50));
+        cell("owner", cut(r.owner, 18), { color: B.mahogany });
+        cell("category", cut(r.category, 22), { color: B.mahogany });
+        cell("planning", r.planning, { color: B.mahogany });
+        cell("health", r.health, { fontFace: FB, color: HC[r.health] ?? B.mahogany });
+        // progress bar + %
+        const px = colX.progress + 0.06, bw = 1.05;
+        box(s, px, y + LH / 2 - 0.05, bw, 0.1, B.grid, null, false);
+        if (r.progress != null && r.progress > 0) box(s, px, y + LH / 2 - 0.05, Math.max(0.03, bw * Math.min(100, r.progress) / 100), 0.1, BAR[r.health] ?? B.hydrate, null, false);
+        txt(s, px + bw + 0.05, y, 0.55, LH, r.progress != null ? `${r.progress}%` : "–", { fontFace: FB, fontSize: 9, valign: "middle" });
+        // target date (+ days moved since Start Project)
+        const runs: Run[] = [{ text: r.target ? fmtMD(r.target) : "Not set", options: { fontFace: FB, fontSize: 9, color: r.daysLate ? B.renew : B.onyx } }];
+        if (r.moved) runs.push({ text: `  +${r.moved}d`, options: { fontFace: F, fontSize: 8, color: B.renew } });
+        cell("target", runs);
+      });
+      txt(s, X0, 6.42, W, 0.3, rich([["How to read: ", true], ["Progress = Actual Progress in Tempo (hours-weighted task completion) · Target = current End Date, red when past · +Nd = days moved from the date committed at Start Project · as of " + fmtMD(d.generatedOn), false]], 8.5, B.taupe), { valign: "middle" });
+    });
   }
 
   const gen = (await pptx.write({ outputType: "arraybuffer" })) as ArrayBuffer;
