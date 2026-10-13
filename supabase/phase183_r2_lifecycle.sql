@@ -37,10 +37,25 @@ create policy lifecycle_phases_write on public.lifecycle_phases for all to authe
   using (public.my_access_level() = 'full') with check (public.my_access_level() = 'full');
 
 -- 2. New columns -------------------------------------------------------
--- Added without a default first so EXISTING rows stay NULL (old model);
--- the default then applies to new projects only.
+-- Existing rows stay NULL (old model). Until release, only projects created
+-- from the PREVIEW app (request header x-tempo-channel: preview, same
+-- pattern as phase169) get version 2, so projects created on the live app
+-- keep today's behaviour. At release: alter column ... set default 2.
 alter table public.projects add column if not exists lifecycle_version smallint;
-alter table public.projects alter column lifecycle_version set default 2;
+
+create or replace function public.r2_set_lifecycle_version() returns trigger
+language plpgsql as $$
+begin
+  if new.lifecycle_version is null
+     and coalesce(nullif(current_setting('request.headers', true), '')::json ->> 'x-tempo-channel', '') = 'preview' then
+    new.lifecycle_version := 2;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_r2_set_lifecycle_version on public.projects;
+create trigger trg_r2_set_lifecycle_version before insert on public.projects
+  for each row execute function public.r2_set_lifecycle_version();
 alter table public.tasks add column if not exists wbs_phase text references public.lifecycle_phases(key);
 
 -- 3. Milestones --------------------------------------------------------
