@@ -5064,7 +5064,12 @@ export default function Projects() {
           // Sandra, 2026-08-24: can't log/track hours against a task
           // whose project baseline isn't locked yet -- same gate as
           // Status and Extension Requests.
-          const baselineBlocksStart = !isProjectLocked(t.project_id) && !isRunningHere && !(t as { is_scoping?: boolean }).is_scoping; // phase180: Scoping task takes time in Draft
+          const baselineBlocksStart =
+            !isProjectLocked(t.project_id) &&
+            !isRunningHere &&
+            !(t as { is_scoping?: boolean }).is_scoping && // phase180: Scoping task takes time in Draft
+            // phase184: so do Analysis & Scoping tasks of new-lifecycle projects
+            !((t as { wbs_phase?: string | null }).wbs_phase === "analysis" && projects.find((p) => p.id === t.project_id)?.lifecycle_version === 2);
           // Phase 26 (2026-08-28): and no new time against a project
           // whose close-out has already been approved -- the Final Scope
           // snapshot is frozen, so hours logged after it would never be

@@ -4318,6 +4318,27 @@ export default function WbsPlanning() {
     }
   }
 
+  // phase184: add the Analysis & Scoping template (ordinary tasks -- the owner
+  // can rename, delete or change hours afterwards).
+  async function applyScopingTemplate() {
+    if (!project) return;
+    const ok = await confirm({
+      title: "Add the Analysis & Scoping template?",
+      message: "Adds 5 standard scoping tasks (about 20 hours) with their dependencies. You can rename, delete or change hours on any of them afterwards.",
+      confirmLabel: "Add tasks",
+    });
+    if (!ok) return;
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    if (!(await startDatePrompt.ensure(project))) return;
+    const { error } = await supabase.rpc("r2_apply_template", { p_project_id: project.id, p_template_key: "scoping" });
+    if (error) {
+      await alert(friendlyError("add the scoping template", error));
+      return;
+    }
+    await loadAll(true);
+  }
+
   async function toggleMilestoneTask(m: ProjectMilestone, taskId: string) {
     const linked = milestoneDeps.some((d) => d.milestone_id === m.id && d.task_id === taskId);
     setMilestoneDeps((prev) => (linked ? prev.filter((d) => !(d.milestone_id === m.id && d.task_id === taskId)) : [...prev, { milestone_id: m.id, task_id: taskId }]));
@@ -4408,6 +4429,11 @@ export default function WbsPlanning() {
                 <strong style={{ fontSize: 13 }}>{it.label}</strong>
               </button>
               <span style={{ fontSize: 11, color: "var(--muted)" }}>{it.count} task{it.count === 1 ? "" : "s"} · {Math.round(it.hours * 10) / 10} est. hrs</span>
+              {canEditWbs && !isSessionProject && it.key === "analysis" && it.count === 0 && (
+                <button type="button" onClick={() => void applyScopingTemplate()} style={{ marginLeft: 6, border: `1px solid ${c.fg}`, background: c.fg, color: "#fff", borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <ListPlus size={12} /> Use scoping template (5 tasks)
+                </button>
+              )}
               {canEditWbs && !isSessionProject && (
                 <button type="button" onClick={() => void addTopLevelTask(it.key)} style={{ marginLeft: 6, border: `1px solid ${c.border}`, background: "#fff", color: c.fg, borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
                   <Plus size={12} /> Add task

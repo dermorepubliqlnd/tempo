@@ -65,7 +65,7 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "Rejected",
 };
 
-const TASK_SELECT = "id,name,assignee_id,project_id,parent_task_id,current_due_date,status,is_scoping,project:projects(id,name,timelines_locked,wbs_status)";
+const TASK_SELECT = "id,name,assignee_id,project_id,parent_task_id,current_due_date,status,is_scoping,wbs_phase,project:projects(id,name,timelines_locked,wbs_status,lifecycle_version)";
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -277,7 +277,10 @@ export default function LogTimeModal({
     () =>
       tasks.filter(
         (t) =>
-          (t.project?.timelines_locked || (t as { is_scoping?: boolean }).is_scoping) &&
+          // phase184: Analysis & Scoping tasks of new-lifecycle projects take time in Draft too.
+          (t.project?.timelines_locked ||
+            (t as { is_scoping?: boolean }).is_scoping ||
+            ((t as { wbs_phase?: string | null }).wbs_phase === "analysis" && (t.project as { lifecycle_version?: number | null } | null)?.lifecycle_version === 2)) &&
           t.project?.wbs_status !== "closed" &&
           (t.status !== "Done" || !parentIds.has(t.id))
       ),
