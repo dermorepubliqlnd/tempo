@@ -52,6 +52,8 @@ export interface StartChecklistInput {
   hasUnsavedChanges?: boolean;
   /** R1 (new projects only): review/QA/sign-off tasks with no Depends-on link. */
   reviewTasksMissingDependency?: string[];
+  /** R2.1 lifecycle checks (phases / milestones), built by the WBS page. */
+  extraGroups?: ChecklistGroup[];
   /** The approver's run of the list. Skips Description: Sandra 2026-09-07
    * made Description the requester's job only ("not the approver of
    * baseline"), so it is never re-checked on approval. */
@@ -125,6 +127,8 @@ export function startProjectChecklist(input: StartChecklistInput): ChecklistGrou
       overridable: true,
     });
   }
+
+  if (input.extraGroups && input.extraGroups.length) groups.push(...input.extraGroups);
 
   // phase157d: past dates are a warning, not a blocker.
   if (input.pastDated.length) {

@@ -75,6 +75,7 @@ interface DeletedSpentHourRow {
 import { useTimeTracking } from "../lib/TimeTrackingContext";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 import { Play, Square, Info } from "lucide-react";
+import { isLifecycleProject, lifecycleLabelForProjectPhase } from "../lib/lifecycle";
 import { computeReadiness, waitingOnLabel, expectedUnlockDate, needsDependencyLink, isR1Project, type ReadinessDep } from "../lib/taskReadiness";
 import {
   PROJECT_EFFORT_LEVEL_OPTIONS,
@@ -214,6 +215,8 @@ interface ProjectPhaseOption {
 export interface ProjectRow {
   /** phase178: one lifecycle -- see lib/projectStage.ts */
   stage?: string | null;
+  /** R2.1 (phase183): 2 = L&D lifecycle with phases + milestones (new projects). */
+  lifecycle_version?: number | null;
   id: string;
   name: string;
   owner_id: string | null;
@@ -3357,6 +3360,16 @@ export default function Projects() {
         defaultWidth: 130,
         maxWidth: 180,
         render: (p) => (
+          isLifecycleProject(p) ? (
+            // R2.1: new-lifecycle projects -- Phase is set by milestones (WBS page), not by hand.
+            p.phase ? (
+              <span className={`status-pill ${phaseTone(p.phase)}`} title="Set automatically by milestones on the WBS page">
+                {lifecycleLabelForProjectPhase(p.phase)}
+              </span>
+            ) : (
+              "—"
+            )
+          ) : (
           <InlineSelect
             value={p.phase ?? ""}
             editable={canEditPhase(p)}
@@ -3379,6 +3392,7 @@ export default function Projects() {
               updateProject(p.id, { phase: v || null });
             }}
           />
+          )
         ),
       },
       {

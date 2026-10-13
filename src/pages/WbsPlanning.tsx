@@ -23,6 +23,7 @@ import { rollupHoursFor, formatHours, type TimeEntryRow } from "../lib/timeTrack
 import { addDays, buildHolidaySet, isWorkingDay, parseLocalDate, toISO, workingDaysBetween, type HolidaySet } from "../lib/workingDays";
 import { fullCapacityScenario, capacityBasedScenario, packFullCapacityQueue, FULL_CAPACITY_DAILY_HOURS, type FullCapacityQueueTask } from "../lib/taskScheduling";
 import { isR1Project, reviewTasksMissingDependency } from "../lib/taskReadiness";
+import { FALLBACK_LIFECYCLE_PHASES, PHASE_COLORS, lifecycleStartIssues, type LifecyclePhase, type ProjectMilestone, type MilestoneDependency } from "../lib/lifecycle";
 import { buildForwardSchedule, type SchedTaskRow, type SchedProjectRow, type SchedAvailabilityRow } from "../lib/capacityScheduler";
 import { TASK_EFFORT_OPTIONS, TASK_EFFORT_DEFAULT_TONES, TASK_STATUS_GROUPED, statusGroupOf, PROJECT_EFFORT_LEVEL_OPTIONS, PROJECT_PRIORITY_OPTIONS, effortLevelLabel } from "../lib/notionOptions";
 // One shared allocation engine for all three utilization surfaces -- this
@@ -48,6 +49,7 @@ import BulkUploadSessionsModal from "../components/BulkUploadSessionsModal";
 
 interface ProjectRow {
   created_at?: string | null;
+  lifecycle_version?: number | null; // R2.1: 2 = phases + milestones
   stage?: string | null; // phase178
   id: string;
   name: string;
@@ -119,6 +121,8 @@ interface ProjectRow {
 }
 interface TaskRow {
   id: string;
+  // R2.1 (phase183): lifecycle phase group (new projects only).
+  wbs_phase?: string | null;
   // phase115: used to default Actual Project Close Date.
   actual_completion_date?: string | null;
   project_id: string;
@@ -869,6 +873,15 @@ export default function WbsPlanning() {
   const [allTasks, setAllTasks] = useState<UtilTaskRow[]>([]);
   const [allProjects, setAllProjects] = useState<UtilProjectRow[]>([]);
   const [dependencies, setDependencies] = useState<DependencyRow[]>([]);
+  // R2.1 L&D lifecycle (phase183, new projects only).
+  const [lifecycleVersion, setLifecycleVersion] = useState<number | null>(null);
+  const [lifecyclePhases, setLifecyclePhases] = useState<LifecyclePhase[]>(FALLBACK_LIFECYCLE_PHASES);
+  const [milestones, setMilestones] = useState<ProjectMilestone[]>([]);
+  const [milestoneDeps, setMilestoneDeps] = useState<MilestoneDependency[]>([]);
+  const [taskPhaseById, setTaskPhaseById] = useState<Map<string, string | null>>(new Map());
+  const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());
+  const [milestonePicker, setMilestonePicker] = useState<{ milestoneId: string; x: number; y: number } | null>(null);
+  const isLifecycle = lifecycleVersion === 2;
   // Sandra, 2026-07-29: Spent Hrs (actual logged time) shown alongside
   // Est. hrs in the WBS task table -- same rollup helper/shape as the
   // main Projects & Tasks page's own Spent Hrs column.
@@ -1105,6 +1118,33 @@ export default function WbsPlanning() {
   const [changesByTaskId, setChangesByTaskId] = useState<Record<string, RevisionChangeRow[]>>({});
   const [baselineTasksById, setBaselineTasksById] = useState<Record<string, BaselineTaskFull>>({});
 
+  // R2.1: loaded separately and tolerant of errors, so the page still works
+  // if phase183 hasn't been run yet (everything then behaves as before).
+  async function loadLifecycle(taskIds: string[]) {
+    const { data: lv, error: lvErr } = await supabase.from("projects").select("lifecycle_version").eq("id", projectId).maybeSingle();
+    const version = lvErr ? null : ((lv as { lifecycle_version: number | null } | null)?.lifecycle_version ?? null);
+    setLifecycleVersion(version);
+    if (version !== 2) {
+      setMilestones([]);
+      setMilestoneDeps([]);
+      setTaskPhaseById(new Map());
+      return;
+    }
+    const [{ data: lp }, { data: ms }, { data: tp }] = await Promise.all([
+      supabase.from("lifecycle_phases").select("*").order("sort_order"),
+      supabase.from("project_milestones").select("*").eq("project_id", projectId).order("sort_order"),
+      taskIds.length ? supabase.from("tasks").select("id,wbs_phase").in("id", taskIds) : Promise.resolve({ data: [] as { id: string; wbs_phase: string | null }[] }),
+    ]);
+    if (lp && (lp as LifecyclePhase[]).length) setLifecyclePhases(lp as LifecyclePhase[]);
+    const msRows = (ms as ProjectMilestone[]) ?? [];
+    setMilestones(msRows);
+    setTaskPhaseById(new Map(((tp as { id: string; wbs_phase: string | null }[]) ?? []).map((r) => [r.id, r.wbs_phase])));
+    if (msRows.length) {
+      const { data: md } = await supabase.from("milestone_dependencies").select("milestone_id,task_id").in("milestone_id", msRows.map((m) => m.id));
+      setMilestoneDeps((md as MilestoneDependency[]) ?? []);
+    } else setMilestoneDeps([]);
+  }
+
   async function loadAll(silent = false) {
     if (!projectId) return;
     // Sandra, 2026-08-24: "adding a new task ... does not seem to glitch or
@@ -1187,6 +1227,7 @@ export default function WbsPlanning() {
       setDependencies([]);
       setTimeEntries([]);
     }
+    await loadLifecycle(taskIds);
 
     const [{ data: revRow }, { data: closureRow }, { data: baselineRow }, { data: baselineReqRow }, { data: closeoutRow }, { data: declinedReqRow }] = await Promise.all([
       supabase
@@ -1671,11 +1712,20 @@ export default function WbsPlanning() {
   // page load too (the fetch is already sorted, so this is a no-op then).
   function computeOrderedTasks(): (TaskRow & { depth: number })[] {
     const bySortOrder = (a: TaskRow, b: TaskRow) => (a.sort_order ?? 0) - (b.sort_order ?? 0);
-    const roots = tasks.filter((t) => !t.parent_task_id).sort(bySortOrder);
+    const phaseRank = (t: TaskRow) => {
+      if (!isLifecycle) return 0;
+      const k = taskPhaseById.get(t.id) ?? null;
+      const ph = k ? lifecyclePhases.find((x) => x.key === k) : undefined;
+      return ph ? ph.sort_order : 0; // unphased first, so they get noticed
+    };
+    const roots = tasks
+      .filter((t) => !t.parent_task_id)
+      .map((t) => (isLifecycle ? { ...t, wbs_phase: taskPhaseById.get(t.id) ?? null } : t))
+      .sort((a, b) => phaseRank(a) - phaseRank(b) || bySortOrder(a, b));
     const out: (TaskRow & { depth: number })[] = [];
     for (const r of roots) {
       out.push({ ...r, depth: 0 });
-      for (const c of tasks.filter((t) => t.parent_task_id === r.id).sort(bySortOrder)) out.push({ ...c, depth: 1 });
+      for (const c of tasks.filter((t) => t.parent_task_id === r.id).sort(bySortOrder)) out.push({ ...c, wbs_phase: isLifecycle ? r.wbs_phase ?? null : c.wbs_phase, depth: 1 });
     }
     return out;
   }
@@ -2380,6 +2430,7 @@ export default function WbsPlanning() {
       hasUnsavedChanges: forApprover ? false : hasUnsavedChanges,
       forApprover,
       reviewTasksMissingDependency: isR1Project(project) ? reviewTasksMissingDependency(orderedTasks, dependencies) : [],
+      extraGroups: forApprover ? [] : lifecycleChecklistGroups(),
     });
   }
 
@@ -2895,8 +2946,10 @@ export default function WbsPlanning() {
   // rows in between no longer break the chain. Round 11: mode-parameterized
   // now that Full Effort and Conservative Effort each need their own
   // independent "what did the last real task end on" answer.
-  async function addTopLevelTask() {
+  async function addTopLevelTask(phaseKeyArg?: unknown) {
     if (!project) return;
+    // Used directly as an onClick handler too, so ignore a click event.
+    const phaseKey = isLifecycle && typeof phaseKeyArg === "string" ? phaseKeyArg : null;
     // Bugfix (2026-08-24, Sandra: "when adding a task -- all existing
     // tasks become untitled"): this used to call loadAll() right after
     // inserting the new row, which does a full fresh fetch and blows
@@ -2982,6 +3035,7 @@ export default function WbsPlanning() {
       original_due_date: defaultDue,
       current_due_date: defaultDue,
       sort_order: Date.now(),
+      ...(phaseKey ? { wbs_phase: phaseKey } : {}),
     }).select("id").single();
     if (error) {
       await alert(friendlyError("create the task", error));
@@ -3032,6 +3086,7 @@ export default function WbsPlanning() {
       original_due_date: parent.current_due_date,
       current_due_date: parent.current_due_date,
       sort_order: Date.now(),
+      ...(isLifecycle && taskPhaseById.get(parent.id) ? { wbs_phase: taskPhaseById.get(parent.id) } : {}),
     }).select("id").single();
     if (error) {
       await alert(friendlyError("add the sub-task", error));
@@ -3078,6 +3133,7 @@ export default function WbsPlanning() {
       original_due_date: anchor.current_due_date ?? project.end_date ?? toISO(new Date()),
       current_due_date: anchor.current_due_date ?? project.end_date ?? toISO(new Date()),
       sort_order: sortOrder,
+      ...(isLifecycle && taskPhaseById.get(anchor.parent_task_id ?? anchor.id) ? { wbs_phase: taskPhaseById.get(anchor.parent_task_id ?? anchor.id) } : {}),
     }).select("id").single();
     if (error) {
       await alert(friendlyError("add the task", error));
@@ -3125,6 +3181,7 @@ export default function WbsPlanning() {
       output_type_id: t.output_type_id,
       output_count: t.output_count,
       sort_order: sortOrder,
+      ...(isLifecycle && taskPhaseById.get(t.id) ? { wbs_phase: taskPhaseById.get(t.id) } : {}),
     }).select("id").single();
     if (error) {
       await alert(friendlyError("duplicate the task", error));
@@ -4174,6 +4231,235 @@ export default function WbsPlanning() {
   // (Editability itself has never been permission-gated on this page --
   // canEditWbs was always purely a status check, same as before.)
   const canEditWbs = project.wbs_status !== "closed";
+
+  // ---- R2.1 L&D lifecycle: phases + milestones (new projects only) ----
+  const isDraftProject = (project.wbs_status ?? "draft") === "draft";
+  const includedMilestones = milestones.filter((m) => m.is_included);
+  const phaseOfRoot = (t: TaskRow) => (t.wbs_phase && includedMilestones.some((m) => m.phase_key === t.wbs_phase) ? t.wbs_phase : null);
+  const WBS_TOTAL_COLS = 1 + WBS_TASK_COLUMN_ORDER.length + WBS_DATE_COLUMN_WIDTHS.length;
+  type WbsItem =
+    | { kind: "task"; t: TaskRow & { depth: number } }
+    | { kind: "phase"; key: string; label: string; count: number; hours: number }
+    | { kind: "unphased"; count: number }
+    | { kind: "milestone"; m: ProjectMilestone };
+  const wbsItems: WbsItem[] = (() => {
+    if (!isLifecycle) return orderedTasks.map((t) => ({ kind: "task" as const, t }));
+    const rootPhase = new Map<string, string | null>();
+    for (const t of orderedTasks) if (t.depth === 0) rootPhase.set(t.id, phaseOfRoot(t));
+    const phaseOf = (t: TaskRow & { depth: number }) => rootPhase.get(t.depth === 0 ? t.id : t.parent_task_id ?? "") ?? null;
+    const items: WbsItem[] = [];
+    const unphased = orderedTasks.filter((t) => phaseOf(t) === null);
+    if (unphased.length) {
+      items.push({ kind: "unphased", count: unphased.filter((t) => t.depth === 0).length });
+      for (const t of unphased) items.push({ kind: "task", t });
+    }
+    for (const ph of lifecyclePhases) {
+      const m = includedMilestones.find((x) => x.phase_key === ph.key);
+      if (!m) continue;
+      const rows = orderedTasks.filter((t) => phaseOf(t) === ph.key);
+      const leafHours = rows.filter((t) => !(t.depth === 0 && hasChildren(t.id))).reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
+      items.push({ kind: "phase", key: ph.key, label: ph.label, count: rows.filter((t) => t.depth === 0).length, hours: leafHours });
+      if (!collapsedPhases.has(ph.key)) for (const t of rows) items.push({ kind: "task", t });
+      items.push({ kind: "milestone", m });
+    }
+    return items;
+  })();
+
+  function lifecycleChecklistGroups(): ChecklistGroup[] {
+    if (!isLifecycle) return [];
+    const issues = lifecycleStartIssues(milestones, milestoneDeps, orderedTasks.filter((t) => t.depth === 0), lifecyclePhases);
+    const out: ChecklistGroup[] = [];
+    if (issues.noPhases) out.push({ key: "lc_phases", label: "No phases chosen", hint: "Turn on at least one phase for this project (above the WBS).", items: [], blocking: true });
+    if (issues.tasksWithoutPhase.length)
+      out.push({ key: "lc_task_phase", label: "Tasks not in a phase", hint: "Put each task in one of this project's phases (row menu → Move to phase).", items: issues.tasksWithoutPhase, blocking: true, overridable: true });
+    if (issues.milestonesWithoutTasks.length)
+      out.push({ key: "lc_milestone_tasks", label: "Milestones without linked tasks", hint: "Link each milestone to the tasks that must be finished to reach it.", items: issues.milestonesWithoutTasks, blocking: true, overridable: true });
+    return out;
+  }
+
+  async function togglePhaseIncluded(m: ProjectMilestone) {
+    if (!isDraftProject || !canEditWbs) return;
+    const next = !m.is_included;
+    setMilestones((prev) => prev.map((x) => (x.id === m.id ? { ...x, is_included: next } : x)));
+    const { error } = await supabase.from("project_milestones").update({ is_included: next }).eq("id", m.id);
+    if (error) {
+      await alert(friendlyError(next ? "add this phase" : "remove this phase", error));
+      await loadLifecycle(tasks.map((t) => t.id));
+    }
+  }
+
+  async function moveTaskToPhase(task: TaskRow & { depth: number }, phaseKey: string) {
+    const ids = [task.id, ...tasks.filter((x) => x.parent_task_id === task.id).map((x) => x.id)];
+    setTaskPhaseById((prev) => {
+      const next = new Map(prev);
+      for (const id of ids) next.set(id, phaseKey);
+      return next;
+    });
+    const { error } = await supabase.from("tasks").update({ wbs_phase: phaseKey }).in("id", ids);
+    if (error) {
+      await alert(friendlyError("move the task to that phase", error));
+      await loadLifecycle(tasks.map((t) => t.id));
+    }
+  }
+
+  async function toggleMilestoneTask(m: ProjectMilestone, taskId: string) {
+    const linked = milestoneDeps.some((d) => d.milestone_id === m.id && d.task_id === taskId);
+    setMilestoneDeps((prev) => (linked ? prev.filter((d) => !(d.milestone_id === m.id && d.task_id === taskId)) : [...prev, { milestone_id: m.id, task_id: taskId }]));
+    const { error } = linked
+      ? await supabase.from("milestone_dependencies").delete().eq("milestone_id", m.id).eq("task_id", taskId)
+      : await supabase.from("milestone_dependencies").insert({ milestone_id: m.id, task_id: taskId });
+    if (error) await alert(friendlyError(linked ? "unlink the task" : "link the task", error));
+    await loadLifecycle(tasks.map((t) => t.id));
+  }
+
+  function milestoneStatus(m: ProjectMilestone): { label: string; tone: string } {
+    if (m.reached_at) return { label: `Reached ${formatDate(m.reached_at.slice(0, 10))}`, tone: "success" };
+    if (m.kind === "start") return { label: isDraftProject ? "Reached at Start Project" : "Pending", tone: "neutral" };
+    if (m.kind === "close") return { label: "Reached at Close Project", tone: "neutral" };
+    const n = milestoneDeps.filter((d) => d.milestone_id === m.id).length;
+    if (!n) return { label: "No tasks linked yet", tone: "warning" };
+    const done = milestoneDeps.filter((d) => d.milestone_id === m.id && ["Done", "Cancelled"].includes(tasks.find((t) => t.id === d.task_id)?.status ?? "")).length;
+    return { label: `${done} of ${n} linked tasks done`, tone: "accent" };
+  }
+
+  function renderPhaseSetupBar() {
+    if (!isLifecycle || milestones.length === 0) return null;
+    const editable = isDraftProject && canEditWbs;
+    return (
+      <div className="card" style={{ padding: "10px 12px", margin: "0 0 8px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--navy)" }}>Phases for this project</span>
+        {lifecyclePhases.map((ph) => {
+          const m = milestones.find((x) => x.phase_key === ph.key);
+          if (!m) return null;
+          const c = PHASE_COLORS[ph.key] ?? PHASE_COLORS.analysis;
+          const current = !isDraftProject && project?.phase === ph.project_phase;
+          return (
+            <button
+              key={ph.key}
+              type="button"
+              disabled={!editable}
+              onClick={() => void togglePhaseIncluded(m)}
+              title={editable ? (m.is_included ? "Click to skip this phase for this project" : "Click to include this phase") : m.is_included ? (current ? "Current phase" : "") : "Skipped for this project"}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600,
+                border: `1px ${m.is_included ? "solid" : "dashed"} ${m.is_included ? c.fg : "#cbd5e1"}`,
+                background: m.is_included ? (current ? c.fg : c.bg) : "#f8fafc",
+                color: m.is_included ? (current ? "#fff" : c.fg) : "#94a3b8",
+                textDecoration: m.is_included ? "none" : "line-through",
+                cursor: editable ? "pointer" : "default",
+              }}
+            >
+              {m.reached_at && m.is_included ? <CheckCircle2 size={12} /> : <span style={{ width: 8, height: 8, transform: "rotate(45deg)", background: m.is_included ? (current ? "#fff" : c.fg) : "#cbd5e1", display: "inline-block" }} />}
+              {ph.label}
+            </button>
+          );
+        })}
+        <span style={{ fontSize: 10.5, color: "var(--muted)", marginLeft: "auto" }}>
+          {editable ? "Choose the phases this project needs. They lock at Start Project." : "Set at Start Project. Phase moves forward as milestones are reached."}
+        </span>
+      </div>
+    );
+  }
+
+  function renderLifecycleRow(it: Exclude<WbsItem, { kind: "task" }>) {
+    const sticky: React.CSSProperties = { position: "sticky", left: 0, width: "min(100%, calc(100vw - 250px))", boxSizing: "border-box", display: "flex", alignItems: "center", gap: 10 };
+    if (it.kind === "unphased") {
+      return (
+        <tr key="lc-unphased">
+          <td colSpan={WBS_TOTAL_COLS} style={{ padding: 0, background: "#fffbeb", borderTop: "1px solid #fde68a" }}>
+            <div style={{ ...sticky, padding: "7px 12px" }}>
+              <AlertTriangle size={13} color="#b45309" />
+              <strong style={{ fontSize: 12, color: "#92400e" }}>Not in a phase yet ({it.count})</strong>
+              <span style={{ fontSize: 11, color: "#92400e" }}>Use the row menu (⋯) → Move to phase.</span>
+            </div>
+          </td>
+        </tr>
+      );
+    }
+    if (it.kind === "phase") {
+      const c = PHASE_COLORS[it.key] ?? PHASE_COLORS.analysis;
+      const collapsed = collapsedPhases.has(it.key);
+      return (
+        <tr key={`lc-ph-${it.key}`}>
+          <td colSpan={WBS_TOTAL_COLS} style={{ padding: 0, background: c.bg, borderTop: `2px solid ${c.border}` }}>
+            <div style={{ ...sticky, padding: "7px 10px" }}>
+              <button
+                type="button"
+                onClick={() => setCollapsedPhases((prev) => { const n = new Set(prev); if (n.has(it.key)) n.delete(it.key); else n.add(it.key); return n; })}
+                style={{ border: "none", background: "transparent", cursor: "pointer", color: c.fg, display: "inline-flex", alignItems: "center", gap: 6, padding: 0 }}
+              >
+                {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                <strong style={{ fontSize: 13 }}>{it.label}</strong>
+              </button>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>{it.count} task{it.count === 1 ? "" : "s"} · {Math.round(it.hours * 10) / 10} est. hrs</span>
+              {canEditWbs && !isSessionProject && (
+                <button type="button" onClick={() => void addTopLevelTask(it.key)} style={{ marginLeft: 6, border: `1px solid ${c.border}`, background: "#fff", color: c.fg, borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <Plus size={12} /> Add task
+                </button>
+              )}
+            </div>
+          </td>
+        </tr>
+      );
+    }
+    const m = it.m;
+    const c = PHASE_COLORS[m.phase_key] ?? PHASE_COLORS.analysis;
+    const st = milestoneStatus(m);
+    const linked = milestoneDeps.filter((d) => d.milestone_id === m.id).map((d) => tasks.find((t) => t.id === d.task_id)?.name ?? "").filter(Boolean);
+    return (
+      <tr key={`lc-ms-${m.id}`}>
+        <td colSpan={WBS_TOTAL_COLS} style={{ padding: 0, background: "#fffdf5", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ ...sticky, padding: "6px 12px 6px 30px" }}>
+            <span style={{ width: 11, height: 11, transform: "rotate(45deg)", background: m.reached_at ? "#16a34a" : "#f59e0b", display: "inline-block", flexShrink: 0 }} />
+            <strong style={{ fontSize: 12, color: "#0f172a" }}>{m.name}</strong>
+            <span style={{ fontSize: 10.5, color: c.fg, fontWeight: 600 }}>Milestone · 0 hrs</span>
+            <span className={`status-pill ${st.tone}`}>{st.label}</span>
+            {m.kind === "deliverables" && (
+              <span style={{ fontSize: 11, color: "var(--muted)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={linked.join(", ")}>
+                {linked.length ? `Waits for: ${linked.join(", ")}` : ""}
+              </span>
+            )}
+            {m.kind === "deliverables" && canEditWbs && (
+              <button
+                type="button"
+                onClick={(e) => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMilestonePicker({ milestoneId: m.id, x: r.left, y: r.bottom + 4 }); }}
+                style={{ border: "1px solid var(--border)", background: "#fff", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0 }}
+              >
+                <Link2 size={12} /> Link tasks
+              </button>
+            )}
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  function renderMilestonePicker() {
+    if (!milestonePicker) return null;
+    const m = milestones.find((x) => x.id === milestonePicker.milestoneId);
+    if (!m) return null;
+    const inPhase = orderedTasks.filter((t) => (t.depth === 0 ? phaseOfRoot(t) : phaseOfRoot(orderedTasks.find((r) => r.id === t.parent_task_id) ?? t)) === m.phase_key);
+    const list = (inPhase.length ? inPhase : orderedTasks).filter((t) => !(t.depth === 0 && hasChildren(t.id)));
+    return createPortal(
+      <>
+        <div style={{ position: "fixed", inset: 0, zIndex: 1180 }} onClick={() => setMilestonePicker(null)} />
+        <div className="card" style={{ position: "fixed", left: Math.min(milestonePicker.x, window.innerWidth - 340), top: Math.min(milestonePicker.y, window.innerHeight - 320), zIndex: 1181, width: 320, maxHeight: 300, overflowY: "auto", padding: 8, boxShadow: "0 8px 24px rgba(15,41,66,.18)" }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--navy)", margin: "2px 4px 6px" }}>{m.name} is reached when these are done</div>
+          {list.length === 0 && <div style={{ fontSize: 11.5, color: "var(--muted)", padding: 6 }}>Add tasks to this phase first.</div>}
+          {list.map((t) => {
+            const checked = milestoneDeps.some((d) => d.milestone_id === m.id && d.task_id === t.id);
+            return (
+              <label key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", fontSize: 12, cursor: "pointer", paddingLeft: 6 + t.depth * 14 }}>
+                <input type="checkbox" checked={checked} onChange={() => void toggleMilestoneTask(m, t.id)} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name || "Untitled task"}</span>
+              </label>
+            );
+          })}
+        </div>
+      </>,
+      document.body
+    );
+  }
   // Sandra, 2026-07-29: "if one task has been completed... shall we
   // still allow changing of project start date?" -- no. Once any task
   // is Done, the project has genuinely started, so the project's own
@@ -5318,6 +5604,9 @@ export default function WbsPlanning() {
                 {menuItem("Move down", <ArrowDown size={13} />, () => void moveTaskDirection(task, 1), { disabled: !canMoveDown })}
                 {!hasKids && menuItem("Move to parent…", <CornerDownRight size={13} />, () => setMoveParentTaskId(task.id))}
                 {task.depth === 1 && menuItem("Move to top level", <ArrowLeft size={13} />, () => void moveTaskToParent(task, null))}
+                {isLifecycle && task.depth === 0 && lifecyclePhases
+                  .filter((ph) => milestones.some((m) => m.phase_key === ph.key && m.is_included) && ph.key !== (taskPhaseById.get(task.id) ?? null))
+                  .map((ph) => <div key={ph.key}>{menuItem(`Move to ${ph.label}`, <ChevronRight size={13} />, () => { closeMenu(); void moveTaskToPhase(task, ph.key); })}</div>)}
                 <div style={{ height: 1, background: "var(--border)", margin: "4px 2px" }} />
                   </>
                 )}
@@ -6988,6 +7277,8 @@ export default function WbsPlanning() {
               </button>
             </div>
           )}
+          {renderPhaseSetupBar()}
+          {renderMilestonePicker()}
           <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "0 2px 7px", fontSize: 10.5, color: "var(--muted)" }}>
             <span><span className="wbs-required-start">●</span> Required before Start Project</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#fff", border: "1px solid #cfd8e3" }} /> Editable</span>
@@ -7107,7 +7398,9 @@ export default function WbsPlanning() {
                     </td>
                   </tr>
                 )}
-                {orderedTasks.map((t) => {
+                {wbsItems.map((it) => {
+                  if (it.kind !== "task") return renderLifecycleRow(it);
+                  const t = it.t;
                   const isParent = t.depth === 0 && hasChildren(t.id);
                   const assignee = people.find((p) => p.id === t.assignee_id);
                   const dependsOnIds = dependsOnIdsFor(t.id);
