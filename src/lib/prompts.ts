@@ -9,7 +9,9 @@ import type { AlertOptions } from "./useConfirm";
 
 type ErrLike = { message?: string } | string | null | undefined;
 
-const TECHNICAL = /(violates|constraint|column|relation|syntax|null value|PGRST|function|operator|permission denied for|invalid input|uuid|record "new"|duplicate key)/i;
+// "column" only as Postgres phrases it (column "x" ...), so our own
+// messages that mention e.g. "the Status column" still show as written.
+const TECHNICAL = /(violates|constraint|column "|relation "|syntax|null value|PGRST|function|operator|permission denied for|invalid input|uuid|record "new"|duplicate key)/i;
 
 function sentence(text: string): string {
   let t = text.trim().replace(/\s+--\s+/g, ". ").replace(/\s+/g, " ");
