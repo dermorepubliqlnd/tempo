@@ -39,7 +39,7 @@ insert into public.task_templates (template_key, template_name, phase_key, ref, 
   ('scoping', 'Analysis & Scoping', 'analysis', '1.2b', '1.2', 22, 'Learner and context profile (roles, headcount, shifts, sites, Litmos access, language)', 'Learning Design & Analysis', 'Document', 2, '{1.2a}'),
   ('scoping', 'Analysis & Scoping', 'analysis', '1.2c', '1.2', 23, 'Performance gap: training vs non-training solution', 'Learning Design & Analysis', 'Report', 2, '{1.2a}'),
   ('scoping', 'Analysis & Scoping', 'analysis', '1.3',  null,  30, 'Scope statement (outcomes, audience, modality, success metrics L1-L4, rough estimate)', 'Learning Design & Analysis', 'Document', 6, '{1.2b,1.2c}'),
-  ('scoping', 'Analysis & Scoping', 'analysis', '1.4',  null,  40, 'Review scope', 'Quality Assurance', 'QA Record', 1, '{1.3}'),
+  ('scoping', 'Analysis & Scoping', 'analysis', '1.4',  null,  40, 'Review scope', 'Quality Assurance', 'No Deliverable/Activity Only', 1, '{1.3}'),
   ('scoping', 'Analysis & Scoping', 'analysis', '1.5',  null,  50, 'Scope sign-off (sponsor)', 'Quality Assurance', 'No Deliverable/Activity Only', 0.5, '{1.4}')
 on conflict (template_key, ref) do nothing;
 
