@@ -2238,6 +2238,7 @@ export default function Projects() {
       .filter((t) => t.parent_task_id === null)
       .forEach((parent) => {
         if (isProjectLocked(parent.project_id)) return;
+        if (isTaskFinal(parent)) return;
         const computed = taskDatesFromSubtasks(parent.id);
         if (!computed) return;
         const patch: Partial<TaskRow> = {};
@@ -2246,7 +2247,7 @@ export default function Projects() {
           patch.current_due_date = computed.end;
           patch.original_due_date = computed.end;
         }
-        if (Object.keys(patch).length > 0) updateTask(parent.id, patch);
+        if (Object.keys(patch).length > 0) void syncTaskQuietly(parent.id, patch);
       });
   }, [tasks]);
 
@@ -2283,13 +2284,14 @@ export default function Projects() {
         // its own estimated_hours stays exactly what was typed into it.
         const hasSubtasks = tasks.some((t) => t.parent_task_id === parent.id && !t.is_archived);
         if (!hasSubtasks) return;
+        if (isTaskFinal(parent)) return;
         // Has sub-tasks: always mirror the sum, including clearing back
         // to null if none of them have an estimate yet -- otherwise a
         // stale number typed in before this field got locked would sit
         // there forever, unreachable and wrong, until the first sub-task
         // got its own estimate.
         const computed = taskEstimatedHoursFromSubtasks(parent.id);
-        if (computed !== parent.estimated_hours) updateTask(parent.id, { estimated_hours: computed });
+        if (computed !== parent.estimated_hours) void syncTaskQuietly(parent.id, { estimated_hours: computed });
       });
   }, [tasks]);
 
@@ -2421,6 +2423,20 @@ export default function Projects() {
       loadAll();
     }
   }
+
+  // 2026-10-13 fix: background rollups (parent dates / estimated hours)
+  // are not something the person did, so a refusal from the database must
+  // not pop up "Couldn't save your change" on page load. Log it and move on
+  // (no loadAll, which would re-run the rollup and retry forever).
+  async function syncTaskQuietly(id: string, patch: Partial<TaskRow>) {
+    const { error } = await supabase.from("tasks").update(patch).eq("id", id);
+    if (error) { console.warn(`Rollup sync skipped for task ${id}:`, error.message); return; }
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  }
+
+  // Done and Cancelled tasks have their scoping fields locked by the
+  // database (phase12 / phase166), so rollups never try to rewrite them.
+  const isTaskFinal = (t: TaskRow) => t.status === "Done" || t.status === "Cancelled";
 
   async function updateTask(id: string, patch: Partial<TaskRow>) {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
