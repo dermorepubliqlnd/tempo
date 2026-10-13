@@ -265,6 +265,8 @@ export interface ProjectRow {
 export interface TaskRow {
   id: string;
   project_id: string;
+  /** R2.1 (phase183): lifecycle phase group, new-lifecycle projects only. */
+  wbs_phase?: string | null;
   parent_task_id: string | null;
   name: string;
   status: string | null;
@@ -2177,6 +2179,8 @@ export default function Projects() {
   // for every task in the project, then the DB trigger takes over exactly
   // as before. See [[project_capaciq_extension_requests]].
   const isProjectLocked = (projectId: string) => projects.find((p) => p.id === projectId)?.timelines_locked ?? false;
+  const isLifecycleScopingTask = (t: { project_id: string; wbs_phase?: string | null }) =>
+    t.wbs_phase === "analysis" && projects.find((p) => p.id === t.project_id)?.lifecycle_version === 2;
 
   // Project start/due are computed from their own tasks while a project
   // is still in Scoping -- earliest task start, latest task due -- rather
@@ -4413,7 +4417,8 @@ export default function Projects() {
               // "draft" -- see [[project_capaciq...baseline_lock_gating]]).
               // Planning freely pre-baseline shouldn't look like real
               // progress tracking.
-              editable={canEditTask(t) && !isTaskLocked(t) && isProjectLocked(t.project_id)}
+              // phase186: Analysis & Scoping tasks of new-lifecycle projects run before Start Project.
+              editable={canEditTask(t) && !isTaskLocked(t) && (isProjectLocked(t.project_id) || isLifecycleScopingTask(t))}
               allowEmpty
               // Flat list, not TASK_STATUS_GROUPED -- the grouped <optgroup>
               // headers ("To-do"/"In Progress"/"Complete"/"Cancelled") each
@@ -5069,7 +5074,7 @@ export default function Projects() {
             !isRunningHere &&
             !(t as { is_scoping?: boolean }).is_scoping && // phase180: Scoping task takes time in Draft
             // phase184: so do Analysis & Scoping tasks of new-lifecycle projects
-            !((t as { wbs_phase?: string | null }).wbs_phase === "analysis" && projects.find((p) => p.id === t.project_id)?.lifecycle_version === 2);
+            !(t.wbs_phase === "analysis" && projects.find((p) => p.id === t.project_id)?.lifecycle_version === 2);
           // Phase 26 (2026-08-28): and no new time against a project
           // whose close-out has already been approved -- the Final Scope
           // snapshot is frozen, so hours logged after it would never be
