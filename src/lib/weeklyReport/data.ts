@@ -77,7 +77,9 @@ export interface WeeklyReportData {
   // Sandra 2026-10-13: appendix list of every active project, Operational first,
   // then one group per Project Type (e.g. Internal Development), for the
   // cross-department weekly update.
-  activeList: { total: number; operational: number; project: number; overdue: number; groups: ActiveGroup[] };
+  activeList: { total: number; operational: number; project: number; overdue: number; groups: ActiveGroup[];
+    /** Category split of active projects EXCLUDING ongoing containers; top 5 + "Other" when more than 6. */
+    categories: { label: string; count: number; members?: { label: string; count: number }[] }[] };
   // phase151: sessions in operational projects (e.g. quarterly Training Delivery).
   training: {
     projects: number;
@@ -677,10 +679,11 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     hRank(a.health) - hRank(b.health) || (b.progress ?? -1) - (a.progress ?? -1) || (a.target || "9999").localeCompare(b.target || "9999") || a.name.localeCompare(b.name);
   const activeGroups: ActiveGroup[] = [];
   const opRows = activeAll.filter(isOp).map(activeRow).sort(byTarget);
-  if (opRows.length) activeGroups.push({ label: "Operational", operational: true, rows: opRows });
   const projTypes = Array.from(new Set(activeP.map(typeOf)));
   projTypes.sort((a, b) => (a === "No type" ? 1 : 0) - (b === "No type" ? 1 : 0) || activeP.filter((p) => typeOf(p) === b).length - activeP.filter((p) => typeOf(p) === a).length || a.localeCompare(b));
   for (const t of projTypes) activeGroups.push({ label: t, operational: false, rows: activeP.filter((p) => typeOf(p) === t).map(activeRow).sort(byTarget) });
+  // Ongoing containers go last: they are listed but not counted as projects.
+  if (opRows.length) activeGroups.push({ label: "Ongoing containers", operational: true, rows: opRows });
   // Talk track (Sandra 2026-10-13): capture WHY a project is off track,
   // overdue or at risk -- extension reasons, project notes, scope added after
   // Start Project, late tasks -- so the presenter can explain each one.
@@ -717,7 +720,15 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       r.why = parts.length ? parts.join("; ") : "no reason logged in Tempo yet — ask the owner before the meeting";
     }
   }
-  const activeList = { total: activeAll.length, operational: opRows.length, project: activeP.length, overdue: overdueP.length, groups: activeGroups };
+  // Sandra 2026-10-13: KPI cards + category doughnut count real projects only
+  // (Internal Development, Operations, ...), not ongoing containers.
+  const catCount = new Map<string, number>();
+  for (const g of activeGroups) if (!g.operational) for (const r of g.rows) catCount.set(r.category, (catCount.get(r.category) ?? 0) + 1);
+  const catSorted = Array.from(catCount.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([label, count]) => ({ label, count }));
+  const categories: WeeklyReportData["activeList"]["categories"] = catSorted.length > 6
+    ? [...catSorted.slice(0, 5), { label: "Other", count: catSorted.slice(5).reduce((n, c) => n + c.count, 0), members: catSorted.slice(5) }]
+    : catSorted;
+  const activeList = { total: activeAll.length, operational: opRows.length, project: activeP.length, overdue: overdueP.length, groups: activeGroups, categories };
 
   const notes: WeeklyReportData["notes"] = {
     cover: `Report week: ${md(week.start)} – ${md(week.end)} (Mon–Fri). "This week" = ${md(thisWeek.start)} – ${md(thisWeek.end)}. Generated ${md(todayIso)} from Tempo; health and paused figures are as of the generation date.`,
@@ -789,7 +800,8 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     ].filter(Boolean).join("\n"),
     appendix: `All projects to date (excluding Cancelled) by Project Type, Planned vs Ad Hoc.${overall.untyped ? ` ${overall.untyped} project(s) have no Project Type yet: ${live.filter((p) => typeOf(p) === "No type").map((p) => p.name).slice(0, 8).join(", ")}.` : ""}`,
     activeList: (() => {
-      const all = activeGroups.flatMap((g) => g.rows);
+      const all = activeGroups.filter((g) => !g.operational).flatMap((g) => g.rows);
+      const other = categories.find((c) => c.members);
       const attn = all.filter((r) => ATTN.has(r.health));
       const onTrack = all.filter((r) => r.health === "On track").length;
       const cats = new Map<string, number>();
@@ -797,7 +809,8 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       const topCats = Array.from(cats.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([c, n]) => `${c} (${n})`);
       return [
         "TALK TRACK",
-        `- We have ${plural(all.length, "active project")}: ${activeGroups.map((g) => `${g.rows.length} ${g.label}`).join(", ")}.`,
+        `- We have ${plural(all.length, "active project")}: ${activeGroups.filter((g) => !g.operational).map((g) => `${g.rows.length} ${g.label}`).join(", ")}.${opRows.length ? ` On top of that, ${plural(opRows.length, "ongoing container")} (${listNames(opRows.map((r) => r.name))}) ${opRows.length === 1 ? "stays" : "stay"} open for recurring work and ${opRows.length === 1 ? "isn't" : "aren't"} counted as projects.` : ""}`,
+        other?.members ? `- "Other" in the category chart = ${listNames(other.members.map((m) => `${m.label} (${m.count})`))}.` : "",
         topCats.length ? `- Most of the work is in ${listNames(topCats)}.` : "",
         `- ${onTrack} ${onTrack === 1 ? "is" : "are"} on track; ${attn.length ? `${attn.length} need${attn.length === 1 ? "s" : ""} attention — I'll walk through those.` : "nothing needs escalation this week."}`,
         "- Each group is sorted by health, then progress, then target date, so the ones needing attention are at the top.",

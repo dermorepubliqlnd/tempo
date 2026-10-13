@@ -397,8 +397,8 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
       if (pi === 0) {
         const al = d.activeList;
         const BY = 1.42, BH = 1.2;
-        const kp: [string, string, string][] = [["Total active projects", String(al.total), B.mahogany]];
-        for (const g of al.groups) if (g.rows.length && kp.length < 5) kp.push([g.label, String(g.rows.length), groupColor.get(g.label) ?? B.taupe]);
+        const kp: [string, string, string][] = [["Total active projects", String(al.project), B.mahogany]];
+        for (const g of al.groups) if (g.rows.length && !g.operational && kp.length < 5) kp.push([g.label, String(g.rows.length), groupColor.get(g.label) ?? B.taupe]);
         const KW = 7.1, gap = 0.15, kw = (KW - gap * (kp.length - 1)) / kp.length;
         kp.forEach(([lab, val, col], i) => {
           const x = X0 + i * (kw + gap);
@@ -410,15 +410,13 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
         // Category distribution
         const cx = X0 + KW + 0.2, cw = W - KW - 0.2;
         box(s, cx, BY, cw, BH);
-        const cc = new Map<string, number>();
-        for (const g of al.groups) for (const r of g.rows) cc.set(r.category, (cc.get(r.category) ?? 0) + 1);
-        const cats = Array.from(cc.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
         const CAT_COLORS = [B.hydrate, B.calm, B.clarify, B.rewind, B.protect, B.repair, B.brighten, B.taupe];
-        const shown = cats.length > 6 ? [...cats.slice(0, 5), ["Other", cats.slice(5).reduce((n, c) => n + c[1], 0)] as [string, number]] : cats;
-        const colOf = (i: number) => (shown[i][0] === "Other" ? B.linen : CAT_COLORS[i % CAT_COLORS.length]);
+        const shown: [string, number][] = al.categories.map((c) => [c.label, c.count]);
+        if (!shown.length) shown.push(["None", 0]);
+        const colOf = (i: number) => (al.categories[i]?.members ? B.linen : CAT_COLORS[i % CAT_COLORS.length]);
         addChart(s, pptx.ChartType.doughnut, [{ name: "Category", labels: shown.map((c) => c[0]), values: shown.map((c) => c[1]) }],
           { x: cx + 0.05, y: BY + 0.05, w: 1.1, h: 1.1, holeSize: 58, showLegend: false, showValue: false, showPercent: false, showTitle: false, chartColors: shown.map((_, i) => colOf(i)), dataBorder: { pt: 1, color: B.white } });
-        txt(s, cx + 1.2, BY + 0.05, cw - 1.3, 0.26, "By category", { fontFace: FB, fontSize: 9.5, color: B.onyx });
+        txt(s, cx + 1.2, BY + 0.05, cw - 1.3, 0.26, "By category · excl. ongoing", { fontFace: FB, fontSize: 9.5, color: B.onyx });
         const lw = (cw - 1.3) / 2;
         shown.forEach(([lab, n], i) => {
           const lx = cx + 1.2 + Math.floor(i / 3) * lw, ly = BY + 0.33 + (i % 3) * 0.27;
@@ -460,6 +458,8 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
         if (r.moved) runs.push({ text: `  +${r.moved}d`, options: { fontFace: F, fontSize: 8, color: B.renew } });
         cell("target", runs);
       });
+      const otherCat = d.activeList.categories.find((c) => c.members);
+      if (pi === 0 && otherCat?.members) txt(s, X0, 6.66, W, 0.24, rich([["Other categories: ", true], [otherCat.members.map((m) => `${m.label} (${m.count})`).join(" · "), false]], 8.5, B.taupe), { valign: "middle" });
       txt(s, X0, 6.42, W, 0.3, rich([["How to read: ", true], ["Sorted by Health, then Progress (highest first), then Target · Progress = Actual Progress in Tempo · red = past target · +Nd = days moved since Start Project · as of " + fmtMD(d.generatedOn), false]], 8.5, B.taupe), { valign: "middle" });
     });
   }
