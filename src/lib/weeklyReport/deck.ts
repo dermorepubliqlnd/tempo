@@ -375,7 +375,22 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     const LH = 0.295;
     pages.forEach((lines, pi) => {
       const multi = pages.length > 1;
-      const s = content(`Appendix · Active projects${multi ? ` · ${pi + 1} of ${pages.length}` : ""}`, `${t.titles.activeList}${pi ? " (cont.)" : ""}`, pi === 0 ? "activeList" : undefined);
+      const s = content(`Appendix · Active projects${multi ? ` · ${pi + 1} of ${pages.length}` : ""}`, `${t.titles.activeList}${pi ? " (cont.)" : ""}`);
+      // Talk track on EVERY page (Sandra 2026-10-13): page 1 opens with the
+      // editable summary; each page then walks its own rows, with the reason
+      // behind any Overdue / Off track / At risk project.
+      {
+        const out: string[] = [];
+        if (pi === 0) { const n = notesFor("activeList"); if (n) out.push(n, ""); }
+        else out.push(`TALK TRACK (cont., ${pi + 1} of ${pages.length})`);
+        out.push("ON THIS SLIDE");
+        for (const ln of lines) {
+          if (ln.kind === "group") { out.push(`${ln.label}${ln.cont ? " (cont.)" : ""} — ${plural(ln.count, "project")}`); continue; }
+          const r = ln.row;
+          out.push(`- ${r.name}: ${r.health}, ${r.progress ?? "–"}% done, target ${r.target ? fmtMD(r.target) : "not set"}${r.moved ? ` (moved +${r.moved}d from ${fmtMD(r.committed)})` : ""}${r.daysLate ? `, ${r.daysLate} days past target` : ""}.${r.why ? ` Why: ${r.why}.` : ""}`);
+        }
+        s.addNotes(out.join("\n"));
+      }
       // Page 1 top band (Sandra 2026-10-13): KPI cards (total + one per
       // Project Type group) on the left, Category distribution doughnut right.
       let HY = 1.5;

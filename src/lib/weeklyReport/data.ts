@@ -37,6 +37,9 @@ export interface WeekRange { start: string; end: string }
 export interface ActiveRow {
   num: number | null; name: string; owner: string; category: string; planning: string; type: string;
   health: string; progress: number | null; target: string; committed: string; moved: number; daysLate: number;
+  /** Why it needs attention (Overdue / Off track / At risk / Schedule review), from Tempo history. */
+  why?: string;
+  id?: string;
 }
 export interface ActiveGroup { label: string; operational: boolean; rows: ActiveRow[] }
 export interface ProjLine { name: string; type: string; planning: string; date: string; extra?: string; warn?: boolean }
@@ -112,6 +115,8 @@ export function weekOf(monday: string, offsetWeeks = 0): WeekRange {
   const m = addDays(parseLocalDate(monday), offsetWeeks * 7);
   return { start: toISO(m), end: toISO(addDays(m, 4)) };
 }
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const listNames = (a: string[]) => (a.length <= 1 ? a.join("") : `${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}`);
 const d10 = (s: string | null | undefined) => (s ? s.slice(0, 10) : "");
 const localDay = (ts: string) => toISO(new Date(ts)); // never ts.slice(0,10) (UTC bug)
 const daysBetween = (a: string, b: string) => Math.round((parseLocalDate(b).getTime() - parseLocalDate(a).getTime()) / 86400000);
@@ -656,6 +661,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     const committed = d10((p as { committed_end_date?: string | null }).committed_end_date ?? p.original_due_date);
     const health = isOpA(p) ? "Ongoing" : healthBy.get(p.id) ?? "—";
     return {
+      id: p.id,
       num: (p as { project_number?: number }).project_number ?? null,
       name: p.name, owner: ownerName(p.owner_id), category: (p.category ?? "").trim() || "—", planning: planOf(p), type: typeOf(p),
       health, progress: actualProgress(p.id, tasks as TaskRow[]), target, committed,
@@ -675,6 +681,42 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   const projTypes = Array.from(new Set(activeP.map(typeOf)));
   projTypes.sort((a, b) => (a === "No type" ? 1 : 0) - (b === "No type" ? 1 : 0) || activeP.filter((p) => typeOf(p) === b).length - activeP.filter((p) => typeOf(p) === a).length || a.localeCompare(b));
   for (const t of projTypes) activeGroups.push({ label: t, operational: false, rows: activeP.filter((p) => typeOf(p) === t).map(activeRow).sort(byTarget) });
+  // Talk track (Sandra 2026-10-13): capture WHY a project is off track,
+  // overdue or at risk -- extension reasons, project notes, scope added after
+  // Start Project, late tasks -- so the presenter can explain each one.
+  const ATTN = new Set(["Overdue", "Off track", "At risk", "Schedule review"]);
+  const attnRows = activeGroups.flatMap((g) => g.rows).filter((r) => ATTN.has(r.health) && r.id);
+  if (attnRows.length) {
+    const ids = attnRows.map((r) => r.id as string);
+    const [bl2, ext2, notes2] = await Promise.all([
+      supabase.from("project_baselines").select("project_id,captured_at,task_count").in("project_id", ids),
+      supabase.from("extension_requests").select("project_id,reason_category,reason_notes,status,created_at").in("project_id", ids).order("created_at", { ascending: false }),
+      supabase.from("project_notes").select("project_id,body,created_at").in("project_id", ids).order("created_at", { ascending: false }),
+    ]);
+    const base2 = new Map(((bl2.data as { project_id: string; captured_at: string; task_count: number }[]) ?? []).map((b) => [b.project_id, b]));
+    const ext2r = (ext2.data as { project_id: string; reason_category: string | null; reason_notes: string | null; status: string | null; created_at: string }[]) ?? [];
+    const notes2r = (notes2.data as { project_id: string; body: string | null; created_at: string }[]) ?? [];
+    const clip = (x: string, n = 110) => { const t = x.replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+    for (const r of attnRows) {
+      const pid = r.id as string;
+      const pl = leaf.filter((t) => t.project_id === pid && t.status !== "Cancelled");
+      const late = pl.filter((t) => t.status !== "Done" && t.current_due_date && d10(t.current_due_date) < todayIso)
+        .sort((a, b) => d10(a.current_due_date).localeCompare(d10(b.current_due_date)));
+      const b = base2.get(pid);
+      const added = b ? pl.filter((t) => t.created_at && t.created_at > b.captured_at) : [];
+      const addedH = added.reduce((n, t) => n + (Number(t.estimated_hours) || 0), 0);
+      const e = ext2r.find((x) => x.project_id === pid);
+      const n = notes2r.find((x) => x.project_id === pid);
+      const parts: string[] = [];
+      if (late.length) parts.push(`${plural(late.length, "task")} past due (${late.slice(0, 2).map((t) => `${clip(t.name, 45)}, due ${md(t.current_due_date)}`).join("; ")}${late.length > 2 ? "; …" : ""})`);
+      if (added.length) parts.push(`${plural(added.length, "task")} (${round1(addedH)}h) added after Start Project`);
+      if (r.moved) parts.push(`target moved ${r.moved} days from ${md(r.committed)}`);
+      if (e) parts.push(`extension ${e.status ?? "requested"} ${md(localDay(e.created_at))}: ${e.reason_category ?? "no reason"}${e.reason_notes ? ` — “${clip(e.reason_notes)}”` : ""}`);
+      if (n?.body) parts.push(`latest note ${md(localDay(n.created_at))}: “${clip(n.body)}”`);
+      if (r.health === "Schedule review") parts.push("dates need re-baselining after resume");
+      r.why = parts.length ? parts.join("; ") : "no reason logged in Tempo yet — ask the owner before the meeting";
+    }
+  }
   const activeList = { total: activeAll.length, operational: opRows.length, project: activeP.length, overdue: overdueP.length, groups: activeGroups };
 
   const notes: WeeklyReportData["notes"] = {
@@ -746,10 +788,25 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       tCancelled.length ? `Cancelled last week (${tCancelled.length}):\n${bl(tCancelled.map((t) => `${t.name} — ${who(t.assignee_id)}${t.cancellation_reason ? `; reason: ${t.cancellation_reason}` : ""}`))}` : "",
     ].filter(Boolean).join("\n"),
     appendix: `All projects to date (excluding Cancelled) by Project Type, Planned vs Ad Hoc.${overall.untyped ? ` ${overall.untyped} project(s) have no Project Type yet: ${live.filter((p) => typeOf(p) === "No type").map((p) => p.name).slice(0, 8).join(", ")}.` : ""}`,
-    activeList: [
-      `All ${activeAll.length} active projects as of ${md(todayIso)} (In Progress, Start Project approved). Operational = ongoing containers such as Training Delivery; the rest are grouped by Project Type. Progress = Actual Progress (hours-weighted task completion). Target = current End Date; "+Nd" = days moved from the date committed at Start Project.`,
-      ...activeGroups.map((g) => `${g.label} (${g.rows.length}):\n${bl(g.rows.map((r) => `${r.name} — ${r.health}; ${r.progress ?? "–"}% · target ${md(r.target)}${r.moved ? ` (committed ${md(r.committed)})` : ""}${r.daysLate ? `; ${r.daysLate} days past target` : ""}`))}`),
-    ].join("\n"),
+    activeList: (() => {
+      const all = activeGroups.flatMap((g) => g.rows);
+      const attn = all.filter((r) => ATTN.has(r.health));
+      const onTrack = all.filter((r) => r.health === "On track").length;
+      const cats = new Map<string, number>();
+      all.forEach((r) => cats.set(r.category, (cats.get(r.category) ?? 0) + 1));
+      const topCats = Array.from(cats.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([c, n]) => `${c} (${n})`);
+      return [
+        "TALK TRACK",
+        `- We have ${plural(all.length, "active project")}: ${activeGroups.map((g) => `${g.rows.length} ${g.label}`).join(", ")}.`,
+        topCats.length ? `- Most of the work is in ${listNames(topCats)}.` : "",
+        `- ${onTrack} ${onTrack === 1 ? "is" : "are"} on track; ${attn.length ? `${attn.length} need${attn.length === 1 ? "s" : ""} attention — I'll walk through those.` : "nothing needs escalation this week."}`,
+        "- Each group is sorted by health, then progress, then target date, so the ones needing attention are at the top.",
+        attn.length ? "\nNEEDS ATTENTION — why" : "",
+        ...attn.map((r) => `- ${r.name} (${r.health}, ${r.progress ?? "–"}%, target ${md(r.target)}): ${r.why ?? ""}`),
+        "\nDEFINITIONS",
+        "- Progress = Actual Progress in Tempo (hours-weighted task completion). Target = current End Date; +Nd = days moved from the date committed at Start Project.",
+      ].filter(Boolean).join("\n");
+    })(),
   };
 
   return {
