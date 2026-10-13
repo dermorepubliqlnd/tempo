@@ -911,9 +911,6 @@ export default function WbsPlanning() {
   // Phase 10: no longer a single selected preview -- all 4 scenarios
   // render simultaneously as rows now, see effectiveForMode below.
   const [saving, setSaving] = useState(false);
-  // 2026-10-13 (Sandra: "not clear which to fill out first"): a new draft
-  // shows only the 3 fields needed to save; the rest open on request.
-  const [showDetailsEarly, setShowDetailsEarly] = useState(false);
   // Most WBS users do not need the bandwidth diagnostic by default.
   // Keep it opt-in while preserving the existing calculation and controls
   // when someone explicitly opens it.
@@ -4247,7 +4244,9 @@ export default function WbsPlanning() {
     ["Description", project.description],
   ];
   const detailsMissing = PROJECT_DETAIL_FIELDS.filter(([, v]) => !v).map(([k]) => k);
-  const showProjectDetails = !project.is_unsaved || showDetailsEarly;
+  // 2026-10-13 (Sandra): a new draft shows only the 3 fields needed to save;
+  // the other details (all required before Start Project) appear after.
+  const showProjectDetails = !project.is_unsaved;
 
   // ---- R2.1 L&D lifecycle: phases + milestones (new projects only) ----
   const isDraftProject = (project.wbs_status ?? "draft") === "draft";
@@ -6262,7 +6261,7 @@ export default function WbsPlanning() {
             {project.is_unsaved && (
               <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "-4px 0 12px 38px", fontSize: 11.5, color: "#304963" }}>
                 <span>
-                  You only need <strong>Project Name</strong>, <strong>Owner</strong> and <strong>Start Date</strong> to save a draft. The other details are needed later, before Start Project.
+                  Start with <strong>Project Name</strong>, <strong>Owner</strong> and <strong>Start Date</strong> to save your draft. Next, you'll complete the remaining project details, which are all required before Start Project.
                 </span>
               </div>
             )}
@@ -6324,9 +6323,6 @@ export default function WbsPlanning() {
                     </button>
                   )}
                   {basicsMissing.length > 0 && <span style={{ fontSize: 11, color: "var(--muted)" }}>Still needed: {basicsMissing.join(", ")}</span>}
-                  <button type="button" onClick={() => setShowDetailsEarly(true)} style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--accent)", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
-                    Fill in the other project details now (optional)
-                  </button>
                 </div>
               )}
               {showProjectDetails && (<>
