@@ -547,7 +547,7 @@ const TASK_COLUMN_ORDER = ["name", "task_number", "project", "assignee", "status
 // own), "organization" -> Team Views. Personal views land under My Views.
 const TASK_SYS_LEAD = ["task_number", "name", "project", "assignee", "status", "readiness", "revision_count", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext", "actual_completion_date", "validated_completion_date", "validated_by", "hours_variance"];
 const TASK_SYSTEM_COLUMN_ORDER = [...TASK_SYS_LEAD, ...TASK_COLUMN_ORDER.filter((k) => !TASK_SYS_LEAD.includes(k))];
-const TASK_MY_VISIBLE = new Set(["task_number", "name", "project", "status", "readiness", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext"]);
+const TASK_MY_VISIBLE = new Set(["task_number", "name", "project", "status", "readiness", "revision_count", "timing", "start_date", "current_due_date", "estimated_hours", "time_spent_hours", "due_date_ext"]);
 const TASK_TEAM_VISIBLE = new Set([...TASK_MY_VISIBLE, "assignee"]);
 const TASK_DONE_VISIBLE = new Set(["task_number", "name", "project", "current_due_date", "committed_due_date", "committed_slip", "actual_completion_date", "validated_completion_date", "validated_by", "estimated_hours", "time_spent_hours", "hours_variance"]);
 function taskSystemView(
