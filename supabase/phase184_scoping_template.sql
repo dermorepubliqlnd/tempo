@@ -35,13 +35,14 @@ create policy task_templates_write on public.task_templates for all to authentic
 insert into public.task_templates (template_key, template_name, phase_key, ref, parent_ref, sort_order, name, work_type_name, output_type_name, estimated_hours, depends_on_refs) values
   ('scoping', 'Analysis & Scoping', 'analysis', '1.1',  null,  10, 'Discovery / kickoff call (incl. stakeholder and SME mapping)', 'Project Management', 'Discovery Call', 2.5, '{}'),
   ('scoping', 'Analysis & Scoping', 'analysis', '1.2',  null,  20, 'Needs analysis', 'Learning Design & Analysis', null, null, '{}'),
-  ('scoping', 'Analysis & Scoping', 'analysis', '1.2a', '1.2', 21, 'Interviews, observation and data review (audits, NCRs, complaints, KPIs)', 'Learning Design & Analysis', 'Report', 6, '{1.1}'),
-  ('scoping', 'Analysis & Scoping', 'analysis', '1.2b', '1.2', 22, 'Learner and context profile (roles, headcount, shifts, sites, Litmos access, language)', 'Learning Design & Analysis', 'Document', 2, '{1.2a}'),
-  ('scoping', 'Analysis & Scoping', 'analysis', '1.2c', '1.2', 23, 'Performance gap: training vs non-training solution', 'Learning Design & Analysis', 'Report', 2, '{1.2a}'),
-  ('scoping', 'Analysis & Scoping', 'analysis', '1.3',  null,  30, 'Scope statement (outcomes, audience, modality, success metrics L1-L4, rough estimate)', 'Learning Design & Analysis', 'Document', 6, '{1.2b,1.2c}'),
+  ('scoping', 'Analysis & Scoping', 'analysis', '1.2a', '1.2', 21, 'Interviews, observation and data review (audits, NCRs, complaints, KPIs)', 'Learning Design & Analysis', 'No Deliverable/Activity Only', 6, '{1.1}'),
+  ('scoping', 'Analysis & Scoping', 'analysis', '1.2b', '1.2', 22, 'Learner and context profile (roles, headcount, shifts, sites, Litmos access, language)', 'Learning Design & Analysis', 'No Deliverable/Activity Only', 2, '{1.2a}'),
+  ('scoping', 'Analysis & Scoping', 'analysis', '1.2c', '1.2', 23, 'Performance gap: training vs non-training solution', 'Learning Design & Analysis', 'Needs Analysis (TNA)', 2, '{1.2a}'),
+  ('scoping', 'Analysis & Scoping', 'analysis', '1.3',  null,  30, 'Scope statement (outcomes, audience, modality, success metrics L1-L4, rough estimate)', 'Learning Design & Analysis', 'Scope Document', 6, '{1.2b,1.2c}'),
   ('scoping', 'Analysis & Scoping', 'analysis', '1.4',  null,  40, 'Review scope', 'Quality Assurance', 'No Deliverable/Activity Only', 1, '{1.3}'),
   ('scoping', 'Analysis & Scoping', 'analysis', '1.5',  null,  50, 'Scope sign-off (sponsor)', 'Quality Assurance', 'No Deliverable/Activity Only', 0.5, '{1.4}')
 on conflict (template_key, ref) do nothing;
+-- (Output types above reflect phase185; on a fresh database run phase185 first or re-run its updates.)
 
 -- 2. Apply a template to a project ----------------------------------------
 create or replace function public.r2_apply_template(p_project_id uuid, p_template_key text) returns int
