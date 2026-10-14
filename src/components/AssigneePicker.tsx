@@ -10,13 +10,17 @@ interface Option {
 }
 
 export function useAssigneePicker(people: Option[]) {
-  const [state, setState] = useState<{ title: string; defaultId: string } | null>(null);
+  const [state, setState] = useState<{ title: string; defaultId: string; allowedIds?: string[]; note?: string } | null>(null);
   const [sel, setSel] = useState("");
   const resolver = useRef<((v: string | null) => void) | null>(null);
 
-  function pick(title: string, defaultId?: string | null): Promise<string | null> {
-    setSel(defaultId ?? "");
-    setState({ title, defaultId: defaultId ?? "" });
+  // 2026-10-14: opts.allowedIds limits the list (ongoing containers: yourself
+  // and your team below you); opts.note explains why.
+  function pick(title: string, defaultId?: string | null, opts?: { allowedIds?: string[]; note?: string }): Promise<string | null> {
+    const allowed = opts?.allowedIds;
+    const def = defaultId && (!allowed || allowed.includes(defaultId)) ? defaultId : allowed?.[0] ?? "";
+    setSel(def);
+    setState({ title, defaultId: def, allowedIds: allowed, note: opts?.note });
     return new Promise((res) => {
       resolver.current = res;
     });
@@ -32,6 +36,7 @@ export function useAssigneePicker(people: Option[]) {
       <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: "0 0 10px" }}>
         This project has started, so every new task needs an Assignee. You can change it later, but not remove it.
       </p>
+      {state.note && <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: "0 0 10px" }}>{state.note}</p>}
       <select
         autoFocus
         value={sel}
@@ -39,7 +44,7 @@ export function useAssigneePicker(people: Option[]) {
         style={{ width: "100%", fontSize: 13, padding: "7px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", marginBottom: 14 }}
       >
         <option value="">Select a team member…</option>
-        {people.map((p) => (
+        {people.filter((p) => !state.allowedIds || state.allowedIds.includes(p.id)).map((p) => (
           <option key={p.id} value={p.id}>
             {p.name}
           </option>
