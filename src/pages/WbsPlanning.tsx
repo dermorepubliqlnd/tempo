@@ -4286,6 +4286,21 @@ export default function WbsPlanning() {
   // to sign-off. Phases, milestones and dates are unchanged underneath.
   const hasModules = isLifecycle && orderedTasks.some((t) => taskModuleById.has(t.id) && !t.is_archived);
   const groupByModule = hasModules && (wbsGroupMode ?? "module") === "module";
+  // Module view shows "Design / storyboard" instead of "Design / storyboard · M1 ..."
+  // -- the module header already says which module. The full name is kept
+  // everywhere else (My Tasks, dashboard), and edits keep the suffix.
+  const moduleSuffix = (t: TaskRow) => {
+    const n = taskModuleById.get(t.id);
+    return n ? ` · ${n}` : "";
+  };
+  const shortNameInModuleView = (t: TaskRow) => {
+    const suf = moduleSuffix(t);
+    return groupByModule && suf && t.name.endsWith(suf) ? t.name.slice(0, -suf.length) : t.name;
+  };
+  const fullNameFromModuleView = (t: TaskRow, v: string) => {
+    const suf = moduleSuffix(t);
+    return groupByModule && suf && t.name.endsWith(suf) && !v.endsWith(suf) ? v + suf : v;
+  };
   const wbsItems: WbsItem[] = (() => {
     if (!isLifecycle) return orderedTasks.map((t) => ({ kind: "task" as const, t }));
     const rootPhase = new Map<string, string | null>();
@@ -7752,11 +7767,11 @@ export default function WbsPlanning() {
                           </span>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <InlineText
-                              value={t.name}
+                              value={shortNameInModuleView(t)}
                               editable={rowEditable}
                               bold={t.depth === 0}
                               dataNavId={`task-name-${t.id}`}
-                              onCommit={(v) => saveTaskField(t.id, { name: v })}
+                              onCommit={(v) => saveTaskField(t.id, { name: fullNameFromModuleView(t, v) })}
                               onEnter={() => {
                                 if (!rowEditable) return;
                                 if (t.depth === 0) {
@@ -8243,7 +8258,11 @@ export default function WbsPlanning() {
                       const entry = chainByMode[mode].get(t.id);
                       const isParent = t.depth === 0 && hasChildren(t.id);
                       const assignee = people.find((p) => p.id === t.assignee_id);
-                      const barColor = assignee ? colorForPerson(assignee) : UNASSIGNED_BAR_COLOR;
+                      // 2026-10-14 (Sandra): on new-lifecycle projects the bars use the
+                      // phase colour (same as the WBS phase headers); older projects keep
+                      // the assignee colour.
+                      const ganttPhase = isLifecycle ? taskPhaseById.get(t.depth === 0 ? t.id : t.parent_task_id ?? "") ?? taskPhaseById.get(t.id) ?? null : null;
+                      const barColor = ganttPhase && PHASE_COLORS[ganttPhase] ? PHASE_COLORS[ganttPhase].fg : assignee ? colorForPerson(assignee) : UNASSIGNED_BAR_COLOR;
                       return (
                         <div key={t.id} style={{ display: "flex" }}>
                           <div
