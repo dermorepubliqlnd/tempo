@@ -1,3 +1,4 @@
+import { selfAndTeamBelow } from "../lib/teamBelow";
 import { projectStageOf } from "../lib/projectStage";
 import { useAssigneePicker } from "../components/AssigneePicker";
 import Modal from "../components/Modal";
@@ -232,6 +233,7 @@ interface PersonRow {
   daily_capacity_hours: number;
   is_active: boolean;
   color: string | null;
+  reports_to?: string | null;
 }
 // Phase 2 (2026-07-28): Draft/Baseline/Revision/Final-Scope workflow rows.
 // Only the ONE in-progress revision and ONE pending closure request (if
@@ -593,6 +595,12 @@ export default function WbsPlanning() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [people, setPeople] = useState<PersonRow[]>([]);
   const assigneePicker = useAssigneePicker(people.filter((p) => p.is_active));
+  // phase190b: on ongoing containers, non-owners without Full Access can add
+  // tasks for themselves and the people below them in the reporting line.
+  function containerPickOpts(): { allowedIds?: string[]; note?: string } | undefined {
+    if (!project || !me || !project.is_operational || isFullAccess || project.owner_id === me.id) return undefined;
+    return { allowedIds: selfAndTeamBelow(me.id, people.map((p) => ({ id: p.id, reports_to: p.reports_to ?? null }))), note: "On ongoing projects you can add tasks for yourself and the people in your team." };
+  }
   const startDatePrompt = useProjectStartDatePrompt();
   // Work Types (Phase 12, 2026-08-20) -- fetched unfiltered (all rows) so
   // an already-assigned but since-deactivated Work Type still resolves to
@@ -1170,7 +1178,7 @@ export default function WbsPlanning() {
         .eq("is_archived", false)
         .eq("is_scoping", false) // phase180: Scoping task lives outside the plan/baseline
         .order("sort_order"),
-      supabase.from("people").select("id,name,daily_capacity_hours,is_active,color").eq("is_active", true).order("name"),
+      supabase.from("people").select("id,name,daily_capacity_hours,is_active,color,reports_to").eq("is_active", true).order("name"),
       // Paged (audit Fix 8) -- these three feed the capacity schedulers and
       // would be silently truncated at PostgREST's 1000-row cap otherwise.
       fetchAllRows<AvailabilityRow>((from, to) => supabase.from("person_availability").select("person_id,date,status").order("date").range(from, to)),
@@ -3022,7 +3030,7 @@ export default function WbsPlanning() {
     // phase126l: started project -> new task needs an Assignee up front.
     let newAssignee: string | null = null;
     if (project.wbs_status !== "draft") {
-      newAssignee = await assigneePicker.pick("Assign the new task");
+      newAssignee = await assigneePicker.pick("Assign the new task", me?.id, containerPickOpts());
       if (!newAssignee) return;
     }
     const { data: newTask, error } = await supabase.from("tasks").insert({
@@ -3072,7 +3080,7 @@ export default function WbsPlanning() {
     // correctly once floors don't artificially skip ahead.
     let newAssignee: string | null = null;
     if (project && project.wbs_status !== "draft") {
-      newAssignee = await assigneePicker.pick("Assign the new sub-task", parent.assignee_id);
+      newAssignee = await assigneePicker.pick("Assign the new sub-task", parent.assignee_id, containerPickOpts());
       if (!newAssignee) return;
     }
     const { data: newTask, error } = await supabase.from("tasks").insert({
@@ -3116,7 +3124,7 @@ export default function WbsPlanning() {
 
     let newAssignee: string | null = null;
     if (project.wbs_status !== "draft") {
-      newAssignee = await assigneePicker.pick("Assign the new task");
+      newAssignee = await assigneePicker.pick("Assign the new task", me?.id, containerPickOpts());
       if (!newAssignee) return;
     }
     const start = anchor.depth === 1
@@ -3155,8 +3163,9 @@ export default function WbsPlanning() {
     const flushed = await flushPendingEdits();
     if (!flushed) return;
     let dupAssignee = t.assignee_id;
-    if (project.wbs_status !== "draft" && !dupAssignee) {
-      dupAssignee = await assigneePicker.pick("Assign the duplicated task");
+    const dupOpts = containerPickOpts();
+    if (project.wbs_status !== "draft" && (!dupAssignee || (dupOpts?.allowedIds && !dupOpts.allowedIds.includes(dupAssignee)))) {
+      dupAssignee = await assigneePicker.pick("Assign the duplicated task", me?.id, dupOpts);
       if (!dupAssignee) return;
     }
     const siblings = siblingsFor(t);

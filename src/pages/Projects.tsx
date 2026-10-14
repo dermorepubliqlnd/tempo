@@ -23,6 +23,7 @@ import { timingWithPause, type TimingResult } from "../lib/pause";
 import { METRIC_DEFINITIONS, isActiveProject, isOverdueProject, isOverdueTask, isDueThisWeek } from "../lib/metrics";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import LogTimeModal from "../components/LogTimeModal";
+import { selfAndTeamBelow } from "../lib/teamBelow";
 import CompleteTaskModal from "../components/CompleteTaskModal";
 import { fetchStagePhaseRules, type StagePhaseRules } from "../components/StagePhaseRules";
 import { PROJECT_STAGES, PROJECT_STAGE_TONES, PROJECT_STAGE_HINTS, projectStageOf, normalizeStageFilter } from "../lib/projectStage";
@@ -1448,6 +1449,12 @@ export default function Projects() {
   const [returnError, setReturnError] = useState("");
   const [people, setPeople] = useState<PersonOption[]>([]);
   const assigneePicker = useAssigneePicker(people);
+  // phase190b: who this person may assign when adding a task to an ongoing container.
+  function containerPickOpts(projectId: string): { allowedIds?: string[]; note?: string } | undefined {
+    const pr = projects.find((p) => p.id === projectId);
+    if (!pr || !me || !pr.is_operational || me.access_level === "full" || pr.owner_id === me.id) return undefined;
+    return { allowedIds: selfAndTeamBelow(me.id, chainPeople), note: "On ongoing projects you can add tasks for yourself and the people in your team." };
+  }
   const startDatePrompt = useProjectStartDatePrompt();
   // Work Types (Phase 12, 2026-08-20) -- fetched unfiltered (all rows,
   // active or not) so a task referencing a since-deactivated Work Type
@@ -4309,7 +4316,7 @@ export default function Projects() {
     // phase126l: started project -> new task needs an Assignee up front.
     let newAssignee: string | null = null;
     if (projects.find((p) => p.id === parent.project_id)?.wbs_status !== "draft") {
-      newAssignee = await assigneePicker.pick("Assign the new sub-task", parent.assignee_id);
+      newAssignee = await assigneePicker.pick("Assign the new sub-task", parent.assignee_id, containerPickOpts(parent.project_id));
       if (!newAssignee) return;
     }
     const { error } = await supabase.from("tasks").insert({
@@ -6113,7 +6120,7 @@ export default function Projects() {
     if (!(await startDatePrompt.ensure(project))) return;
     let newAssignee: string | null = null;
     if (project && project.wbs_status !== "draft") {
-      newAssignee = await assigneePicker.pick("Assign the new task");
+      newAssignee = await assigneePicker.pick("Assign the new task", me?.id, containerPickOpts(projectId));
       if (!newAssignee) return;
     }
     const { error } = await supabase.from("tasks").insert({
