@@ -1927,6 +1927,30 @@ export default function Projects() {
     r1ProjectIds.has(t.project_id) && isLeafTask(t) && taskDeps.some((d) => d.task_id === t.id) ? reviewKindOf(t.name) : null;
   const isHandoffTask = (t: TaskRow) => r1ProjectIds.has(t.project_id) && isLeafTask(t) && !reviewStepKind(t) && reviewersOf(t).length > 0;
   const handoffToday = () => toISOWorkingDay(new Date());
+  // 2026-10-14 (Sandra: "someone can re-open a done and signed-off task"):
+  // on new projects a finished hand-off only goes back through For Revision.
+  // - Nobody can reopen a task once a later step built on it is Done
+  //   (e.g. Scope statement after Review scope passed QA).
+  // - The assignee can't pull back work they handed over, or a review they
+  //   passed / approved; the project owner or Full Access can, as long as
+  //   nothing after it is Done yet.
+  function reopenBlockedReason(t: TaskRow): string | null {
+    if (t.status !== "Done" || !r1ProjectIds.has(t.project_id)) return null;
+    const later = taskDeps
+      .filter((d) => d.depends_on_task_id === t.id)
+      .map((d) => tasks.find((x) => x.id === d.task_id))
+      .filter((x): x is TaskRow => !!x && !x.is_archived && x.status === "Done");
+    if (later.length) return `"${later[0].name}" is already done on top of this. To change it now, that step has to send it back For Revision.`;
+    const handedOver = !!reviewStepKind(t) || isHandoffTask(t);
+    if (handedOver && !canManageTasksIn(t.project_id)) {
+      const rv = reviewersOf(t)[0];
+      const who = rv ? people.find((p) => p.id === rv.assignee_id)?.name ?? rv.name : "the project owner";
+      return reviewStepKind(t)
+        ? "You've already passed this. Ask the project owner if it needs to be reopened."
+        : `This was handed over for review. Ask ${who} to send it back For Revision.`;
+    }
+    return null;
+  }
   function openReturnDialog(t: TaskRow) {
     const c = returnableFor(t).map((x) => ({ id: x.id, name: x.name }));
     setReturnDialog({ reviewTaskId: t.id, reviewName: t.name, candidates: c });
@@ -2818,6 +2842,11 @@ export default function Projects() {
     // becomes that hand-off -- a review step decides Pass QA / Approve or
     // For Revision; a work task with a review after it is Ready for Review.
     if (!handoff) handoff = reviewStepKind(t) ?? (isHandoffTask(t) ? "review" : null);
+    const rd = readinessById.get(t.id);
+    if (r1ProjectIds.has(t.project_id) && rd && rd.waitingOn.length > 0) {
+      await alert({ title: "Waiting on earlier work", message: `This can be finished once these are done: ${rd.waitingOn.map((w) => w.name).join(", ")}.` });
+      return;
+    }
     const actionLabel = handoff === "review" ? "Ready for Review" : handoff === "qa" ? "Pass QA" : handoff === "approve" ? "Approve" : "Mark Done";
     setCompleteDlg({ taskId: t.id, date: v, actionLabel });
   }
@@ -2864,6 +2893,13 @@ export default function Projects() {
     // below the moment any of its children next changes.
     if ("status" in patch) {
       ids = ids.filter((id) => !(!tasks.find((t) => t.id === id)?.parent_task_id && hasChildren(id)));
+      if (patch.status !== "Done") {
+        const blocked = ids.map((id) => tasks.find((t) => t.id === id)).filter((t): t is TaskRow => !!t && !!reopenBlockedReason(t));
+        if (blocked.length) {
+          await alert({ title: "Some tasks can't be reopened", message: "These were handed over or signed off, so they're left as they are:", items: blocked.map((t) => t.name) });
+          ids = ids.filter((id) => !blocked.some((b) => b.id === id));
+        }
+      }
       if (ids.length === 0) return;
     }
     setTasks((prev) => prev.map((t) => (ids.includes(t.id) ? { ...t, ...patch } : t)));
@@ -4509,6 +4545,13 @@ export default function Projects() {
                   await markTaskDone(t, t.actual_completion_date ?? toISOWorkingDay(new Date()));
                   return;
                 }
+                {
+                  const why = reopenBlockedReason(t);
+                  if (why) {
+                    await alert({ title: "Can't reopen this task", message: why });
+                    return;
+                  }
+                }
                 // Moving to any other status clears the Done-related
                 // stamps, same as before -- and, now that Actual
                 // Completion Date is what puts a task INTO Done, also
@@ -5038,6 +5081,11 @@ export default function Projects() {
               editable={editable}
               onCommit={async (v) => {
                 if (!v) {
+                  const why = reopenBlockedReason(t);
+                  if (why) {
+                    await alert({ title: "Can't reopen this task", message: why });
+                    return;
+                  }
                   // Clearing the date takes the task back out of Done --
                   // same "reopening wipes the slate" convention as
                   // reopen_task, since Done no longer means anything
@@ -5337,7 +5385,10 @@ export default function Projects() {
             color: primary ? "#fff" : "var(--warning-text)",
             borderRadius: 6, padding: "2px 9px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
           });
-          if (!r || r.state === "action") {
+          // 2026-10-14 (Sandra's recording): on new projects a task whose
+          // predecessor was sent back waits again, even if it was already
+          // In Progress -- no Approve while the work behind it is reopened.
+          if (!r || (r.state === "action" && !(isNew && r.waitingOn.length > 0))) {
             if (!isNew) return <span className="status-pill success">Action needed</span>;
             if (!isLeafTask(t)) return <span style={{ color: "var(--muted)", fontSize: 12 }} title="Finish the sub-tasks; this row follows them.">In sub-tasks</span>;
             const mine = canActOnTask(t);
@@ -5352,6 +5403,19 @@ export default function Projects() {
                     <button type="button" style={btn(true)} onClick={(e) => { e.stopPropagation(); void markTaskDone(t, handoffToday(), false, "review"); }} title="Send the revised work back to the reviewer">
                       Resubmit
                     </button>
+                  )}
+                  {/* A review step sent back by the approver: re-check it, then pass or send it further back. */}
+                  {mine && !isHandoffTask(t) && reviewStepKind(t) && (
+                    <>
+                      <button type="button" style={btn(true)} onClick={(e) => { e.stopPropagation(); void markTaskDone(t, handoffToday(), false, reviewStepKind(t)); }}>
+                        ✓ {reviewStepKind(t) === "approve" ? "Approve" : "Pass QA"}
+                      </button>
+                      {canReturnFrom(t) && (
+                        <button type="button" style={btn(false)} onClick={(e) => { e.stopPropagation(); openReturnDialog(t); }} title="Send the work back to its owner for revision, with a comment">
+                          ↺ For Revision
+                        </button>
+                      )}
+                    </>
                   )}
                   <span className="status-pill warning" title={`For revision from ${by} (round ${ret.round}):\n${ret.comment ?? ""}`} style={{ cursor: "help", overflow: "hidden", textOverflow: "ellipsis" }}>
                     For Revision · {ret.comment ? `"${ret.comment}"` : by}
@@ -5762,6 +5826,8 @@ export default function Projects() {
       // 2026-10-07 (item L): Done and Cancelled go through their real paths.
       if (v === "Done") { markTaskDone(t, toISOWorkingDay(new Date()), true); return; }
       if (v === "Cancelled") { setCancelTaskDialog({ taskIds: [t.id], label: `"${t.name}"` }); return; }
+      const why = reopenBlockedReason(t);
+      if (why) { alert({ title: "Can't reopen this task", message: why }); return; }
       updateTask(t.id, { status: v || null, submitted_on: null, submitted_by: null, actual_completion_date: null });
     };
     return undefined; // assignee, effort, work_type, project, timing, due_date_ext: read-only board
