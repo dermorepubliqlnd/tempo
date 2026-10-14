@@ -39,9 +39,9 @@ export interface MilestoneDependency {
 // read (e.g. the SQL hasn't been run yet), so the page never breaks.
 export const FALLBACK_LIFECYCLE_PHASES: LifecyclePhase[] = [
   { key: "analysis", label: "Analysis & Scoping", sort_order: 1, project_phase: "Scoping", milestone_name: "Scope Confirmed", milestone_kind: "start" },
-  { key: "design", label: "Learning Design", sort_order: 2, project_phase: "Design", milestone_name: "Design Approved", milestone_kind: "deliverables" },
-  { key: "development", label: "Learning Development", sort_order: 3, project_phase: "Development", milestone_name: "Materials Approved", milestone_kind: "deliverables" },
-  { key: "delivery", label: "Implementation / Delivery", sort_order: 4, project_phase: "Delivery", milestone_name: "Program Delivered", milestone_kind: "deliverables" },
+  { key: "design", label: "Design", sort_order: 2, project_phase: "Design", milestone_name: "Design Approved", milestone_kind: "deliverables" },
+  { key: "development", label: "Development", sort_order: 3, project_phase: "Development", milestone_name: "Materials Approved", milestone_kind: "deliverables" },
+  { key: "delivery", label: "Implementation", sort_order: 4, project_phase: "Delivery", milestone_name: "Program Delivered", milestone_kind: "deliverables" },
   { key: "evaluation", label: "Evaluation & Closure", sort_order: 5, project_phase: "Evaluation", milestone_name: "Project Closed", milestone_kind: "close" },
 ];
 

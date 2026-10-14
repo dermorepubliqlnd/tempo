@@ -4,24 +4,25 @@
 -- leave the live app's hard-coded phase lists out of step.
 --
 -- Renames the project Phase values for EVERY project (Sandra 2026-10-13:
--- "rename for everyone") and moves Evaluation & Closure after Delivery.
+-- "rename for everyone") and moves Evaluation & Closure after Implementation.
+-- 2026-10-14 (Sandra): final names are Analysis & Scoping, Design, Development,
+-- Implementation, Evaluation & Closure -- Design and Development keep their
+-- current names; only Scoping, Delivery and Evaluation are renamed.
 begin;
 alter table public.projects disable trigger trg_touch_activity_projects;
 
 update public.project_phases set name = 'Analysis & Scoping',        sort_order = 3 where name = 'Scoping';
-update public.project_phases set name = 'Learning Design',           sort_order = 4 where name = 'Design';
-update public.project_phases set name = 'Learning Development',      sort_order = 5 where name = 'Development';
-update public.project_phases set name = 'Implementation / Delivery', sort_order = 6 where name = 'Delivery';
+update public.project_phases set sort_order = 4 where name = 'Design';
+update public.project_phases set sort_order = 5 where name = 'Development';
+update public.project_phases set name = 'Implementation',            sort_order = 6 where name = 'Delivery';
 update public.project_phases set name = 'Evaluation & Closure',      sort_order = 7 where name = 'Evaluation';
 
 update public.projects set phase = case phase
   when 'Scoping' then 'Analysis & Scoping'
-  when 'Design' then 'Learning Design'
-  when 'Development' then 'Learning Development'
-  when 'Delivery' then 'Implementation / Delivery'
+  when 'Delivery' then 'Implementation'
   when 'Evaluation' then 'Evaluation & Closure'
   else phase end
-where phase in ('Scoping', 'Design', 'Development', 'Delivery', 'Evaluation');
+where phase in ('Scoping', 'Delivery', 'Evaluation');
 
 update public.lifecycle_phases set project_phase = label;
 

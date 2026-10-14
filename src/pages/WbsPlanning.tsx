@@ -3211,8 +3211,16 @@ export default function WbsPlanning() {
     await loadAll(true);
   }
 
+  // #14 (2026-10-14): on new-lifecycle projects, Move up / Move down stays
+  // inside the task's phase (use "Move to phase" to change phase).
+  function phaseSiblingsFor(t: TaskRow & { depth: number }) {
+    const sibs = siblingsFor(t);
+    if (!isLifecycle || t.depth > 0) return sibs;
+    const ph = taskPhaseById.get(t.id) ?? null;
+    return sibs.filter((x) => (taskPhaseById.get(x.id) ?? null) === ph);
+  }
   async function moveTaskDirection(t: TaskRow & { depth: number }, direction: -1 | 1) {
-    const siblings = siblingsFor(t);
+    const siblings = phaseSiblingsFor(t);
     const at = siblings.findIndex((x) => x.id === t.id);
     const target = siblings[at + direction];
     if (!target) return;
@@ -4442,7 +4450,7 @@ export default function WbsPlanning() {
   // phase193: delivery / evaluation templates use the same RPC.
   const PHASE_TEMPLATES: Record<string, { key: string; title: string; message: string; label: string }> = {
     analysis: { key: "scoping", title: "Add the Analysis & Scoping template?", message: "Adds 5 standard scoping tasks (about 20 hours) with their dependencies. You can rename, delete or change hours on any of them afterwards.", label: "Use scoping template (5 tasks)" },
-    delivery: { key: "delivery", title: "Add the Implementation / Delivery template?", message: "Adds 10 delivery activities in order (pilot, LMS upload, scheduling, launch, monitoring, handover). Delete the ones this project doesn't need; the chain closes up around them.", label: "Use delivery template (10 tasks)" },
+    delivery: { key: "delivery", title: "Add the Implementation template?", message: "Adds 10 delivery activities in order (pilot, LMS upload, scheduling, launch, monitoring, handover). Delete the ones this project doesn't need; the chain closes up around them.", label: "Use delivery template (10 tasks)" },
     evaluation: { key: "evaluation", title: "Add the Evaluation & Closure template?", message: "Adds 9 evaluation and close-out activities in order (L1 to L4, completion records, report, lessons learned). Delete the ones this project doesn't need.", label: "Use evaluation template (9 tasks)" },
   };
   async function applyScopingTemplate(phaseKey = "analysis") {
@@ -5780,7 +5788,7 @@ export default function WbsPlanning() {
         <Modal title="Add module" onClose={() => (moduleDlg.busy ? undefined : setModuleDlg(null))} width={440}>
           <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
             <div style={{ color: "var(--muted)" }}>
-              Adds 6 linked tasks: <strong>Design / storyboard → Review → Sign-off</strong> in Learning Design and <strong>Build → Review → Sign-off</strong> in Learning Development. Reviews go to the person's supervisor and sign-offs to the project owner. Delete or reassign any step afterwards.
+              Adds 6 linked tasks: <strong>Design / storyboard → Review → Sign-off</strong> in Design and <strong>Build → Review → Sign-off</strong> in Development. Reviews go to the person's supervisor and sign-offs to the project owner. Delete or reassign any step afterwards.
             </div>
             <label style={{ display: "grid", gap: 4 }}>
               <span style={{ fontWeight: 600 }}>Module name</span>
@@ -5836,7 +5844,7 @@ export default function WbsPlanning() {
         (() => {
           const task = orderedTasks.find((x) => x.id === rowActionsMenu.taskId);
           if (!task) return null;
-          const siblings = siblingsFor(task);
+          const siblings = phaseSiblingsFor(task);
           const at = siblings.findIndex((x) => x.id === task.id);
           const canMoveUp = at > 0;
           const canMoveDown = at >= 0 && at < siblings.length - 1;

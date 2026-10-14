@@ -4278,6 +4278,11 @@ export default function Projects() {
         alert({ title: "Phase is for Active projects", message: `"${p.name}" is ${projectStageOf(p)}. Phase can be set once the project is Active.` });
         return;
       }
+      // #16 (2026-10-14): new-lifecycle projects' Phase moves only with their milestones.
+      if (isLifecycleProject(p)) {
+        alert({ title: "Phase moves on its own", message: `"${p.name}" uses the new lifecycle. Its Phase moves forward as milestones are reached in WBS Planning.` });
+        return;
+      }
       if (v === "Done") {
         alert({ title: "Done is set by Close Project", message: "Send the Close Project request from the WBS page; approval sets Phase to Done." });
         return;
@@ -6775,11 +6780,15 @@ export default function Projects() {
                   const ids = selectedProjectIds;
                   const isActiveStage = (p: ProjectRow) => projectStageOf(p) === "Active" || projectStageOf(p) === "Closing";
                   const skippedDraft = projects.some((p) => ids.includes(p.id) && !isActiveStage(p));
-                  const nonDraftIds = projects.filter((p) => ids.includes(p.id) && isActiveStage(p)).map((p) => p.id);
+                  // #16 (2026-10-14): new-lifecycle projects' Phase moves only with their milestones.
+                  const skippedLifecycle = projects.some((p) => ids.includes(p.id) && isLifecycleProject(p));
+                  const nonDraftIds = projects.filter((p) => ids.includes(p.id) && isActiveStage(p) && !isLifecycleProject(p)).map((p) => p.id);
                   if (nonDraftIds.length === 0) {
-                    if (skippedDraft) alert({ title: "Nothing was changed", message: "Phase is only for Active projects." });
+                    if (skippedLifecycle) alert({ title: "Nothing was changed", message: "Phase on new-lifecycle projects moves on its own as milestones are reached." });
+                    else if (skippedDraft) alert({ title: "Nothing was changed", message: "Phase is only for Active projects." });
                     return;
                   }
+                  if (skippedLifecycle) alert({ title: "Some projects were skipped", message: "Phase on new-lifecycle projects moves on its own as milestones are reached. The other projects were updated." });
                   setProjects((prev) => prev.map((p) => (nonDraftIds.includes(p.id) ? { ...p, phase: v || null } : p)));
                   supabase
                     .from("projects")
