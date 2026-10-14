@@ -2813,6 +2813,11 @@ export default function Projects() {
   // through its Log time link. The same checks still apply on confirm.
   // R2.2 #3: the hand-off buttons open the same pop-up with their own wording.
   async function markTaskDone(t: TaskRow, v: string, _fromBoard = false, handoff: "review" | "qa" | "approve" | null = null): Promise<void> {
+    // 2026-10-14 (Sandra: Done from the Status dropdown skipped the review
+    // decision): on new projects, any route into Done on a hand-off task
+    // becomes that hand-off -- a review step decides Pass QA / Approve or
+    // For Revision; a work task with a review after it is Ready for Review.
+    if (!handoff) handoff = reviewStepKind(t) ?? (isHandoffTask(t) ? "review" : null);
     const actionLabel = handoff === "review" ? "Ready for Review" : handoff === "qa" ? "Pass QA" : handoff === "approve" ? "Approve" : "Mark Done";
     setCompleteDlg({ taskId: t.id, date: v, actionLabel });
   }
@@ -7123,6 +7128,7 @@ export default function Projects() {
             onLogTime={() => setCompleteLogTime(true)}
             onCancel={() => setCompleteDlg(null)}
             onConfirm={(date, count, types) => confirmTaskDone(ct, date, count, types)}
+            onRevision={reviewStepKind(ct) && canReturnFrom(ct) ? () => { setCompleteDlg(null); openReturnDialog(ct); } : undefined}
           />
         );
       })()}

@@ -39,6 +39,8 @@ interface Props {
   onLogTime: () => void;
   onCancel: () => void;
   /** Save and mark Done. Return an error message to keep the pop-up open. */
+  /** Review steps: send the work back instead of passing it. */
+  onRevision?: () => void;
   onConfirm: (date: string, outputCount: number, types?: { workTypeId: string | null; outputTypeId: string | null }) => Promise<string | null>;
 }
 
@@ -46,7 +48,7 @@ const label: React.CSSProperties = { fontSize: 11.5, color: "var(--muted)", font
 const value: React.CSSProperties = { fontSize: 12.5, color: "var(--text)" };
 const input: React.CSSProperties = { fontSize: 12.5, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--border)", fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
 
-export default function CompleteTaskModal({ info, initialDate, initialCount, today, actionLabel = "Mark Done", onLogTime, onCancel, onConfirm }: Props) {
+export default function CompleteTaskModal({ info, initialDate, initialCount, today, actionLabel = "Mark Done", onLogTime, onCancel, onConfirm, onRevision }: Props) {
   const te = info.typeEdit;
   const [wtId, setWtId] = useState<string>(te?.workTypeId ?? "");
   const [otId, setOtId] = useState<string>(te?.outputTypeId ?? "");
@@ -95,7 +97,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
   }
 
   return (
-    <Modal title={actionLabel === "Mark Done" ? "Complete task" : actionLabel} onClose={() => (busy ? undefined : onCancel())} width={480}>
+    <Modal title={onRevision ? `${actionLabel} or send for revision?` : actionLabel === "Mark Done" ? "Complete task" : actionLabel} onClose={() => (busy ? undefined : onCancel())} width={480}>
       <div style={{ display: "grid", gap: 14 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{info.name}</div>
 
@@ -168,6 +170,11 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
         {error && <div style={{ color: "var(--danger-text)", fontSize: 12 }}>{error}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button className="btn-secondary" disabled={busy} onClick={onCancel}>Cancel</button>
+          {onRevision && (
+            <button className="btn-secondary" disabled={busy} onClick={onRevision} style={{ color: "var(--warning-text)" }} title="Send the work back to its owner with a comment">
+              ↺ For Revision
+            </button>
+          )}
           <button className="btn-primary" disabled={busy} onClick={() => void submit()}>{busy ? "Saving…" : actionLabel}</button>
         </div>
       </div>
