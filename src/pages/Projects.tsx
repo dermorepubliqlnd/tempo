@@ -2002,7 +2002,23 @@ export default function Projects() {
       return new Set(prev).add(projectId);
     });
   }
-  const canManageTasksIn = (projectId: string) => isFullAccess || isProjectOwner(projectId);
+  // phase197 (#25): the owner's direct supervisor can manage the project's tasks too.
+  const isOwnerSupervisor = (projectId: string) => {
+    const ownerId = projects.find((p) => p.id === projectId)?.owner_id;
+    return !!me && !!ownerId && chainPeople.find((p) => p.id === ownerId)?.reports_to === me.id;
+  };
+  const canManageTasksIn = (projectId: string) => isFullAccess || isProjectOwner(projectId) || isOwnerSupervisor(projectId);
+  // phase197 (#23/#25): explain a blocked edit before it reaches the database.
+  const TASK_PLAN_KEYS = ["name", "start_date", "start_date_full", "start_date_standard", "original_due_date", "current_due_date", "estimated_hours", "assignee_id", "parent_task_id", "project_id"];
+  function taskEditBlockedReason(t: TaskRow | undefined, patch: Partial<TaskRow>): string | null {
+    if (!t || !me) return null;
+    if (canManageTasksIn(t.project_id)) return null;
+    const pr = projects.find((p) => p.id === t.project_id);
+    if (pr?.is_operational) return t.assignee_id === me.id ? null : "You can only edit your own sessions in this project.";
+    if (t.assignee_id !== me.id) return "Only the project owner, their supervisor or Full Access can edit this task.";
+    const touchesPlan = Object.keys(patch).some((k) => TASK_PLAN_KEYS.includes(k));
+    return touchesPlan ? "Only the project owner, their supervisor or Full Access can change this task's plan (name, dates, hours or assignee)." : null;
+  }
   // Closure is final (Sandra, repeatedly: "no re-opening"). Until Phase 26
   // (2026-08-28) WbsPlanning.tsx's own `canEditWbs = wbs_status !== "closed"`
   // was the ONLY thing anywhere enforcing that -- nothing on this page,
@@ -2450,6 +2466,12 @@ export default function Projects() {
   const isTaskFinal = (t: TaskRow) => t.status === "Done" || t.status === "Cancelled";
 
   async function updateTask(id: string, patch: Partial<TaskRow>) {
+    const blocked = taskEditBlockedReason(tasks.find((t) => t.id === id), patch);
+    if (blocked) {
+      alert({ title: "Can't save this change", message: blocked });
+      loadAll();
+      return;
+    }
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
     const { error } = await supabase.from("tasks").update(patch).eq("id", id);
     if (error) {
@@ -2747,6 +2769,14 @@ export default function Projects() {
   async function bulkUpdateTasks(patch: Partial<TaskRow>) {
     let ids = selectedTaskIds;
     if (ids.length === 0) return;
+    {
+      const blockedTasks = ids.map((id) => tasks.find((t) => t.id === id)).filter((t): t is TaskRow => !!t && !!taskEditBlockedReason(t, patch));
+      if (blockedTasks.length) {
+        await alert({ title: "Some tasks weren't changed", message: taskEditBlockedReason(blockedTasks[0], patch) ?? "", items: blockedTasks.map((t) => t.name) });
+        ids = ids.filter((id) => !blockedTasks.some((b) => b.id === id));
+        if (ids.length === 0) return;
+      }
+    }
     // 2026-09-07: Status is no longer settable on parent rows at all (see
     // the Status column's own isParent branch above) -- silently drop
     // any selected parent from a bulk Status edit rather than writing a
