@@ -1614,6 +1614,8 @@ export default function Projects() {
   // 2026-10-14 (Sandra): Complete task pop-up (see markTaskDone).
   const [completeDlg, setCompleteDlg] = useState<{ taskId: string; date: string; actionLabel: string } | null>(null);
   const [completeLogTime, setCompleteLogTime] = useState(false);
+  // phase189: Work Type -> Output Type links, for the pop-up's Output Type list.
+  const [typeLinks, setTypeLinks] = useState<{ work_type_id: string; output_type_id: string }[]>([]);
   const [followUpTask, setFollowUpTask] = useState<{ id: string; name: string; onBehalfOf: string | null } | null>(null);
   const [timeEntries, setTimeEntries] = useState<TimeEntryRow[]>([]);
   const [deletedSpentHours, setDeletedSpentHours] = useState<DeletedSpentHourRow[]>([]);
@@ -1827,6 +1829,7 @@ export default function Projects() {
     setDeletedSpentHours((delSpentData as DeletedSpentHourRow[]) ?? []);
     setWorkTypes((workTypeData as WorkTypeOption[]) ?? []);
     setOutputTypes((outputTypeData as OutputTypeOption[]) ?? []);
+    supabase.from("work_type_output_types").select("work_type_id,output_type_id").then(({ data }) => setTypeLinks((data as { work_type_id: string; output_type_id: string }[]) ?? []));
     setProjectSources((projectSourceData as ProjectSourceOption[]) ?? []);
     setProjectCategories((projectCategoryData as ProjectCategoryOption[]) ?? []);
     setProjectPhases((projectPhaseData as ProjectPhaseOption[]) ?? []);
@@ -2814,8 +2817,16 @@ export default function Projects() {
     setCompleteDlg({ taskId: t.id, date: v, actionLabel });
   }
 
-  async function confirmTaskDone(t: TaskRow, date: string, outputCount: number): Promise<string | null> {
+  async function confirmTaskDone(t: TaskRow, date: string, outputCount: number, types?: { workTypeId: string | null; outputTypeId: string | null }): Promise<string | null> {
     if (ownHoursFor(timeEntries, t.id) <= 0) return "Log your time on this task first.";
+    // phase189: Work Type / Output Type changed in the pop-up -> saved with an Audit Trail entry.
+    if (types) {
+      const { error } = await supabase.rpc("set_task_types_at_completion", { p_task_id: t.id, p_work_type_id: types.workTypeId, p_output_type_id: types.outputTypeId });
+      if (error) return friendlyError("change the Work Type / Output Type", error).message ?? "Couldn't change the Work Type / Output Type.";
+      t = { ...t, work_type_id: types.workTypeId, output_type_id: types.outputTypeId };
+      const changed = t;
+      setTasks((prev) => prev.map((row) => (row.id === changed.id ? { ...row, work_type_id: changed.work_type_id, output_type_id: changed.output_type_id } : row)));
+    }
     const outType = outputTypes.find((o) => o.id === t.output_type_id);
     const countsDeliverable = !!outType && outType.counts_deliverable !== false;
     if (countsDeliverable && (t.output_count ?? null) !== outputCount) {
@@ -2831,7 +2842,7 @@ export default function Projects() {
     };
     const { error } = await supabase.from("tasks").update(patch).eq("id", t.id);
     if (error) return friendlyError("mark the task Done", error).message ?? "Couldn't mark the task Done.";
-    const next = tasks.map((row) => (row.id === t.id ? { ...row, ...patch, ...(countsDeliverable ? { output_count: outputCount } : {}) } : row));
+    const next = tasks.map((row) => (row.id === t.id ? { ...row, ...patch, work_type_id: t.work_type_id, output_type_id: t.output_type_id, ...(countsDeliverable ? { output_count: outputCount } : {}) } : row));
     setTasks(next);
     setCompleteDlg(null);
     await recomputeAncestorStatus(t.id, next);
@@ -7097,6 +7108,13 @@ export default function Projects() {
               estimatedHours: ct.estimated_hours,
               loggedHours: ownHoursFor(timeEntries, ct.id),
               pendingHours: Math.round((pendingMin / 60) * 100) / 100,
+              typeEdit: {
+                workTypeId: ct.work_type_id,
+                outputTypeId: ct.output_type_id,
+                workTypes,
+                outputTypes,
+                links: typeLinks,
+              },
             }}
             initialDate={completeDlg.date}
             initialCount={ct.output_count}
@@ -7104,7 +7122,7 @@ export default function Projects() {
             actionLabel={completeDlg.actionLabel}
             onLogTime={() => setCompleteLogTime(true)}
             onCancel={() => setCompleteDlg(null)}
-            onConfirm={(date, count) => confirmTaskDone(ct, date, count)}
+            onConfirm={(date, count, types) => confirmTaskDone(ct, date, count, types)}
           />
         );
       })()}

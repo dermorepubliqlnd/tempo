@@ -4528,6 +4528,7 @@ export default function WbsPlanning() {
     date_changed: "#b8860b",
     dependency_changed: "#7b4fb0",
     assignee_changed: "#2e75b6",
+    type_changed: "#7b4fb0",
   };
   const CHANGE_TYPE_SHORT_LABEL: Record<string, string> = {
     task_added: "New task",
@@ -4536,6 +4537,7 @@ export default function WbsPlanning() {
     date_changed: "Date changed",
     dependency_changed: "Dependency changed",
     assignee_changed: "Assignee changed",
+    type_changed: "Work / Output Type changed",
   };
   function taskChangeKind(c: RevisionChangeRow): keyof typeof CHANGE_DOT_COLOR | null {
     if (c.change_type === "task_added") return "task_added";

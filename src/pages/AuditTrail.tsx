@@ -30,6 +30,7 @@ const CHANGE_TYPE_LABEL: Record<string, string> = {
   date_changed: "Date changed",
   dependency_changed: "Dependency changed",
   assignee_changed: "Assignee changed",
+  type_changed: "Work / Output Type changed",
 };
 
 interface ProjectRow {
