@@ -13,18 +13,24 @@ export default function DateInput({ style, className, value, defaultValue, onCha
   const [uncontrolled, setUncontrolled] = useState<string>(defaultValue != null ? String(defaultValue) : "");
   const shown = value !== undefined ? String(value ?? "") : uncontrolled;
   const [pad, setPad] = useState<CSSProperties>({});
+  // Measure the input once after it mounts (and when its class changes).
+  // Only primitive values are compared, so this can never loop.
+  const styleKey = `${className ?? ""}|${style?.fontSize ?? ""}|${style?.padding ?? ""}|${style?.color ?? ""}`;
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const cs = getComputedStyle(el);
-    setPad({
+    const next: CSSProperties = {
       paddingLeft: `calc(${cs.paddingLeft} + ${cs.borderLeftWidth})`,
       fontSize: cs.fontSize,
       fontFamily: cs.fontFamily,
       fontWeight: cs.fontWeight as CSSProperties["fontWeight"],
       color: cs.color === "rgba(0, 0, 0, 0)" ? undefined : cs.color,
-    });
-  }, [className, style]);
+    };
+    setPad((prev) =>
+      prev.paddingLeft === next.paddingLeft && prev.fontSize === next.fontSize && prev.fontFamily === next.fontFamily && prev.fontWeight === next.fontWeight && prev.color === next.color ? prev : next
+    );
+  }, [styleKey]);
   const fill = style?.width === "100%" || !!style?.flex;
   return (
     <span
