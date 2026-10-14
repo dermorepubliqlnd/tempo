@@ -344,9 +344,15 @@ export function InlineDate({ value, onCommit, editable, emptyLabel = "—" }: In
   // sub-task dates "kind of not good in the eye to see them misaligned"
   // next to their locked parent row).
   if (!editable) return <span className="inline-cell readonly">{formatDate(value, emptyLabel)}</span>;
+  // 2026-10-14 (Sandra): a native date input shows the computer's regional
+  // format (dd/mm/yyyy on some laptops). The input stays for the picker,
+  // but its own text is hidden and the date is drawn on top as mm/dd/yyyy,
+  // so every date in the app reads the same way.
   return (
+    <span className="inline-date-wrap">
+      <span className="inline-date-text" aria-hidden="true">{formatDate(value, "mm/dd/yyyy")}</span>
     <input
-      className="inline-cell"
+      className="inline-cell inline-date-input"
       type="date"
       value={value ?? ""}
       onChange={(e) => onCommit(e.target.value)}
@@ -370,6 +376,7 @@ export function InlineDate({ value, onCommit, editable, emptyLabel = "—" }: In
         }
       }}
     />
+    </span>
   );
 }
 

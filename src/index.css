@@ -1947,3 +1947,10 @@ mark.kb-mark { background: #fff3c4; color: inherit; padding: 0 1px; border-radiu
 
 /* 2026-10-14: WBS sticky header -- header cells need a solid background while rows scroll under them. */
 .wbs-scroll-box thead th { background: var(--surface); }
+
+/* InlineDate: always mm/dd/yyyy, whatever the computer's regional format (2026-10-14). */
+.inline-date-wrap { position: relative; display: block; width: 100%; }
+.inline-date-wrap .inline-date-input { color: transparent; caret-color: transparent; }
+.inline-date-wrap .inline-date-input::-webkit-datetime-edit { color: transparent; }
+.inline-date-wrap .inline-date-text { position: absolute; left: 0; top: 0; bottom: 0; display: flex; align-items: center; padding: 0 5px; border: 1px solid transparent; pointer-events: none; font-size: inherit; color: var(--text); white-space: nowrap; }
+.inline-date-wrap .inline-date-input:not(:focus) + .inline-date-text { }

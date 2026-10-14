@@ -5,7 +5,7 @@ import Modal from "../components/Modal";
 import { useProjectStartDatePrompt } from "../components/ProjectStartDatePrompt";
 import { useState, useEffect, useCallback, useRef, Fragment, Children, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate, useParams, Link } from "react-router-dom";
+import { useNavigate, useParams, useLocation, Link } from "react-router-dom";
 import { PauseReviewBanner } from "../components/PauseProjectModals";
 import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin, MoreHorizontal, Copy, ArrowUp, ArrowDown, CornerDownRight, Undo2, MessageCircle, Search, X as XIcon } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -949,11 +949,13 @@ export default function WbsPlanning() {
     setWbsFilterWorkType("");
   }
   // Opening another project starts with no filters, on the WBS tab.
+  // ?view=timeline (from the Overview page's Timeline tab) opens the Timeline.
+  const wbsLocation = useLocation();
   useEffect(() => {
     clearWbsFilters();
-    setWbsView("wbs");
+    setWbsView(new URLSearchParams(wbsLocation.search).get("view") === "timeline" ? "timeline" : "wbs");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, wbsLocation.search]);
   // phase187: task descriptions (shown on hover next to the task name).
   const [taskDescById, setTaskDescById] = useState<Map<string, string>>(new Map());
   const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());

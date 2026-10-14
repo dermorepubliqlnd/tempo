@@ -292,6 +292,9 @@ export default function ProjectOverview() {
         <Link to={`/projects/${project.id}/wbs`} style={{ padding: "9px 2px", color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}>
           WBS
         </Link>
+        <Link to={`/projects/${project.id}/wbs?view=timeline`} style={{ padding: "9px 2px", color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}>
+          Timeline
+        </Link>
         <button
           type="button"
           onClick={() => setNotesOpen(true)}
