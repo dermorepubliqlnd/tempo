@@ -5828,7 +5828,8 @@ export default function Projects() {
     // Falls back to today only if the project has no end_date set yet.
     const today = toISOWorkingDay(new Date());
     const project = projects.find((p) => p.id === projectId);
-    const defaultDue = project?.end_date ?? today;
+    // phase197b (#23): containers -- a new session is due today, not on the container's past end date.
+    const defaultDue = project?.is_operational ? (project.end_date && project.end_date > today ? project.end_date : today) : project?.end_date ?? today;
     // phase127f (Sandra: "always ask for a project start date before
     // adding new tasks").
     if (!(await startDatePrompt.ensure(project))) return;

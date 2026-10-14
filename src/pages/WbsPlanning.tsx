@@ -2920,7 +2920,9 @@ export default function WbsPlanning() {
     if (!ensuredStart) return;
     if (!project.start_date) setProject((prev) => (prev ? { ...prev, start_date: ensuredStart } : prev));
     const today = toISO(new Date());
-    const anchor = ensuredStart;
+    // phase197b (#23): in an ongoing container a new session starts today --
+    // the container's own (locked) start/end dates are long past.
+    const anchor = project.is_operational && ensuredStart < today ? today : ensuredStart;
     let defaultStartFull = anchor;
     let defaultStartStandard = anchor;
     // Bugfix (2026-08-26, Sandra: "why is Gemma and Fritzie's task start
@@ -2967,7 +2969,7 @@ export default function WbsPlanning() {
     // [[project_capaciq_scheduler_tiebreak_fix]] for the same fix applied
     // to the Refresh dates button, which had this exact bug independently
     // duplicated in its own re-seeding logic.
-    const defaultDue = project.end_date ?? today;
+    const defaultDue = project.is_operational ? (project.end_date && project.end_date > today ? project.end_date : today) : project.end_date ?? today;
     // phase126l: started project -> new task needs an Assignee up front.
     let newAssignee: string | null = null;
     if (project.wbs_status !== "draft") {
