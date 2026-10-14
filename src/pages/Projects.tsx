@@ -1939,8 +1939,8 @@ export default function Projects() {
   // - Nobody can reopen a task once a later step built on it is Done
   //   (e.g. Scope statement after Review scope passed QA).
   // - The assignee can't pull back work they handed over, or a review they
-  //   passed / approved; the project owner or Full Access can, as long as
-  //   nothing after it is Done yet.
+  //   passed / approved; the project owner, Full Access or the assignee's
+  //   supervisors can, as long as nothing after it is Done yet.
   function reopenBlockedReason(t: TaskRow): string | null {
     if (t.status !== "Done" || !r1ProjectIds.has(t.project_id)) return null;
     const later = taskDeps
@@ -1949,7 +1949,8 @@ export default function Projects() {
       .filter((x): x is TaskRow => !!x && !x.is_archived && x.status === "Done");
     if (later.length) return `"${later[0].name}" is already done on top of this. To change it now, that step has to send it back For Revision.`;
     const handedOver = !!reviewStepKind(t) || isHandoffTask(t);
-    if (handedOver && !canManageTasksIn(t.project_id)) {
+    // phase191: same rule in the database -- Full Access, the owner, or anyone above the assignee.
+    if (handedOver && !canManageTasksIn(t.project_id) && !isInApprovalChainOf(t.assignee_id)) {
       const rv = reviewersOf(t)[0];
       const who = rv ? people.find((p) => p.id === rv.assignee_id)?.name ?? rv.name : "the project owner";
       return reviewStepKind(t)
