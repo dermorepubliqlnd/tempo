@@ -40,7 +40,9 @@ const input: React.CSSProperties = { fontSize: 12.5, padding: "5px 8px", borderR
 
 export default function CompleteTaskModal({ info, initialDate, initialCount, today, actionLabel = "Mark Done", onLogTime, onCancel, onConfirm }: Props) {
   const [date, setDate] = useState(initialDate);
-  const [count, setCount] = useState(info.countsDeliverable ? (initialCount != null && initialCount > 0 ? String(initialCount) : "") : "0");
+  // phase199: System Configuration always counts as 1 output.
+  const fixedOne = info.outputTypeName === "System Configuration";
+  const [count, setCount] = useState(fixedOne ? "1" : info.countsDeliverable ? (initialCount != null && initialCount > 0 ? String(initialCount) : "") : "0");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => setError(""), [date, count, info.loggedHours]);
@@ -90,7 +92,11 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
           <label style={{ display: "grid", gap: 4 }}>
             <span style={label}>Output Count{info.countsDeliverable ? " *" : ""}</span>
             {info.countsDeliverable ? (
-              <input type="number" min={1} step={1} value={count} onChange={(e) => setCount(e.target.value)} placeholder="1" style={input} />
+              fixedOne ? (
+                <span style={{ ...value, color: "var(--muted)" }} title="System Configuration always counts as 1 output.">1 · system configuration</span>
+              ) : (
+                <input type="number" min={1} step={1} value={count} onChange={(e) => setCount(e.target.value)} placeholder="1" style={input} />
+              )
             ) : (
               <span style={{ ...value, color: "var(--muted)" }} title="This output type has no deliverable, so the count is always 0.">0 · no deliverable</span>
             )}
