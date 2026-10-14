@@ -4243,6 +4243,10 @@ export default function WbsPlanning() {
   // (Editability itself has never been permission-gated on this page --
   // canEditWbs was always purely a status check, same as before.)
   const canEditWbs = project.wbs_status !== "closed";
+  // 2026-10-14 (Sandra): only show "add task" controls to people the
+  // database lets add tasks (tasks_insert, phase190b): Full Access, the
+  // project owner, or anyone on an ongoing container.
+  const canAddTasks = isFullAccess || project.owner_id === me?.id || !!project.is_operational;
 
   // Project Information completeness (2026-10-13).
   const basicsMissing = [!project.name?.trim() || project.name === "Untitled" ? "Project Name" : null, !project.owner_id ? "Owner" : null, !project.start_date ? "Start Date" : null].filter((x): x is string => !!x);
@@ -5659,9 +5663,9 @@ export default function WbsPlanning() {
               >
                 {task.status !== "Cancelled" && (
                   <>
-                {!isSessionProject && task.depth === 0 && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
-                {!isSessionProject && menuItem("Add task below", <CornerDownRight size={13} />, () => void addTaskBelow(task))}
-                {!isSessionProject && menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
+                {!isSessionProject && canAddTasks && task.depth === 0 && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
+                {!isSessionProject && canAddTasks && menuItem("Add task below", <CornerDownRight size={13} />, () => void addTaskBelow(task))}
+                {!isSessionProject && canAddTasks && menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
                 {menuItem(wbsNoteCounts.byTask[task.id] ? `Notes (${wbsNoteCounts.byTask[task.id]})` : "Add note", <MessageCircle size={13} />, () => setWbsNotes({ taskId: task.id }))}
                 <div style={{ height: 1, background: "var(--border)", margin: "4px 2px" }} />
                 {menuItem("Move up", <ArrowUp size={13} />, () => void moveTaskDirection(task, -1), { disabled: !canMoveUp })}
@@ -7355,9 +7359,11 @@ export default function WbsPlanning() {
               <button type="button" className="btn-secondary" onClick={() => void bulkAssignSelected()} style={{ padding: "5px 10px" }}>
                 Assign
               </button>
-              <button type="button" className="btn-secondary" onClick={() => void bulkDuplicateSelected()} style={{ padding: "5px 10px" }}>
-                Duplicate
-              </button>
+              {canAddTasks && (
+                <button type="button" className="btn-secondary" onClick={() => void bulkDuplicateSelected()} style={{ padding: "5px 10px" }}>
+                  Duplicate
+                </button>
+              )}
               {project?.wbs_status === "draft" ? (
                 <button type="button" className="btn-secondary" onClick={() => void bulkDeleteSelected()} style={{ padding: "5px 10px", color: "var(--danger-text)" }}>
                   Delete
@@ -7622,7 +7628,7 @@ export default function WbsPlanning() {
                             </button>
                           )}
                           <span className="wbs-row-actions">
-                          {rowEditable && t.depth === 0 && (
+                          {rowEditable && canAddTasks && t.depth === 0 && (
                             <button
                               className="add-subtask-btn"
                               tabIndex={-1}
@@ -7951,13 +7957,20 @@ export default function WbsPlanning() {
                     </tr>
                   );
                 })}
-                {canEditWbs && (
+                {canEditWbs && canAddTasks && (
                   <tr>
                     <td colSpan={17} className="add-row-cell">
                       <div className="add-row-trigger" onClick={addTopLevelTask}>
                         <Plus size={12} />
                         New task
                       </div>
+                    </td>
+                  </tr>
+                )}
+                {canEditWbs && !canAddTasks && (
+                  <tr>
+                    <td colSpan={17} style={{ padding: "8px 12px", fontSize: 11.5, color: "var(--muted)" }}>
+                      Only the project owner or a Full Access user can add tasks to this project.
                     </td>
                   </tr>
                 )}
