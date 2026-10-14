@@ -4395,7 +4395,7 @@ export default function WbsPlanning() {
   const wbsSearchQ = wbsSearch.trim().toLowerCase();
   const wbsFiltersActive = !!(wbsSearchQ || wbsFilterPhase || wbsFilterModule || wbsFilterStatus || wbsFilterAssignee || wbsFilterWorkType);
   // Filters are view-only: they never change data, permissions or what the
-  // database lets anyone see. A row with unsaved edits always stays visible.
+  // database lets anyone see. Edits on rows hidden by a filter still save.
   const wbsVisibleIds: Set<string> | null = (() => {
     if (!wbsFiltersActive) return null;
     const ctxMatch = (t: TaskRow & { depth: number }) =>
@@ -4409,11 +4409,6 @@ export default function WbsPlanning() {
     const onlySearch = !wbsFilterStatus && !wbsFilterAssignee && !wbsFilterWorkType;
     for (const t of orderedTasks) {
       const isParentRow = t.depth === 0 && hasChildren(t.id);
-      if (pendingTaskPatches.current.has(t.id)) {
-        out.add(t.id);
-        if (t.parent_task_id) out.add(t.parent_task_id);
-        continue;
-      }
       if (!ctxMatch(t)) continue;
       if (isParentRow) {
         // A parent whose own name matches the search shows with all its sub-tasks.
@@ -7887,6 +7882,7 @@ export default function WbsPlanning() {
                   wbsVisibleCols.reduce((sum, k) => sum + wbsColWidth(k), 0) +
                   wbsVisibleDateWidths.reduce((sum, w) => sum + w, 0),
                 tableLayout: "fixed",
+                minWidth: "100%",
               }}
             >
               {/* colgroup drives the actual rendered column widths under
