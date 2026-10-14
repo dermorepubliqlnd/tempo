@@ -4464,11 +4464,15 @@ export default function WbsPlanning() {
   };
   const shortNameInModuleView = (t: TaskRow) => {
     const suf = moduleSuffix(t);
-    return groupByModule && suf && t.name.endsWith(suf) ? t.name.slice(0, -suf.length) : t.name;
+    // 2026-10-14 (Sandra): show the full name, module included, everywhere --
+    // owners and developers should always see which module a task belongs to.
+    void suf;
+    return t.name;
   };
   const fullNameFromModuleView = (t: TaskRow, v: string) => {
     const suf = moduleSuffix(t);
-    return groupByModule && suf && t.name.endsWith(suf) && !v.endsWith(suf) ? v + suf : v;
+    void suf;
+    return v;
   };
   const wbsItems: WbsItem[] = (() => {
     if (!isLifecycle) return orderedTasks.map((t) => ({ kind: "task" as const, t }));
