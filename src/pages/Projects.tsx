@@ -4487,8 +4487,10 @@ export default function Projects() {
                 // triggered from). Manually picking "Done" here is no
                 // longer allowed; the dropdown reverts (no patch) and
                 // points the person at the field that actually drives it.
+                // 2026-10-14 (Sandra): picking Done opens the Complete task
+                // pop-up, where Reported Completion is entered.
                 if (v === "Done") {
-                  await alert({ title: "Set Reported Completion instead", message: "Status moves to Done on its own once **Reported Completion** is entered." });
+                  await markTaskDone(t, t.actual_completion_date ?? toISOWorkingDay(new Date()));
                   return;
                 }
                 // Moving to any other status clears the Done-related
