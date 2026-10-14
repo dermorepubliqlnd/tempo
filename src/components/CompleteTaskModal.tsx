@@ -61,15 +61,18 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
     : [];
   const typesChanged = !!te && ((te.workTypeId ?? "") !== wtId || (te.outputTypeId ?? "") !== otId);
   const [date, setDate] = useState(initialDate);
-  const [count, setCount] = useState(countsDeliverable ? (initialCount != null && initialCount > 0 ? String(initialCount) : "") : "0");
+  // phase199: System Configuration always counts as 1 output.
+  const fixedOne = outputTypeName === "System Configuration";
+  const [count, setCount] = useState(fixedOne ? "1" : countsDeliverable ? (initialCount != null && initialCount > 0 ? String(initialCount) : "") : "0");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => setError(""), [date, count, info.loggedHours, wtId, otId]);
   useEffect(() => {
-    if (!countsDeliverable) setCount("0");
+    if (fixedOne) setCount("1");
+    else if (!countsDeliverable) setCount("0");
     else if (count === "0") setCount("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [countsDeliverable]);
+  }, [countsDeliverable, fixedOne]);
 
   const hoursOk = info.loggedHours > 0;
   const countNum = Number(count);
@@ -146,7 +149,11 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
           <label style={{ display: "grid", gap: 4 }}>
             <span style={label}>Output Count{countsDeliverable ? " *" : ""}</span>
             {countsDeliverable ? (
-              <input type="number" min={1} step={1} value={count} onChange={(e) => setCount(e.target.value)} placeholder="1" style={input} />
+              fixedOne ? (
+                <span style={{ ...value, color: "var(--muted)" }} title="System Configuration always counts as 1 output.">1 · system configuration</span>
+              ) : (
+                <input type="number" min={1} step={1} value={count} onChange={(e) => setCount(e.target.value)} placeholder="1" style={input} />
+              )
             ) : (
               <span style={{ ...value, color: "var(--muted)" }} title="This output type has no deliverable, so the count is always 0.">0 · no deliverable</span>
             )}
