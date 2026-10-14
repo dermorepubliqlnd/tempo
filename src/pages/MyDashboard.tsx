@@ -75,7 +75,7 @@ import { parseLocalDate, calendarDaysBetween } from "../lib/taskTiming";
 // Dashboard.tsx already follows) so this page's numbers can never drift
 // out of sync with what the Projects table itself shows for a project.
 import { wbsStatusMetaFor } from "../lib/wbsStatus";
-import { computeReadiness, waitingOnLabel, expectedUnlockDate, isR1Project, type ReadinessDep } from "../lib/taskReadiness";
+import { computeReadiness, waitingOnLabel, expectedUnlockDate, isR1Project, reviewKindOf, looksLikeReviewTask, type ReadinessDep } from "../lib/taskReadiness";
 import { healthOf, actualProgress, countWorkingDays, projectCompletionDate, type ProjectRow, type TaskRow } from "./Projects";
 import {
   createAllocationEngine,
@@ -244,6 +244,8 @@ export default function MyDashboard() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   // R1 Actionable To-Do: Depends-on links (read-only).
   const [taskDeps, setTaskDeps] = useState<ReadinessDep[]>([]);
+  // 2026-10-14 (Sandra): "Waiting for you" card -- latest For Revision comment per task.
+  const [lastReturn, setLastReturn] = useState<Map<string, { comment: string | null; actor_id: string | null; created_at: string }>>(new Map());
   const [holidays, setHolidays] = useState<HolidayRow[]>([]);
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
   const [ownerHistory, setOwnerHistory] = useState<OwnerHistoryRow[]>([]);
@@ -390,6 +392,13 @@ export default function MyDashboard() {
     setProjects((projectData as ProjectRow[]) ?? []);
     setTasks((taskData as TaskRow[]) ?? []);
     fetchAllRows<ReadinessDep>((f, t) => supabase.from("task_dependencies").select("task_id,depends_on_task_id").order("task_id").order("depends_on_task_id").range(f, t)).then(({ data }) => setTaskDeps(data));
+    fetchAllRows<{ task_id: string; comment: string | null; actor_id: string | null; created_at: string }>((f, t) =>
+      supabase.from("task_review_events").select("task_id,comment,actor_id,created_at").eq("action", "returned").order("created_at", { ascending: false }).order("id").range(f, t)
+    ).then(({ data }) => {
+      const m = new Map<string, { comment: string | null; actor_id: string | null; created_at: string }>();
+      for (const e of data) if (!m.has(e.task_id)) m.set(e.task_id, e);
+      setLastReturn(m);
+    });
     setHolidays((holidayData as HolidayRow[]) ?? []);
     setAvailability((availabilityData as AvailabilityRow[]) ?? []);
     const historicalLockingEnabled = (settingsData as { historical_locking_enabled?: boolean } | null)?.historical_locking_enabled ?? false;
@@ -468,6 +477,28 @@ export default function MyDashboard() {
   const myComingUp = myOpenTasks.filter(
     (t) => isWaiting(t) && ((t.project as ProjectRow | null)?.wbs_status !== "draft" || (t as { wbs_phase?: string | null }).wbs_phase === "analysis")
   );
+  // ---- Waiting for you (2026-10-14, Sandra: notifications on the dashboard) ----
+  // New projects only. Three lists: reviews / sign-offs that are ready for me,
+  // my work sent back For Revision, and my work sitting with a reviewer.
+  const waitingForYou = useMemo(() => {
+    if (!me) return { toReview: [], sentBack: [], withReviewer: [] } as { toReview: typeof myOpenTasks; sentBack: typeof myOpenTasks; withReviewer: (TaskRow & { reviewer: TaskRow })[] };
+    const r1 = new Set(projects.filter((p) => isR1Project(p)).map((p) => p.id));
+    const hasPred = (id: string) => taskDeps.some((d) => d.task_id === id);
+    const toReview = myOpenTasks.filter((t) => r1.has(t.project_id) && !isWaiting(t) && hasPred(t.id) && !!reviewKindOf(t.name) && !myParentIds.has(t.id));
+    const sentBack = myOpenTasks.filter((t) => r1.has(t.project_id) && (t.revision_count ?? 0) > 0 && t.status === "In Progress" && lastReturn.has(t.id));
+    const withReviewer: (TaskRow & { reviewer: TaskRow })[] = [];
+    for (const t of tasks) {
+      if (t.assignee_id !== me.id || t.status !== "Done" || !r1.has(t.project_id)) continue;
+      const rv = taskDeps
+        .filter((d) => d.depends_on_task_id === t.id)
+        .map((d) => tasks.find((x) => x.id === d.task_id))
+        .find((x) => !!x && looksLikeReviewTask(x.name) && x.status !== "Done" && x.status !== "Cancelled");
+      if (rv) withReviewer.push({ ...t, reviewer: rv });
+    }
+    return { toReview, sentBack, withReviewer };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, projects, myOpenTasks, taskDeps, tasks, lastReturn, readinessById, myParentIds]);
+  const waitingCount = waitingForYou.toReview.length + waitingForYou.sentBack.length;
   const overdueTasks = myActionTasks.filter((t) => isOverdueTask(t, t.project, todayIso, myParentIds.has(t.id)));
   const isPausedTask = (t: { project?: unknown }) => (t.project as PauseProjectInfo | null)?.status === "Paused";
   const tasksDueToday = myActionTasks.filter((t) => hasConfirmedBaseline(t) && t.current_due_date && t.current_due_date.slice(0, 10) === todayIso);
@@ -1478,6 +1509,62 @@ export default function MyDashboard() {
               {dueRestOfWeek.map((t) => renderWorkRow(t, "deadline"))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 2026-10-14 (Sandra): Waiting for you -- dashboard notifications for the review workflow. */}
+      {(waitingCount > 0 || waitingForYou.withReviewer.length > 0) && (
+        <div className="dash-card">
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
+            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>Waiting for you{waitingCount > 0 ? ` (${waitingCount})` : ""}</h2>
+            <Link to="/projects" style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>Open in Projects &amp; Tasks →</Link>
+          </div>
+          {(() => {
+            const nm = (id: string | null) => (id ? people.find((p) => p.id === id)?.name ?? "—" : "—");
+            const tid = (t: TaskRow) => (t.task_number ? `T-${String(t.task_number).padStart(4, "0")}` : "—");
+            const row: CSSProperties = { display: "grid", gridTemplateColumns: "70px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.6fr)", gap: 10, alignItems: "center", padding: "7px 0", borderBottom: "1px solid var(--border)", fontSize: 12 };
+            const clip: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 };
+            const head = (label: string, n: number, tone: string) => (
+              <div style={{ padding: "10px 0 2px", fontSize: 11, fontWeight: 700, color: tone, textTransform: "uppercase", letterSpacing: 0.3 }}>{label} ({n})</div>
+            );
+            return (
+              <>
+                {waitingForYou.toReview.length > 0 && head("To review or approve", waitingForYou.toReview.length, "var(--accent)")}
+                {waitingForYou.toReview.map((t) => {
+                  const pred = taskDeps.filter((d) => d.task_id === t.id).map((d) => tasks.find((x) => x.id === d.depends_on_task_id)).find(Boolean);
+                  return (
+                    <div key={`rv${t.id}`} style={row}>
+                      <span style={{ color: "var(--muted)" }}>{tid(t)}</span>
+                      <span style={{ ...clip, fontWeight: 600 }} title={t.name}>{t.name}</span>
+                      <span style={clip} title={t.project?.name ?? ""}>{t.project?.name ?? "—"}</span>
+                      <span style={{ ...clip, color: "var(--muted)" }}>{reviewKindOf(t.name) === "approve" ? "Approve" : "Pass QA"} or send For Revision{pred ? ` · from ${nm(pred.assignee_id)}` : ""}</span>
+                    </div>
+                  );
+                })}
+                {waitingForYou.sentBack.length > 0 && head("Sent back to you", waitingForYou.sentBack.length, "var(--warning-text)")}
+                {waitingForYou.sentBack.map((t) => {
+                  const ev = lastReturn.get(t.id);
+                  return (
+                    <div key={`sb${t.id}`} style={row}>
+                      <span style={{ color: "var(--muted)" }}>{tid(t)}</span>
+                      <span style={{ ...clip, fontWeight: 600 }} title={t.name}>{t.name}</span>
+                      <span style={clip} title={t.project?.name ?? ""}>{t.project?.name ?? "—"}</span>
+                      <span style={{ ...clip, color: "var(--warning-text)" }} title={ev?.comment ?? ""}>{nm(ev?.actor_id ?? null)}: "{ev?.comment ?? ""}"</span>
+                    </div>
+                  );
+                })}
+                {waitingForYou.withReviewer.length > 0 && head("With a reviewer", waitingForYou.withReviewer.length, "var(--muted)")}
+                {waitingForYou.withReviewer.slice(0, 8).map((t) => (
+                  <div key={`wr${t.id}`} style={row}>
+                    <span style={{ color: "var(--muted)" }}>{tid(t)}</span>
+                    <span style={{ ...clip, fontWeight: 600 }} title={t.name}>{t.name}</span>
+                    <span style={clip} title={projectById.get(t.project_id)?.name ?? ""}>{projectById.get(t.project_id)?.name ?? "—"}</span>
+                    <span style={{ ...clip, color: "var(--muted)" }}>In review · {nm(t.reviewer.assignee_id)} ({t.reviewer.name})</span>
+                  </div>
+                ))}
+              </>
+            );
+          })()}
         </div>
       )}
 
