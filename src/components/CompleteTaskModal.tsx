@@ -4,6 +4,7 @@
 // filled, editable), with Due date, Work Type and Output Type shown for a
 // final check, and a Log time link for the logged-hours requirement.
 import { useEffect, useState } from "react";
+import DateInput from "./DateInput";
 import Modal from "./Modal";
 import { formatDate } from "../lib/formatDate";
 
@@ -111,7 +112,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
           </div>
           <label style={{ display: "grid", gap: 4 }}>
             <span style={label}>Reported Completion *</span>
-            <input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} style={input} />
+            <DateInput value={date} max={today} onChange={(e) => setDate(e.target.value)} style={input} />
           </label>
           {te ? (
             <>

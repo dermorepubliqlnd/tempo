@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from "react";
+import DateInput from "./DateInput";
 import Modal from "./Modal";
 import { formatDate } from "../lib/formatDate";
 
@@ -66,8 +67,8 @@ export default function RequestExtensionModal({
         </div>
         <div>
           <div style={fieldLabelStyle}>New due date</div>
-          <input
-            type="date"
+          <DateInput
+           
             value={newDueDate}
             min={currentDueDate}
             onChange={(e) => setNewDueDate(e.target.value)}

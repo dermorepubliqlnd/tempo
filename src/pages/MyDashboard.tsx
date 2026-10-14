@@ -471,11 +471,19 @@ export default function MyDashboard() {
   // 2026-10-08 (Sandra, item I): one rule everywhere -- lib/metrics.ts
   // isOverdueTask (started project, not paused, leaf tasks only).
   const myParentIds = useMemo(() => new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string)), [tasks]);
-  const myActionTasks = myOpenTasks.filter((t) => !isWaiting(t));
+  // 2026-10-14 (Sandra): the to-do lists show only tasks that need my action now.
+  // Left out: tasks waiting on someone else (they show under What's next),
+  // parent rows (their sub-tasks carry the work), and tasks of Draft projects
+  // still being planned -- except Analysis & Scoping, which runs before Start Project.
+  const taskPhase = (t: TaskRow) =>
+    (t as { wbs_phase?: string | null }).wbs_phase ??
+    ((t.parent_task_id ? (tasks.find((x) => x.id === t.parent_task_id) as { wbs_phase?: string | null } | undefined)?.wbs_phase : null) ?? null);
+  const isPlanningOnly = (t: TaskRow & { project?: ProjectRow | null }) => t.project?.wbs_status === "draft" && taskPhase(t) !== "analysis";
+  const myActionTasks = myOpenTasks.filter((t) => !isWaiting(t) && !myParentIds.has(t.id) && !isPlanningOnly(t));
   // Draft projects' tasks stay out (still being planned) -- except Analysis &
   // Scoping tasks of new-lifecycle projects, which run before Start Project.
   const myComingUp = myOpenTasks.filter(
-    (t) => isWaiting(t) && ((t.project as ProjectRow | null)?.wbs_status !== "draft" || (t as { wbs_phase?: string | null }).wbs_phase === "analysis")
+    (t) => isWaiting(t) && !myParentIds.has(t.id) && !isPlanningOnly(t)
   );
   // ---- Waiting for you (2026-10-14, Sandra: notifications on the dashboard) ----
   // New projects only. Three lists: reviews / sign-offs that are ready for me,
@@ -1573,7 +1581,7 @@ export default function MyDashboard() {
       {myComingUp.length > 0 && (
         <div className="dash-card">
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
-            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>Coming Up ({myComingUp.length})</h2>
+            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>What's next ({myComingUp.length})</h2>
             <span style={{ fontSize: 11, color: "var(--muted)" }}>Waiting on someone else's task. Moves to your to-do once it's done.</span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.6fr) auto", alignItems: "center" }}>

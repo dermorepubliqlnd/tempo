@@ -1,4 +1,5 @@
 import RolesPermissions from "../components/RolesPermissions";
+import DateInput from "../components/DateInput";
 import StagePhaseRulesPanel from "../components/StagePhaseRules";
 import { useAutoApprovalsOn } from "../lib/autoApprovals";
 import { canAccessPage } from "../lib/pageAccess";
@@ -3764,8 +3765,8 @@ export default function SiteSettings() {
             Expected hours are only counted from this date (Team Dashboard: Logged Hours "% of expected" and Missing Hours), so months before the team started logging don't read as missing time.
           </div>
         </div>
-        <input
-          type="date"
+        <DateInput
+         
           value={trackingStartDate}
           disabled={trackingStartSaving}
           onChange={(e) => saveTrackingStart(e.target.value)}

@@ -1,4 +1,5 @@
 import { useAssigneePicker } from "../components/AssigneePicker";
+import DateInput from "../components/DateInput";
 import { useProjectStartDatePrompt } from "../components/ProjectStartDatePrompt";
 import ValidateCompletionModal from "../components/ValidateCompletionModal";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -7508,8 +7509,8 @@ export default function Projects() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, alignItems: "end" }}>
                   <label style={{ display: "grid", gap: 4, fontSize: 11, color: "var(--muted)" }}>
                     Start Date
-                    <input
-                      type="date"
+                    <DateInput
+                     
                       value={rescheduleStartDate || extDetailTask.start_date?.slice(0, 10) || ""}
                       onChange={(e) => {
                         const next = e.target.value;
@@ -7522,8 +7523,8 @@ export default function Projects() {
                   </label>
                   <label style={{ display: "grid", gap: 4, fontSize: 11, color: "var(--muted)" }}>
                     End Date
-                    <input
-                      type="date"
+                    <DateInput
+                     
                       min={rescheduleStartDate || extDetailTask.start_date?.slice(0, 10) || undefined}
                       value={rescheduleEndDate || extDetailTask.current_due_date?.slice(0, 10) || ""}
                       onChange={(e) => setRescheduleEndDate(e.target.value)}

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import DateInput from "./DateInput";
 import { friendlyError } from "../lib/prompts";
 import Modal from "./Modal";
 import { confirmTimeEntry, resumeTimer, discardTimerEntry, formatDuration, DISCARD_TIMER_MAX_SECONDS } from "../lib/timeTracking";
@@ -13,7 +14,7 @@ import { confirmTimeEntry, resumeTimer, discardTimerEntry, formatDuration, DISCA
 // accident used to count as Continue work and silently restart the timer.
 //
 // Start/end use separate date + time fields rather than a single
-// <input type="datetime-local"> -- that control's displayed time format
+// <DateInput type="datetime-local"> -- that control's displayed time format
 // (12-hour vs 24-hour, ":" vs "." separator) is rendered by the browser
 // using the OS locale, which on some locales shows a period instead of a
 // colon. Plain <input type="time"> is far more consistently colon-separated
@@ -130,7 +131,7 @@ export default function ConfirmTimeEntryModal({
           <label style={{ display: "block", flex: 1 }}>
             <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>Start date</span>
             <input
-              type="date"
+             
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
               style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}
@@ -149,8 +150,8 @@ export default function ConfirmTimeEntryModal({
         <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
           <label style={{ display: "block", flex: 1 }}>
             <span style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 3 }}>End date</span>
-            <input
-              type="date"
+            <DateInput
+             
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
               style={{ width: "100%", fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", boxSizing: "border-box" }}

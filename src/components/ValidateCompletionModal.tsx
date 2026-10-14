@@ -7,6 +7,7 @@
 // OR later) a Reason for adjustment is required -- validate_task_completion
 // enforces the same rule server-side.
 import { useState, type ReactNode } from "react";
+import DateInput from "./DateInput";
 import { X, Calendar, CheckCircle2, Clock, AlertTriangle } from "lucide-react";
 import { calendarDaysBetween, parseLocalDate } from "../lib/taskTiming";
 
@@ -97,8 +98,8 @@ export default function ValidateCompletionModal({
           <DateRow label="Reported completion date">{longDate(reported)}</DateRow>
           <DateRow label="Confirmed completion date" highlight={adjusted}>
             {onChangeConfirmed ? (
-              <input
-                type="date"
+              <DateInput
+               
                 value={confirmed}
                 max={todayISO()}
                 min={minDate ? minDate.slice(0, 10) : undefined}

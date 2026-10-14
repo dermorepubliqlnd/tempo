@@ -12,6 +12,7 @@
 // All utilization / capacity numbers come from the shared allocation engine
 // (lib/dailyAllocation.ts) so they can never disagree with the Utilization page.
 import { projectStageOf } from "../lib/projectStage";
+import DateInput from "../components/DateInput";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
@@ -1802,9 +1803,9 @@ function PeriodPicker({ period, setPeriod, custom, setCustom, range }: { period:
         {period === "custom" && (
           <div className="exec-pop-sub" style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: "6px 8px", padding: "8px 4px 2px" }}>
             <span style={{ fontSize: 11, color: "var(--muted)" }}>From</span>
-            <input type="date" value={custom.start} max={custom.end} onChange={(e) => e.target.value && setCustom({ ...custom, start: e.target.value })} className="exec-date" style={{ marginBottom: 0 }} />
+            <DateInput value={custom.start} max={custom.end} onChange={(e) => e.target.value && setCustom({ ...custom, start: e.target.value })} className="exec-date" style={{ marginBottom: 0 }} />
             <span style={{ fontSize: 11, color: "var(--muted)" }}>To</span>
-            <input type="date" value={custom.end} min={custom.start} onChange={(e) => e.target.value && setCustom({ ...custom, end: e.target.value })} className="exec-date" style={{ marginBottom: 0 }} />
+            <DateInput value={custom.end} min={custom.start} onChange={(e) => e.target.value && setCustom({ ...custom, end: e.target.value })} className="exec-date" style={{ marginBottom: 0 }} />
           </div>
         )}
       </Popover>

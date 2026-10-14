@@ -5,6 +5,7 @@
 // Cancelling aborts the add. Task Start dates anchor to this date, so a
 // project without one would otherwise silently anchor every task to today.
 import { useRef, useState } from "react";
+import DateInput from "./DateInput";
 import Modal from "./Modal";
 import { supabase } from "../lib/supabaseClient";
 
@@ -53,8 +54,8 @@ export function useProjectStartDatePrompt() {
       <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: "0 0 10px", lineHeight: 1.45 }}>
         <strong>{state.projectName}</strong> has no Start date yet. Task dates are planned from it, so set it before adding tasks.
       </p>
-      <input
-        type="date"
+      <DateInput
+       
         autoFocus
         value={value}
         onChange={(e) => setValue(e.target.value)}

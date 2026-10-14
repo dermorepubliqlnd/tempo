@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from "react";
+import DateInput from "./DateInput";
 import { AlertTriangle, PauseCircle } from "lucide-react";
 import Modal from "./Modal";
 import { PAUSE_CATEGORIES, pauseProject, resolveScheduleReview, pausedDays, type PauseProjectInfo } from "../lib/pause";
@@ -77,7 +78,7 @@ export function PauseProjectModal({
           </div>
           <div>
             <span style={label}>Expected resume (optional)</span>
-            <input type="date" value={resume} onChange={(e) => setResume(e.target.value)} style={{ ...input, width: "100%" }} />
+            <DateInput value={resume} onChange={(e) => setResume(e.target.value)} style={{ ...input, width: "100%" }} />
           </div>
         </div>
         <div>

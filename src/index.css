@@ -1954,3 +1954,6 @@ mark.kb-mark { background: #fff3c4; color: inherit; padding: 0 1px; border-radiu
 .inline-date-wrap .inline-date-input::-webkit-datetime-edit { color: transparent; }
 .inline-date-wrap .inline-date-text { position: absolute; left: 0; top: 0; bottom: 0; display: flex; align-items: center; padding: 0 5px; border: 1px solid transparent; pointer-events: none; font-size: inherit; color: var(--text); white-space: nowrap; }
 .inline-date-wrap .inline-date-input:not(:focus) + .inline-date-text { }
+/* DateInput: forms and pop-ups always read mm/dd/yyyy (2026-10-14). */
+.date-input-native::-webkit-datetime-edit { color: transparent; }
+.date-input-text { position: absolute; left: 0; top: 0; bottom: 0; display: flex; align-items: center; pointer-events: none; white-space: nowrap; }

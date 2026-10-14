@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import DateInput from "../components/DateInput";
 import { MessageSquarePlus, Lightbulb, Clock, CheckCircle2, XCircle, Search } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
@@ -332,11 +333,11 @@ export default function Feedback() {
                           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 12, fontSize: 12 }}>
                             <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
                               Target release
-                              <input type="date" value={r.target_release_date ?? ""} onChange={(e) => setReleaseDate(r, "target_release_date", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--border)", borderRadius: 6 }} />
+                              <DateInput value={r.target_release_date ?? ""} onChange={(e) => setReleaseDate(r, "target_release_date", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--border)", borderRadius: 6 }} />
                             </label>
                             <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
                               Released on
-                              <input type="date" value={r.released_on ?? ""} onChange={(e) => setReleaseDate(r, "released_on", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--border)", borderRadius: 6 }} />
+                              <DateInput value={r.released_on ?? ""} onChange={(e) => setReleaseDate(r, "released_on", e.target.value)} style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--border)", borderRadius: 6 }} />
                             </label>
                             <span style={{ fontSize: 11, color: "var(--muted)" }}>Setting the status to Done fills in Released on with today.</span>
                           </div>
@@ -395,7 +396,7 @@ export default function Feedback() {
             <div style={{ color: "var(--muted)" }}>Planned requests show their target release to everyone on this page.</div>
             <label style={{ display: "grid", gap: 4 }}>
               <span style={{ fontSize: 11, color: "var(--muted)" }}>Target release date (required)</span>
-              <input type="date" value={planDate} onChange={(e) => setPlanDate(e.target.value)} style={{ fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }} />
+              <DateInput value={planDate} onChange={(e) => setPlanDate(e.target.value)} style={{ fontSize: 12, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }} />
             </label>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button type="button" className="btn-secondary" onClick={() => setPlanFor(null)} style={{ width: "auto" }}>Cancel</button>

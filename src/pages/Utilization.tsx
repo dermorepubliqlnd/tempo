@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import DateInput from "../components/DateInput";
 import { ChevronLeft, ChevronRight, Minus, Plus, Circle, CheckCircle2, TrendingUp, Gauge, AlertTriangle, Info, X, Search, ArrowRight, Sparkles } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { fetchAllRows } from "../lib/fetchAllRows";
@@ -1430,11 +1431,11 @@ export default function Utilization() {
                 <div style={{ width: 1, height: 18, background: "var(--border)" }} />
                 <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
                   From
-                  <input type="date" min="2026-01-01" value={toISO(rangeStart)} onChange={(e) => setRangeStartFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
+                  <DateInput min="2026-01-01" value={toISO(rangeStart)} onChange={(e) => setRangeStartFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--muted)" }}>
                   To
-                  <input type="date" min="2026-01-01" value={toISO(rangeEnd)} onChange={(e) => setRangeEndFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
+                  <DateInput min="2026-01-01" value={toISO(rangeEnd)} onChange={(e) => setRangeEndFromInput(e.target.value)} style={{ fontSize: 11, color: "var(--navy)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 7px" }} />
                 </label>
               </>
             )}
@@ -2284,8 +2285,8 @@ export default function Utilization() {
                   </label>
                   <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
                     Scenario Start
-                    <input
-                      type="date"
+                    <DateInput
+                     
                       value={scenarioStart}
                       min={today}
                       onChange={(e) => {
@@ -2301,8 +2302,8 @@ export default function Utilization() {
                   <ArrowRight size={15} style={{ color: "var(--muted)", marginBottom: 10 }} />
                   <label style={{ fontSize: 9.5, color: "var(--muted)" }}>
                     Scenario Due
-                    <input
-                      type="date"
+                    <DateInput
+                     
                       value={scenarioDue}
                       min={scenarioStart || today}
                       disabled={preserveScenarioDuration}

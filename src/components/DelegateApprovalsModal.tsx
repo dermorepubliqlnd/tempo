@@ -2,6 +2,7 @@
 // While a delegation covers today, the delegator's routed items move to
 // the delegate's "Mine to approve" tab (tagged "Acting for ...").
 import { useState } from "react";
+import DateInput from "./DateInput";
 import Modal from "./Modal";
 import { supabase } from "../lib/supabaseClient";
 import { formatDate } from "../lib/formatDate";
@@ -86,11 +87,11 @@ export default function DelegateApprovalsModal({
         </div>
         <div>
           <label style={label}>From</label>
-          <input type="date" value={start} onChange={(e) => setStart(e.target.value)} style={input} />
+          <DateInput value={start} onChange={(e) => setStart(e.target.value)} style={input} />
         </div>
         <div>
           <label style={label}>To</label>
-          <input type="date" value={end} min={start} onChange={(e) => setEnd(e.target.value)} style={input} />
+          <DateInput value={end} min={start} onChange={(e) => setEnd(e.target.value)} style={input} />
         </div>
       </div>
       {error && <div style={{ fontSize: 11.5, color: "var(--danger, #c0392b)", marginTop: 8 }}>{error}</div>}

@@ -1,4 +1,5 @@
 import RecycleBinLink from "../components/RecycleBinLink";
+import DateInput from "../components/DateInput";
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ShieldCheck, ChevronRight, ChevronLeft, ChevronDown, Pencil, Timer, Trash2, Archive, RotateCcw, Plus, Search, X, CalendarDays, AlertCircle, ListChecks, Radio, FilePen, Download } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -512,7 +513,7 @@ function EditForm({
   const [notes, setNotes] = useState(row.reason_notes ?? "");
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-      <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
+      <DateInput value={date} onChange={(e) => setDate(e.target.value)} style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
       <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
       <span style={{ fontSize: 11.5, color: "var(--muted)" }}>to</span>
       <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={{ fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
@@ -588,7 +589,7 @@ function CorrectionForm({
         <strong>{formatClockRange(row.started_at, row.ended_at)}</strong> ({formatDuration(row.duration_minutes)})
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+        <DateInput value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
         <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={inputStyle} />
         <span style={{ fontSize: 11.5, color: "var(--muted)" }}>to</span>
         <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={inputStyle} />
@@ -2066,15 +2067,15 @@ export default function TimeTracking() {
             ))}
             {datePreset === "custom" ? (
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 4 }}>
-                <input
-                  type="date"
+                <DateInput
+                 
                   value={customStart}
                   onChange={(e) => setCustomStart(e.target.value)}
                   style={{ fontSize: 11.5, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 8 }}
                 />
                 <span style={{ color: "var(--muted)", fontSize: 11.5 }}>to</span>
-                <input
-                  type="date"
+                <DateInput
+                 
                   value={customEnd}
                   onChange={(e) => setCustomEnd(e.target.value)}
                   style={{ fontSize: 11.5, padding: "5px 7px", border: "1px solid var(--border)", borderRadius: 8 }}

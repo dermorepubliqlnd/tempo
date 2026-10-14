@@ -1,4 +1,5 @@
 import MultiSelectFilter from "../components/MultiSelectFilter";
+import DateInput from "../components/DateInput";
 import ValidateCompletionModal from "../components/ValidateCompletionModal";
 import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -511,8 +512,8 @@ function ValidateActionCells({ row, busy, onValidate }: { row: TaskCompletionRow
   return (
     <>
       <td style={{ ...td, whiteSpace: "nowrap" }}>
-        <input
-          type="date"
+        <DateInput
+         
           value={date}
           onChange={(e) => setDate(e.target.value)}
           max={(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; })()}

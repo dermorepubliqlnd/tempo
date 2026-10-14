@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import DateInput from "../components/DateInput";
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon, Download } from "lucide-react";
 import { timingWithPause, type PauseProjectInfo, type TimingResult } from "../lib/pause";
 import { supabase } from "../lib/supabaseClient";
@@ -891,8 +892,8 @@ export default function HoursOverview() {
             </button>
             <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
               From
-              <input
-                type="date"
+              <DateInput
+               
                 value={toISO(rangeStart)}
                 onChange={(e) => setRangeStartFromInput(e.target.value)}
                 style={{ fontSize: 12, padding: "3px 6px" }}
@@ -900,8 +901,8 @@ export default function HoursOverview() {
             </label>
             <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
               To
-              <input
-                type="date"
+              <DateInput
+               
                 value={toISO(rangeEnd)}
                 onChange={(e) => setRangeEndFromInput(e.target.value)}
                 style={{ fontSize: 12, padding: "3px 6px" }}

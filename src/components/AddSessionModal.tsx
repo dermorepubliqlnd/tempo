@@ -1,4 +1,5 @@
 import { useMemo, useState, type CSSProperties } from "react";
+import DateInput from "./DateInput";
 import Modal from "./Modal";
 import { supabase } from "../lib/supabaseClient";
 import { toISO } from "../lib/workingDays";
@@ -128,8 +129,8 @@ export default function AddSessionModal({ projects, people, meId, isFullAccess, 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 120px", gap: 10 }}>
               <div>
                 <div style={labelStyle}>Session Start Date</div>
-                <input
-                  type="date"
+                <DateInput
+                 
                   value={startDate}
                   onChange={(e) => {
                     const next = e.target.value;
@@ -141,8 +142,8 @@ export default function AddSessionModal({ projects, people, meId, isFullAccess, 
               </div>
               <div>
                 <div style={labelStyle}>Session End Date</div>
-                <input
-                  type="date"
+                <DateInput
+                 
                   value={endDate}
                   min={startDate || undefined}
                   onChange={(e) => setEndDate(e.target.value)}

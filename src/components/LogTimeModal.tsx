@@ -11,6 +11,7 @@
 //   - The DB repeats these checks (phase173 zy_time_entry_guard, staging
 //     first); its messages arrive as error text and are shown via friendlyError.
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import DateInput from "./DateInput";
 import Modal from "./Modal";
 import { supabase } from "../lib/supabaseClient";
 import { useConfirm } from "../lib/useConfirm";
@@ -535,7 +536,7 @@ export default function LogTimeModal({
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
             <label style={{ display: "block", marginBottom: 4, flex: 1.3 }}>
               <span style={label}>Log date</span>
-              <input type="date" value={date} onChange={(e) => { setDate(e.target.value); clearMessages(); }} style={input} />
+              <DateInput value={date} onChange={(e) => { setDate(e.target.value); clearMessages(); }} style={input} />
             </label>
             <label style={{ display: "block", marginBottom: 4, flex: 1 }}>
               <span style={label}>Start time</span>
