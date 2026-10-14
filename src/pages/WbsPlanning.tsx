@@ -3746,6 +3746,23 @@ export default function WbsPlanning() {
         }
       }
     }
+    // phase198 (#24): warn before a past date goes onto a task that isn't Done.
+    {
+      const t = tasks.find((x) => x.id === taskId);
+      const newDue = (patch.current_due_date ?? null) as string | null;
+      if (t && newDue && newDue.slice(0, 10) < toISO(new Date()) && (patch.status ?? t.status) !== "Done") {
+        void confirm({
+          title: "This date has already passed",
+          message: "This date has already passed. If the session already happened, mark it Done and it will be logged as Logged late. Otherwise it will be tagged as Extended.",
+          confirmLabel: "Keep this date",
+        }).then((ok) => {
+          if (!ok) return;
+          stageTaskField(taskId, patch);
+          setHasUnsavedChanges(true);
+        });
+        return;
+      }
+    }
     stageTaskField(taskId, patch);
     setHasUnsavedChanges(true);
   }

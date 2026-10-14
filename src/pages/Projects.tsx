@@ -264,6 +264,21 @@ export interface ProjectRow {
   committed_end_source?: string | null;
 }
 
+// phase198 (#24): shown when a past date is saved on a task that isn't Done.
+const PAST_DATE_WARNING = "This date has already passed. If the session already happened, mark it Done and it will be logged as Logged late. Otherwise it will be tagged as Extended.";
+// Mon-Fri days after `from` up to and including `to`.
+function workingDaysBetween(from: string, to: string): number {
+  let n = 0;
+  const d = new Date(`${from.slice(0, 10)}T00:00:00`);
+  const end = new Date(`${to.slice(0, 10)}T00:00:00`);
+  while (d < end) {
+    d.setDate(d.getDate() + 1);
+    const wd = d.getDay();
+    if (wd !== 0 && wd !== 6) n++;
+  }
+  return n;
+}
+
 export interface TaskRow {
   id: string;
   project_id: string;
@@ -273,6 +288,9 @@ export interface TaskRow {
   description?: string | null;
   /** phase188: how many times a reviewer returned this task. */
   revision_count?: number | null;
+  /** phase198 (#24): 'logged_late' | 'extended' when the due date was before the task was created. */
+  late_log_kind?: string | null;
+  late_log_confirmed_at?: string | null;
   parent_task_id: string | null;
   name: string;
   status: string | null;
@@ -2599,6 +2617,20 @@ export default function Projects() {
       loadAll();
       return;
     }
+    // phase198 (#24): warn before saving a past date on a task that isn't Done.
+    {
+      const cur = tasks.find((t) => t.id === id);
+      const today = toISOWorkingDay(new Date());
+      const newDue = (patch.current_due_date ?? null) as string | null;
+      const status = (patch.status ?? cur?.status) as string | null;
+      if (newDue && newDue.slice(0, 10) < today && status !== "Done") {
+        const ok = await confirm({ title: "This date has already passed", message: PAST_DATE_WARNING, confirmLabel: "Save anyway" });
+        if (!ok) {
+          loadAll();
+          return;
+        }
+      }
+    }
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
     const { error } = await supabase.from("tasks").update(patch).eq("id", id);
     if (error) {
@@ -4763,6 +4795,44 @@ export default function Projects() {
             return (
               <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="Not applicable -- a parent task's own completion is never independently tracked.">
                 N/A
+              </span>
+            );
+          }
+          // phase198 (#24): Logged late / Extended tags.
+          if (t.late_log_kind === "logged_late") {
+            const created = toISOWorkingDay(new Date(t.created_at));
+            const wd = t.current_due_date ? workingDaysBetween(t.current_due_date, created) : 0;
+            const needsConfirm = wd > 3 && !t.late_log_confirmed_at;
+            const canConfirm = canManageTasksIn(t.project_id) || isInApprovalChainOf(t.assignee_id);
+            return (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span className="status-pill success" title={`Logged ${wd} working day${wd === 1 ? "" : "s"} after its date. Not counted as late or extended.`} style={{ cursor: "help" }}>
+                  Logged late
+                </span>
+                {needsConfirm && (canConfirm ? (
+                  <button
+                    type="button"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const { error } = await supabase.rpc("r2_confirm_late_log", { p_task_id: t.id });
+                      if (error) alert(friendlyError("confirm the late log", error));
+                      else loadAll();
+                    }}
+                    style={{ border: "1px solid var(--border)", background: "var(--surface)", borderRadius: 6, padding: "1px 7px", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "var(--accent)" }}
+                    title="Logged more than 3 working days after its date: confirm it happened"
+                  >
+                    Confirm
+                  </button>
+                ) : (
+                  <span style={{ fontSize: 11, color: "var(--warning-text)" }} title="Logged more than 3 working days late: the owner or your manager confirms it">needs confirmation</span>
+                ))}
+              </span>
+            );
+          }
+          if (t.late_log_kind === "extended" && t.status !== "Done") {
+            return (
+              <span className="status-pill warning" title="Added with a date that had already passed. Mark it Done if it already happened, or move the date." style={{ cursor: "help" }}>
+                Extended
               </span>
             );
           }
