@@ -1944,3 +1944,6 @@ mark.kb-mark { background: #fff3c4; color: inherit; padding: 0 1px; border-radiu
 .role-inline-edit:hover { border-color: var(--border); }
 .role-inline-edit:focus { outline: none; border-color: var(--accent, #2f6fed); background: var(--surface, #fff); }
 .role-inline-edit::placeholder { color: var(--muted); font-style: italic; }
+
+/* 2026-10-14: WBS sticky header -- header cells need a solid background while rows scroll under them. */
+.wbs-scroll-box thead th { background: var(--surface); }

@@ -7559,7 +7559,9 @@ export default function WbsPlanning() {
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#f3f5f7", border: "1px solid #dfe4ea" }} /> Auto-calculated / read-only</span>
             <span style={{ marginLeft: "auto" }}>Keyboard: Enter adds the next row · Tab moves across fields · Shift+Tab moves back</span>
           </div>
-          <div className="card" style={{ padding: 0, overflowX: "auto", overflowY: "visible" }}>
+          {/* 2026-10-14 (Sandra): the table scrolls inside its own box so the
+              column headers stay visible on long WBS lists. */}
+          <div className="card wbs-scroll-box" style={{ padding: 0, overflow: "auto", maxHeight: "calc(100vh - 120px)" }}>
             <table
               className="data-table"
               style={{
@@ -7584,7 +7586,7 @@ export default function WbsPlanning() {
                   <col key={i} style={{ width: w }} />
                 ))}
               </colgroup>
-              <thead>
+              <thead style={{ position: "sticky", top: 0, zIndex: 6, background: "var(--surface)", boxShadow: "0 1px 0 var(--border)" }}>
                 <tr>
                   <th
                     rowSpan={2}
