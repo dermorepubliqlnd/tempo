@@ -948,6 +948,12 @@ export default function WbsPlanning() {
     setWbsFilterAssignee("");
     setWbsFilterWorkType("");
   }
+  // Opening another project starts with no filters, on the WBS tab.
+  useEffect(() => {
+    clearWbsFilters();
+    setWbsView("wbs");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
   // phase187: task descriptions (shown on hover next to the task name).
   const [taskDescById, setTaskDescById] = useState<Map<string, string>>(new Map());
   const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());
