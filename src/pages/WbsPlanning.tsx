@@ -3724,6 +3724,26 @@ export default function WbsPlanning() {
   // not a regression (see [[project_capaciq_wbs_effort_staleness_fix]]
   // for the older, now-superseded instant-write version of this concern).
   function saveTaskField(taskId: string, patch: Partial<TaskRow>) {
+    // phase197 (#23/#25): explain a blocked edit instead of failing at Save.
+    {
+      const t = tasks.find((x) => x.id === taskId);
+      const ownerSup = !!project && !!me && people.find((p) => p.id === project.owner_id)?.reports_to === me.id;
+      const manager = isFullAccess || project?.owner_id === me?.id || ownerSup;
+      if (t && me && project && !manager) {
+        const planKeys = ["name", "start_date", "start_date_full", "start_date_standard", "original_due_date", "current_due_date", "estimated_hours", "assignee_id", "parent_task_id", "project_id"];
+        const msg = project.is_operational
+          ? (t.assignee_id === me.id ? null : "You can only edit your own sessions in this project.")
+          : t.assignee_id !== me.id
+            ? "Only the project owner, their supervisor or Full Access can edit this task."
+            : Object.keys(patch).some((k) => planKeys.includes(k))
+              ? "Only the project owner, their supervisor or Full Access can change this task's plan (name, dates, hours or assignee)."
+              : null;
+        if (msg) {
+          void alert({ title: "Can't save this change", message: msg });
+          return;
+        }
+      }
+    }
     stageTaskField(taskId, patch);
     setHasUnsavedChanges(true);
   }
@@ -4252,7 +4272,7 @@ export default function WbsPlanning() {
   // 2026-10-14 (Sandra): only show "add task" controls to people the
   // database lets add tasks (tasks_insert, phase190b): Full Access, the
   // project owner, or anyone on an ongoing container.
-  const canAddTasks = isFullAccess || project.owner_id === me?.id || !!project.is_operational;
+  const canAddTasks = isFullAccess || project.owner_id === me?.id || !!project.is_operational || (!!me && people.find((p) => p.id === project.owner_id)?.reports_to === me.id);
 
   // Project Information completeness (2026-10-13).
   const basicsMissing = [!project.name?.trim() || project.name === "Untitled" ? "Project Name" : null, !project.owner_id ? "Owner" : null, !project.start_date ? "Start Date" : null].filter((x): x is string => !!x);
