@@ -594,6 +594,8 @@ export default function WbsPlanning() {
   const [project, setProject] = useState<ProjectRow | null>(null);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [people, setPeople] = useState<PersonRow[]>([]);
+  // phase193: Add module dialog (declared up here -- hooks can't follow the early returns below).
+  const [moduleDlg, setModuleDlg] = useState<{ name: string; maker: string; busy: boolean; error: string } | null>(null);
   const assigneePicker = useAssigneePicker(people.filter((p) => p.is_active));
   // phase190b: on ongoing containers, non-owners without Full Access can add
   // tasks for themselves and the people below them in the reporting line.
@@ -4336,22 +4338,49 @@ export default function WbsPlanning() {
 
   // phase184: add the Analysis & Scoping template (ordinary tasks -- the owner
   // can rename, delete or change hours afterwards).
-  async function applyScopingTemplate() {
+  // phase193: delivery / evaluation templates use the same RPC.
+  const PHASE_TEMPLATES: Record<string, { key: string; title: string; message: string; label: string }> = {
+    analysis: { key: "scoping", title: "Add the Analysis & Scoping template?", message: "Adds 5 standard scoping tasks (about 20 hours) with their dependencies. You can rename, delete or change hours on any of them afterwards.", label: "Use scoping template (5 tasks)" },
+    delivery: { key: "delivery", title: "Add the Implementation / Delivery template?", message: "Adds 10 delivery activities in order (pilot, LMS upload, scheduling, launch, monitoring, handover). Delete the ones this project doesn't need; the chain closes up around them.", label: "Use delivery template (10 tasks)" },
+    evaluation: { key: "evaluation", title: "Add the Evaluation & Closure template?", message: "Adds 9 evaluation and close-out activities in order (L1 to L4, completion records, report, lessons learned). Delete the ones this project doesn't need.", label: "Use evaluation template (9 tasks)" },
+  };
+  async function applyScopingTemplate(phaseKey = "analysis") {
     if (!project) return;
+    const tpl = PHASE_TEMPLATES[phaseKey];
+    if (!tpl) return;
     const ok = await confirm({
-      title: "Add the Analysis & Scoping template?",
-      message: "Adds 5 standard scoping tasks (about 20 hours) with their dependencies. You can rename, delete or change hours on any of them afterwards.",
+      title: tpl.title,
+      message: tpl.message,
       confirmLabel: "Add tasks",
     });
     if (!ok) return;
     const flushed = await flushPendingEdits();
     if (!flushed) return;
     if (!(await startDatePrompt.ensure(project))) return;
-    const { error } = await supabase.rpc("r2_apply_template", { p_project_id: project.id, p_template_key: "scoping" });
+    const { error } = await supabase.rpc("r2_apply_template", { p_project_id: project.id, p_template_key: tpl.key });
     if (error) {
-      await alert(friendlyError("add the scoping template", error));
+      await alert(friendlyError("add the template", error));
       return;
     }
+    await loadAll(true);
+  }
+
+  // phase193: Add module -- one module's Design -> Review -> Sign-off ->
+  // Build -> Review -> Sign-off chain. Delete any step the project doesn't need.
+  async function submitAddModule() {
+    if (!project || !moduleDlg) return;
+    if (!moduleDlg.name.trim()) { setModuleDlg({ ...moduleDlg, error: "Give the module a name, e.g. \"M1 Hygiene basics\"." }); return; }
+    if (!moduleDlg.maker) { setModuleDlg({ ...moduleDlg, error: "Pick who designs and builds it." }); return; }
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    if (!(await startDatePrompt.ensure(project))) return;
+    setModuleDlg({ ...moduleDlg, busy: true, error: "" });
+    const { error } = await supabase.rpc("r2_add_module", { p_project_id: project.id, p_module_name: moduleDlg.name.trim(), p_maker_id: moduleDlg.maker });
+    if (error) {
+      setModuleDlg({ ...moduleDlg, busy: false, error: friendlyError("add the module", error).message ?? "Couldn't add the module." });
+      return;
+    }
+    setModuleDlg(null);
     await loadAll(true);
   }
 
@@ -4445,12 +4474,17 @@ export default function WbsPlanning() {
                 <strong style={{ fontSize: 13 }}>{it.label}</strong>
               </button>
               <span style={{ fontSize: 11, color: "var(--muted)" }}>{it.count} task{it.count === 1 ? "" : "s"} · {Math.round(it.hours * 10) / 10} est. hrs</span>
-              {canEditWbs && !isSessionProject && it.key === "analysis" && it.count === 0 && (
-                <button type="button" onClick={() => void applyScopingTemplate()} style={{ marginLeft: 6, border: `1px solid ${c.fg}`, background: c.fg, color: "#fff", borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <ListPlus size={12} /> Use scoping template (5 tasks)
+              {canEditWbs && canAddTasks && !isSessionProject && PHASE_TEMPLATES[it.key] && it.count === 0 && (
+                <button type="button" onClick={() => void applyScopingTemplate(it.key)} style={{ marginLeft: 6, border: `1px solid ${c.fg}`, background: c.fg, color: "#fff", borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <ListPlus size={12} /> {PHASE_TEMPLATES[it.key].label}
                 </button>
               )}
-              {canEditWbs && !isSessionProject && (
+              {canEditWbs && canAddTasks && !isSessionProject && (it.key === "design" || it.key === "development") && (
+                <button type="button" onClick={() => setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" })} title="Adds Design / storyboard, Review and Sign-off in Design, and Build, Review and Sign-off in Development, linked in order" style={{ marginLeft: 6, border: `1px solid ${c.fg}`, background: c.fg, color: "#fff", borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <ListPlus size={12} /> Add module
+                </button>
+              )}
+              {canEditWbs && canAddTasks && !isSessionProject && (
                 <button type="button" onClick={() => void addTopLevelTask(it.key)} style={{ marginLeft: 6, border: `1px solid ${c.border}`, background: "#fff", color: c.fg, borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
                   <Plus size={12} /> Add task
                 </button>
@@ -5589,6 +5623,31 @@ export default function WbsPlanning() {
       {dialog}
       {checklistDialog}
       {assigneePicker.element}
+      {moduleDlg && (
+        <Modal title="Add module" onClose={() => (moduleDlg.busy ? undefined : setModuleDlg(null))} width={440}>
+          <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
+            <div style={{ color: "var(--muted)" }}>
+              Adds 6 linked tasks: <strong>Design / storyboard → Review → Sign-off</strong> in Learning Design and <strong>Build → Review → Sign-off</strong> in Learning Development. Reviews go to the person's supervisor and sign-offs to the project owner. Delete or reassign any step afterwards.
+            </div>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontWeight: 600 }}>Module name</span>
+              <input autoFocus value={moduleDlg.name} onChange={(e) => setModuleDlg({ ...moduleDlg, name: e.target.value, error: "" })} placeholder="M1 Hygiene basics" style={{ fontSize: 12.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }} />
+            </label>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontWeight: 600 }}>Designs and builds it</span>
+              <select value={moduleDlg.maker} onChange={(e) => setModuleDlg({ ...moduleDlg, maker: e.target.value, error: "" })} style={{ fontSize: 12.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }}>
+                <option value="">Select a team member…</option>
+                {people.filter((pp) => pp.is_active).map((pp) => <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+              </select>
+            </label>
+            {moduleDlg.error && <div style={{ color: "var(--danger-text)", fontSize: 12 }}>{moduleDlg.error}</div>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn-secondary" disabled={moduleDlg.busy} onClick={() => setModuleDlg(null)}>Cancel</button>
+              <button className="btn-primary" disabled={moduleDlg.busy} onClick={() => void submitAddModule()}>{moduleDlg.busy ? "Adding…" : "Add module"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {startDatePrompt.element}
       {showAddSession && isSessionProject && me?.id && (
         <AddSessionModal
