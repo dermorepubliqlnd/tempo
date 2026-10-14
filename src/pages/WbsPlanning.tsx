@@ -3,11 +3,11 @@ import { projectStageOf } from "../lib/projectStage";
 import { useAssigneePicker } from "../components/AssigneePicker";
 import Modal from "../components/Modal";
 import { useProjectStartDatePrompt } from "../components/ProjectStartDatePrompt";
-import { useState, useEffect, useCallback, useRef, Fragment, type CSSProperties } from "react";
+import { useState, useEffect, useCallback, useRef, Fragment, Children, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { PauseReviewBanner } from "../components/PauseProjectModals";
-import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin, MoreHorizontal, Copy, ArrowUp, ArrowDown, CornerDownRight, Undo2, MessageCircle } from "lucide-react";
+import { ArrowLeft, Plus, ChevronLeft, ChevronRight, ChevronDown, Info, AlertTriangle, Link2, Trash2, GripVertical, RefreshCw, Clock, ListPlus, TrendingUp, TrendingDown, Calendar, User, Circle, CheckCircle2, XCircle, Pin, MoreHorizontal, Copy, ArrowUp, ArrowDown, CornerDownRight, Undo2, MessageCircle, Search, X as XIcon } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { archiveItem, restoreItem, ARCHIVE_MOVE_NOTE, splitByArchivePermission, blockedDeleteMessage, loggedHoursOnTasks, loggedTimeDeleteWarning } from "../lib/archive";
 import { useSession } from "../lib/useSession";
@@ -219,10 +219,33 @@ const WBS_TASK_COLUMN_DEFAULTS: Record<string, number> = {
   assignee: 150,
   depends_on: 150,
   changes: 190,
+  status: 110,
 };
-const WBS_TASK_COLUMN_ORDER = ["task", "depends_on", "assignee", "work_type", "output_type", "output_count", "effort_hours", "spent_hrs", "effort", "changes"];
+const WBS_TASK_COLUMN_ORDER = ["task", "depends_on", "assignee", "status", "work_type", "output_type", "output_count", "effort_hours", "spent_hrs", "effort", "changes"];
 const WBS_DATE_COLUMN_WIDTHS = [110, 100, 90, 110, 100, 90]; // Start/End/Duration x Forecasted + Theoretical, fixed
 const WBS_COL_WIDTHS_STORAGE_KEY = "capaciq_wbs_task_col_widths";
+// WBS UI Refresh 1.5 (2026-10-14, Sandra): column presets, remembered per browser.
+type WbsPreset = "essential" | "planning" | "full";
+const WBS_PRESET_STORAGE_KEY = "capaciq_wbs_view_preset";
+const WBS_PRESETS: WbsPreset[] = ["essential", "planning", "full"];
+const WBS_PRESET_LABEL: Record<WbsPreset, string> = { essential: "Essential", planning: "Planning", full: "Full" };
+const WBS_PRESET_HINT: Record<WbsPreset, string> = {
+  essential: "Task, Depends on, Assignee, Status, Estimated Hours, Forecasted Start and End",
+  planning: "Essential plus Work Type, Output Type and Forecasted Duration",
+  full: "Every column, including Logged Hours, Effort, Changes vs Baseline and Theoretical dates",
+};
+const WBS_PRESET_COLS: Record<WbsPreset, string[] | null> = {
+  essential: ["task", "depends_on", "assignee", "status", "effort_hours"],
+  planning: ["task", "depends_on", "assignee", "status", "work_type", "output_type", "effort_hours"],
+  full: null,
+};
+// Forecasted Start/End/Duration, Theoretical Start/End/Duration
+const WBS_PRESET_DATES: Record<WbsPreset, boolean[]> = {
+  essential: [true, true, false, false, false, false],
+  planning: [true, true, true, false, false, false],
+  full: [true, true, true, true, true, true],
+};
+const TASK_STATUS_PILL_TONE: Record<string, string> = { "Not Started": "neutral", "In Progress": "blue", Done: "success", Cancelled: "danger" };
 const WBS_FREEZE_STORAGE_KEY = "capaciq_wbs_freeze_task_col"; // legacy -- read once as a migration fallback
 const WBS_FREEZE_COL_STORAGE_KEY = "capaciq_wbs_freeze_col_key";
 const WBS_MIN_COL_WIDTH = 50;
@@ -892,6 +915,39 @@ export default function WbsPlanning() {
   // phase194: module each task belongs to (set by Add module) + WBS grouping.
   const [taskModuleById, setTaskModuleById] = useState<Map<string, string>>(new Map());
   const [wbsGroupMode, setWbsGroupMode] = useState<"phase" | "module" | null>(null);
+  // WBS UI Refresh 1.5: WBS / Timeline view, filters (view-only) and column preset.
+  const [wbsView, setWbsView] = useState<"wbs" | "timeline">("wbs");
+  const [wbsSearch, setWbsSearch] = useState("");
+  const [wbsFilterPhase, setWbsFilterPhase] = useState("");
+  const [wbsFilterModule, setWbsFilterModule] = useState("");
+  const [wbsFilterStatus, setWbsFilterStatus] = useState("");
+  const [wbsFilterAssignee, setWbsFilterAssignee] = useState("");
+  const [wbsFilterWorkType, setWbsFilterWorkType] = useState("");
+  const [wbsPreset, setWbsPresetState] = useState<WbsPreset>(() => {
+    try {
+      const v = localStorage.getItem(WBS_PRESET_STORAGE_KEY);
+      if (v === "essential" || v === "planning" || v === "full") return v;
+    } catch {
+      // ignore
+    }
+    return "essential";
+  });
+  function setWbsPreset(p: WbsPreset) {
+    setWbsPresetState(p);
+    try {
+      localStorage.setItem(WBS_PRESET_STORAGE_KEY, p);
+    } catch {
+      // ignore -- still applies for this session
+    }
+  }
+  function clearWbsFilters() {
+    setWbsSearch("");
+    setWbsFilterPhase("");
+    setWbsFilterModule("");
+    setWbsFilterStatus("");
+    setWbsFilterAssignee("");
+    setWbsFilterWorkType("");
+  }
   // phase187: task descriptions (shown on hover next to the task name).
   const [taskDescById, setTaskDescById] = useState<Map<string, string>>(new Map());
   const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());
@@ -1060,6 +1116,10 @@ export default function WbsPlanning() {
   const [moveParentTaskId, setMoveParentTaskId] = useState<string | null>(null);
   const [lastDeletedTask, setLastDeletedTask] = useState<{ id: string; name: string } | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  // A filter change clears the selection so bulk actions never hit rows you can't see.
+  useEffect(() => {
+    setSelectedTaskIds((prev) => (prev.size ? new Set() : prev));
+  }, [wbsSearch, wbsFilterPhase, wbsFilterModule, wbsFilterStatus, wbsFilterAssignee, wbsFilterWorkType]);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [bulkCancelOpen, setBulkCancelOpen] = useState(false);
   // 2026-10-04: Esc closes the row "⋯" menu and the Move / Bulk Move /
@@ -4321,7 +4381,66 @@ export default function WbsPlanning() {
   const isDraftProject = (project.wbs_status ?? "draft") === "draft";
   const includedMilestones = milestones.filter((m) => m.is_included);
   const phaseOfRoot = (t: TaskRow) => (t.wbs_phase && includedMilestones.some((m) => m.phase_key === t.wbs_phase) ? t.wbs_phase : null);
-  const WBS_TOTAL_COLS = 1 + WBS_TASK_COLUMN_ORDER.length + WBS_DATE_COLUMN_WIDTHS.length;
+  const wbsPresetCols = WBS_PRESET_COLS[wbsPreset];
+  const wbsVisibleCols = WBS_TASK_COLUMN_ORDER.filter((k) => !wbsPresetCols || wbsPresetCols.includes(k));
+  const colOn = (k: string) => wbsVisibleCols.includes(k);
+  const dateOn = WBS_PRESET_DATES[wbsPreset];
+  const wbsVisibleDateWidths = WBS_DATE_COLUMN_WIDTHS.filter((_, i) => dateOn[i]);
+  const WBS_TOTAL_COLS = 1 + wbsVisibleCols.length + wbsVisibleDateWidths.length;
+  // Keeps only the Start / End / Duration cells this preset shows.
+  const pickDateCells = (frag: React.ReactElement, mask: boolean[]) => (
+    <>{Children.toArray((frag.props as { children?: React.ReactNode }).children).filter((_, i) => mask[i])}</>
+  );
+  const taskModuleOf = (t: TaskRow & { depth: number }) => taskModuleById.get(t.depth === 0 ? t.id : t.parent_task_id ?? "") ?? taskModuleById.get(t.id) ?? null;
+  const wbsSearchQ = wbsSearch.trim().toLowerCase();
+  const wbsFiltersActive = !!(wbsSearchQ || wbsFilterPhase || wbsFilterModule || wbsFilterStatus || wbsFilterAssignee || wbsFilterWorkType);
+  // Filters are view-only: they never change data, permissions or what the
+  // database lets anyone see. A row with unsaved edits always stays visible.
+  const wbsVisibleIds: Set<string> | null = (() => {
+    if (!wbsFiltersActive) return null;
+    const ctxMatch = (t: TaskRow & { depth: number }) =>
+      (!wbsFilterPhase || phaseOfRoot(t) === wbsFilterPhase) && (!wbsFilterModule || taskModuleOf(t) === wbsFilterModule);
+    const ownMatch = (t: TaskRow & { depth: number }) =>
+      (!wbsSearchQ || (t.name ?? "").toLowerCase().includes(wbsSearchQ)) &&
+      (!wbsFilterStatus || (t.status ?? "Not Started") === wbsFilterStatus) &&
+      (!wbsFilterAssignee || (wbsFilterAssignee === "__none" ? !t.assignee_id : t.assignee_id === wbsFilterAssignee)) &&
+      (!wbsFilterWorkType || t.work_type_id === wbsFilterWorkType);
+    const out = new Set<string>();
+    const onlySearch = !wbsFilterStatus && !wbsFilterAssignee && !wbsFilterWorkType;
+    for (const t of orderedTasks) {
+      const isParentRow = t.depth === 0 && hasChildren(t.id);
+      if (pendingTaskPatches.current.has(t.id)) {
+        out.add(t.id);
+        if (t.parent_task_id) out.add(t.parent_task_id);
+        continue;
+      }
+      if (!ctxMatch(t)) continue;
+      if (isParentRow) {
+        // A parent whose own name matches the search shows with all its sub-tasks.
+        if (wbsSearchQ && onlySearch && (t.name ?? "").toLowerCase().includes(wbsSearchQ)) {
+          out.add(t.id);
+          for (const c of orderedTasks) if (c.parent_task_id === t.id) out.add(c.id);
+        }
+        continue;
+      }
+      if (ownMatch(t)) {
+        out.add(t.id);
+        if (t.parent_task_id) out.add(t.parent_task_id); // keep the parent for context
+      }
+    }
+    return out;
+  })();
+  // Phase progress: real tasks only (no parent rows, no milestones, no cancelled).
+  const phaseKpis = isLifecycle
+    ? lifecyclePhases
+        .filter((ph) => includedMilestones.some((m) => m.phase_key === ph.key))
+        .map((ph) => {
+          const leaves = orderedTasks.filter((t) => phaseOfRoot(t) === ph.key && !(t.depth === 0 && hasChildren(t.id)) && t.status !== "Cancelled");
+          const done = leaves.filter((t) => t.status === "Done").length;
+          const active = leaves.filter((t) => t.status === "In Progress").length;
+          return { key: ph.key, label: ph.label, done, active, total: leaves.length, pct: leaves.length ? Math.round((done * 100) / leaves.length) : 0 };
+        })
+    : [];
   type WbsItem =
     | { kind: "task"; t: TaskRow & { depth: number } }
     | { kind: "phase"; key: string; label: string; count: number; hours: number }
@@ -4377,7 +4496,7 @@ export default function WbsPlanning() {
         const next = leaves.find((t) => t.status !== "Done" && t.status !== "Cancelled");
         const stage = next ? `now in ${next.name.split(" · ").slice(0, next.name.split(" · ").length > 2 ? 2 : 1).join(" · ")}` : "complete";
         items.push({ kind: "module", name: n, done, total: leaves.length, stage, hours: leaves.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0) });
-        if (!collapsedPhases.has(`mod:${n}`)) for (const t of rows) items.push({ kind: "task", t });
+        if (wbsFiltersActive || !collapsedPhases.has(`mod:${n}`)) for (const t of rows) items.push({ kind: "task", t });
       }
       if (canEditWbs && canAddTasks && !isSessionProject) items.push({ kind: "addmodule" });
       for (const hm of heldMilestones) items.push({ kind: "milestone", m: hm });
@@ -4392,7 +4511,7 @@ export default function WbsPlanning() {
         if (rows.length) {
           const lh = rows.filter((t) => !(t.depth === 0 && hasChildren(t.id))).reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
           items.push({ kind: "phase", key: ph.key, label: ph.label, count: rows.filter((t) => t.depth === 0).length, hours: lh });
-          if (!collapsedPhases.has(ph.key)) for (const t of rows) items.push({ kind: "task", t });
+          if (wbsFiltersActive || !collapsedPhases.has(ph.key)) for (const t of rows) items.push({ kind: "task", t });
         }
         heldMilestones.push(m);
         if (ph.key === "development" || !includedMilestones.some((x) => x.phase_key === "development")) placeModules();
@@ -4401,12 +4520,42 @@ export default function WbsPlanning() {
       if (groupByModule && !modulesPlaced && (ph.key === "delivery" || ph.key === "evaluation")) placeModules();
       const leafHours = rows.filter((t) => !(t.depth === 0 && hasChildren(t.id))).reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
       items.push({ kind: "phase", key: ph.key, label: ph.label, count: rows.filter((t) => t.depth === 0).length, hours: leafHours });
-      if (!collapsedPhases.has(ph.key)) for (const t of rows) items.push({ kind: "task", t });
+      if (wbsFiltersActive || !collapsedPhases.has(ph.key)) for (const t of rows) items.push({ kind: "task", t });
       items.push({ kind: "milestone", m });
     }
     if (groupByModule) placeModules();
     return items;
   })();
+  // While filtering: only matching tasks, each under its phase / module
+  // header; milestone and Add module rows are hidden.
+  const wbsModuleNames: string[] = [];
+  for (const t of orderedTasks) {
+    const n = taskModuleOf(t);
+    if (n && !wbsModuleNames.includes(n)) wbsModuleNames.push(n);
+  }
+  const wbsAssigneeOptions = people
+    .filter((p) => orderedTasks.some((t) => t.assignee_id === p.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const wbsWorkTypeOptions = workTypes.filter((w) => orderedTasks.some((t) => t.work_type_id === w.id)).sort((a, b) => a.name.localeCompare(b.name));
+  const wbsShownItems: WbsItem[] = !wbsVisibleIds
+    ? wbsItems
+    : (() => {
+        const out: WbsItem[] = [];
+        let header: WbsItem | null = null;
+        for (const it of wbsItems) {
+          if (it.kind === "task") {
+            if (!wbsVisibleIds.has(it.t.id)) continue;
+            if (header) {
+              out.push(header);
+              header = null;
+            }
+            out.push(it);
+          } else if (it.kind === "phase" || it.kind === "module" || it.kind === "unphased") {
+            header = it;
+          }
+        }
+        return out;
+      })();
 
   function lifecycleChecklistGroups(): ChecklistGroup[] {
     if (!isLifecycle) return [];
@@ -4548,21 +4697,6 @@ export default function WbsPlanning() {
         <span style={{ fontSize: 10.5, color: "var(--muted)", marginLeft: "auto" }}>
           {editable ? "Choose the phases this project needs. They lock at Start Project." : "Set at Start Project. Phase moves forward as milestones are reached."}
         </span>
-        {hasModules && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--muted)" }}>
-            Group by
-            <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
-              {(["phase", "module"] as const).map((mode) => {
-                const on = (groupByModule ? "module" : "phase") === mode;
-                return (
-                  <button key={mode} type="button" onClick={() => setWbsGroupMode(mode)} style={{ border: "none", padding: "3px 10px", fontSize: 11.5, fontWeight: on ? 700 : 500, cursor: "pointer", background: on ? "var(--accent-bg)" : "#fff", color: on ? "var(--accent)" : "var(--muted)" }}>
-                    {mode === "phase" ? "Phase" : "Module"}
-                  </button>
-                );
-              })}
-            </span>
-          </span>
-        )}
       </div>
     );
   }
@@ -4635,17 +4769,17 @@ export default function WbsPlanning() {
                 <strong style={{ fontSize: 13 }}>{it.label}</strong>
               </button>
               <span style={{ fontSize: 11, color: "var(--muted)" }}>{it.count} task{it.count === 1 ? "" : "s"} · {Math.round(it.hours * 10) / 10} est. hrs</span>
-              {canEditWbs && canAddTasks && !isSessionProject && PHASE_TEMPLATES[it.key] && it.count === 0 && (
+              {canEditWbs && canAddTasks && !wbsFiltersActive && !isSessionProject && PHASE_TEMPLATES[it.key] && it.count === 0 && (
                 <button type="button" onClick={() => void applyScopingTemplate(it.key)} style={{ marginLeft: 6, border: `1px solid ${c.fg}`, background: c.fg, color: "#fff", borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
                   <ListPlus size={12} /> {PHASE_TEMPLATES[it.key].label}
                 </button>
               )}
-              {canEditWbs && canAddTasks && !isSessionProject && (it.key === "design" || it.key === "development") && (
+              {canEditWbs && canAddTasks && !wbsFiltersActive && !isSessionProject && (it.key === "design" || it.key === "development") && (
                 <button type="button" onClick={() => setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" })} title="Adds Design / storyboard, Review and Sign-off in Design, and Build, Review and Sign-off in Development, linked in order" style={{ marginLeft: 6, border: `1px solid ${c.fg}`, background: c.fg, color: "#fff", borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
                   <ListPlus size={12} /> Add module
                 </button>
               )}
-              {canEditWbs && canAddTasks && !isSessionProject && (
+              {canEditWbs && canAddTasks && !wbsFiltersActive && !isSessionProject && (
                 <button type="button" onClick={() => void addTopLevelTask(it.key)} style={{ marginLeft: 6, border: `1px solid ${c.border}`, background: "#fff", color: c.fg, borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
                   <Plus size={12} /> Add task
                 </button>
@@ -4930,11 +5064,11 @@ export default function WbsPlanning() {
   // boundary boxShadow; earlier sticky columns don't need their own,
   // same as before.
   function wbsColStickyStyle(colKey: string, isTd: boolean, rowLocked?: boolean): CSSProperties | undefined {
-    const idx = WBS_TASK_COLUMN_ORDER.indexOf(colKey);
-    const frozenIdx = wbsFreezeColKey ? WBS_TASK_COLUMN_ORDER.indexOf(wbsFreezeColKey) : -1;
+    const idx = wbsVisibleCols.indexOf(colKey);
+    const frozenIdx = wbsFreezeColKey ? wbsVisibleCols.indexOf(wbsFreezeColKey) : -1;
     if (frozenIdx < 0 || idx < 0 || idx > frozenIdx) return undefined;
     let left = wbsFrozenGutterW;
-    for (let i = 0; i < idx; i++) left += wbsColWidth(WBS_TASK_COLUMN_ORDER[i]);
+    for (let i = 0; i < idx; i++) left += wbsColWidth(wbsVisibleCols[i]);
     return {
       position: "sticky",
       left,
@@ -5656,6 +5790,30 @@ export default function WbsPlanning() {
   return (
     <div className="wbs-modern-page">
       <style>{`
+        .wbs-view-tab { padding: 9px 2px; border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--text-secondary); font-size: 12.5px; font-weight: 600; cursor: pointer; width: auto; font-family: inherit; }
+        .wbs-view-tab.on { border-bottom-color: var(--accent); color: var(--accent); font-weight: 700; }
+        .wbs-phase-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 0 0 10px; }
+        .wbs-phase-kpi { display: grid; gap: 6px; text-align: left; padding: 10px 12px; background: #fff; border: 1px solid #dce7f3; border-radius: 10px; cursor: pointer; font-family: inherit; width: auto; transition: border-color .12s, box-shadow .12s; box-shadow: 0 1px 2px rgba(31, 71, 117, 0.035); }
+        .wbs-phase-kpi:hover { border-color: #b9cde4; }
+        .wbs-phase-kpi-label { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #304963; }
+        .wbs-phase-kpi-nums { display: flex; align-items: baseline; gap: 8px; font-size: 10.5px; color: var(--muted); }
+        .wbs-phase-kpi-nums strong { font-family: var(--font-heading); font-size: 18px; line-height: 1.1; color: #17324f; font-weight: 700; }
+        .wbs-phase-kpi-bar { display: block; height: 4px; border-radius: 999px; background: #edf2f8; overflow: hidden; }
+        .wbs-phase-kpi-bar > span { display: block; height: 100%; border-radius: 999px; }
+        .wbs-modern-page .wbs-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; margin: 0 0 8px; }
+        .wbs-toolbar select { width: auto; height: 30px; padding: 0 24px 0 9px; font-size: 11.5px; border: 1px solid #d6e2ef; border-radius: 8px; background-color: #fff; color: #304963; font-family: inherit; }
+        .wbs-toolbar select.on { border-color: var(--accent); color: var(--accent); background-color: var(--accent-bg); font-weight: 600; }
+        .wbs-search { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border: 1px solid #d6e2ef; border-radius: 8px; background: #fff; color: var(--muted); width: 220px; box-sizing: border-box; }
+        .wbs-search:focus-within { border-color: var(--accent); }
+        .wbs-search input { border: none; outline: none; background: transparent; font-size: 11.5px; width: 100%; min-width: 0; padding: 0; height: auto; box-shadow: none; font-family: inherit; }
+        .wbs-seg { display: inline-flex; border: 1px solid #d6e2ef; border-radius: 8px; overflow: hidden; background: #fff; }
+        .wbs-seg button { border: none; border-radius: 0; background: transparent; padding: 0 11px; height: 28px; font-size: 11.5px; font-weight: 500; color: var(--muted); cursor: pointer; width: auto; font-family: inherit; }
+        .wbs-seg button + button { border-left: 1px solid #e3ebf4; }
+        .wbs-seg button.on { background: var(--accent-bg); color: var(--accent); font-weight: 700; }
+        .wbs-seg-label { font-size: 11px; color: var(--muted); font-weight: 600; }
+        .wbs-clear-btn { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px; border: none; border-radius: 8px; background: transparent; color: var(--accent); font-size: 11.5px; font-weight: 600; cursor: pointer; width: auto; font-family: inherit; }
+        .wbs-chip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid #d6e2ef; background: #fff; font-size: 11.5px; color: var(--muted); cursor: pointer; width: auto; font-family: inherit; }
+        .wbs-chip.on { color: #17324f; font-weight: 600; }
         .wbs-modern-page {
           background: var(--bg);
           margin: -16px;
@@ -5888,8 +6046,8 @@ export default function WbsPlanning() {
                 {!isSessionProject && canAddTasks && menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
                 {menuItem(wbsNoteCounts.byTask[task.id] ? `Notes (${wbsNoteCounts.byTask[task.id]})` : "Add note", <MessageCircle size={13} />, () => setWbsNotes({ taskId: task.id }))}
                 <div style={{ height: 1, background: "var(--border)", margin: "4px 2px" }} />
-                {menuItem("Move up", <ArrowUp size={13} />, () => void moveTaskDirection(task, -1), { disabled: !canMoveUp })}
-                {menuItem("Move down", <ArrowDown size={13} />, () => void moveTaskDirection(task, 1), { disabled: !canMoveDown })}
+                {menuItem("Move up", <ArrowUp size={13} />, () => void moveTaskDirection(task, -1), { disabled: !canMoveUp || wbsFiltersActive })}
+                {menuItem("Move down", <ArrowDown size={13} />, () => void moveTaskDirection(task, 1), { disabled: !canMoveDown || wbsFiltersActive })}
                 {!hasKids && menuItem("Move to parent…", <CornerDownRight size={13} />, () => setMoveParentTaskId(task.id))}
                 {task.depth === 1 && menuItem("Move to top level", <ArrowLeft size={13} />, () => void moveTaskToParent(task, null))}
                 {isLifecycle && task.depth === 0 && lifecyclePhases
@@ -6253,12 +6411,12 @@ export default function WbsPlanning() {
         >
           Overview
         </Link>
-        <Link
-          to={`/projects/${projectId}/wbs`}
-          style={{ padding: "9px 2px", borderBottom: "2px solid var(--accent)", color: "var(--accent)", fontSize: 12.5, fontWeight: 700, textDecoration: "none" }}
-        >
+        <button type="button" className={`wbs-view-tab${wbsView === "wbs" ? " on" : ""}`} onClick={() => setWbsView("wbs")}>
           WBS
-        </Link>
+        </button>
+        <button type="button" className={`wbs-view-tab${wbsView === "timeline" ? " on" : ""}`} onClick={() => setWbsView("timeline")}>
+          Timeline
+        </button>
         <button
           type="button"
           onClick={() => setWbsNotes({ taskId: null })}
@@ -6508,6 +6666,7 @@ export default function WbsPlanning() {
           alongside the main content (not a full-width toggle panel like
           before), matching her reference mockup. Main content is the
           flex:1 left column; the rail is a fixed-width sibling. */}
+          <div style={{ display: wbsView === "timeline" ? "none" : undefined }}>
           <section className="card" style={{ padding: 16, marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
               <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800, flexShrink: 0 }}>1</span>
@@ -7454,13 +7613,14 @@ export default function WbsPlanning() {
             </div>
           </div>
 
+          </div>
           {/* 2026-09-21 (Sandra): collapsible "Work Breakdown Structure
               and Gantt" header -- closed projects only. Everything below
               this point through the end of the Gantt sections is wrapped
               in a display:none toggle rather than conditionally
               rendered, so this change doesn't require moving or
               restructuring any of that existing JSX. */}
-          {project.wbs_status === "closed" && (
+          {wbsView === "wbs" && project.wbs_status === "closed" && (
             <button
               onClick={() => setWbsDetailsExpanded((v) => !v)}
               className="card"
@@ -7487,7 +7647,8 @@ export default function WbsPlanning() {
               </span>
             </button>
           )}
-          <div style={{ display: project.wbs_status === "closed" && !wbsDetailsExpanded ? "none" : undefined }}>
+          <div style={{ display: wbsView === "wbs" && project.wbs_status === "closed" && !wbsDetailsExpanded ? "none" : undefined }}>
+          <div style={{ display: wbsView === "timeline" ? "none" : undefined }}>
 
           <div className="card" style={{ padding: 0, marginBottom: 10, overflow: "hidden" }}>
             <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #e5edf6", flexWrap: "wrap" }}>
@@ -7516,7 +7677,7 @@ export default function WbsPlanning() {
                       <Plus size={13} /> Add Session
                     </button>
                   ) : (
-                    <button type="button" className="btn-primary" onClick={addTopLevelTask} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <button type="button" className="btn-primary" onClick={() => { clearWbsFilters(); void addTopLevelTask(); }} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                       <Plus size={13} /> Add Task
                     </button>
                   )
@@ -7600,6 +7761,115 @@ export default function WbsPlanning() {
           )}
           {renderPhaseSetupBar()}
           {renderMilestonePicker()}
+          {isLifecycle && phaseKpis.length > 0 && orderedTasks.length > 0 && (
+            <div className="wbs-phase-kpis">
+              {phaseKpis.map((k) => {
+                const c = PHASE_COLORS[k.key] ?? PHASE_COLORS.analysis;
+                const on = wbsFilterPhase === k.key;
+                return (
+                  <button
+                    key={k.key}
+                    type="button"
+                    className={`wbs-phase-kpi${on ? " on" : ""}`}
+                    style={on ? { borderColor: c.fg, boxShadow: `0 0 0 1px ${c.fg}`, background: c.bg } : undefined}
+                    onClick={() => setWbsFilterPhase(on ? "" : k.key)}
+                    title={on ? "Click again to show all phases" : `Show only ${k.label} tasks`}
+                  >
+                    <span className="wbs-phase-kpi-label">
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: c.fg, flexShrink: 0 }} />
+                      {k.label}
+                    </span>
+                    <span className="wbs-phase-kpi-nums">
+                      <strong>{k.total ? `${k.pct}%` : "–"}</strong>
+                      <span>{k.total ? `${k.done} of ${k.total} done${k.active ? ` · ${k.active} in progress` : ""}` : "No tasks yet"}</span>
+                    </span>
+                    <span className="wbs-phase-kpi-bar">
+                      <span style={{ width: `${k.pct}%`, background: c.fg }} />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {orderedTasks.length > 0 && (
+            <div className="card wbs-toolbar">
+              <label className="wbs-search">
+                <Search size={13} />
+                <input value={wbsSearch} onChange={(e) => setWbsSearch(e.target.value)} placeholder="Search tasks" aria-label="Search tasks" />
+                {wbsSearch && (
+                  <button type="button" onClick={() => setWbsSearch("")} aria-label="Clear search" style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "var(--muted)", display: "inline-flex", width: "auto" }}>
+                    <XIcon size={12} />
+                  </button>
+                )}
+              </label>
+              {isLifecycle && phaseKpis.length > 0 && (
+                <select className={wbsFilterPhase ? "on" : ""} value={wbsFilterPhase} onChange={(e) => setWbsFilterPhase(e.target.value)} aria-label="Phase">
+                  <option value="">All phases</option>
+                  {phaseKpis.map((k) => (
+                    <option key={k.key} value={k.key}>{k.label}</option>
+                  ))}
+                </select>
+              )}
+              {hasModules && (
+                <select className={wbsFilterModule ? "on" : ""} value={wbsFilterModule} onChange={(e) => setWbsFilterModule(e.target.value)} aria-label="Module">
+                  <option value="">All modules</option>
+                  {wbsModuleNames.map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              )}
+              <select className={wbsFilterStatus ? "on" : ""} value={wbsFilterStatus} onChange={(e) => setWbsFilterStatus(e.target.value)} aria-label="Status">
+                <option value="">All statuses</option>
+                {["Not Started", "In Progress", "Done", "Cancelled"].map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+              <select className={wbsFilterAssignee ? "on" : ""} value={wbsFilterAssignee} onChange={(e) => setWbsFilterAssignee(e.target.value)} aria-label="Assignee">
+                <option value="">All assignees</option>
+                <option value="__none">Unassigned</option>
+                {wbsAssigneeOptions.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              {wbsWorkTypeOptions.length > 0 && (
+                <select className={wbsFilterWorkType ? "on" : ""} value={wbsFilterWorkType} onChange={(e) => setWbsFilterWorkType(e.target.value)} aria-label="Work Type">
+                  <option value="">All work types</option>
+                  {wbsWorkTypeOptions.map((w) => (
+                    <option key={w.id} value={w.id}>{w.name}</option>
+                  ))}
+                </select>
+              )}
+              {wbsFiltersActive && (
+                <button type="button" className="wbs-clear-btn" onClick={clearWbsFilters}>
+                  <XIcon size={12} /> Clear
+                </button>
+              )}
+              <div style={{ marginLeft: "auto", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                {hasModules && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span className="wbs-seg-label">Group by</span>
+                    <span className="wbs-seg">
+                      {(["phase", "module"] as const).map((mode) => (
+                        <button key={mode} type="button" className={(groupByModule ? "module" : "phase") === mode ? "on" : ""} onClick={() => setWbsGroupMode(mode)}>
+                          {mode === "phase" ? "Phase" : "Module"}
+                        </button>
+                      ))}
+                    </span>
+                  </span>
+                )}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span className="wbs-seg-label">Columns</span>
+                  <span className="wbs-seg">
+                    {WBS_PRESETS.map((p) => (
+                      <button key={p} type="button" className={wbsPreset === p ? "on" : ""} title={WBS_PRESET_HINT[p]} onClick={() => setWbsPreset(p)}>
+                        {WBS_PRESET_LABEL[p]}
+                      </button>
+                    ))}
+                  </span>
+                </span>
+              </div>
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "0 2px 7px", fontSize: 10.5, color: "var(--muted)" }}>
             <span><span className="wbs-required-start">●</span> Required before Start Project</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#fff", border: "1px solid #cfd8e3" }} /> Editable</span>
@@ -7614,8 +7884,8 @@ export default function WbsPlanning() {
               style={{
                 width:
                   WBS_GUTTER_WIDTH +
-                  WBS_TASK_COLUMN_ORDER.reduce((sum, k) => sum + wbsColWidth(k), 0) +
-                  WBS_DATE_COLUMN_WIDTHS.reduce((sum, w) => sum + w, 0),
+                  wbsVisibleCols.reduce((sum, k) => sum + wbsColWidth(k), 0) +
+                  wbsVisibleDateWidths.reduce((sum, w) => sum + w, 0),
                 tableLayout: "fixed",
               }}
             >
@@ -7626,11 +7896,11 @@ export default function WbsPlanning() {
                   row's widths "win". */}
               <colgroup>
                 <col style={{ width: WBS_GUTTER_WIDTH }} />
-                {WBS_TASK_COLUMN_ORDER.map((k) => (
+                {wbsVisibleCols.map((k) => (
                   <col key={k} style={{ width: wbsColWidth(k) }} />
                 ))}
-                {WBS_DATE_COLUMN_WIDTHS.map((w, i) => (
-                  <col key={i} style={{ width: w }} />
+                {wbsVisibleDateWidths.map((w, i) => (
+                  <col key={`d${i}`} style={{ width: w }} />
                 ))}
               </colgroup>
               <thead style={{ position: "sticky", top: 0, zIndex: 6, background: "var(--surface)", boxShadow: "0 1px 0 var(--border)" }}>
@@ -7641,40 +7911,44 @@ export default function WbsPlanning() {
                     style={{ width: WBS_GUTTER_WIDTH, minWidth: WBS_GUTTER_WIDTH, ...(wbsGutterStickyStyle(false) ?? {}) }}
                   />
                   <ResizableTh colKey="task">Task <span className="wbs-required-start" title="Required before Start Project">●</span></ResizableTh>
-                  <ResizableTh colKey="depends_on">Depends on</ResizableTh>
-                  <ResizableTh colKey="assignee">Assignee <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
-                  <ResizableTh colKey="work_type">Work Type</ResizableTh>
-                  <ResizableTh colKey="output_type">Output Type <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
-                  <ResizableTh colKey="output_count">Output Count</ResizableTh>
-                  <ResizableTh colKey="effort_hours">Estimated Hours <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>
-                  <ResizableTh colKey="spent_hrs">Logged Hours</ResizableTh>
-                  <ResizableTh colKey="effort">Effort</ResizableTh>
-                  <ResizableTh colKey="changes" title="vs the active Baseline">
-                    Changes vs Baseline
-                  </ResizableTh>
-                  {/* Phase 21 (2026-08-24): column order now Forecasted,
-                      Capacity-Based, Full everywhere (was Full,
-                      Capacity-Based, Manual) -- matches MODES' new order. */}
-                  <th colSpan={3} style={{ textAlign: "center", ...modeColStyle("manual") }} title="Mirrors Capacity-Based until edited, then freezes -- this is what Save always records">
-                    Forecasted
-                  </th>
-                  <th colSpan={3} style={{ textAlign: "center", ...modeColStyle("full_capacity") }} title="Read-only reference -- edit dates under Forecasted instead">
-                    Theoretical
-                  </th>
+                  {colOn("depends_on") && <ResizableTh colKey="depends_on">Depends on</ResizableTh>}
+                  {colOn("assignee") && <ResizableTh colKey="assignee">Assignee <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>}
+                  {colOn("status") && <ResizableTh colKey="status" title="Read-only here. Change status from Tasks or the Next step buttons.">Status</ResizableTh>}
+                  {colOn("work_type") && <ResizableTh colKey="work_type">Work Type</ResizableTh>}
+                  {colOn("output_type") && <ResizableTh colKey="output_type">Output Type <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>}
+                  {colOn("output_count") && <ResizableTh colKey="output_count">Output Count</ResizableTh>}
+                  {colOn("effort_hours") && <ResizableTh colKey="effort_hours">Estimated Hours <span className="wbs-required-start" title="Required on leaf tasks before Start Project">●</span></ResizableTh>}
+                  {colOn("spent_hrs") && <ResizableTh colKey="spent_hrs">Logged Hours</ResizableTh>}
+                  {colOn("effort") && <ResizableTh colKey="effort">Effort</ResizableTh>}
+                  {colOn("changes") && (
+                    <ResizableTh colKey="changes" title="vs the active Baseline">
+                      Changes vs Baseline
+                    </ResizableTh>
+                  )}
+                  {dateOn.slice(0, 3).some(Boolean) && (
+                    <th colSpan={dateOn.slice(0, 3).filter(Boolean).length} style={{ textAlign: "center", ...modeColStyle("manual") }} title="Mirrors Capacity-Based until edited, then freezes -- this is what Save always records">
+                      Forecasted
+                    </th>
+                  )}
+                  {dateOn.slice(3).some(Boolean) && (
+                    <th colSpan={dateOn.slice(3).filter(Boolean).length} style={{ textAlign: "center", ...modeColStyle("full_capacity") }} title="Read-only reference -- edit dates under Forecasted instead">
+                      Theoretical
+                    </th>
+                  )}
                 </tr>
                 <tr>
-                  <th style={{ width: 110, ...modeColStyle("manual") }}>Start</th>
-                  <th style={{ width: 100, ...modeColStyle("manual") }}>End Date</th>
-                  <th style={{ width: 90, ...modeColStyle("manual") }}>Duration (days)</th>
-                  <th style={{ width: 110, ...modeColStyle("full_capacity") }}>Start</th>
-                  <th style={{ width: 100, ...modeColStyle("full_capacity") }}>End Date</th>
-                  <th style={{ width: 90, ...modeColStyle("full_capacity") }}>Duration (days)</th>
+                  {dateOn[0] && <th style={{ width: 110, ...modeColStyle("manual") }}>Start</th>}
+                  {dateOn[1] && <th style={{ width: 100, ...modeColStyle("manual") }}>End Date</th>}
+                  {dateOn[2] && <th style={{ width: 90, ...modeColStyle("manual") }}>Duration (days)</th>}
+                  {dateOn[3] && <th style={{ width: 110, ...modeColStyle("full_capacity") }}>Start</th>}
+                  {dateOn[4] && <th style={{ width: 100, ...modeColStyle("full_capacity") }}>End Date</th>}
+                  {dateOn[5] && <th style={{ width: 90, ...modeColStyle("full_capacity") }}>Duration (days)</th>}
                 </tr>
               </thead>
               <tbody>
                 {orderedTasks.length === 0 && (
                   <tr>
-                    <td colSpan={17} style={{ padding: "32px 0 34px", background: "#fff", position: "relative" }}>
+                    <td colSpan={WBS_TOTAL_COLS} style={{ padding: "32px 0 34px", background: "#fff", position: "relative" }}>
                       <div
                         style={{
                           position: "sticky",
@@ -7721,7 +7995,7 @@ export default function WbsPlanning() {
                     </td>
                   </tr>
                 )}
-                {wbsItems.map((it) => {
+                {wbsShownItems.map((it) => {
                   if (it.kind !== "task") return renderLifecycleRow(it);
                   const t = it.t;
                   const isParent = t.depth === 0 && hasChildren(t.id);
@@ -7756,7 +8030,7 @@ export default function WbsPlanning() {
                       }}
                       onDragLeave={() => setDragOverTaskId((prev) => (prev === t.id ? null : prev))}
                       onDrop={() => {
-                        if (draggedTaskId && validDropTarget) reorderTask(draggedTaskId, t.id);
+                        if (draggedTaskId && validDropTarget && !wbsFiltersActive) reorderTask(draggedTaskId, t.id);
                         setDraggedTaskId(null);
                         setDragOverTaskId(null);
                       }}
@@ -7793,7 +8067,7 @@ export default function WbsPlanning() {
                               title="Select task"
                             />
                           )}
-                          {rowEditable && selectedTaskIds.size === 0 && (
+                          {rowEditable && selectedTaskIds.size === 0 && !wbsFiltersActive && (
                             <span
                               className="row-grip-btn wbs-row-grip"
                               draggable
@@ -7822,7 +8096,7 @@ export default function WbsPlanning() {
                               dataNavId={`task-name-${t.id}`}
                               onCommit={(v) => saveTaskField(t.id, { name: fullNameFromModuleView(t, v) })}
                               onEnter={() => {
-                                if (!rowEditable) return;
+                                if (!rowEditable || wbsFiltersActive) return;
                                 if (t.depth === 0) {
                                   void addTopLevelTask();
                                 } else {
@@ -7878,6 +8152,7 @@ export default function WbsPlanning() {
                           </span>
                         </div>
                       </td>
+                      {colOn("depends_on") && (
                       <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={{ position: "relative", ...(wbsColStickyStyle("depends_on", true, rowLocked) ?? {}) }}>
                         <DependsOnPicker
                           task={t}
@@ -7907,6 +8182,8 @@ export default function WbsPlanning() {
                           </span>
                         )}
                       </td>
+                      )}
+                      {colOn("assignee") && (
                       <td className={rowEditable && !isParent ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("assignee", true, rowLocked)}>
                         {isParent ? (
                           (() => {
@@ -7964,6 +8241,13 @@ export default function WbsPlanning() {
                           />
                         )}
                       </td>
+                      )}
+                      {colOn("status") && (
+                        <td className="wbs-readonly-cell" style={wbsColStickyStyle("status", true, rowLocked)} title="Read-only here. Change status from Tasks or the Next step buttons.">
+                          <span className={`status-pill ${TASK_STATUS_PILL_TONE[t.status ?? "Not Started"] ?? "neutral"}`} style={{ fontSize: 9.5 }}>{t.status ?? "Not Started"}</span>
+                        </td>
+                      )}
+                      {colOn("work_type") && (
                       <td className={rowEditable && !isParent ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("work_type", true, rowLocked)}>
                         {isParent ? (
                           <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="Not applicable -- a parent task's own Work Type is already represented by its sub-tasks.">
@@ -8007,6 +8291,8 @@ export default function WbsPlanning() {
                           })()
                         )}
                       </td>
+                      )}
+                      {colOn("output_type") && (
                       <td className={rowEditable && !isParent && !!t.work_type_id ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("output_type", true, rowLocked)}>
                         {/* 2026-09-24 (Sandra): parent rows are N/A for Output Type too,
                             same as Work Type / Output Count -- outputs belong to the
@@ -8078,6 +8364,8 @@ export default function WbsPlanning() {
                           );
                         })()}
                       </td>
+                      )}
+                      {colOn("output_count") && (
                       <td className={canEditWbs && !isParent && t.status !== "Done" ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("output_count", true, rowLocked)}>
                         {t.output_type_id && outputTypes.find((o) => o.id === t.output_type_id)?.counts_deliverable === false ? (
                           <span style={{ color: "var(--muted)", fontSize: 11.5 }} title="This Output Type isn't counted as a deliverable (Site Settings), so Output Count is always 0.">0 · not counted</span>
@@ -8108,6 +8396,8 @@ export default function WbsPlanning() {
                         />
                         )}
                       </td>
+                      )}
+                      {colOn("effort_hours") && (
                       <td className={rowEditable && !isParent ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("effort_hours", true, rowLocked)}>
                         <span title={isParent ? "Computed from this task's own sub-tasks (sum of their Estimated Hours)" : undefined}>
                           <InlineNumber
@@ -8117,7 +8407,11 @@ export default function WbsPlanning() {
                           />
                         </span>
                       </td>
+                      )}
+                      {colOn("spent_hrs") && (
                       <td className="wbs-readonly-cell" style={{ fontVariantNumeric: "tabular-nums", ...(wbsColStickyStyle("spent_hrs", true, rowLocked) ?? {}) }}>{formatHours(spentHoursFor(t.id))}</td>
+                      )}
+                      {colOn("effort") && (
                       <td className="wbs-readonly-cell" style={wbsColStickyStyle("effort", true, rowLocked)}>
                         {isParent ? (
                           <span style={{ fontSize: 11.5, color: "var(--muted)" }} title="Not applicable -- a parent task's own effort is already represented by its sub-tasks' own Effort/points, so it doesn't carry a separate value.">
@@ -8146,6 +8440,8 @@ export default function WbsPlanning() {
                           </span>
                         )}
                       </td>
+                      )}
+                      {colOn("changes") && (
                       <td className="wbs-readonly-cell" style={wbsColStickyStyle("changes", true, rowLocked)}>
                         {(() => {
                           // Sandra, 2026-07-29: "omit the notes column and
@@ -8171,17 +8467,30 @@ export default function WbsPlanning() {
                           );
                         })()}
                       </td>
+                      )}
                       {/* Phase 21: render order matches the reordered
                           header above -- Forecasted, Capacity-Based, Full. */}
-                      {renderModeCells(t, "manual", isParent)}
+                      {pickDateCells(renderModeCells(t, "manual", isParent), dateOn.slice(0, 3))}
                       {/* Capacity-Based column removed 2026-08-26 */}
-                      {renderModeCells(t, "full_capacity", isParent)}
+                      {pickDateCells(renderModeCells(t, "full_capacity", isParent), dateOn.slice(3))}
                     </tr>
                   );
                 })}
-                {canEditWbs && canAddTasks && (
+                {wbsFiltersActive && (
                   <tr>
-                    <td colSpan={17} className="add-row-cell">
+                    <td colSpan={WBS_TOTAL_COLS} style={{ padding: "9px 12px", fontSize: 11.5, color: "var(--muted)", background: "#fbfdff" }}>
+                      <span style={{ position: "sticky", left: 12 }}>
+                        {wbsShownItems.some((x) => x.kind === "task") ? "Showing filtered tasks." : "No tasks match these filters."} Clear filters to reorder or add tasks.{" "}
+                        <button type="button" onClick={clearWbsFilters} style={{ border: "none", background: "transparent", color: "var(--accent)", fontWeight: 600, cursor: "pointer", padding: 0, fontSize: 11.5, width: "auto" }}>
+                          Clear filters
+                        </button>
+                      </span>
+                    </td>
+                  </tr>
+                )}
+                {canEditWbs && canAddTasks && !wbsFiltersActive && (
+                  <tr>
+                    <td colSpan={WBS_TOTAL_COLS} className="add-row-cell">
                       <div className="add-row-trigger" onClick={addTopLevelTask}>
                         <Plus size={12} />
                         New task
@@ -8191,7 +8500,7 @@ export default function WbsPlanning() {
                 )}
                 {canEditWbs && !canAddTasks && (
                   <tr>
-                    <td colSpan={17} style={{ padding: "8px 12px", fontSize: 11.5, color: "var(--muted)" }}>
+                    <td colSpan={WBS_TOTAL_COLS} style={{ padding: "8px 12px", fontSize: 11.5, color: "var(--muted)" }}>
                       Only the project owner or a Full Access user can add tasks to this project.
                     </td>
                   </tr>
@@ -8233,6 +8542,55 @@ export default function WbsPlanning() {
             </>
           )}
 
+          </div>
+          {wbsView === "timeline" && (
+            <div className="card" style={{ padding: "12px 14px", marginBottom: 4, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Timeline</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Same schedule as the WBS. Change dates in the WBS tab.</div>
+              {isLifecycle && (
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 10.5, color: "var(--muted)" }}>
+                  {lifecyclePhases
+                    .filter((ph) => includedMilestones.some((m) => m.phase_key === ph.key))
+                    .map((ph) => (
+                      <span key={ph.key} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ width: 10, height: 6, borderRadius: 2, background: (PHASE_COLORS[ph.key] ?? PHASE_COLORS.analysis).fg }} />
+                        {ph.label}
+                      </span>
+                    ))}
+                </div>
+              )}
+              <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+                <span className="wbs-seg-label">Show</span>
+                {SCENARIO_ORDER.map((key) => {
+                  const on = visibleScenarios.has(key);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`wbs-chip${on ? " on" : ""}`}
+                      style={on ? { borderColor: SCENARIO_COLOR[key] } : undefined}
+                      onClick={() =>
+                        setVisibleScenarios((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(key)) next.delete(key);
+                          else next.add(key);
+                          return next;
+                        })
+                      }
+                    >
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: on ? SCENARIO_COLOR[key] : "#cbd5e1" }} />
+                      {SCENARIO_LABEL[key]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {wbsView === "timeline" && orderedTasks.length === 0 && (
+            <div className="card" style={{ padding: "16px 18px", marginTop: 12, fontSize: 11.5, color: "var(--muted)" }}>
+              No schedule yet. Add tasks with a start date and estimated hours in the WBS tab.
+            </div>
+          )}
           {/* Timeline (Gantt) -- all 3 scenarios stacked (2026-07-28:
               previously just whichever mode was toggled active; Sandra
               asked for all side by side since the scoping table above
@@ -8245,7 +8603,7 @@ export default function WbsPlanning() {
               to see... scenarios and gantt will only show forecasted
               ones." Order comes for free from MODES' own Phase 21
               reorder (Forecasted, Capacity-Based, Full). */}
-          {MODES.filter((mode) => visibleScenarios.has(MODE_TO_SCENARIO[mode])).map((mode) => {
+          {wbsView === "timeline" && MODES.filter((mode) => visibleScenarios.has(MODE_TO_SCENARIO[mode])).map((mode) => {
             const { startDate: ganttStartDate, days: ganttDays, widthPx: ganttWidthPx } = ganttMetricsFor(chainByMode[mode]);
             return (
               <div key={mode} className="card" style={{ padding: 14, marginTop: 12, display: orderedTasks.length === 0 ? "none" : undefined }}>
@@ -8435,7 +8793,7 @@ export default function WbsPlanning() {
           -- these are end-of-project reflection fields, filled in once
           work is basically done, so they read better as the last thing on
           the page rather than competing with Name/Owner/Start date up top. */}
-      {(closureFormOpen || !!pendingClosure || project.wbs_status === "closed") && (
+      {wbsView === "wbs" && (closureFormOpen || !!pendingClosure || project.wbs_status === "closed") && (
         <section id="project-closure-section" className="card" style={{ padding: 14, marginTop: 12, marginBottom: 12, borderColor: pendingClosure ? "var(--warning-border, #fed7aa)" : "var(--border)" }}>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
             <div>
