@@ -6661,8 +6661,7 @@ export default function WbsPlanning() {
           alongside the main content (not a full-width toggle panel like
           before), matching her reference mockup. Main content is the
           flex:1 left column; the rail is a fixed-width sibling. */}
-          <div style={{ display: wbsView === "timeline" ? "none" : undefined }}>
-          <section className="card" style={{ padding: 16, marginBottom: 14 }}>
+          <section className="card" style={{ padding: 16, marginBottom: 14, display: wbsView === "timeline" ? "none" : undefined }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
               <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800, flexShrink: 0 }}>1</span>
               <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Project Information</div>
@@ -6909,13 +6908,14 @@ export default function WbsPlanning() {
             </div>
           </section>
 
-          {project.is_unsaved && (
+          {wbsView === "wbs" && project.is_unsaved && (
             <div style={{ margin: "-2px 2px 12px", fontSize: 11.5, color: "var(--muted)" }}>
               WBS, resource planning, timeline and forecast sections will appear after Project Information is saved.
             </div>
           )}
 
           <div style={{ display: project.is_unsaved ? "none" : "contents" }}>
+          <div style={{ display: wbsView === "timeline" ? "none" : undefined }}>
           {project.wbs_status !== "closed" && (
             <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", margin: "-2px 2px 12px" }}>
               <label style={{ display: "inline-flex", alignItems: "center", gap: 9, fontSize: 11.5, fontWeight: 600, color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}>
