@@ -594,7 +594,7 @@ function taskSystemView(
   scope: NonNullable<TableView["taskScope"]>,
   group: "my" | "organization",
   visible: Set<string>,
-  opts: { groupBy?: string | null; viewType?: TableView["viewType"]; sortKey?: string; isDefault?: boolean } = {}
+  opts: { groupBy?: string | null; viewType?: TableView["viewType"]; sortKey?: string; isDefault?: boolean; filters?: Partial<TableView>; sorts?: TableView["sorts"] } = {}
 ): TableView {
   return {
     id,
@@ -604,6 +604,7 @@ function taskSystemView(
     systemGroup: group,
     isDefaultView: !!opts.isDefault,
     ...scopeToTaskFilters(scope),
+    ...(opts.filters ?? {}),
     columnOrder: TASK_SYSTEM_COLUMN_ORDER,
     hiddenColumns: TASK_SYSTEM_COLUMN_ORDER.filter((key) => !visible.has(key)),
     columnWidths: {},
@@ -612,15 +613,28 @@ function taskSystemView(
     hideEmptyGroups: true,
     color: "neutral",
     showCount: false,
-    sorts: [{ key: opts.sortKey ?? "current_due_date", direction: "asc" }],
+    sorts: opts.sorts ?? [{ key: opts.sortKey ?? "current_due_date", direction: "asc" }],
   };
 }
+// Defaults retired on 2026-10-20 (see useTableViews installSystemViews): a
+// saved value still equal to one of these was never customized.
+const TASK_SYSTEM_RETIRED_DEFAULTS: Record<string, Partial<Record<keyof TableView, unknown[]>>> = {
+  system_tasks_owner_open: { groupBy: ["assignee"], sorts: [[{ key: "current_due_date", direction: "asc" }]] },
+};
+
 const TASK_SYSTEM_VIEWS: TableView[] = [
   taskSystemView("system_tasks_my_open", "My Open Tasks", "my_open", "my", TASK_MY_VISIBLE, { groupBy: "due_window", isDefault: true }),
   taskSystemView("system_tasks_my_by_project", "My Tasks by Project", "my_open", "my", TASK_MY_VISIBLE, { groupBy: "project" }),
   taskSystemView("system_tasks_my_calendar", "My Task Calendar", "my_open", "my", TASK_MY_VISIBLE, { viewType: "calendar" }),
   taskSystemView("system_tasks_my_done", "My Completed Tasks", "my_done", "my", TASK_DONE_VISIBLE, { groupBy: "validation" }),
-  taskSystemView("system_tasks_owner_open", "Tasks in My Projects", "owner_open", "my", TASK_TEAM_VISIBLE, { groupBy: "assignee" }),
+  // 2026-10-20 (Sandra): every task, any status, in projects I own that are
+  // not officially closed (Closed / Cancelled left out), grouped by project
+  // and in WBS order (parent tasks with their sub-tasks, WBS sequence) -- no sort.
+  taskSystemView("system_tasks_owner_open", "Tasks in My Projects", "owner_open", "my", TASK_TEAM_VISIBLE, {
+    groupBy: "project",
+    filters: { filterStatuses: [], filterFlags: ["project_open"] },
+    sorts: [],
+  }),
   taskSystemView("system_tasks_owner_at_risk", "At-Risk Tasks in My Projects", "owner_at_risk", "my", TASK_TEAM_VISIBLE, { groupBy: "project" }),
   taskSystemView("system_tasks_org_open", "All Open Tasks", "org_open", "organization", TASK_TEAM_VISIBLE, { groupBy: "assignee" }),
   taskSystemView("system_tasks_org_all", "All Tasks", "org_all", "organization", TASK_TEAM_VISIBLE, { groupBy: "project", sortKey: "task_number" }),
@@ -5723,7 +5737,7 @@ export default function Projects() {
     const allowed = TASK_SYSTEM_VIEWS.filter((v) => navAccess.views.has(v.id));
     const list = allowed.length ? allowed : TASK_SYSTEM_VIEWS.filter((v) => v.id === "system_tasks_my_open");
     const def = list.find((v) => v.id === "system_tasks_my_open") ?? list[0];
-    taskViews.installSystemViews(list, def.id, migrateTaskScope);
+    taskViews.installSystemViews(list, def.id, migrateTaskScope, TASK_SYSTEM_RETIRED_DEFAULTS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskViews.loaded, navAccess.loaded, navAccess.views]);
 
@@ -5894,6 +5908,10 @@ export default function Projects() {
       }
       const flags = andList(view.filterFlags, legacy.filterFlags);
       if (flags.includes("at_risk")) out = out.filter(atRisk);
+      if (flags.includes("project_open")) {
+        const openPids = new Set(projects.filter((p) => { const st = projectStageOf(p); return st !== "Closed" && st !== "Cancelled"; }).map((p) => p.id));
+        out = out.filter((t) => openPids.has(t.project_id));
+      }
       const lp = legacy.filterPersonIds ?? [];
       if (lp.length > 0) out = out.filter((t) => lp.some((id) => (id === "me" ? t.assignee_id === me?.id : t.assignee_id === id)));
       const ls = legacy.filterStatuses ?? [];
@@ -6717,7 +6735,10 @@ export default function Projects() {
                 {
                   key: "attention",
                   label: "Attention",
-                  options: [{ value: "at_risk", label: "At risk (overdue, due soon or unassigned)" }],
+                  options: [
+                    { value: "at_risk", label: "At risk (overdue, due soon or unassigned)" },
+                    { value: "project_open", label: "Project not closed (excl. Closed & Cancelled)" },
+                  ],
                   selected: taskActiveView.filterFlags ?? [],
                   onChange: (next) => updateTaskView({ filterFlags: next as TableView["filterFlags"] }),
                 },
@@ -6777,6 +6798,7 @@ export default function Projects() {
               ? [`Project owner: ${(taskActiveView.filterProjectOwnerIds ?? []).map((id) => (id === "me" ? "Me" : people.find((p) => p.id === id)?.name ?? "Unknown")).join(", ")}`]
               : []),
             ...((taskActiveView.filterFlags ?? []).includes("at_risk") ? ["At risk"] : []),
+            ...((taskActiveView.filterFlags ?? []).includes("project_open") ? ["Project not closed"] : []),
           ]}
           onClearFilter={() => updateTaskView({ filterPersonIds: [], filterStatuses: [], filterProjectOwnerIds: [], filterFlags: [] })}
           containerRef={setTaskPillsRowEl}
