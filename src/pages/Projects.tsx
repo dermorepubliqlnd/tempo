@@ -397,13 +397,16 @@ const PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "pha
 // (WBS Status), delivery (Status/Health/Phase/Due/Progress), effort
 // (Scoped/Spent/Variance) and schedule slippage (Days Extended). Owner
 // column hidden in "I own" views (it's always you); Created dropped.
-// 2026-10-20 (Sandra): Priority sits right before the project name, same as
-// the weekly report's Active Projects slides.
-const PROJECT_SYSTEM_LEAD = ["project_number", "priority", "name", "owner", "status", "health", "phase", "end_date", "committed_slip", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
+// 2026-10-20 (Sandra, v2): ID, Project, Owner, Priority, Health, Stage, Phase,
+// Actual Progress, Due, vs Committed, My Next Due, My Open Tasks, My Hours.
+const PROJECT_SYSTEM_LEAD = ["project_number", "name", "owner", "priority", "health", "status", "phase", "actual_progress", "end_date", "committed_slip", "my_next_due", "my_open_tasks", "my_hours", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
 const PROJECT_SYSTEM_COLUMN_ORDER = [...PROJECT_SYSTEM_LEAD, ...PROJECT_COLUMN_ORDER.filter((k) => !PROJECT_SYSTEM_LEAD.includes(k))];
 // Column order used before 2026-10-20 -- a saved order still equal to it was never customized.
 const PROJECT_SYSTEM_LEAD_PRE_1020 = ["project_number", "name", "owner", "status", "health", "phase", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
 const PROJECT_SYSTEM_COLUMN_ORDER_PRE_1020 = [...PROJECT_SYSTEM_LEAD_PRE_1020, ...PROJECT_COLUMN_ORDER.filter((k) => !PROJECT_SYSTEM_LEAD_PRE_1020.includes(k))];
+// Interim order live briefly on 2026-10-20 (Priority before Project).
+const PROJECT_SYSTEM_LEAD_1020A = ["project_number", "priority", "name", "owner", "status", "health", "phase", "end_date", "committed_slip", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
+const PROJECT_SYSTEM_COLUMN_ORDER_1020A = [...PROJECT_SYSTEM_LEAD_1020A, ...PROJECT_COLUMN_ORDER.filter((k) => !PROJECT_SYSTEM_LEAD_1020A.includes(k))];
 const PROJECT_OWNER_VISIBLE = new Set(["project_number", "name", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "committed_slip"]);
 // 2026-10-04 (Sandra): portfolio lens = "what am I involved in and what do
 // I owe on each" -- grouped by My Role, soonest Due first, with the
@@ -535,7 +538,7 @@ const PROJECT_SYSTEM_RETIRED_DEFAULTS: Record<string, Partial<Record<keyof Table
   ["system_my_active_projects", "system_my_active_portfolio", "system_all_projects_i_own", "system_my_full_portfolio", "system_active_project_portfolio", "system_all_projects"].map((id) => [
     id,
     {
-      columnOrder: [PROJECT_SYSTEM_COLUMN_ORDER_PRE_1020],
+      columnOrder: [PROJECT_SYSTEM_COLUMN_ORDER_PRE_1020, PROJECT_SYSTEM_COLUMN_ORDER_1020A],
       ...(id === "system_my_active_portfolio" || id === "system_my_full_portfolio" ? { sorts: [[{ key: "end_date", direction: "asc" }]] } : {}),
     },
   ])
