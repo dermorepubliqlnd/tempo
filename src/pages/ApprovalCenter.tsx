@@ -140,6 +140,8 @@ interface CorrectionRequestRowLite {
   proposed_started_at: string;
   proposed_ended_at: string;
   proposed_activity_type_id: string | null;
+  /** phase202: move this non-project entry to a project task (absent before phase202 is applied). */
+  proposed_task_id?: string | null;
   reason: string;
   created_at: string;
   entry: {
@@ -554,6 +556,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
   const [closureRequests, setClosureRequests] = useState<ClosureRow[]>([]);
   const [taskCompletions, setTaskCompletions] = useState<TaskCompletionRow[]>([]);
   const [correctionRequests, setCorrectionRequests] = useState<CorrectionRequestRowLite[]>([]);
+  const [moveTargets, setMoveTargets] = useState<Map<string, string>>(new Map());
   // 2026-09-22 (Sandra: Scoped vs Logged Hours column) -- a lightweight
   // fetch of just the fields ownHoursFor needs, same
   // confirmed/approved-only scope Spent Hrs itself uses on Projects.tsx.
@@ -681,7 +684,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
       supabase
         .from("time_entry_correction_requests")
         .select(
-          `id, entry_id, requested_by, current_started_at, current_ended_at, proposed_started_at, proposed_ended_at, proposed_activity_type_id, reason, created_at,
+          `*,
            entry:time_entries ( id, entry_number, task_id, activity_type_id, non_project_entry_number,
              task:tasks ( id, name, task_number, project:projects ( id, name, owner_id ) ),
              activity_type:non_project_activity_types ( id, name ) ),
@@ -690,7 +693,15 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
         .eq("status", "pending")
         .order("created_at", { ascending: false }),
     ]);
-    setCorrectionRequests((corrData as unknown as CorrectionRequestRowLite[]) ?? []);
+    const corrRows = (corrData as unknown as CorrectionRequestRowLite[]) ?? [];
+    setCorrectionRequests(corrRows);
+    // phase202: target task of "move to project task" requests.
+    const moveIds = Array.from(new Set(corrRows.map((r) => r.proposed_task_id).filter((x): x is string => !!x)));
+    if (moveIds.length) {
+      const { data: mt } = await supabase.from("tasks").select("id,task_number,name,project:projects ( name )").in("id", moveIds);
+      setMoveTargets(new Map(((mt as unknown as { id: string; task_number: number | null; name: string; project: { name: string } | null }[] | null) ?? [])
+        .map((t) => [t.id, `T-${String(t.task_number ?? 0).padStart(4, "0")} ${t.name} · ${t.project?.name ?? "project"}`])));
+    }
     setPeople((peopleData as PersonLite[]) ?? []);
     setProjects((projectData as ProjectLite[]) ?? []);
     // Same start_date-request filter ExtensionRequests.tsx applies -- that
@@ -1315,9 +1326,11 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
         personId: row.requested_by,
         projectId: row.entry?.task?.project?.id ?? null,
         searchIds: [timeLogId(row.entry?.entry_number ?? null), row.entry?.task?.task_number ? `T-${String(row.entry.task.task_number).padStart(4, "0")}` : "", row.entry?.non_project_entry_number ? `NP-${String(row.entry.non_project_entry_number).padStart(4, "0")}` : ""].join(" "),
-        typeLabel: "Time Correction",
+        typeLabel: row.proposed_task_id ? "Time Correction · Move to project" : "Time Correction",
         subject: isNonProject ? row.entry?.activity_type?.name ?? "Non-project" : row.entry?.task?.name ?? "Untitled task",
-        context: isNonProject ? "Non-project" : row.entry?.task?.project?.name ?? "—",
+        context: row.proposed_task_id
+          ? `Non-project → move to ${moveTargets.get(row.proposed_task_id) ?? "a project task"}`
+          : isNonProject ? "Non-project" : row.entry?.task?.project?.name ?? "—",
         requestedByName: row.requester?.name ?? personName(row.requested_by),
         requestedAt: row.created_at,
         reasonCategory: null,
@@ -1454,7 +1467,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
     });
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extensions, timeEntries, correctionRequests, baselineRequests, closureRequests, taskCompletions, allTimeEntries, parentTaskIds, chainPeople, people, projects, me, routing, overrideReasons, rights, autoOn, decidingKey, holidaySet]);
+  }, [extensions, timeEntries, correctionRequests, moveTargets, baselineRequests, closureRequests, taskCompletions, allTimeEntries, parentTaskIds, chainPeople, people, projects, me, routing, overrideReasons, rights, autoOn, decidingKey, holidaySet]);
 
   // phase130: cards count only the active tab's rows.
   const inTab = (r: Row) => (tab === "mine" ? r.route === "mine" || r.route === "acting" : r.route === "team");

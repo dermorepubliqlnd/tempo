@@ -7,7 +7,7 @@ import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
 import { friendlyError } from "../lib/prompts";
 import { formatDate } from "../lib/formatDate";
-import { FOLLOW_UP_REASON_LABEL, type FollowUpReason, timeLogId, formatDuration, correctTimeEntry, requestTimeEntryCorrection, cancelTimeEntryCorrection, editPendingManualTimeEntry } from "../lib/timeTracking";
+import { FOLLOW_UP_REASON_LABEL, type FollowUpReason, timeLogId, formatDuration, correctTimeEntry, correctTimeEntryToTask, requestTimeEntryCorrection, cancelTimeEntryCorrection, editPendingManualTimeEntry, loadMoveTargetTasks, taskIdLabel, type MoveTargetTask } from "../lib/timeTracking";
 import { archiveItem, ARCHIVE_MOVE_NOTE } from "../lib/archive";
 import { loggedHoursTier } from "../lib/loggedHoursBands";
 import { expectedHoursForDay } from "../lib/dailyAllocation";
@@ -149,6 +149,8 @@ interface CorrectionRequestRow {
   proposed_started_at: string;
   proposed_ended_at: string;
   proposed_activity_type_id: string | null;
+  /** phase202: move a non-project entry to this project task (absent before phase202 is applied). */
+  proposed_task_id?: string | null;
   reason: string;
   status: "pending" | "approved" | "rejected" | "cancelled";
   decided_by: string | null;
@@ -553,6 +555,8 @@ function EditForm({
 // Both edit date + start + end (duration is derived); notes/reason are
 // required. Reason Category (project) / Activity Type (non-project) stay
 // correctable in "correct" mode, same branch as before (phase63).
+type CorrectionValues = { date: string; startTime: string; endTime: string; notes: string; reasonCategory: string; activityTypeId: string; moveToTask?: boolean; taskId?: string; taskLabel?: string };
+
 function CorrectionForm({
   row,
   mode,
@@ -565,7 +569,7 @@ function CorrectionForm({
   mode: "correct" | "request";
   reasonOptions: TimeEntryReasonRow[];
   nonProjectActivityTypes: NonProjectActivityTypeRow[];
-  onSubmit: (v: { date: string; startTime: string; endTime: string; notes: string; reasonCategory: string; activityTypeId: string }) => void;
+  onSubmit: (v: CorrectionValues) => void;
   onCancel: () => void;
 }) {
   const start = new Date(row.started_at);
@@ -577,6 +581,18 @@ function CorrectionForm({
   const [reasonCategory, setReasonCategory] = useState(row.reason_category ?? "");
   const [activityTypeId, setActivityTypeId] = useState(row.activity_type_id ?? "");
   const isNonProject = Boolean(row.activity_type_id);
+  // phase202 (Sandra 2026-10-20): non-project time that was really project
+  // work can move to one of the person's project tasks.
+  const [moveToTask, setMoveToTask] = useState(false);
+  const [taskId, setTaskId] = useState("");
+  const [taskOptions, setTaskOptions] = useState<MoveTargetTask[] | null>(null);
+  useEffect(() => {
+    if (!moveToTask || taskOptions) return;
+    let gone = false;
+    loadMoveTargetTasks(row.person_id).then((t) => { if (!gone) setTaskOptions(t); });
+    return () => { gone = true; };
+  }, [moveToTask, taskOptions, row.person_id]);
+  const taskGroups = (taskOptions ?? []).reduce<Map<string, MoveTargetTask[]>>((m, t) => { m.set(t.project_name, [...(m.get(t.project_name) ?? []), t]); return m; }, new Map());
   const inputStyle: CSSProperties = { fontSize: 11.5, padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" };
   const previewStart = new Date(`${date}T${startTime}`);
   const previewEnd = new Date(`${date}T${endTime}`);
@@ -596,11 +612,30 @@ function CorrectionForm({
           {previewMinutes !== null && previewMinutes > 0 ? `= ${formatDuration(previewMinutes)}` : "—"}
         </span>
         {isNonProject ? (
-          <select value={activityTypeId} onChange={(e) => setActivityTypeId(e.target.value)} style={{ ...inputStyle, width: 150 }}>
-            {nonProjectActivityTypes.filter((a) => a.is_active || a.id === activityTypeId).map((a) => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
+          <>
+            <select value={moveToTask ? "task" : "np"} onChange={(e) => setMoveToTask(e.target.value === "task")} style={{ ...inputStyle, width: 170 }} title="Keep this as non-project time, or move it to a project task">
+              <option value="np">Keep as non-project</option>
+              <option value="task">Move to project task</option>
+            </select>
+            {moveToTask ? (
+              <select value={taskId} onChange={(e) => setTaskId(e.target.value)} style={{ ...inputStyle, width: 280 }} disabled={!taskOptions}>
+                <option value="">{!taskOptions ? "Loading tasks…" : taskOptions.length ? "Pick the project task" : "No project tasks assigned"}</option>
+                {Array.from(taskGroups.entries()).map(([proj, list]) => (
+                  <optgroup key={proj} label={proj}>
+                    {list.map((t) => (
+                      <option key={t.id} value={t.id}>{`${taskIdLabel(t.task_number)} · ${t.name}${t.status === "Done" ? " (Done: follow-up time)" : ""}`}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            ) : (
+              <select value={activityTypeId} onChange={(e) => setActivityTypeId(e.target.value)} style={{ ...inputStyle, width: 150 }}>
+                {nonProjectActivityTypes.filter((a) => a.is_active || a.id === activityTypeId).map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+            )}
+          </>
         ) : mode === "correct" ? (
           <select value={reasonCategory} onChange={(e) => setReasonCategory(e.target.value)} style={{ ...inputStyle, width: 150 }}>
             <option value="">No reason</option>
@@ -617,7 +652,7 @@ function CorrectionForm({
           style={{ ...inputStyle, flex: "1 1 200px" }}
         />
         <button
-          onClick={() => onSubmit({ date, startTime, endTime, notes, reasonCategory, activityTypeId })}
+          onClick={() => onSubmit({ date, startTime, endTime, notes, reasonCategory, activityTypeId, moveToTask: isNonProject && moveToTask, taskId, taskLabel: (() => { const t = (taskOptions ?? []).find((x) => x.id === taskId); return t ? `${taskIdLabel(t.task_number)} ${t.name} (${t.project_name})` : ""; })() })}
           style={{ fontSize: 11.5, fontWeight: 600, color: "#fff", background: "var(--accent)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap" }}
         >
           {mode === "correct" ? "Save correction" : "Submit request"}
@@ -653,6 +688,7 @@ export default function TimeTracking() {
   // 2026-09-23 (phase102, phase 2): owner-initiated correction requests.
   const [requestingId, setRequestingId] = useState<string | null>(null);
   const [correctionRequests, setCorrectionRequests] = useState<CorrectionRequestRow[]>([]);
+  const [moveTaskLabels, setMoveTaskLabels] = useState<Map<string, string>>(new Map());
   const [archivingId, setArchivingId] = useState<string | null>(null);
   // 2026-09-22 (Sandra: "let's allow the assignee or requestor to delete
   // or make changes with the manual time entry log" while it's still
@@ -829,7 +865,14 @@ export default function TimeTracking() {
       supabase.from("holidays").select("date,name"),
       supabase.from("time_entry_correction_requests").select("*").order("created_at", { ascending: false }),
     ]);
-    setCorrectionRequests((correctionRequestData as CorrectionRequestRow[] | null) ?? []);
+    const reqs = (correctionRequestData as CorrectionRequestRow[] | null) ?? [];
+    setCorrectionRequests(reqs);
+    // phase202: labels for "move to project task" requests.
+    const moveIds = Array.from(new Set(reqs.map((r) => r.proposed_task_id).filter((x): x is string => !!x)));
+    if (moveIds.length) {
+      const { data: mt } = await supabase.from("tasks").select("id,task_number,name").in("id", moveIds);
+      setMoveTaskLabels(new Map(((mt as { id: string; task_number: number | null; name: string }[] | null) ?? []).map((t) => [t.id, `${taskIdLabel(t.task_number)} ${t.name}`])));
+    }
     setEntries(((entryData as unknown as EntryRow[]) ?? []));
     setPeople((peopleData as PersonLite[]) ?? []);
     setMyAvailability((availabilityData as { date: string; status: "off" | "half_day" }[] | null) ?? []);
@@ -924,7 +967,11 @@ export default function TimeTracking() {
   // them to fit (only finalized ones, only at an edge -- see
   // untrimmableReason). Anything that can't be trimmed blocks with the
   // usual overlap message.
-  async function submitCorrection(row: EntryRow, v: { date: string; startTime: string; endTime: string; notes: string; reasonCategory: string; activityTypeId: string }) {
+  async function submitCorrection(row: EntryRow, v: CorrectionValues) {
+    if (v.moveToTask && !v.taskId) {
+      await alert({ title: "Pick a task", message: "Choose the project task this time was really for." });
+      return;
+    }
     const win = await validateCorrectionWindow(v);
     if (!win) return;
     const { startIso, endIso } = win;
@@ -940,17 +987,22 @@ export default function TimeTracking() {
     const message = conflicts.length > 0
       ? `Changes ${wasRange} to ${newRange}. ${conflicts.length === 1 ? "The overlapping entry below is" : "The overlapping entries below are"} trimmed to fit; the original stays on record.`
       : `Changes ${wasRange} to ${newRange}. The original stays on record.`;
+    const minuteOf = (x: string) => Math.floor(new Date(x).getTime() / 60000);
+    const timeChanged = minuteOf(startIso) !== minuteOf(row.started_at) || !row.ended_at || minuteOf(endIso) !== minuteOf(row.ended_at);
+    const moveMsg = v.moveToTask ? `Moves this non-project entry to **${v.taskLabel}**. Its hours count on that project from now on; the move stays on record.${timeChanged ? ` ${message}` : ""}` : message;
     const ok = await confirm({
-      title: conflicts.length > 0 ? "Correct and trim overlaps?" : "Correct this time entry?",
-      message,
+      title: v.moveToTask ? (conflicts.length > 0 ? "Move, correct and trim overlaps?" : "Move to project task?") : conflicts.length > 0 ? "Correct and trim overlaps?" : "Correct this time entry?",
+      message: moveMsg,
       items: conflicts.length > 0
         ? conflicts.map((c) => `**${overlapTaskIdLabel(c)}** ${overlapTitle(c)}: ${formatClockRange(c.started_at, c.ended_at)} → ${trimmedRangeText(c, startIso, endIso)}`)
         : undefined,
-      confirmLabel: conflicts.length > 0 ? "Trim and correct" : "Correct entry",
+      confirmLabel: v.moveToTask ? "Move entry" : conflicts.length > 0 ? "Trim and correct" : "Correct entry",
     });
     if (!ok) return;
     const isNonProject = Boolean(row.activity_type_id);
-    const res = await correctTimeEntry(row.id, startIso, endIso, v.notes.trim(), {
+    const res = v.moveToTask && v.taskId
+      ? await correctTimeEntryToTask(row.id, v.taskId, timeChanged ? startIso : row.started_at, timeChanged ? endIso : (row.ended_at ?? endIso), v.notes.trim(), conflicts.map((c) => c.id))
+      : await correctTimeEntry(row.id, startIso, endIso, v.notes.trim(), {
       reasonCategory: isNonProject ? undefined : v.reasonCategory || undefined,
       activityTypeId: isNonProject ? v.activityTypeId || undefined : undefined,
       trimEntryIds: conflicts.map((c) => c.id),
@@ -967,7 +1019,11 @@ export default function TimeTracking() {
   // trimming here -- an overlap means the request is blocked and the
   // person picks a free window (or asks for the other entry to be fixed
   // too). Approval re-validates server-side.
-  async function submitCorrectionRequest(row: EntryRow, v: { date: string; startTime: string; endTime: string; notes: string; reasonCategory: string; activityTypeId: string }) {
+  async function submitCorrectionRequest(row: EntryRow, v: CorrectionValues) {
+    if (v.moveToTask && !v.taskId) {
+      await alert({ title: "Pick a task", message: "Choose the project task this time was really for." });
+      return;
+    }
     const win = await validateCorrectionWindow(v);
     if (!win) return;
     const overlap = findOverlappingEntry(entries, row.person_id, win.startIso, win.endIso, row.id);
@@ -976,18 +1032,23 @@ export default function TimeTracking() {
       return;
     }
     const isNonProject = Boolean(row.activity_type_id);
+    const minuteOf = (x: string) => Math.floor(new Date(x).getTime() / 60000);
+    const sameTime = !!row.ended_at && minuteOf(win.startIso) === minuteOf(row.started_at) && minuteOf(win.endIso) === minuteOf(row.ended_at);
     const ok = await confirm({
-      title: "Request a time correction?",
-      message: `Changes ${formatClockRange(row.started_at, row.ended_at)} (${formatDuration(row.duration_minutes)}) to **${formatClockRange(win.startIso, win.endIso)}**. Your supervisor reviews it in Approval Center.`,
+      title: v.moveToTask ? "Request to move this time?" : "Request a time correction?",
+      message: v.moveToTask
+        ? `Moves ${formatClockRange(row.started_at, row.ended_at)} (${formatDuration(row.duration_minutes)}) from non-project to **${v.taskLabel}**${sameTime ? "" : `, as **${formatClockRange(win.startIso, win.endIso)}**`}. Your supervisor reviews it in Approval Center.`
+        : `Changes ${formatClockRange(row.started_at, row.ended_at)} (${formatDuration(row.duration_minutes)}) to **${formatClockRange(win.startIso, win.endIso)}**. Your supervisor reviews it in Approval Center.`,
       confirmLabel: "Send request",
     });
     if (!ok) return;
     const res = await requestTimeEntryCorrection(
       row.id,
-      win.startIso,
-      win.endIso,
+      sameTime ? row.started_at : win.startIso,
+      sameTime ? (row.ended_at as string) : win.endIso,
       v.notes.trim(),
-      isNonProject && v.activityTypeId && v.activityTypeId !== row.activity_type_id ? v.activityTypeId : undefined
+      !v.moveToTask && isNonProject && v.activityTypeId && v.activityTypeId !== row.activity_type_id ? v.activityTypeId : undefined,
+      v.moveToTask ? v.taskId : undefined
     );
     if (res.error) {
       await alert(friendlyError("send this request", res.error));
@@ -1610,6 +1671,7 @@ export default function TimeTracking() {
                         <div style={{ marginTop: 4 }}>
                           <span className="status-pill gold" style={{ fontSize: 9, padding: "1px 5px" }}>Correction requested</span>
                           <div style={{ fontSize: 9.5, color: "var(--muted)", marginTop: 3 }}>
+                            {pendingRequest.proposed_task_id ? <>Move to {moveTaskLabels.get(pendingRequest.proposed_task_id) ?? "a project task"} · </> : null}
                             Proposed {formatClockRange(pendingRequest.proposed_started_at, pendingRequest.proposed_ended_at)} — "{pendingRequest.reason}"
                             {pendingRequest.requested_by === me?.id && (
                               <>
