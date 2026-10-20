@@ -1076,7 +1076,7 @@ const CARD_MAX = 4;
 const TASK_CARD_DEFAULT = { primary: ["task_number", "project", "assignee", "current_due_date"], secondary: ["estimated_hours", "time_spent_hours", "due_date_ext"] };
 const PROJECT_CARD_DEFAULT = { primary: ["project_number", "owner", "end_date", "actual_progress"], secondary: ["estimated_hours", "time_spent_hours", "days_extended", "priority"] };
 const CARD_SHORT_LABELS: Record<string, string> = {
-  task_number: "ID", project_number: "ID", current_due_date: "Due", end_date: "Due", start_date: "Start",
+  task_number: "ID", project_number: "ID", current_due_date: "Due", end_date: "Project Due", start_date: "Start",
   estimated_hours: "Estimated", time_spent_hours: "Logged", due_date_ext: "Ext.", days_extended: "Extended",
   actual_progress: "Progress", hours_variance: "Var.", hours_variance_pct: "Var. %", time_log_status: "Logs",
   actual_completion_date: "Reported", validated_completion_date: "Confirmed", validated_by: "Validated by",
@@ -3673,7 +3673,7 @@ export default function Projects() {
       },
       {
         key: "end_date",
-        label: "Due",
+        label: "Project Due",
         defaultWidth: 110,
         maxWidth: 140,
         // Governance lockdown (Sandra, 2026-07-29): see start_date above --
@@ -3733,7 +3733,7 @@ export default function Projects() {
       },
       {
         key: "my_next_due",
-        label: "My Next Due",
+        label: "My Next Task Due",
         defaultWidth: 115,
         maxWidth: 150,
         render: (p) => {
@@ -4033,7 +4033,7 @@ export default function Projects() {
       boardGroupable: true,
     },
     { key: "start_date", label: "Start", getGroup: () => "", boardGroupable: false },
-    { key: "end_date", label: "Due", getGroup: () => "", boardGroupable: false },
+    { key: "end_date", label: "Project Due", getGroup: () => "", boardGroupable: false },
   ];
 
   // Computes Board's actual columns/getValue/drag-write-handler for
@@ -4181,9 +4181,9 @@ export default function Projects() {
     { key: "project_type", label: "Project Type", getValue: (p) => projectTypes.find((t) => t.id === p.project_type_id)?.name ?? "" },
     { key: "effort_level", label: "Complexity", getValue: (p) => PROJECT_EFFORT_LEVEL_OPTIONS.indexOf(p.effort_level ?? "") },
     { key: "start_date", label: "Start", getValue: (p) => (p.start_date ? new Date(p.start_date).getTime() : null) },
-    { key: "end_date", label: "Due", getValue: (p) => (p.end_date ? new Date(p.end_date).getTime() : null) },
+    { key: "end_date", label: "Project Due", getValue: (p) => (p.end_date ? new Date(p.end_date).getTime() : null) },
     { key: "my_open_tasks", label: "My Open Tasks", getValue: (p) => (myStatsByProject.get(p.id)?.hasTasks ? myStatsByProject.get(p.id)!.open : null) },
-    { key: "my_next_due", label: "My Next Due", getValue: (p) => { const d = myStatsByProject.get(p.id)?.nextDue; return d ? new Date(d).getTime() : null; } },
+    { key: "my_next_due", label: "My Next Task Due", getValue: (p) => { const d = myStatsByProject.get(p.id)?.nextDue; return d ? new Date(d).getTime() : null; } },
     { key: "my_hours", label: "My Hours", getValue: (p) => (myStatsByProject.get(p.id)?.hasTasks ? myStatsByProject.get(p.id)!.spent : null) },
     { key: "health", label: "Health", getValue: (p) => healthRank(healthOf(p, tasks, holidayDates).label) },
     { key: "actual_progress", label: "Actual Progress", getValue: (p) => actualProgress(p.id, tasks) ?? -1 },
