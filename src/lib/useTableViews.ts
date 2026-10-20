@@ -384,7 +384,13 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
     setViews((vs) => vs.map((v) => (v.id === id && !v.systemView ? { ...v, icon } : v)));
   }
 
-  function installSystemViews(systemViews: TableView[], defaultSystemViewId: string, migrate?: (v: TableView) => TableView) {
+  /**
+   * retiredDefaults (2026-10-20): per System View id, earlier DEFAULT values of
+   * personal keys (e.g. the old sort). A saved value that still equals a
+   * retired default was never customized, so the new default replaces it;
+   * real personal changes are kept.
+   */
+  function installSystemViews(systemViews: TableView[], defaultSystemViewId: string, migrate?: (v: TableView) => TableView, retiredDefaults?: Record<string, Partial<Record<keyof TableView, unknown[]>>>) {
     const normalizedSystemViews = systemViews.map((v) => normalizeTableView(tableKey, v));
     systemDefaultsRef.current = new Map(normalizedSystemViews.map((v) => [v.id, v]));
     setViews((vs) => {
@@ -406,14 +412,16 @@ export function useTableViews(tableKey: string, personId: string | undefined, de
         // (columns kept only if the set is unchanged).
         const sameCols = saved.columnOrder.length === sv.columnOrder.length && saved.columnOrder.every((k) => sv.columnOrder.includes(k));
         const carried: Partial<TableView> = {};
+        const retired = retiredDefaults?.[sv.id] ?? {};
+        const isRetired = (k: keyof TableView) => (retired[k] ?? []).some((old) => JSON.stringify(old) === JSON.stringify(saved[k]));
         for (const k of SYSTEM_VIEW_PERSONAL_KEYS) {
           if (k === "columnOrder") continue;
-          if (saved[k] !== undefined) (carried as Record<string, unknown>)[k] = saved[k];
+          if (saved[k] !== undefined && !isRetired(k)) (carried as Record<string, unknown>)[k] = saved[k];
         }
         return {
           ...sv,
           ...carried,
-          columnOrder: sameCols ? saved.columnOrder : sv.columnOrder,
+          columnOrder: sameCols && !isRetired("columnOrder") ? saved.columnOrder : sv.columnOrder,
           personalDefault: saved.personalDefault,
         };
       });

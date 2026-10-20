@@ -397,13 +397,21 @@ const PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "pha
 // (WBS Status), delivery (Status/Health/Phase/Due/Progress), effort
 // (Scoped/Spent/Variance) and schedule slippage (Days Extended). Owner
 // column hidden in "I own" views (it's always you); Created dropped.
-const PROJECT_SYSTEM_LEAD = ["project_number", "name", "owner", "status", "health", "phase", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
+// 2026-10-20 (Sandra): Priority sits right before the project name, same as
+// the weekly report's Active Projects slides.
+const PROJECT_SYSTEM_LEAD = ["project_number", "priority", "name", "owner", "status", "health", "phase", "end_date", "committed_slip", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
 const PROJECT_SYSTEM_COLUMN_ORDER = [...PROJECT_SYSTEM_LEAD, ...PROJECT_COLUMN_ORDER.filter((k) => !PROJECT_SYSTEM_LEAD.includes(k))];
+// Column order used before 2026-10-20 -- a saved order still equal to it was never customized.
+const PROJECT_SYSTEM_LEAD_PRE_1020 = ["project_number", "name", "owner", "status", "health", "phase", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
+const PROJECT_SYSTEM_COLUMN_ORDER_PRE_1020 = [...PROJECT_SYSTEM_LEAD_PRE_1020, ...PROJECT_COLUMN_ORDER.filter((k) => !PROJECT_SYSTEM_LEAD_PRE_1020.includes(k))];
 const PROJECT_OWNER_VISIBLE = new Set(["project_number", "name", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "committed_slip"]);
 // 2026-10-04 (Sandra): portfolio lens = "what am I involved in and what do
 // I owe on each" -- grouped by My Role, soonest Due first, with the
 // viewer's own open tasks / next due / hours instead of owner metrics.
-const PROJECT_ACTIVE_PORTFOLIO_VISIBLE = new Set(["project_number", "name", "owner", "status", "health", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours"]);
+// 2026-10-20 (Sandra): Priority shown by default; Phase and vs Committed added
+// so owners read health in context (where it is in production, how far the
+// Due date has moved since Start Project).
+const PROJECT_ACTIVE_PORTFOLIO_VISIBLE = new Set(["project_number", "priority", "name", "owner", "status", "health", "phase", "end_date", "committed_slip", "actual_progress", "my_open_tasks", "my_next_due", "my_hours"]);
 const PROJECT_FULL_PORTFOLIO_VISIBLE = new Set([...PROJECT_ACTIVE_PORTFOLIO_VISIBLE]);
 const PROJECT_ORG_VISIBLE = new Set([...PROJECT_OWNER_VISIBLE, "owner", "category", "planning_type", "project_type"]);
 
@@ -480,6 +488,13 @@ function migrateTaskScope(v: TableView): TableView {
   };
 }
 
+const PORTFOLIO_SORTS: TableView["sorts"] = [
+  { key: "priority", direction: "desc" },
+  { key: "health", direction: "asc" },
+  { key: "actual_progress", direction: "asc" },
+  { key: "end_date", direction: "asc" },
+];
+
 function projectSystemView(
   id: string,
   name: string,
@@ -504,12 +519,27 @@ function projectSystemView(
     hiddenGroups: [],
     color: "neutral",
     showCount: false,
+    // 2026-10-20 (Sandra): portfolio views follow the weekly report's sort --
+    // Priority (High first, not set last), Health (needs attention first),
+    // Actual Progress (furthest behind first), then Due (soonest first).
     sorts: scope === "my_active_portfolio" || scope === "my_full_portfolio"
-      ? [{ key: "end_date", direction: "asc" }]
+      ? PORTFOLIO_SORTS
       : [{ key: "project_number", direction: "asc" }],
     progressDisplay: "bar",
   };
 }
+
+// Defaults retired on 2026-10-20: a saved value still equal to one of these
+// was never customized, so the new default replaces it (useTableViews).
+const PROJECT_SYSTEM_RETIRED_DEFAULTS: Record<string, Partial<Record<keyof TableView, unknown[]>>> = Object.fromEntries(
+  ["system_my_active_projects", "system_my_active_portfolio", "system_all_projects_i_own", "system_my_full_portfolio", "system_active_project_portfolio", "system_all_projects"].map((id) => [
+    id,
+    {
+      columnOrder: [PROJECT_SYSTEM_COLUMN_ORDER_PRE_1020],
+      ...(id === "system_my_active_portfolio" || id === "system_my_full_portfolio" ? { sorts: [[{ key: "end_date", direction: "asc" }]] } : {}),
+    },
+  ])
+);
 
 const PROJECT_SYSTEM_VIEWS: TableView[] = [
   projectSystemView("system_my_active_projects", "Active Projects I Own", "my_active_owned", "my", PROJECT_OWNER_VISIBLE, true),
@@ -2932,7 +2962,7 @@ export default function Projects() {
     const allowed = PROJECT_SYSTEM_VIEWS.filter((v) => navAccess.views.has(v.id));
     const list = allowed.length ? allowed : PROJECT_SYSTEM_VIEWS.filter((v) => v.id === "system_my_active_portfolio");
     const def = list.find((v) => v.id === "system_my_active_portfolio") ?? list[0];
-    projectViews.installSystemViews(list, def.id, migrateProjectScope);
+    projectViews.installSystemViews(list, def.id, migrateProjectScope, PROJECT_SYSTEM_RETIRED_DEFAULTS);
     // installSystemViews is intentionally idempotent; PROJECT_SYSTEM_VIEWS is
     // module-level and stable so this only changes state when the saved set
     // actually differs.
