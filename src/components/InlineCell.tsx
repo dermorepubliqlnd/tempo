@@ -18,7 +18,17 @@ interface InlineTextProps extends BaseProps {
 
 export function InlineText({ value, onCommit, editable, bold, onEnter, dataNavId, emptyLabel = "—" }: InlineTextProps) {
   const [draft, setDraft] = useState(value);
-  if (!editable) return <span style={bold ? { fontWeight: 600, color: "var(--navy)" } : undefined}>{value || emptyLabel}</span>;
+  // 2026-10-21 (Sandra): read-only text cuts off with an ellipsis when the
+  // column is narrowed (full text on hover) instead of running under icons.
+  if (!editable)
+    return (
+      <span
+        title={value || undefined}
+        style={{ display: "inline-block", maxWidth: "100%", verticalAlign: "bottom", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...(bold ? { fontWeight: 600, color: "var(--navy)" } : {}) }}
+      >
+        {value || emptyLabel}
+      </span>
+    );
   return (
     <input
       className="inline-cell"
@@ -103,7 +113,10 @@ export function InlineSelect({ value, onCommit, options, editable, allowEmpty, e
     }
   }, [isEditing]);
 
-  if (!editable) return <>{renderReadOnly ? renderReadOnly(value) : value || emptyLabel}</>;
+  if (!editable)
+    return renderReadOnly ? <>{renderReadOnly(value)}</> : (
+      <span title={value || undefined} style={{ display: "inline-block", maxWidth: "100%", verticalAlign: "bottom", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value || emptyLabel}</span>
+    );
 
   if (!alwaysSelect && !isEditing) {
     return (
