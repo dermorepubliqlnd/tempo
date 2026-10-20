@@ -23,7 +23,8 @@ const SLIDES: { key: SlideKey; eyebrow: string; optional?: "drivers" | "training
   { key: "training", eyebrow: "Training delivery", optional: "training" },
   { key: "appendix", eyebrow: "Appendix", optional: "appendix" },
   // Sandra 2026-10-13: every active project with progress + target date, for the cross-department update.
-  { key: "activeList", eyebrow: "Appendix · Active projects", optional: "activeList" },
+  // 2026-10-20: no longer an appendix -- one slide per Project Type.
+  { key: "activeList", eyebrow: "Active projects · eyebrow (titles read Active Projects - <type>)", optional: "activeList" },
 ];
 
 export default function Reports() {

@@ -84,7 +84,7 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
         ? `${plural(d.training.thisWeek, "session")} scheduled this week`
         : "No training sessions logged last week",
       appendix: "Overall portfolio mix — all projects to date",
-      activeList: "Where every active project stands: progress and target completion",
+      activeList: "Project status",
     },
     cards: [
       { tag: "DELIVERY · LAST WEEK", head: `${plural(nDone, "project")} completed`, bullets: deliveryBul, color: B.calm },
@@ -97,31 +97,31 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
 }
 
 
-// ------------------------------------------------------------------ active project list pagination (2026-10-13)
-// Shared by the deck and the Reports page (slide count). One line = a group
-// header or a project row; a group that runs over a page repeats its header
-// with "(cont.)" on the next one.
+// ------------------------------------------------------------------ active project list pagination (2026-10-13, 2026-10-20)
+// Shared by the deck and the Reports page (slide count). Sandra 2026-10-20:
+// each Project Type gets its own slide(s) -- a type never shares a slide with
+// another. One line = the group header or a project row; when a type runs
+// over, it continues on a "(cont.)" slide that repeats the header.
+// Every slide carries the KPI band + health legend, so all hold the same
+// number of lines (rows at 10pt).
 export const ACTIVE_LINES_PER_PAGE = 15;
 export type ActiveLine =
   | { kind: "group"; label: string; operational: boolean; count: number; cont: boolean }
   | { kind: "row"; row: WeeklyReportData["activeList"]["groups"][number]["rows"][number]; operational: boolean };
-/** Page 1 holds the KPI cards, so it takes fewer lines. */
-export const ACTIVE_LINES_FIRST_PAGE = 11;
-export function paginateActiveList(d: WeeklyReportData, per = ACTIVE_LINES_PER_PAGE, first = ACTIVE_LINES_FIRST_PAGE): ActiveLine[][] {
-  const pages: ActiveLine[][] = [];
-  let cur: ActiveLine[] = [];
-  const cap = () => (pages.length ? per : first);
-  const flush = () => { if (cur.length) pages.push(cur); cur = []; };
+export interface ActivePage { group: string; operational: boolean; cont: boolean; lines: ActiveLine[] }
+export function paginateActiveList(d: WeeklyReportData, per = ACTIVE_LINES_PER_PAGE): ActivePage[] {
+  const pages: ActivePage[] = [];
   for (const g of d.activeList.groups) {
     if (!g.rows.length) continue;
-    if (cap() - cur.length < 2) flush();
-    cur.push({ kind: "group", label: g.label, operational: g.operational, count: g.rows.length, cont: false });
+    let cur: ActivePage | null = null;
     for (const r of g.rows) {
-      if (cur.length >= cap()) { flush(); cur.push({ kind: "group", label: g.label, operational: g.operational, count: g.rows.length, cont: true }); }
-      cur.push({ kind: "row", row: r, operational: g.operational });
+      if (!cur || cur.lines.length >= per) {
+        cur = { group: g.label, operational: g.operational, cont: !!cur, lines: [{ kind: "group", label: g.label, operational: g.operational, count: g.rows.length, cont: !!cur }] };
+        pages.push(cur);
+      }
+      cur.lines.push({ kind: "row", row: r, operational: g.operational });
     }
   }
-  flush();
   return pages;
 }
 export const activeListPages = (d: WeeklyReportData) => paginateActiveList(d).length;

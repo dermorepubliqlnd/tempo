@@ -36,6 +36,8 @@ export interface WeekRange { start: string; end: string }
 /** Appendix: one active project (Sandra 2026-10-13, cross-department weekly update). */
 export interface ActiveRow {
   num: number | null; name: string; owner: string; category: string; planning: string; type: string;
+  /** Project Priority (High / Medium / Low), "—" when not set. */
+  priority: string;
   health: string; progress: number | null; target: string; committed: string; moved: number; daysLate: number;
   /** Why it needs attention (Overdue / Off track / At risk / Schedule review), from Tempo history. */
   why?: string;
@@ -666,17 +668,21 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       id: p.id,
       num: (p as { project_number?: number }).project_number ?? null,
       name: p.name, owner: ownerName(p.owner_id), category: (p.category ?? "").trim() || "—", planning: planOf(p), type: typeOf(p),
+      priority: (p as { priority?: string | null }).priority || "—",
       health, progress: actualProgress(p.id, tasks as TaskRow[]), target, committed,
       moved: target && committed && target > committed ? daysBetween(committed, target) : 0,
       daysLate: !isOpA(p) && target && target < todayIso ? daysBetween(target, todayIso) : 0,
     };
   };
-  // Sandra 2026-10-13: sort = Health (needs attention first), then Actual
-  // Progress high to low, then Target completion (earliest first).
+  // Sandra 2026-10-20: sort = Priority (High > Medium > Low > not set), then
+  // Health (needs attention first), then Actual Progress LOW to high (the one
+  // furthest behind first), then Target completion (earliest first).
+  const PRIORITY_RANK = ["High", "Medium", "Low"];
+  const pRank = (x: string) => { const i = PRIORITY_RANK.indexOf(x); return i < 0 ? PRIORITY_RANK.length : i; };
   const HEALTH_RANK = ["Overdue", "Off track", "At risk", "Schedule review", "On track", "Done late · close pending", "Done on time · close pending", "Not started", "Ongoing"];
   const hRank = (h: string) => { const i = HEALTH_RANK.indexOf(h); return i < 0 ? HEALTH_RANK.length : i; };
   const byTarget = (a: ActiveRow, b: ActiveRow) =>
-    hRank(a.health) - hRank(b.health) || (b.progress ?? -1) - (a.progress ?? -1) || (a.target || "9999").localeCompare(b.target || "9999") || a.name.localeCompare(b.name);
+    pRank(a.priority) - pRank(b.priority) || hRank(a.health) - hRank(b.health) || (a.progress ?? 101) - (b.progress ?? 101) || (a.target || "9999").localeCompare(b.target || "9999") || a.name.localeCompare(b.name);
   const activeGroups: ActiveGroup[] = [];
   const opRows = activeAll.filter(isOp).map(activeRow).sort(byTarget);
   const projTypes = Array.from(new Set(activeP.map(typeOf)));
@@ -813,11 +819,14 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
         other?.members ? `- "Other" in the category chart = ${listNames(other.members.map((m) => `${m.label} (${m.count})`))}.` : "",
         topCats.length ? `- Most of the work is in ${listNames(topCats)}.` : "",
         `- ${onTrack} ${onTrack === 1 ? "is" : "are"} on track; ${attn.length ? `${attn.length} need${attn.length === 1 ? "s" : ""} attention — I'll walk through those.` : "nothing needs escalation this week."}`,
-        "- Each group is sorted by health, then progress, then target date, so the ones needing attention are at the top.",
+        (() => { const hi = all.filter((r) => r.priority === "High"); const hiAttn = hi.filter((r) => ATTN.has(r.health)); return hi.length ? `- ${plural(hi.length, "High-priority project")}${hiAttn.length ? `; ${hiAttn.length} of them need${hiAttn.length === 1 ? "s" : ""} attention (${listNames(hiAttn.map((r) => r.name))}).` : ", all on track."}` : ""; })(),
+        (() => { const np = all.filter((r) => r.priority === "—").length; return np ? `- ${plural(np, "project")} ${np === 1 ? "has" : "have"} no Priority set yet; ${np === 1 ? "it's" : "they're"} listed last on ${np === 1 ? "its" : "their"} slide.` : ""; })(),
+        "- Each Project Type has its own slide, sorted by Priority (High first), then Health (needs attention first), then Progress (furthest behind first), then target date.",
         attn.length ? "\nNEEDS ATTENTION — why" : "",
-        ...attn.map((r) => `- ${r.name} (${r.health}, ${r.progress ?? "–"}%, target ${md(r.target)}): ${r.why ?? ""}`),
+        ...attn.map((r) => `- ${r.name} (${r.priority === "—" ? "no priority" : `${r.priority} priority`}, ${r.health}, ${r.progress ?? "–"}%, target ${md(r.target)}): ${r.why ?? ""}`),
         "\nDEFINITIONS",
         "- Progress = Actual Progress in Tempo (hours-weighted task completion). Target = current End Date; +Nd = days moved from the date committed at Start Project.",
+        "- Health: On track = within 10 pts of where progress should be today; At risk = 11–20 pts behind; Off track = more than 20 pts behind; Overdue = past target date and not finished; Done · close pending = all tasks done, project not closed yet.",
       ].filter(Boolean).join("\n");
     })(),
   };
