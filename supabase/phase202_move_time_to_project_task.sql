@@ -29,10 +29,17 @@
 --
 -- Run once in Supabase SQL editor. Safe to re-run.
 
-alter table public.time_entries add column if not exists moved_from_activity_type_id uuid references public.non_project_activity_types(id);
+-- NO foreign keys on these (phase202b hotfix, 2026-10-21): a second FK from
+-- time_entries to non_project_activity_types made the app's PostgREST embeds
+-- ambiguous and Time Tracking showed no entries. Integrity is checked in the
+-- functions below instead.
+alter table public.time_entries add column if not exists moved_from_activity_type_id uuid;
 alter table public.time_entries add column if not exists moved_at timestamptz;
-alter table public.time_entries add column if not exists moved_by uuid references public.people(id);
-alter table public.time_entry_correction_requests add column if not exists proposed_task_id uuid references public.tasks(id);
+alter table public.time_entries add column if not exists moved_by uuid;
+alter table public.time_entry_correction_requests add column if not exists proposed_task_id uuid;
+alter table public.time_entries drop constraint if exists time_entries_moved_from_activity_type_id_fkey;
+alter table public.time_entries drop constraint if exists time_entries_moved_by_fkey;
+alter table public.time_entry_correction_requests drop constraint if exists time_entry_correction_requests_proposed_task_id_fkey;
 
 -- ---------------------------------------------------------------------
 -- Why a task can't take a person's moved time (null = OK).
