@@ -23,7 +23,7 @@ import { formatDate } from "../lib/formatDate";
 import { rollupHoursFor, formatHours, type TimeEntryRow } from "../lib/timeTracking";
 import { addDays, buildHolidaySet, isWorkingDay, parseLocalDate, toISO, workingDaysBetween, type HolidaySet } from "../lib/workingDays";
 import { fullCapacityScenario, capacityBasedScenario, packFullCapacityQueue, FULL_CAPACITY_DAILY_HOURS, type FullCapacityQueueTask } from "../lib/taskScheduling";
-import { isR1Project, reviewTasksMissingDependency } from "../lib/taskReadiness";
+import { isR1Project, reviewTasksMissingDependency, looksLikeReviewTask } from "../lib/taskReadiness";
 import { FALLBACK_LIFECYCLE_PHASES, PHASE_COLORS, lifecycleStartIssues, type LifecyclePhase, type ProjectMilestone, type MilestoneDependency } from "../lib/lifecycle";
 import { buildForwardSchedule, type SchedTaskRow, type SchedProjectRow, type SchedAvailabilityRow } from "../lib/capacityScheduler";
 import { TASK_EFFORT_OPTIONS, TASK_EFFORT_DEFAULT_TONES, TASK_STATUS_GROUPED, statusGroupOf, PROJECT_EFFORT_LEVEL_OPTIONS, PROJECT_PRIORITY_OPTIONS, effortLevelLabel } from "../lib/notionOptions";
@@ -619,6 +619,9 @@ export default function WbsPlanning() {
   const [people, setPeople] = useState<PersonRow[]>([]);
   // phase193: Add module dialog (declared up here -- hooks can't follow the early returns below).
   const [moduleDlg, setModuleDlg] = useState<{ name: string; maker: string; dev?: string; busy: boolean; error: string } | null>(null);
+  // Layer 1 (2026-10-22, Sandra: "bullet proof" reviews): the owner picks what
+  // happens after a task; Tempo adds correctly named, linked review steps.
+  const [reviewDlg, setReviewDlg] = useState<{ taskId: string; mode: "review" | "review_signoff"; reviewer: string; approver: string; busy: boolean; error: string } | null>(null);
   const assigneePicker = useAssigneePicker(people.filter((p) => p.is_active));
   // phase190b: on ongoing containers, non-owners without Full Access can add
   // tasks for themselves and the people below them in the reporting line.
@@ -4773,6 +4776,104 @@ export default function WbsPlanning() {
     await loadAll(true);
   }
 
+  // Layer 1 (2026-10-22): "After this task" -> Review / Review + Sign-off.
+  // Adds "Review · {task}" (and "Sign-Off · {task}") right below the task,
+  // in the same phase and module, linked in order. Anything that waited on the
+  // task (later tasks, a milestone) now waits on the last new step instead.
+  function taskReviewSteps(taskId: string) {
+    return dependencies
+      .filter((d) => d.depends_on_task_id === taskId)
+      .map((d) => tasks.find((x) => x.id === d.task_id))
+      .filter((x): x is TaskRow => !!x && !x.is_archived && x.status !== "Cancelled" && looksLikeReviewTask(x.name));
+  }
+  function isReviewStepTask(t: TaskRow) {
+    return looksLikeReviewTask(t.name) && dependencies.some((d) => d.task_id === t.id);
+  }
+  function openReviewDlg(t: TaskRow) {
+    if (!project) return;
+    const sup = t.assignee_id ? people.find((pp) => pp.id === t.assignee_id)?.reports_to ?? null : null;
+    setReviewDlg({ taskId: t.id, mode: "review", reviewer: sup ?? project.owner_id ?? "", approver: project.owner_id ?? "", busy: false, error: "" });
+  }
+  async function submitReviewSteps() {
+    if (!project || !reviewDlg) return;
+    const t = tasks.find((x) => x.id === reviewDlg.taskId);
+    if (!t) { setReviewDlg(null); return; }
+    const baseName = (t.name ?? "").trim();
+    if (!baseName || /^untitled( sub-)?task$/i.test(baseName)) {
+      setReviewDlg({ ...reviewDlg, error: "Name the task first, so the review steps can carry its name." });
+      return;
+    }
+    const isDraft = (project.wbs_status ?? "draft") === "draft";
+    const withSignOff = reviewDlg.mode === "review_signoff";
+    if (!isDraft && (!reviewDlg.reviewer || (withSignOff && !reviewDlg.approver))) {
+      setReviewDlg({ ...reviewDlg, error: "Pick who reviews" + (withSignOff ? " and who signs off" : "") + " -- the project has started." });
+      return;
+    }
+    const flushed = await flushPendingEdits();
+    if (!flushed) return;
+    setReviewDlg({ ...reviewDlg, busy: true, error: "" });
+    const siblings = tasks
+      .filter((x) => !x.is_archived && (x.parent_task_id ?? null) === (t.parent_task_id ?? null) && (x.sort_order ?? 0) > (t.sort_order ?? 0))
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const lo = t.sort_order ?? Date.now();
+    const hi = siblings[0]?.sort_order ?? lo + 1000;
+    const qaWt = workTypes.find((w) => w.name === "Quality Assurance")?.id ?? null;
+    const qaOut = outputTypes.find((o) => o.name === "QA Record")?.id ?? null;
+    const noOut = outputTypes.find((o) => o.name === "No Deliverable/Activity Only")?.id ?? null;
+    const phase = taskPhaseById.get(t.parent_task_id ?? t.id) ?? t.wbs_phase ?? null;
+    const start = (t.start_date_standard ?? t.start_date_full ?? project.start_date ?? toISO(new Date())).slice(0, 10);
+    const due = t.current_due_date ?? project.end_date ?? start;
+    const steps = [
+      { name: `Review · ${baseName}`, assignee: reviewDlg.reviewer || null, hours: 1, out: qaOut, count: 1 },
+      ...(withSignOff ? [{ name: `Sign-Off · ${baseName}`, assignee: reviewDlg.approver || null, hours: 0.5, out: noOut, count: 0 }] : []),
+    ];
+    const created: string[] = [];
+    for (let i = 0; i < steps.length; i++) {
+      const st = steps[i];
+      const { data, error } = await supabase.from("tasks").insert({
+        project_id: project.id,
+        parent_task_id: t.parent_task_id ?? null,
+        assignee_id: st.assignee,
+        name: st.name,
+        status: "Not Started",
+        start_date: start, start_date_full: start, start_date_standard: start,
+        start_full_auto: true, start_standard_auto: true,
+        original_due_date: due, current_due_date: due,
+        estimated_hours: st.hours,
+        work_type_id: qaWt,
+        output_type_id: st.out,
+        output_count: st.count,
+        sort_order: lo + ((hi - lo) * (i + 1)) / (steps.length + 1),
+        ...(phase ? { wbs_phase: phase } : {}),
+        ...(taskModuleById.get(t.id) ? { module_name: taskModuleById.get(t.id) } : {}),
+      }).select("id").single();
+      if (error || !data?.id) {
+        setReviewDlg({ ...reviewDlg, busy: false, error: friendlyError("add the review steps", error).message ?? "Couldn't add the review steps." });
+        await loadAll(true);
+        return;
+      }
+      created.push(data.id as string);
+      const { error: depErr } = await supabase.from("task_dependencies").insert({ task_id: data.id, depends_on_task_id: i === 0 ? t.id : created[i - 1] });
+      if (depErr && !/duplicate/i.test(depErr.message)) { await alert(friendlyError("link the review steps", depErr)); break; }
+    }
+    // Whatever waited on the task now waits on the last review step.
+    const last = created.at(-1);
+    if (last) {
+      const waiting = dependencies.filter((d) => d.depends_on_task_id === t.id && !created.includes(d.task_id));
+      for (const d of waiting) {
+        await supabase.from("task_dependencies").delete().eq("task_id", d.task_id).eq("depends_on_task_id", t.id);
+        await supabase.from("task_dependencies").insert({ task_id: d.task_id, depends_on_task_id: last });
+      }
+      const ms = milestoneDeps.filter((d) => d.task_id === t.id);
+      for (const d of ms) {
+        await supabase.from("milestone_dependencies").delete().eq("milestone_id", d.milestone_id).eq("task_id", t.id);
+        await supabase.from("milestone_dependencies").insert({ milestone_id: d.milestone_id, task_id: last });
+      }
+    }
+    setReviewDlg(null);
+    await loadAll(true);
+  }
+
   async function toggleMilestoneTask(m: ProjectMilestone, taskId: string) {
     const linked = milestoneDeps.some((d) => d.milestone_id === m.id && d.task_id === taskId);
     setMilestoneDeps((prev) => (linked ? prev.filter((d) => !(d.milestone_id === m.id && d.task_id === taskId)) : [...prev, { milestone_id: m.id, task_id: taskId }]));
@@ -6208,6 +6309,49 @@ export default function WbsPlanning() {
       {dialog}
       {checklistDialog}
       {assigneePicker.element}
+      {reviewDlg && (() => {
+        const rt = tasks.find((x) => x.id === reviewDlg.taskId);
+        const draftNow = (project?.wbs_status ?? "draft") === "draft";
+        const sel = { fontSize: 12.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 } as const;
+        const opt = (mode: "review" | "review_signoff", title: string, sub: string) => (
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "8px 10px", border: `1px solid ${reviewDlg.mode === mode ? "var(--accent)" : "var(--border)"}`, borderRadius: 8, cursor: "pointer", background: reviewDlg.mode === mode ? "var(--accent-soft, rgba(37,99,235,.06))" : "transparent" }}>
+            <input type="radio" checked={reviewDlg.mode === mode} onChange={() => setReviewDlg({ ...reviewDlg, mode, error: "" })} style={{ marginTop: 2 }} />
+            <span><strong>{title}</strong><br /><span style={{ color: "var(--muted)" }}>{sub}</span></span>
+          </label>
+        );
+        return (
+          <Modal title="Add review steps" onClose={() => (reviewDlg.busy ? undefined : setReviewDlg(null))} width={460}>
+            <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
+              <div style={{ color: "var(--muted)" }}>
+                After <strong style={{ color: "var(--text)" }}>{rt?.name || "this task"}</strong>. Tempo adds the steps right below it and links them, so the assignee gets <strong>Ready for Review</strong> instead of Mark Done.
+              </div>
+              {opt("review", "Review", `Adds "Review · ${rt?.name ?? "task"}". The reviewer gets Pass QA / For Revision.`)}
+              {opt("review_signoff", "Review + Sign-off", `Also adds "Sign-Off · ${rt?.name ?? "task"}". The approver gets Approve / For Revision.`)}
+              <label style={{ display: "grid", gap: 4 }}>
+                <span style={{ fontWeight: 600 }}>Reviewer{draftNow && <span style={{ fontWeight: 400, color: "var(--muted)" }}> · optional in Draft</span>}</span>
+                <select value={reviewDlg.reviewer} onChange={(e) => setReviewDlg({ ...reviewDlg, reviewer: e.target.value, error: "" })} style={sel}>
+                  <option value="">Not assigned yet</option>
+                  {people.filter((pp) => pp.is_active).map((pp) => <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+                </select>
+              </label>
+              {reviewDlg.mode === "review_signoff" && (
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span style={{ fontWeight: 600 }}>Signs off{draftNow && <span style={{ fontWeight: 400, color: "var(--muted)" }}> · optional in Draft</span>}</span>
+                  <select value={reviewDlg.approver} onChange={(e) => setReviewDlg({ ...reviewDlg, approver: e.target.value, error: "" })} style={sel}>
+                    <option value="">Not assigned yet</option>
+                    {people.filter((pp) => pp.is_active).map((pp) => <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+                  </select>
+                </label>
+              )}
+              {reviewDlg.error && <div style={{ color: "var(--danger-text)", fontSize: 12 }}>{reviewDlg.error}</div>}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button className="btn-secondary" disabled={reviewDlg.busy} onClick={() => setReviewDlg(null)}>Cancel</button>
+                <button className="btn-primary" disabled={reviewDlg.busy} onClick={() => void submitReviewSteps()}>{reviewDlg.busy ? "Adding…" : reviewDlg.mode === "review" ? "Add review" : "Add review + sign-off"}</button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
       {moduleDlg && (
         <Modal title="Add module" onClose={() => (moduleDlg.busy ? undefined : setModuleDlg(null))} width={440}>
           <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
@@ -6385,6 +6529,11 @@ export default function WbsPlanning() {
               >
                 {task.status !== "Cancelled" && (
                   <>
+                {isLifecycle && !isSessionProject && canAddTasks && !hasKids && !isReviewStepTask(task) && !isLockedStatus(task.status) && (
+                  taskReviewSteps(task.id).length > 0
+                    ? menuItem("Review steps added", <CheckCircle2 size={13} />, () => undefined, { disabled: true })
+                    : menuItem("Add review steps…", <CheckCircle2 size={13} />, () => openReviewDlg(task))
+                )}
                 {!isSessionProject && canAddTasks && task.depth === 0 && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
                 {!isSessionProject && canAddTasks && menuItem("Add task below", <CornerDownRight size={13} />, () => void addTaskBelow(task))}
                 {!isSessionProject && canAddTasks && menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
