@@ -4808,8 +4808,8 @@ export default function WbsPlanning() {
         <tr key={`lc-ph-${it.key}`} className={`wbs-phase-row${filtered ? " is-filtered" : ""}`}>
           <td colSpan={WBS_TOTAL_COLS} style={{ background: c.bg, borderTop: `1px solid ${c.border}` }}>
             <div style={{ ...sticky }} className="wbs-phase-inner">
-              <button type="button" className="wbs-phase-chev" onClick={toggle} aria-expanded={!collapsed} aria-label={`${collapsed ? "Expand" : "Collapse"} ${it.label}`} style={{ color: c.fg }}>
-                {collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+              <button type="button" className="wbs-phase-chev" onClick={toggle} aria-expanded={!collapsed && it.count > 0} aria-label={`${collapsed ? "Expand" : "Collapse"} ${it.label}`} style={{ color: c.fg }}>
+                {collapsed || it.count === 0 ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
               </button>
               <span className="wbs-phase-num" style={{ background: c.fg }}>{num}</span>
               <button
@@ -8080,7 +8080,8 @@ export default function WbsPlanning() {
             <table
               className="data-table"
               style={{
-                width:
+                // 2.0: an empty project shows just the phase rows, full width, no column headers.
+                width: orderedTasks.length === 0 ? "100%" :
                   WBS_GUTTER_WIDTH +
                   wbsVisibleCols.reduce((sum, k) => sum + wbsColWidth(k), 0) +
                   wbsVisibleDateWidths.reduce((sum, w) => sum + w, 0),
@@ -8093,6 +8094,7 @@ export default function WbsPlanning() {
                   alone given this header spans two rows (rowSpan/colSpan
                   mixed), where browsers can be inconsistent about which
                   row's widths "win". */}
+              {orderedTasks.length > 0 && (
               <colgroup>
                 <col style={{ width: WBS_GUTTER_WIDTH }} />
                 {wbsVisibleCols.map((k) => (
@@ -8102,7 +8104,8 @@ export default function WbsPlanning() {
                   <col key={`d${i}`} style={{ width: w }} />
                 ))}
               </colgroup>
-              <thead style={{ position: "sticky", top: 0, zIndex: 6, background: "var(--surface)", boxShadow: "0 1px 0 var(--border)" }}>
+              )}
+              <thead style={{ position: "sticky", top: 0, zIndex: 6, background: "var(--surface)", boxShadow: "0 1px 0 var(--border)", display: orderedTasks.length === 0 ? "none" : undefined }}>
                 <tr>
                   <th
                     rowSpan={2}
