@@ -944,6 +944,29 @@ export default function WbsPlanning() {
   }
   // WBS UI Refresh 2.0: project details fold behind the summary strip; one Add task menu; phase row menus.
   const [wbsDetailsOpen, setWbsDetailsOpen] = useState(false);
+  // One vertical scroll (the page): keep the WBS header row in view by
+  // shifting it down while the table passes under the top of the window.
+  useEffect(() => {
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const box = document.querySelector<HTMLElement>(".wbs-scroll-box");
+      const head = box?.querySelector<HTMLElement>("thead.wbs-float-head");
+      if (!box || !head) return;
+      const r = box.getBoundingClientRect();
+      const h = head.offsetHeight;
+      const shift = Math.max(0, Math.min(-r.top, r.height - h - 40));
+      head.style.transform = shift > 0 ? `translateY(${Math.round(shift)}px)` : "";
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update); };
+    document.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      document.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
   // 2026-10-22 (Sandra): after the first save, ask how the plan will be built.
   // 2026-10-22 (Sandra): an empty new-lifecycle plan shows "How do you want to plan this project?" inside the WBS panel.
   const [wbsAddMenu, setWbsAddMenu] = useState<{ x: number; y: number } | null>(null);
@@ -8191,7 +8214,10 @@ export default function WbsPlanning() {
           </div>
           {/* 2026-10-14 (Sandra): the table scrolls inside its own box so the
               column headers stay visible on long WBS lists. */}
-          <div className="card wbs-scroll-box" style={{ padding: 0, overflow: "auto", maxHeight: "calc(100vh - 120px)" }}>
+          {/* 2026-10-22 (Sandra): one vertical scroll -- the page. The box only
+              scrolls sideways; the header row follows the page (see the
+              wbs-float-head effect) so it stays visible on long lists. */}
+          <div className="card wbs-scroll-box" style={{ padding: 0, overflowX: "auto", overflowY: "hidden" }}>
             <table
               className="data-table"
               style={{
@@ -8220,7 +8246,7 @@ export default function WbsPlanning() {
                 ))}
               </colgroup>
               )}
-              <thead style={{ position: "sticky", top: 0, zIndex: 6, background: "var(--surface)", boxShadow: "0 1px 0 var(--border)", display: orderedTasks.length === 0 ? "none" : undefined }}>
+              <thead className="wbs-float-head" style={{ position: "relative", zIndex: 6, background: "var(--surface)", boxShadow: "0 1px 0 var(--border)", display: orderedTasks.length === 0 ? "none" : undefined }}>
                 <tr>
                   <th
                     rowSpan={2}
