@@ -1707,6 +1707,14 @@ export default function Projects() {
   // 2026-10-14 (Sandra): Complete task pop-up (see markTaskDone).
   const [completeDlg, setCompleteDlg] = useState<{ taskId: string; date: string; actionLabel: string } | null>(null);
   const [completeLogTime, setCompleteLogTime] = useState(false);
+  // 2026-10-22 (Sandra): say what happened -- time saved, work handed over.
+  const [completeNotice, setCompleteNotice] = useState("");
+  const [doneToast, setDoneToast] = useState("");
+  useEffect(() => {
+    if (!doneToast) return;
+    const h = window.setTimeout(() => setDoneToast(""), 5000);
+    return () => window.clearTimeout(h);
+  }, [doneToast]);
   // phase189: Work Type -> Output Type links, for the pop-up's Output Type list.
   const [typeLinks, setTypeLinks] = useState<{ work_type_id: string; output_type_id: string }[]>([]);
   const [followUpTask, setFollowUpTask] = useState<{ id: string; name: string; onBehalfOf: string | null } | null>(null);
@@ -2982,6 +2990,30 @@ export default function Projects() {
     setCompleteDlg({ taskId: t.id, date: v, actionLabel });
   }
 
+  function personName(id: string | null | undefined) {
+    return id ? people.find((p) => p.id === id)?.name ?? null : null;
+  }
+  function nextOpenAfter(t: TaskRow) {
+    return taskDeps
+      .filter((d) => d.depends_on_task_id === t.id)
+      .map((d) => tasks.find((x) => x.id === d.task_id))
+      .find((x): x is TaskRow => !!x && !x.is_archived && x.status !== "Done" && x.status !== "Cancelled");
+  }
+  /** Plain words for what finishing this task does: [before, after]. */
+  function completionWords(t: TaskRow, actionLabel: string): [string, string] {
+    if (actionLabel === "Ready for Review") {
+      const rv = reviewersOf(t)[0];
+      const who = personName(rv?.assignee_id);
+      return [who ? `Sends your work to ${who} for review.` : "Sends your work for review.", who ? `Sent to ${who} for review.` : "Sent for review."];
+    }
+    const nx = nextOpenAfter(t);
+    const nxWho = personName(nx?.assignee_id);
+    const nextBit = nx ? ` Next: ${nx.name}${nxWho ? ` (${nxWho})` : ""}.` : "";
+    if (actionLabel === "Pass QA") return [`Passes QA.${nextBit}`, `QA passed.${nextBit}`];
+    if (actionLabel === "Approve") return [`Approves the work.${nextBit}`, `Approved.${nextBit}`];
+    return [`Closes the task.${nextBit}`, `Marked done.${nextBit}`];
+  }
+
   async function confirmTaskDone(t: TaskRow, date: string, outputCount: number, types?: { workTypeId: string | null; outputTypeId: string | null }): Promise<string | null> {
     if (ownHoursFor(timeEntries, t.id) <= 0) return "Log your time on this task first.";
     // phase189: Work Type / Output Type changed in the pop-up -> saved with an Audit Trail entry.
@@ -3009,7 +3041,10 @@ export default function Projects() {
     if (error) return friendlyError("mark the task Done", error).message ?? "Couldn't mark the task Done.";
     const next = tasks.map((row) => (row.id === t.id ? { ...row, ...patch, work_type_id: t.work_type_id, output_type_id: t.output_type_id, ...(countsDeliverable ? { output_count: outputCount } : {}) } : row));
     setTasks(next);
+    const words = completionWords(t, completeDlg?.actionLabel ?? "Mark Done");
     setCompleteDlg(null);
+    setCompleteNotice("");
+    setDoneToast(`${t.name}: ${words[1]}`);
     await recomputeAncestorStatus(t.id, next);
     return null;
   }
@@ -7366,6 +7401,11 @@ export default function Projects() {
       </div>
       </div>
 
+      {doneToast && (
+        <div role="status" aria-live="polite" onClick={() => setDoneToast("")} style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 1300, background: "#0f2942", color: "#fff", padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 24px rgba(15,41,66,.25)", maxWidth: "min(560px, calc(100vw - 32px))", cursor: "pointer" }}>
+          <span style={{ color: "#4ade80", marginRight: 8 }}>✓</span>{doneToast}
+        </div>
+      )}
       {completeDlg && (() => {
         const ct = tasks.find((x) => x.id === completeDlg.taskId);
         if (!ct) return null;
@@ -7398,8 +7438,10 @@ export default function Projects() {
             today={toISOWorkingDay(new Date())}
             actionLabel={completeDlg.actionLabel}
             onLogTime={() => setCompleteLogTime(true)}
-            onCancel={() => setCompleteDlg(null)}
+            onCancel={() => { setCompleteDlg(null); setCompleteNotice(""); }}
             onConfirm={(date, count, types) => confirmTaskDone(ct, date, count, types)}
+            outcome={completionWords(ct, completeDlg.actionLabel)[0]}
+            notice={completeNotice}
             onRevision={reviewStepKind(ct) && canReturnFrom(ct) ? () => { setCompleteDlg(null); openReturnDialog(ct); } : undefined}
           />
         );
@@ -7412,6 +7454,7 @@ export default function Projects() {
           onClose={() => setCompleteLogTime(false)}
           onSaved={() => {
             setCompleteLogTime(false);
+            setCompleteNotice(`Time logged. Now click ${completeDlg.actionLabel} to finish.`);
             loadAll();
           }}
         />

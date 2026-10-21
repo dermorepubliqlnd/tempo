@@ -43,13 +43,17 @@ interface Props {
   /** Review steps: send the work back instead of passing it. */
   onRevision?: () => void;
   onConfirm: (date: string, outputCount: number, types?: { workTypeId: string | null; outputTypeId: string | null }) => Promise<string | null>;
+  /** What confirming does, in plain words (e.g. "Sends it to Joseph for review."). */
+  outcome?: string;
+  /** Green confirmation shown in the pop-up, e.g. after time was logged. */
+  notice?: string;
 }
 
 const label: React.CSSProperties = { fontSize: 11.5, color: "var(--muted)", fontWeight: 600 };
 const value: React.CSSProperties = { fontSize: 12.5, color: "var(--text)" };
 const input: React.CSSProperties = { fontSize: 12.5, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--border)", fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
 
-export default function CompleteTaskModal({ info, initialDate, initialCount, today, actionLabel = "Mark Done", onLogTime, onCancel, onConfirm, onRevision }: Props) {
+export default function CompleteTaskModal({ info, initialDate, initialCount, today, actionLabel = "Mark Done", onLogTime, onCancel, onConfirm, onRevision, outcome, notice }: Props) {
   const te = info.typeEdit;
   const [wtId, setWtId] = useState<string>(te?.workTypeId ?? "");
   const [otId, setOtId] = useState<string>(te?.outputTypeId ?? "");
@@ -173,8 +177,9 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
         </div>
 
         <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
-          Check the details, then confirm. Status moves to Done.{typesChanged ? " The Work Type / Output Type change is recorded in the Audit Trail." : ""}
+          Check the details, then confirm. {outcome ?? "Status moves to Done."}{typesChanged ? " The Work Type / Output Type change is recorded in the Audit Trail." : ""}
         </div>
+        {notice && !error && <div role="status" style={{ color: "var(--success-text)", background: "var(--success-bg, rgba(22,163,74,.08))", borderRadius: 6, padding: "6px 8px", fontSize: 12, fontWeight: 600 }}>✓ {notice}</div>}
         {error && <div style={{ color: "var(--danger-text)", fontSize: 12 }}>{error}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button className="btn-secondary" disabled={busy} onClick={onCancel}>Cancel</button>
