@@ -5608,7 +5608,7 @@ export default function Projects() {
               );
             }
             if (t.status !== "In Progress") {
-              return <span style={{ color: "var(--accent)", fontSize: 12, fontWeight: 600 }} title="Starts automatically when time is logged on this task.">{mine ? "Ready · your turn" : `Ready · ${who}`}</span>;
+              return <span style={{ color: "var(--accent)", fontSize: 12, fontWeight: 600 }} title="Starts automatically when time is logged on this task.">{t.assignee_id && t.assignee_id === me?.id ? "Ready · your turn" : `Ready · ${who}`}</span>;
             }
             if (!mine) return <span style={{ color: "var(--muted)", fontSize: 12 }}>In progress · {who}</span>;
             const kind = reviewStepKind(t);

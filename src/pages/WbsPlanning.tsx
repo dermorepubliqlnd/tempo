@@ -4755,6 +4755,20 @@ export default function WbsPlanning() {
         if (upErr) { await alert(friendlyError("assign the module steps", upErr)); break; }
       }
     }
+    // 2026-10-22 (Sandra): a module's storyboard waits for the scope sign-off,
+    // so it doesn't show "Ready" before Analysis & Scoping is done.
+    {
+      const { data: modTasks2 } = await supabase.from("tasks").select("id,name").eq("project_id", project.id).eq("module_name", modName).eq("is_archived", false);
+      const design = (modTasks2 ?? []).find((x: { id: string; name: string }) => x.name.startsWith("Design / Storyboard · "));
+      const analysisTasks = tasks.filter((x) => !x.is_archived && x.status !== "Cancelled" && (taskPhaseById.get(x.id) ?? x.wbs_phase) === "analysis");
+      const signOff =
+        analysisTasks.find((x) => /scope sign-?off/i.test(x.name)) ??
+        analysisTasks.filter((x) => !tasks.some((c) => c.parent_task_id === x.id)).sort((a, b) => (b.sort_order ?? 0) - (a.sort_order ?? 0))[0];
+      if (design && signOff) {
+        const { error: depErr } = await supabase.from("task_dependencies").insert({ task_id: design.id, depends_on_task_id: signOff.id });
+        if (depErr && !/duplicate/i.test(depErr.message)) await alert(friendlyError("link the module to the scope sign-off", depErr));
+      }
+    }
     setModuleDlg(null);
     await loadAll(true);
   }
