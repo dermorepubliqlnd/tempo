@@ -794,6 +794,25 @@ export function projectCompletionDate(projectId: string, allTasks: TaskRow[], p?
   return fallback ? (fallback.length > 10 ? toISOWorkingDay(new Date(fallback)) : fallback) : null;
 }
 
+// 2026-10-21 (Sandra, P-0018): approved TASK extensions move task due dates
+// but not the project's End Date, so a project whose work was re-planned to
+// Nov 9 still read "Overdue" against its Oct 7 End Date. Forecast End = the
+// later of the End Date and the latest due date of its live (not archived,
+// not Cancelled) tasks -- the same "Forecast End" as the Overview's Schedule
+// Snapshot. Health, Project Due and vs Committed all read this date; the
+// original commitment stays visible through committed_end_date (vs Committed).
+export function forecastEndOf(p: ProjectRow, allTasks: TaskRow[]): string | null {
+  const end = p.end_date ? p.end_date.slice(0, 10) : null;
+  if (p.is_operational) return end;
+  let max = end;
+  for (const t of allTasks) {
+    if (t.project_id !== p.id || t.is_archived || t.status === "Cancelled" || !t.current_due_date) continue;
+    const d = t.current_due_date.slice(0, 10);
+    if (!max || d > max) max = d;
+  }
+  return max;
+}
+
 export function healthOf(
   p: ProjectRow,
   allTasks: TaskRow[],
@@ -842,7 +861,7 @@ export function healthOf(
   // thing left is marking the project Completed.
   if (actual === 100) {
     const doneOn = projectCompletionDate(p.id, allTasks, p);
-    const dueOn = p.end_date ? p.end_date.slice(0, 10) : null;
+    const dueOn = forecastEndOf(p, allTasks);
     if (doneOn && dueOn && doneOn > dueOn) return { label: "Done late · close pending", tone: "gold" };
     return { label: "Done on time · close pending", tone: "success" };
   }
@@ -852,11 +871,12 @@ export function healthOf(
   // started"'s "neutral" -- so the two don't render as an identical grey
   // pill (Sandra 2026-09-03: ok with both grey, just wants a different
   // shade/tone so they're tellable apart at a glance).
-  if (!p.start_date || !p.end_date) return { label: "Health unavailable", tone: "slate" };
+  const forecastEnd = forecastEndOf(p, allTasks);
+  if (!p.start_date || !forecastEnd) return { label: "Health unavailable", tone: "slate" };
 
   const today = new Date();
   const start = parseLocalDate(p.start_date);
-  const due = parseLocalDate(p.end_date);
+  const due = parseLocalDate(forecastEnd);
 
   if (today < start) return { label: "Not started", tone: "neutral" };
   if (today > due) return { label: "Overdue", tone: "danger" };
@@ -1428,7 +1448,7 @@ export default function Projects() {
       cancelled: st === "Cancelled",
       done,
       finishedOn: done ? projectCompletionDate(p.id, tasks, p) : null,
-      currentDue: p.end_date,
+      currentDue: forecastEndOf(p, tasks),
       holidays: holidayDates,
     });
   }
@@ -3694,9 +3714,12 @@ export default function Projects() {
         // Due is also WBS-only now, not editable from this page.
         render: (p) => {
           const computed = projectDatesFromTasks(p.id);
+          // 2026-10-21: shows the Forecast End (after approved task extensions).
+          const fe = forecastEndOf(p, tasks);
+          const moved = !!fe && !!p.end_date && fe > p.end_date.slice(0, 10);
           return (
-            <span title={computed ? "Computed from this project's own tasks (latest task due date)" : "Set in this project's WBS page"}>
-              <InlineDate value={p.end_date} editable={false} onCommit={() => {}} />
+            <span title={moved ? `Forecast end after approved task extensions. End Date on record: ${formatDate(p.end_date)}. See vs Committed for the change from the original commitment.` : computed ? "Computed from this project's own tasks (latest task due date)" : "Set in this project's WBS page"}>
+              <InlineDate value={fe} editable={false} onCommit={() => {}} />
             </span>
           );
         },
@@ -4195,7 +4218,7 @@ export default function Projects() {
     { key: "project_type", label: "Project Type", getValue: (p) => projectTypes.find((t) => t.id === p.project_type_id)?.name ?? "" },
     { key: "effort_level", label: "Complexity", getValue: (p) => PROJECT_EFFORT_LEVEL_OPTIONS.indexOf(p.effort_level ?? "") },
     { key: "start_date", label: "Start", getValue: (p) => (p.start_date ? new Date(p.start_date).getTime() : null) },
-    { key: "end_date", label: "Project Due", getValue: (p) => (p.end_date ? new Date(p.end_date).getTime() : null) },
+    { key: "end_date", label: "Project Due", getValue: (p) => { const fe = forecastEndOf(p, tasks); return fe ? new Date(fe).getTime() : null; } },
     { key: "my_open_tasks", label: "My Open Tasks", getValue: (p) => (myStatsByProject.get(p.id)?.hasTasks ? myStatsByProject.get(p.id)!.open : null) },
     { key: "my_next_due", label: "My Next Task Due", getValue: (p) => { const d = myStatsByProject.get(p.id)?.nextDue; return d ? new Date(d).getTime() : null; } },
     { key: "my_hours", label: "My Hours", getValue: (p) => (myStatsByProject.get(p.id)?.hasTasks ? myStatsByProject.get(p.id)!.spent : null) },

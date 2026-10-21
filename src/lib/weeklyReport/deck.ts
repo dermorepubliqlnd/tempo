@@ -398,7 +398,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
         else out.push(`TALK TRACK (${pg.group}${pg.cont ? ", cont." : ""} · slide ${pi + 1} of ${pages.length})`);
         out.push("HOW TO READ");
         out.push("- Sorted by Priority (High first), then Health (needs attention first), then Progress (furthest behind first), then target date.");
-        out.push("- Progress = Actual Progress in Tempo. Red date = past target. +Nd = days the target moved since Start Project.");
+        out.push("- Progress = Actual Progress in Tempo. Red date = past target. +Nd = working days the target is past the original commitment (Start Project).");
         if (otherCat?.members) out.push(`- "Other" in the category chart = ${otherCat.members.map((m) => `${m.label} (${m.count})`).join(", ")}.`);
         out.push("");
         out.push("ON THIS SLIDE");

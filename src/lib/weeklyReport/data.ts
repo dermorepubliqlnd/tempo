@@ -12,9 +12,9 @@
 //   * Development      = projects owned by anyone who is NOT a Trainer
 import { supabase } from "../supabaseClient";
 import { fetchAllRows } from "../fetchAllRows";
-import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from "../workingDays";
+import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet, workingDayDelta } from "../workingDays";
 import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, type UtilTaskRow, type UtilProjectRow } from "../dailyAllocation";
-import { healthOf, actualProgress, type ProjectRow, type TaskRow } from "../../pages/Projects";
+import { healthOf, actualProgress, forecastEndOf, type ProjectRow, type TaskRow } from "../../pages/Projects";
 import { fmtMD } from "./format";
 import { projectStatus, isActiveProject, isOverdueProject, isStartedProject, portfolioInPeriod } from "../metrics";
 
@@ -289,10 +289,12 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   const counts = new Map<string, number>();
   healthBy.forEach((l) => counts.set(l, (counts.get(l) ?? 0) + 1));
   const buckets = Array.from(counts.entries()).sort((a, b) => (ORDER.indexOf(a[0]) + 99 * +(ORDER.indexOf(a[0]) < 0)) - (ORDER.indexOf(b[0]) + 99 * +(ORDER.indexOf(b[0]) < 0))).map(([label, count]) => ({ label, count }));
+  // 2026-10-21: project dates = Forecast End (after approved task extensions), same as Health.
+  const fEnd = (p: P) => d10(forecastEndOf(p as ProjectRow, tasks as TaskRow[]) ?? p.end_date);
   const overdueLines = overdueP
-    .map((p) => ({ ...line(p, d10(p.end_date)), daysLate: Math.max(0, daysBetween(d10(p.end_date), todayIso)) }))
+    .map((p) => ({ ...line(p, fEnd(p)), daysLate: Math.max(0, daysBetween(fEnd(p), todayIso)) }))
     .sort((a, b) => b.daysLate - a.daysLate);
-  const dueThisWeek = activeP.filter((p) => inWeek(d10(p.end_date), thisWeek)).map((p) => line(p, d10(p.end_date))).sort((a, b) => a.date.localeCompare(b.date));
+  const dueThisWeek = activeP.filter((p) => inWeek(fEnd(p), thisWeek)).map((p) => line(p, fEnd(p))).sort((a, b) => a.date.localeCompare(b.date));
 
   // ------------------------------------------------------------ drivers (overdue projects)
   const ovIds = overdueP.map((p) => p.id);
@@ -316,12 +318,12 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     extCount = exts.length;
     noteCount = notesRows.length;
     driverRows = overdueLines.slice(0, 5).map((o) => {
-      const p = overdueP.find((x) => x.name === o.name && x.end_date && d10(x.end_date) === o.date) as P;
+      const p = overdueP.find((x) => x.name === o.name && fEnd(x) === o.date) as P;
       const b = baselines.get(p.id);
       const pl = leaf.filter((t) => t.project_id === p.id);
       const added = b ? pl.filter((t) => t.created_at && t.created_at > b.captured_at) : [];
       const addedH = added.reduce((s, t) => s + (Number(t.estimated_hours) || 0), 0);
-      const end = d10(p.end_date);
+      const end = fEnd(p);
       const addedLate = added.filter((t) => t.created_at && localDay(t.created_at) > end);
       const ch = changes.filter((c) => revProject.get(c.revision_id) === p.id);
       const cnt = (k: string) => ch.filter((c) => c.change_type === k).length;
@@ -668,8 +670,9 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   };
   const isOpA = (p: P) => !!(p as { is_operational?: boolean | null }).is_operational;
   const activeRow = (p: P): ActiveRow => {
-    const target = d10(p.end_date);
-    const committed = d10((p as { committed_end_date?: string | null }).committed_end_date ?? p.original_due_date);
+    // 2026-10-21: Target = Forecast End; +N = WORKING days past the original commitment.
+    const target = fEnd(p);
+    const committed = d10((p as { committed_end_date?: string | null }).committed_end_date ?? p.original_due_date ?? p.end_date);
     const health = isOpA(p) ? "Ongoing" : healthBy.get(p.id) ?? "—";
     return {
       id: p.id,
@@ -677,7 +680,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       name: p.name, owner: ownerName(p.owner_id), category: (p.category ?? "").trim() || "—", planning: planOf(p), type: typeOf(p),
       priority: (p as { priority?: string | null }).priority || "—",
       health, progress: actualProgress(p.id, tasks as TaskRow[]), target, committed,
-      moved: target && committed && target > committed ? daysBetween(committed, target) : 0,
+      moved: target && committed && target > committed ? workingDayDelta(committed, target, holidaySet) : 0,
       daysLate: !isOpA(p) && target && target < todayIso ? daysBetween(target, todayIso) : 0,
     };
   };
@@ -726,7 +729,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       const parts: string[] = [];
       if (late.length) parts.push(`${plural(late.length, "task")} past due (${late.slice(0, 2).map((t) => `${clip(t.name, 45)}, due ${md(t.current_due_date)}`).join("; ")}${late.length > 2 ? "; …" : ""})`);
       if (added.length) parts.push(`${plural(added.length, "task")} (${round1(addedH)}h) added after Start Project`);
-      if (r.moved) parts.push(`target moved ${r.moved} days from ${md(r.committed)}`);
+      if (r.moved) parts.push(`target ${r.moved} working days past the ${md(r.committed)} commitment`);
       if (e) parts.push(`extension ${e.status ?? "requested"} ${md(localDay(e.created_at))}: ${e.reason_category ?? "no reason"}${e.reason_notes ? ` — “${clip(e.reason_notes)}”` : ""}`);
       if (n?.body) parts.push(`latest note ${md(localDay(n.created_at))}: “${clip(n.body)}”`);
       if (r.health === "Schedule review") parts.push("dates need re-baselining after resume");
@@ -832,7 +835,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
         attn.length ? "\nNEEDS ATTENTION — why" : "",
         ...attn.map((r) => `- ${r.name} (${r.priority === "—" ? "no priority" : `${r.priority} priority`}, ${r.health}, ${r.progress ?? "–"}%, target ${md(r.target)}): ${r.why ?? ""}`),
         "\nDEFINITIONS",
-        "- Progress = Actual Progress in Tempo (hours-weighted task completion). Target = current End Date; +Nd = days moved from the date committed at Start Project.",
+        "- Progress = Actual Progress in Tempo (hours-weighted task completion). Target = Forecast End (latest task due date after approved extensions, never earlier than the End Date); +Nd = working days past the date committed at Start Project.",
         "- Health: On track = within 10 pts of where progress should be today; At risk = 11–20 pts behind; Off track = more than 20 pts behind; Overdue = past target date and not finished; Done · close pending = all tasks done, project not closed yet.",
       ].filter(Boolean).join("\n");
     })(),
