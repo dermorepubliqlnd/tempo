@@ -366,6 +366,18 @@ export function InlineDate({ value, onCommit, editable, emptyLabel = "—" }: In
       <span className="inline-date-text" aria-hidden="true">{formatDate(value, "mm/dd/yyyy")}</span>
     <input
       className="inline-cell inline-date-input"
+      onKeyDown={(e) => {
+        if (e.key === "Tab" || e.key === "Escape" || e.ctrlKey || e.metaKey || e.altKey) return;
+        e.preventDefault();
+        if (e.key === "Enter" || e.key === " " || /^[0-9]$/.test(e.key) || e.key === "ArrowDown") {
+          const el = e.currentTarget as HTMLInputElement & { showPicker?: () => void };
+          try {
+            el.showPicker?.();
+          } catch {
+            // ignore
+          }
+        }
+      }}
       type="date"
       value={value ?? ""}
       onChange={(e) => onCommit(e.target.value)}

@@ -6689,7 +6689,9 @@ export default function WbsPlanning() {
             return (
               <>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  {canEditWbs && project.wbs_status !== "closed" && (
+                  {/* 2026-10-22 (Sandra): a new, unsaved draft saves from the blue
+                      "Save draft & continue" button in Project Information only. */}
+                  {canEditWbs && project.wbs_status !== "closed" && !project.is_unsaved && (
                     <button
                       className="btn-secondary"
                       disabled={saving}
@@ -6769,7 +6771,7 @@ export default function WbsPlanning() {
                   )}
                 </div>
 
-                {hasUnsavedChanges && project.wbs_status !== "closed" ? (
+                {project.is_unsaved ? null : hasUnsavedChanges && project.wbs_status !== "closed" ? (
                   <span style={{ fontSize: 10.5, color: "var(--warning-text, #b45309)" }}>
                     Save your latest changes before sending a workflow request.
                   </span>

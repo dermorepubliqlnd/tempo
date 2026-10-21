@@ -1959,3 +1959,12 @@ mark.kb-mark { background: #fff3c4; color: inherit; padding: 0 1px; border-radiu
 /* DateInput: forms and pop-ups always read mm/dd/yyyy (2026-10-14). */
 .date-input-native::-webkit-datetime-edit { color: transparent; }
 .date-input-text { position: absolute; left: 0; top: 0; bottom: 0; display: flex; align-items: center; pointer-events: none; white-space: nowrap; }
+
+/* 2026-10-22 (Sandra's screenshot): the native date input's own segments
+   (dd/mm on PH laptops) showed a blue highlight through the mm/dd overlay
+   when focused. Hide the native segments entirely; the overlay shows the date
+   and the calendar picker sets it. */
+.inline-date-wrap .inline-date-input::-webkit-datetime-edit-fields-wrapper,
+.date-input-native::-webkit-datetime-edit-fields-wrapper { visibility: hidden; }
+.inline-date-wrap .inline-date-input:focus-visible,
+.date-input-native:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

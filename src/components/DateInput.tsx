@@ -1,3 +1,4 @@
+import type React from "react";
 import { useLayoutEffect, useRef, useState, type CSSProperties, type InputHTMLAttributes } from "react";
 import { formatDate } from "../lib/formatDate";
 
@@ -6,6 +7,22 @@ import { formatDate } from "../lib/formatDate";
 // input and its calendar picker, hides the input's own text, and draws the
 // date on top as mm/dd/yyyy so every date box in Tempo reads the same way.
 // Drop-in replacement for <input type="date" ... />.
+
+// Keys that would type into the browser's hidden dd/mm segments open the
+// calendar instead; Tab, Shift+Tab and Escape keep working.
+function dateKeyGuard(e: React.KeyboardEvent<HTMLInputElement>) {
+  if (e.key === "Tab" || e.key === "Escape" || e.ctrlKey || e.metaKey || e.altKey) return;
+  e.preventDefault();
+  if (e.key === "Enter" || e.key === " " || /^[0-9]$/.test(e.key) || e.key === "ArrowDown") {
+    const el = e.currentTarget as HTMLInputElement & { showPicker?: () => void };
+    try {
+      el.showPicker?.();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 type Props = Omit<InputHTMLAttributes<HTMLInputElement>, "type">;
 
 export default function DateInput({ style, className, value, defaultValue, onChange, onClick, ...rest }: Props) {
@@ -54,6 +71,10 @@ export default function DateInput({ style, className, value, defaultValue, onCha
         defaultValue={value === undefined ? defaultValue : undefined}
         className={`${className ?? ""} date-input-native`.trim()}
         style={{ ...style, width: style?.width ? "100%" : undefined, flex: undefined, marginBottom: style?.marginBottom !== undefined ? 0 : undefined }}
+        onKeyDown={(e) => {
+          rest.onKeyDown?.(e);
+          if (!e.defaultPrevented) dateKeyGuard(e);
+        }}
         onChange={(e) => {
           if (value === undefined) setUncontrolled(e.target.value);
           onChange?.(e);
