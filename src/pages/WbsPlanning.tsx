@@ -945,7 +945,8 @@ export default function WbsPlanning() {
   // WBS UI Refresh 2.0: project details fold behind the summary strip; one Add task menu; phase row menus.
   const [wbsDetailsOpen, setWbsDetailsOpen] = useState(false);
   // 2026-10-22 (Sandra): after the first save, ask how the plan will be built.
-  const [planChoiceOpen, setPlanChoiceOpen] = useState<false | "choose" | "phases">(false);
+  // 2026-10-22 (Sandra): an empty new-lifecycle plan shows "How do you want to plan this project?" inside the WBS panel.
+  const [planStep, setPlanStep] = useState<"choose" | "phases">("choose");
   const [wbsAddMenu, setWbsAddMenu] = useState<{ x: number; y: number } | null>(null);
   const [wbsPhaseMenu, setWbsPhaseMenu] = useState<{ key: string; x: number; y: number } | null>(null);
   function clearWbsFilters() {
@@ -4168,7 +4169,6 @@ export default function WbsPlanning() {
         .eq("id", project.id);
       if (!scopingModeError && project.is_unsaved) {
         setProject((prev) => (prev ? { ...prev, is_unsaved: false } : prev));
-        if (isLifecycle && !isSessionProject && !project.is_operational) setPlanChoiceOpen("choose");
       }
       if (scopingModeError) {
         await alert({
@@ -6056,50 +6056,6 @@ export default function WbsPlanning() {
       {dialog}
       {checklistDialog}
       {assigneePicker.element}
-      {planChoiceOpen === "phases" && (
-        <Modal title="Which phases does this project need?" onClose={() => setPlanChoiceOpen(false)} width={520}>
-          <div style={{ display: "grid", gap: 10, fontSize: 12.5 }}>
-            <div style={{ color: "var(--muted)" }}>
-              Tick the phases this project will go through. You can change them on the WBS (phase ⋯ menu) until Start Project, when they lock.
-            </div>
-            {lifecyclePhases.map((ph) => {
-              const m = milestones.find((x) => x.phase_key === ph.key);
-              if (!m) return null;
-              const c = PHASE_COLORS[ph.key] ?? PHASE_COLORS.analysis;
-              return (
-                <label key={ph.key} className="wbs-plan-phase" style={{ borderColor: m.is_included ? c.border : undefined, background: m.is_included ? c.bg : undefined }}>
-                  <input type="checkbox" checked={m.is_included} onChange={() => void togglePhaseIncluded(m)} style={{ accentColor: c.fg }} />
-                  <span style={{ fontWeight: 700, color: m.is_included ? c.fg : "var(--muted)" }}>{ph.label}</span>
-                  <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--muted)" }}>◆ {m.name}</span>
-                </label>
-              );
-            })}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button type="button" className="btn-primary" onClick={() => setPlanChoiceOpen(false)}>Done</button>
-            </div>
-          </div>
-        </Modal>
-      )}
-      {planChoiceOpen === "choose" && (
-        <Modal title="How do you want to plan this project?" onClose={() => setPlanChoiceOpen(false)} width={520}>
-          <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
-            <div style={{ color: "var(--muted)" }}>
-              Either way, the project runs through the same phases and starts with Analysis &amp; Scoping. This only sets how the WBS is laid out; you can switch any time with <strong>Group by</strong>.
-            </div>
-            <button type="button" className="wbs-plan-choice" onClick={() => { setWbsGroupMode("phase"); setPlanChoiceOpen("phases"); }}>
-              <strong>By phase</strong>
-              <span>Choose the phases this project needs, then add tasks phase by phase. Best for a single course or a small project.</span>
-            </button>
-            <button type="button" className="wbs-plan-choice" onClick={() => { setWbsGroupMode("module"); setPlanChoiceOpen(false); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); }}>
-              <strong>By module</strong>
-              <span>Each module gets its own Design / Storyboard → Review → Sign-Off → Build → Review → Sign-Off chain. Best for a program with several modules. You'll name the first module next.</span>
-            </button>
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button type="button" className="btn-secondary" onClick={() => setPlanChoiceOpen(false)}>Decide later</button>
-            </div>
-          </div>
-        </Modal>
-      )}
       {moduleDlg && (
         <Modal title="Add module" onClose={() => (moduleDlg.busy ? undefined : setModuleDlg(null))} width={440}>
           <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
@@ -8043,6 +7999,46 @@ export default function WbsPlanning() {
                 )}
               </div>
             </div>
+            {isLifecycle && !isSessionProject && !project.is_operational && isDraftProject && orderedTasks.length === 0 && canEditWbs && canAddTasks && (() => {
+              const firstPhase = lifecyclePhases.find((ph) => includedMilestones.some((m) => m.phase_key === ph.key));
+              return (
+                <div className="wbs-plan-panel">
+                  <div className="wbs-plan-title">How do you want to plan this project?</div>
+                  <div className="wbs-plan-sub">Every project runs through the same phases and starts with Analysis &amp; Scoping. This sets your starting point; switch the layout any time with Group by.</div>
+                  <div className="wbs-plan-options">
+                    <button type="button" className={`wbs-plan-choice${planStep === "phases" ? " on" : ""}`} aria-pressed={planStep === "phases"} onClick={() => { setWbsGroupMode("phase"); setPlanStep(planStep === "phases" ? "choose" : "phases"); }}>
+                      <strong>By phase</strong>
+                      <span>Choose the phases this project needs, then add tasks phase by phase. Best for a single course or a small project.</span>
+                    </button>
+                    <button type="button" className="wbs-plan-choice" onClick={() => { setPlanStep("choose"); setWbsGroupMode("module"); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); }}>
+                      <strong>By module</strong>
+                      <span>Each module gets its own Design / Storyboard → Review → Sign-Off → Build → Review → Sign-Off chain. Best for a program with several modules.</span>
+                    </button>
+                    <button type="button" className="wbs-plan-choice" onClick={() => { setPlanStep("choose"); clearWbsFilters(); void addTopLevelTask(firstPhase?.key); }}>
+                      <strong>Free planning</strong>
+                      <span>Start with a blank task and build the plan your own way. Tasks start in {firstPhase?.label ?? "the first phase"}; move them to another phase from the row menu.</span>
+                    </button>
+                  </div>
+                  {planStep === "phases" && (
+                    <div className="wbs-plan-phases">
+                      <span className="wbs-plan-phases-label">Phases for this project:</span>
+                      {lifecyclePhases.map((ph) => {
+                        const m = milestones.find((x) => x.phase_key === ph.key);
+                        if (!m) return null;
+                        const c = PHASE_COLORS[ph.key] ?? PHASE_COLORS.analysis;
+                        return (
+                          <label key={ph.key} className="wbs-plan-phase" style={{ borderColor: m.is_included ? c.fg : undefined, background: m.is_included ? c.bg : undefined, color: m.is_included ? c.fg : undefined }}>
+                            <input type="checkbox" checked={m.is_included} onChange={() => void togglePhaseIncluded(m)} style={{ accentColor: c.fg, margin: 0 }} />
+                            {ph.label}
+                          </label>
+                        );
+                      })}
+                      <span className="wbs-plan-phases-hint">Saved as you tick. Next, add tasks from <strong>Add task</strong> or a phase's ⋯ menu (templates are there too). Phases lock at Start Project.</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Sandra, 2026-07-29: "move the refresh dates button a bit
