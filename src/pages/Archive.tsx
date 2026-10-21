@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Search, RotateCcw, RefreshCw } from "lucide-react";
+import { Search, RotateCcw, RefreshCw, Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
 import { useConfirm } from "../lib/useConfirm";
@@ -81,12 +81,16 @@ export default function Archive() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [search, setSearch] = useState("");
   const [restoringKey, setRestoringKey] = useState<string | null>(null);
+  // 2026-10-22 (Sandra): Full Access can permanently delete, one or many at once.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [purging, setPurging] = useState(false);
 
   async function load() {
     setLoading(true);
     const { data, error } = await supabase.from("archive_items").select("*").order("archived_at", { ascending: false });
     if (error) await alert(friendlyError("load the Archive", error));
     setRows((data as ArchiveRow[]) ?? []);
+    setSelected(new Set());
     setLoading(false);
   }
 
@@ -136,6 +140,66 @@ export default function Archive() {
     load();
   }
 
+  const rowKey = (r: ArchiveRow) => `${r.kind}-${r.id}`;
+  const selectedRows = rows.filter((r) => selected.has(rowKey(r)));
+  const allVisibleSelected = visible.length > 0 && visible.every((r) => selected.has(rowKey(r)));
+  function toggleRow(r: ArchiveRow) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const k = rowKey(r);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+  }
+  function toggleAllVisible() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) visible.forEach((r) => next.delete(rowKey(r)));
+      else visible.forEach((r) => next.add(rowKey(r)));
+      return next;
+    });
+  }
+
+  async function handlePurge() {
+    if (!isFullAccess || selectedRows.length === 0) return;
+    const n = selectedRows.length;
+    const bundled = selectedRows.reduce((a, r) => ({ t: a.t + r.bundled_tasks, te: a.te + r.bundled_time_entries, kb: a.kb + r.bundled_kb_entries }), { t: 0, te: 0, kb: 0 });
+    const hasTimeData = selectedRows.some((r) => r.kind === "project" || r.kind === "task" || r.kind === "time_entry");
+    const extras = [
+      bundled.t ? `${bundled.t} bundled task${bundled.t === 1 ? "" : "s"}` : "",
+      bundled.te ? `${bundled.te} bundled time entr${bundled.te === 1 ? "y" : "ies"}` : "",
+      bundled.kb ? `${bundled.kb} bundled KB entr${bundled.kb === 1 ? "y" : "ies"}` : "",
+    ].filter(Boolean);
+    const list = selectedRows.map((r) => `${ARCHIVE_KIND_LABEL[r.kind]}: ${r.label}${r.ref ? ` (${r.ref})` : ""}`);
+    const ok = await confirm({
+      title: `Permanently delete ${n} item${n === 1 ? "" : "s"}?`,
+      message:
+        `⚠️ **This can't be undone.** ${n === 1 ? "This item" : "These items"}${extras.length ? ` and their ${extras.join(", ")}` : ""} will be removed from Tempo for good. They can't be restored.` +
+        (hasTimeData ? " Logged hours on them are removed too, so they no longer appear anywhere in reports." : ""),
+      items: list,
+      confirmLabel: `Delete ${n} permanently`,
+      danger: true,
+    });
+    if (!ok) return;
+    setPurging(true);
+    const { data, error } = await supabase.rpc("purge_archive_items", { p_items: selectedRows.map((r) => ({ kind: r.kind, id: r.id })) });
+    setPurging(false);
+    if (error) {
+      await alert(friendlyError("permanently delete these items", error));
+      load();
+      return;
+    }
+    const res = (data ?? {}) as { deleted?: number; skipped?: string[] };
+    if (res.skipped && res.skipped.length) {
+      await alert({
+        title: "Some items were kept",
+        message: `${res.deleted ?? 0} deleted. These settings are still used somewhere in Tempo, so they stay in the Archive:`,
+        items: res.skipped,
+      });
+    }
+    load();
+  }
+
   const th: CSSProperties = { padding: "9px 12px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap", textAlign: "left" };
   const td: CSSProperties = { padding: "10px 12px", fontSize: 11.5, color: "var(--text-secondary)", verticalAlign: "top" };
 
@@ -146,7 +210,7 @@ export default function Archive() {
         <h1 style={{ marginBottom: 2 }}>Archive</h1>
         <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: 0 }}>
           Everything deleted in Tempo lands here first. Items are permanently removed {ARCHIVE_RETENTION_DAYS} days after archiving unless restored.
-          Only the person who archived an item, or Full Access, can restore it.
+          Only the person who archived an item, or Full Access, can restore it.{isFullAccess ? " Full Access can also delete items permanently." : ""}
         </p>
       </div>
 
@@ -189,6 +253,21 @@ export default function Archive() {
         </button>
       </div>
 
+      {isFullAccess && selected.size > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10, padding: "8px 12px", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", background: "var(--danger-bg, rgba(220,38,38,.05))", fontSize: 12 }}>
+          <strong style={{ color: "var(--text)" }}>{selected.size} selected</strong>
+          <button onClick={() => setSelected(new Set())} style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>Clear</button>
+          <span style={{ flex: 1 }} />
+          <button
+            onClick={() => void handlePurge()}
+            disabled={purging}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "#fff", background: "var(--danger-text, #b91c1c)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: purging ? "default" : "pointer" }}
+          >
+            <Trash2 size={13} /> {purging ? "Deleting…" : "Delete permanently"}
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <p style={{ fontSize: 12.5, color: "var(--muted)" }}>Loading…</p>
       ) : visible.length === 0 ? (
@@ -198,6 +277,11 @@ export default function Archive() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "var(--surface-2, #f5f6f8)", borderBottom: "1px solid var(--border)" }}>
+                {isFullAccess && (
+                  <th style={{ ...th, width: 34, textAlign: "center" }}>
+                    <input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} aria-label="Select all shown" title="Select all shown" />
+                  </th>
+                )}
                 <th style={th}>Type</th>
                 <th style={th}>Item</th>
                 <th style={th}>Context</th>
@@ -215,7 +299,12 @@ export default function Archive() {
                 const daysLeft = Math.max(0, Math.ceil((new Date(r.purge_at).getTime() - Date.now()) / 86400000));
                 const bundle = bundleText(r);
                 return (
-                  <tr key={key} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <tr key={key} style={{ borderBottom: "1px solid var(--border)", background: selected.has(key) ? "var(--danger-bg, rgba(220,38,38,.04))" : undefined }}>
+                    {isFullAccess && (
+                      <td style={{ ...td, textAlign: "center", width: 34 }}>
+                        <input type="checkbox" checked={selected.has(key)} onChange={() => toggleRow(r)} aria-label={`Select ${r.label}`} />
+                      </td>
+                    )}
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
                       <span className={`status-pill ${KIND_TONE[filterGroup(r.kind)]}`} style={{ fontSize: 9.5 }}>{ARCHIVE_KIND_LABEL[r.kind]}</span>
                     </td>
