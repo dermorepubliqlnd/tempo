@@ -923,23 +923,29 @@ export default function WbsPlanning() {
   const [wbsFilterStatus, setWbsFilterStatus] = useState("");
   const [wbsFilterAssignee, setWbsFilterAssignee] = useState("");
   const [wbsFilterWorkType, setWbsFilterWorkType] = useState("");
-  const [wbsPreset, setWbsPresetState] = useState<WbsPreset>(() => {
+  // 2.0: null = no saved choice yet -> Draft opens on Full (Work Type /
+  // Output Type visible before Start Project), anything else on Essential.
+  const [wbsPresetChoice, setWbsPresetChoice] = useState<WbsPreset | null>(() => {
     try {
       const v = localStorage.getItem(WBS_PRESET_STORAGE_KEY);
       if (v === "essential" || v === "planning" || v === "full") return v;
     } catch {
       // ignore
     }
-    return "essential";
+    return null;
   });
   function setWbsPreset(p: WbsPreset) {
-    setWbsPresetState(p);
+    setWbsPresetChoice(p);
     try {
       localStorage.setItem(WBS_PRESET_STORAGE_KEY, p);
     } catch {
       // ignore -- still applies for this session
     }
   }
+  // WBS UI Refresh 2.0: project details fold behind the summary strip; one Add task menu; phase row menus.
+  const [wbsDetailsOpen, setWbsDetailsOpen] = useState(false);
+  const [wbsAddMenu, setWbsAddMenu] = useState<{ x: number; y: number } | null>(null);
+  const [wbsPhaseMenu, setWbsPhaseMenu] = useState<{ key: string; x: number; y: number } | null>(null);
   function clearWbsFilters() {
     setWbsSearch("");
     setWbsFilterPhase("");
@@ -4389,6 +4395,7 @@ export default function WbsPlanning() {
   const isDraftProject = (project.wbs_status ?? "draft") === "draft";
   const includedMilestones = milestones.filter((m) => m.is_included);
   const phaseOfRoot = (t: TaskRow) => (t.wbs_phase && includedMilestones.some((m) => m.phase_key === t.wbs_phase) ? t.wbs_phase : null);
+  const wbsPreset: WbsPreset = wbsPresetChoice ?? (isDraftProject ? "full" : "essential");
   const wbsPresetCols = WBS_PRESET_COLS[wbsPreset];
   const wbsVisibleCols = WBS_TASK_COLUMN_ORDER.filter((k) => !wbsPresetCols || wbsPresetCols.includes(k));
   const colOn = (k: string) => wbsVisibleCols.includes(k);
@@ -4446,7 +4453,7 @@ export default function WbsPlanning() {
     : [];
   type WbsItem =
     | { kind: "task"; t: TaskRow & { depth: number } }
-    | { kind: "phase"; key: string; label: string; count: number; hours: number }
+    | { kind: "phase"; key: string; label: string; count: number; hours: number; excluded?: boolean }
     | { kind: "unphased"; count: number }
     | { kind: "milestone"; m: ProjectMilestone }
     | { kind: "module"; name: string; done: number; total: number; stage: string; hours: number }
@@ -4505,12 +4512,15 @@ export default function WbsPlanning() {
         items.push({ kind: "module", name: n, done, total: leaves.length, stage, hours: leaves.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0) });
         if (wbsFiltersActive || !collapsedPhases.has(`mod:${n}`)) for (const t of rows) items.push({ kind: "task", t });
       }
-      if (canEditWbs && canAddTasks && !isSessionProject) items.push({ kind: "addmodule" });
-      for (const hm of heldMilestones) items.push({ kind: "milestone", m: hm });
+      for (const hm of heldMilestones) if (orderedTasks.some((t) => phaseOf(t) === hm.phase_key)) items.push({ kind: "milestone", m: hm });
     };
     for (const ph of lifecyclePhases) {
       const m = includedMilestones.find((x) => x.phase_key === ph.key);
-      if (!m) continue;
+      if (!m) {
+        // 2.0: phases switched off for this project stay visible, greyed out.
+        if (milestones.some((x) => x.phase_key === ph.key)) items.push({ kind: "phase", key: ph.key, label: ph.label, count: 0, hours: 0, excluded: true });
+        continue;
+      }
       const moduleable = ph.key === "design" || ph.key === "development";
       const rows = orderedTasks.filter((t) => phaseOf(t) === ph.key && !(groupByModule && moduleOf(t)));
       if (groupByModule && moduleable) {
@@ -4528,7 +4538,8 @@ export default function WbsPlanning() {
       const leafHours = rows.filter((t) => !(t.depth === 0 && hasChildren(t.id))).reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
       items.push({ kind: "phase", key: ph.key, label: ph.label, count: rows.filter((t) => t.depth === 0).length, hours: leafHours });
       if (wbsFiltersActive || !collapsedPhases.has(ph.key)) for (const t of rows) items.push({ kind: "task", t });
-      items.push({ kind: "milestone", m });
+      // 2.0: milestone details show under an open phase that has tasks; the name is on the phase row.
+      if (rows.length && !collapsedPhases.has(ph.key)) items.push({ kind: "milestone", m });
     }
     if (groupByModule) placeModules();
     return items;
@@ -4761,36 +4772,75 @@ export default function WbsPlanning() {
       );
     }
     if (it.kind === "phase") {
+      // WBS UI Refresh 2.0: one compact row per phase. The left chevron is the
+      // only expand/collapse control; the phase name filters the WBS to it;
+      // the milestone name sits on the right; other actions live in the menu.
       const c = PHASE_COLORS[it.key] ?? PHASE_COLORS.analysis;
       const collapsed = collapsedPhases.has(it.key);
+      const ph = lifecyclePhases.find((x) => x.key === it.key);
+      const num = lifecyclePhases.findIndex((x) => x.key === it.key) + 1;
+      const pm = milestones.find((x) => x.phase_key === it.key);
+      const kpi = phaseKpis.find((k) => k.key === it.key);
+      const filtered = wbsFilterPhase === it.key;
+      const current = !isDraftProject && !it.excluded && !!ph && project?.phase === ph.project_phase;
+      const toggle = () => setCollapsedPhases((prev) => { const n = new Set(prev); if (n.has(it.key)) n.delete(it.key); else n.add(it.key); return n; });
+      if (it.excluded) {
+        return (
+          <tr key={`lc-ph-${it.key}`} className="wbs-phase-row is-off">
+            <td colSpan={WBS_TOTAL_COLS}>
+              <div style={{ ...sticky }} className="wbs-phase-inner">
+                <span className="wbs-phase-chev" aria-hidden="true" />
+                <span className="wbs-phase-num" style={{ background: "#cbd5e1" }}>{num}</span>
+                <span className="wbs-phase-name off">{it.label}</span>
+                <span className="wbs-phase-meta">Skipped for this project</span>
+                <span className="wbs-phase-ms off"><span className="wbs-ms-diamond" />{pm?.name}</span>
+                {isDraftProject && canEditWbs && canManageWbs && pm ? (
+                  <button type="button" className="wbs-phase-more" aria-label={`${it.label} actions`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setWbsPhaseMenu({ key: it.key, x: r.right, y: r.bottom + 4 }); }}>
+                    <MoreHorizontal size={14} />
+                  </button>
+                ) : <span className="wbs-phase-more-spacer" />}
+              </div>
+            </td>
+          </tr>
+        );
+      }
       return (
-        <tr key={`lc-ph-${it.key}`}>
-          <td colSpan={WBS_TOTAL_COLS} style={{ padding: 0, background: c.bg, borderTop: `2px solid ${c.border}` }}>
-            <div style={{ ...sticky, padding: "7px 10px" }}>
+        <tr key={`lc-ph-${it.key}`} className={`wbs-phase-row${filtered ? " is-filtered" : ""}`}>
+          <td colSpan={WBS_TOTAL_COLS} style={{ background: c.bg, borderTop: `1px solid ${c.border}` }}>
+            <div style={{ ...sticky }} className="wbs-phase-inner">
+              <button type="button" className="wbs-phase-chev" onClick={toggle} aria-expanded={!collapsed} aria-label={`${collapsed ? "Expand" : "Collapse"} ${it.label}`} style={{ color: c.fg }}>
+                {collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+              </button>
+              <span className="wbs-phase-num" style={{ background: c.fg }}>{num}</span>
               <button
                 type="button"
-                onClick={() => setCollapsedPhases((prev) => { const n = new Set(prev); if (n.has(it.key)) n.delete(it.key); else n.add(it.key); return n; })}
-                style={{ border: "none", background: "transparent", cursor: "pointer", color: c.fg, display: "inline-flex", alignItems: "center", gap: 6, padding: 0 }}
+                className="wbs-phase-name"
+                style={{ color: c.fg }}
+                aria-pressed={filtered}
+                title={filtered ? "Show all phases" : `Show only ${it.label}`}
+                onClick={() => setWbsFilterPhase(filtered ? "" : it.key)}
               >
-                {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                <strong style={{ fontSize: 13 }}>{it.label}</strong>
+                {it.label}
               </button>
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>{it.count} task{it.count === 1 ? "" : "s"} · {Math.round(it.hours * 10) / 10} est. hrs</span>
-              {canEditWbs && canAddTasks && !wbsFiltersActive && !isSessionProject && PHASE_TEMPLATES[it.key] && it.count === 0 && (
-                <button type="button" onClick={() => void applyScopingTemplate(it.key)} style={{ marginLeft: 6, border: `1px solid ${c.fg}`, background: c.fg, color: "#fff", borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <ListPlus size={12} /> {PHASE_TEMPLATES[it.key].label}
-                </button>
+              <span className="wbs-phase-meta">{it.count} task{it.count === 1 ? "" : "s"} · {Math.round(it.hours * 10) / 10} hrs</span>
+              {kpi && kpi.total > 0 && (
+                <span className="wbs-phase-pct" title={`${kpi.done} of ${kpi.total} tasks done${kpi.active ? `, ${kpi.active} in progress` : ""}`}>
+                  <span className="wbs-phase-pct-bar"><span style={{ width: `${kpi.pct}%`, background: c.fg }} /></span>
+                  {kpi.pct}%
+                </span>
               )}
-              {canEditWbs && canAddTasks && !wbsFiltersActive && !isSessionProject && (it.key === "design" || it.key === "development") && (
-                <button type="button" onClick={() => setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" })} title="Adds Design / storyboard, Review and Sign-off in Design, and Build, Review and Sign-off in Development, linked in order" style={{ marginLeft: 6, border: `1px solid ${c.fg}`, background: c.fg, color: "#fff", borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <ListPlus size={12} /> Add module
-                </button>
+              {current && <span className="wbs-phase-current" style={{ color: c.fg, borderColor: c.border }}>Current phase</span>}
+              {filtered && <span className="wbs-phase-current" style={{ color: c.fg, borderColor: c.border }}>Filtered</span>}
+              {pm && (
+                <span className="wbs-phase-ms" title={pm.reached_at ? `${pm.name}: reached` : `${pm.name}: not reached yet`}>
+                  <span className="wbs-ms-diamond" style={{ background: pm.reached_at ? "#16a34a" : "#f59e0b" }} />
+                  {pm.name}
+                  {pm.reached_at && <CheckCircle2 size={12} color="#16a34a" />}
+                </span>
               )}
-              {canEditWbs && canAddTasks && !wbsFiltersActive && !isSessionProject && (
-                <button type="button" onClick={() => void addTopLevelTask(it.key)} style={{ marginLeft: 6, border: `1px solid ${c.border}`, background: "#fff", color: c.fg, borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <Plus size={12} /> Add task
-                </button>
-              )}
+              <button type="button" className="wbs-phase-more" aria-label={`${it.label} actions`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setWbsPhaseMenu({ key: it.key, x: r.right, y: r.bottom + 4 }); }}>
+                <MoreHorizontal size={14} />
+              </button>
             </div>
           </td>
         </tr>
@@ -5821,6 +5871,58 @@ export default function WbsPlanning() {
         .wbs-clear-btn { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px; border: none; border-radius: 8px; background: transparent; color: var(--accent); font-size: 11.5px; font-weight: 600; cursor: pointer; width: auto; font-family: inherit; }
         .wbs-chip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid #d6e2ef; background: #fff; font-size: 11.5px; color: var(--muted); cursor: pointer; width: auto; font-family: inherit; }
         .wbs-chip.on { color: #17324f; font-weight: 600; }
+        .wbs-summary { display: flex; align-items: stretch; flex-wrap: wrap; gap: 0; padding: 12px 6px !important; margin-bottom: 12px; }
+        .wbs-summary-item { display: grid; gap: 4px; padding: 0 18px; border-right: 1px solid #e5edf6; min-width: 0; }
+        .wbs-summary-label { font-size: 11px; color: var(--muted); }
+        .wbs-summary-value { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: #17324f; white-space: nowrap; }
+        .wbs-avatar { width: 22px; height: 22px; border-radius: 50%; color: #fff; font-size: 9.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .wbs-summary-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; padding: 0 12px; flex-wrap: wrap; }
+        .wbs-summary-more, .wbs-summary-need { display: inline-flex; align-items: center; gap: 4px; border: none; background: transparent; color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px 2px; width: auto; font-family: inherit; }
+        .wbs-summary-need { color: #b45309; background: #fff7ed; border-radius: 999px; padding: 3px 10px; }
+        .wbs-modern-page .wbs-workspace-head { padding: 0 !important; margin-bottom: 8px; }
+        .wbs-head-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px 10px; flex-wrap: wrap; }
+        .wbs-head-icon { width: 34px; height: 34px; border-radius: 9px; background: var(--accent-bg); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .wbs-head-title { font-family: var(--font-heading); font-size: 15px; font-weight: 700; color: #17324f; }
+        .wbs-head-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+        .wbs-head-controls { margin-left: auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .wbs-head-group { display: inline-flex; align-items: center; gap: 6px; }
+        .wbs-toolbar-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 0 14px 12px; }
+        .wbs-toolbar-row select { width: auto; height: 30px; padding: 0 24px 0 9px; font-size: 11.5px; border: 1px solid #d6e2ef; border-radius: 8px; background-color: #fff; color: #304963; font-family: inherit; }
+        .wbs-toolbar-row select.on { border-color: var(--accent); color: var(--accent); background-color: var(--accent-bg); font-weight: 600; }
+        .wbs-toolbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+        .wbs-add-btn { display: inline-flex; align-items: center; gap: 6px; padding-right: 6px !important; }
+        .wbs-add-caret { display: inline-flex; align-items: center; margin-left: 4px; padding-left: 6px; border-left: 1px solid rgba(255,255,255,.4); }
+        .wbs-menu { position: fixed; z-index: 1181; width: 260px; padding: 5px !important; box-shadow: 0 8px 24px rgba(15,41,66,.18); display: grid; }
+        .wbs-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 9px; border: none; background: transparent; text-align: left; font-size: 12px; color: var(--text); cursor: pointer; border-radius: 6px; font-family: inherit; }
+        .wbs-menu-item:hover, .wbs-menu-item:focus-visible { background: var(--hover-bg); outline: none; }
+        .wbs-menu-label { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); padding: 6px 9px 3px; }
+        .wbs-menu-sep { height: 1px; background: var(--border); margin: 4px 2px; }
+        .wbs-menu-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+        .wbs-menu-note { font-size: 11px; color: var(--muted); padding: 6px 9px; }
+        .wbs-phase-row td { padding: 0 !important; }
+        .wbs-phase-inner { display: flex; align-items: center; gap: 9px; padding: 7px 10px; min-height: 40px; }
+        .wbs-phase-chev { border: none; background: transparent; cursor: pointer; display: inline-flex; padding: 2px; border-radius: 5px; width: auto; }
+        .wbs-phase-chev:focus-visible, .wbs-phase-name:focus-visible, .wbs-phase-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+        span.wbs-phase-chev { width: 19px; }
+        .wbs-phase-num { width: 20px; height: 20px; border-radius: 50%; color: #fff; font-size: 10.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .wbs-phase-name { border: none; background: transparent; padding: 0; font-family: var(--font-heading); font-size: 13px; font-weight: 700; cursor: pointer; width: auto; white-space: nowrap; }
+        .wbs-phase-name:hover { text-decoration: underline; }
+        .wbs-phase-name.off { color: #94a3b8; text-decoration: line-through; cursor: default; }
+        .wbs-phase-meta { font-size: 11px; color: var(--muted); white-space: nowrap; }
+        .wbs-phase-pct { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; color: #304963; }
+        .wbs-phase-pct-bar { width: 54px; height: 4px; border-radius: 999px; background: rgba(15,41,66,.1); overflow: hidden; display: inline-block; }
+        .wbs-phase-pct-bar > span { display: block; height: 100%; }
+        .wbs-phase-current { font-size: 10px; font-weight: 700; border: 1px solid; border-radius: 999px; padding: 1px 7px; background: #fff; white-space: nowrap; }
+        .wbs-phase-ms { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 600; color: #17324f; white-space: nowrap; padding-left: 12px; border-left: 1px solid rgba(15,41,66,.12); }
+        .wbs-phase-ms.off { color: #94a3b8; font-weight: 500; }
+        .wbs-ms-diamond { width: 9px; height: 9px; transform: rotate(45deg); background: #cbd5e1; display: inline-block; flex-shrink: 0; }
+        .wbs-phase-more { border: none; background: transparent; cursor: pointer; display: inline-flex; padding: 3px; border-radius: 5px; color: var(--muted); width: auto; }
+        .wbs-phase-more:hover { background: rgba(15,41,66,.06); }
+        .wbs-phase-more-spacer { width: 20px; }
+        .wbs-phase-row.is-off td { background: #f8fafc; border-top: 1px dashed #e2e8f0; }
+        .wbs-phase-row.is-filtered td { box-shadow: inset 3px 0 0 currentColor; }
+        .wbs-guidance { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px 14px; border: 1px solid #dce7f3; border-radius: 10px; background: #f7fbff; font-size: 12px; color: #304963; }
+        .wbs-guidance-link { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--accent); }
         .wbs-modern-page {
           background: var(--bg);
           margin: -16px;
@@ -6005,6 +6107,76 @@ export default function WbsPlanning() {
           onImported={() => void loadAll(true)}
         />
       )}
+      {wbsAddMenu && project && (() => {
+        const close = () => setWbsAddMenu(null);
+        const included = lifecyclePhases.filter((ph) => includedMilestones.some((m) => m.phase_key === ph.key));
+        const hasPhaseTasks = (k: string) => orderedTasks.some((t) => phaseOfRoot(t) === k);
+        const canModule = included.some((ph) => ph.key === "design" || ph.key === "development");
+        const templates = included.filter((ph) => PHASE_TEMPLATES[ph.key] && !hasPhaseTasks(ph.key));
+        const item = (key: string, label: React.ReactNode, onClick: () => void, hint?: string) => (
+          <button key={key} type="button" role="menuitem" className="wbs-menu-item" title={hint} onClick={() => { close(); clearWbsFilters(); onClick(); }}>{label}</button>
+        );
+        return createPortal(
+          <>
+            <div style={{ position: "fixed", inset: 0, zIndex: 1180 }} onClick={close} />
+            <div className="card wbs-menu" role="menu" aria-label="Add" onKeyDown={(e) => { if (e.key === "Escape") close(); }}
+              style={{ left: Math.max(8, Math.min(wbsAddMenu.x - 260, window.innerWidth - 268)), top: Math.min(wbsAddMenu.y, window.innerHeight - 360) }}>
+              <div className="wbs-menu-label">Add task</div>
+              {included.map((ph) => item(`t-${ph.key}`, <><span className="wbs-menu-dot" style={{ background: (PHASE_COLORS[ph.key] ?? PHASE_COLORS.analysis).fg }} />In {ph.label}</>, () => void addTopLevelTask(ph.key)))}
+              {canModule && (
+                <>
+                  <div className="wbs-menu-sep" />
+                  {item("module", <><ListPlus size={13} /> Add module</>, () => setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }), "Adds Design / Storyboard, Review and Sign-Off in Design, and Build, Review and Sign-Off in Development, linked in order")}
+                </>
+              )}
+              {templates.length > 0 && (
+                <>
+                  <div className="wbs-menu-sep" />
+                  <div className="wbs-menu-label">Use template</div>
+                  {templates.map((ph) => item(`tpl-${ph.key}`, <><Copy size={13} /> {PHASE_TEMPLATES[ph.key].label}</>, () => void applyScopingTemplate(ph.key), PHASE_TEMPLATES[ph.key].message))}
+                </>
+              )}
+            </div>
+          </>,
+          document.body
+        );
+      })()}
+      {wbsPhaseMenu && project && (() => {
+        const close = () => setWbsPhaseMenu(null);
+        const key = wbsPhaseMenu.key;
+        const ph = lifecyclePhases.find((x) => x.key === key);
+        const pm = milestones.find((x) => x.phase_key === key);
+        if (!ph || !pm) return null;
+        const on = pm.is_included;
+        const hasTasks = orderedTasks.some((t) => phaseOfRoot(t) === key);
+        const canAdd = on && canEditWbs && canAddTasks && !isSessionProject;
+        const canToggle = isDraftProject && canEditWbs && canManageWbs;
+        const filtered = wbsFilterPhase === key;
+        const item = (k: string, label: React.ReactNode, onClick: () => void, hint?: string) => (
+          <button key={k} type="button" role="menuitem" className="wbs-menu-item" title={hint} onClick={() => { close(); onClick(); }}>{label}</button>
+        );
+        return createPortal(
+          <>
+            <div style={{ position: "fixed", inset: 0, zIndex: 1180 }} onClick={close} />
+            <div className="card wbs-menu" role="menu" aria-label={`${ph.label} actions`} onKeyDown={(e) => { if (e.key === "Escape") close(); }}
+              style={{ left: Math.max(8, Math.min(wbsPhaseMenu.x - 240, window.innerWidth - 248)), top: Math.min(wbsPhaseMenu.y, window.innerHeight - 300) }}>
+              {on && item("filter", filtered ? "Show all phases" : `Show only ${ph.label}`, () => setWbsFilterPhase(filtered ? "" : key))}
+              {canAdd && item("add", <><Plus size={13} /> Add task in {ph.label}</>, () => { clearWbsFilters(); void addTopLevelTask(key); })}
+              {canAdd && (key === "design" || key === "development") && item("module", <><ListPlus size={13} /> Add module</>, () => { clearWbsFilters(); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); })}
+              {canAdd && PHASE_TEMPLATES[key] && !hasTasks && item("tpl", <><Copy size={13} /> {PHASE_TEMPLATES[key].label}</>, () => { clearWbsFilters(); void applyScopingTemplate(key); }, PHASE_TEMPLATES[key].message)}
+              {on && hasTasks && pm.kind === "deliverables" && canEditWbs && item("link", <><Link2 size={13} /> Link tasks to {pm.name}</>, () => setMilestonePicker({ milestoneId: pm.id, x: wbsPhaseMenu.x - 240, y: wbsPhaseMenu.y }))}
+              {canToggle && (
+                <>
+                  <div className="wbs-menu-sep" />
+                  {item("toggle", on ? "Skip this phase for this project" : "Include this phase", () => void togglePhaseIncluded(pm), "Phases lock at Start Project.")}
+                </>
+              )}
+              {!on && !canToggle && <div className="wbs-menu-note">Skipped for this project. Phases are set at Start Project.</div>}
+            </div>
+          </>,
+          document.body
+        );
+      })()}
       {rowActionsMenu &&
         (() => {
           const task = orderedTasks.find((x) => x.id === rowActionsMenu.taskId);
@@ -6359,13 +6531,13 @@ export default function WbsPlanning() {
           </div>
         </div>
       )}
-      <Link to={`/projects/${projectId}`} className="back-link" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
-        <ArrowLeft size={13} /> Back to {project.name}
+      <Link to="/projects" className="back-link" style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
+        <ArrowLeft size={13} /> Back to Projects
       </Link>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 2 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-            <h1>WBS Planning — {project.name}</h1>
+            <h1>{project.project_number ? `P-${String(project.project_number).padStart(4, "0")} · ` : ""}{project.name || "Untitled project"}</h1>
             <span style={{
               display: "inline-flex",
               alignItems: "center",
@@ -6673,7 +6845,54 @@ export default function WbsPlanning() {
           alongside the main content (not a full-width toggle panel like
           before), matching her reference mockup. Main content is the
           flex:1 left column; the rail is a fixed-width sibling. */}
-          <section className="card" style={{ padding: 16, marginBottom: 14, display: wbsView === "timeline" ? "none" : undefined }}>
+          {wbsView === "wbs" && !project.is_unsaved && (() => {
+            const fc = summaries.manual;
+            const startTxt = project.start_date ? formatDate(project.start_date.slice(0, 10)) : "—";
+            const endTxt = fc.end ? formatDate(fc.end) : project.end_date ? formatDate(project.end_date.slice(0, 10)) : "—";
+            const taskCount = orderedTasks.filter((t) => t.depth === 0).length;
+            const initials = (owner?.name ?? "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+            const needCount = isDraftProject ? detailsMissing.length : 0;
+            return (
+              <div className="card wbs-summary">
+                <div className="wbs-summary-item">
+                  <span className="wbs-summary-label">Owner</span>
+                  <span className="wbs-summary-value">
+                    <span className="wbs-avatar" style={{ background: owner ? colorForPerson(owner) : "#94a3b8" }}>{initials}</span>
+                    {owner?.name ?? "No owner yet"}
+                  </span>
+                </div>
+                <div className="wbs-summary-item">
+                  <span className="wbs-summary-label">Schedule</span>
+                  <span className="wbs-summary-value" title="Project start to forecasted end">
+                    <Calendar size={14} color="var(--muted)" /> {startTxt} – {endTxt}
+                  </span>
+                </div>
+                <div className="wbs-summary-item">
+                  <span className="wbs-summary-label">Estimated Effort</span>
+                  <span className="wbs-summary-value">
+                    <Clock size={14} color="var(--muted)" /> <strong>{totalEffortHours} hours</strong> <span style={{ color: "var(--muted)" }}>({taskCount} task{taskCount === 1 ? "" : "s"})</span>
+                  </span>
+                </div>
+                <div className="wbs-summary-item">
+                  <span className="wbs-summary-label">Baseline</span>
+                  <span className="wbs-summary-value">
+                    {activeBaseline ? `V${activeBaseline.version_number} · ${formatDate(activeBaseline.captured_at.slice(0, 10))}` : <span style={{ color: "var(--muted)" }}>{isDraftProject ? "Set at Start Project" : "—"}</span>}
+                  </span>
+                </div>
+                <div className="wbs-summary-actions">
+                  {needCount > 0 && (
+                    <button type="button" className="wbs-summary-need" onClick={() => setWbsDetailsOpen(true)} title={`Still needed before Start Project: ${detailsMissing.join(", ")}`}>
+                      {needCount} detail{needCount === 1 ? "" : "s"} needed before Start Project
+                    </button>
+                  )}
+                  <button type="button" className="wbs-summary-more" aria-expanded={wbsDetailsOpen} onClick={() => setWbsDetailsOpen((v) => !v)}>
+                    {wbsDetailsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />} {wbsDetailsOpen ? "Hide details" : "Show more details"}
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+          <section className="card" style={{ padding: 16, marginBottom: 14, display: wbsView === "timeline" || (!project.is_unsaved && !wbsDetailsOpen) ? "none" : undefined }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
               <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800, flexShrink: 0 }}>1</span>
               <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Project Information</div>
@@ -6927,7 +7146,7 @@ export default function WbsPlanning() {
           )}
 
           <div style={{ display: project.is_unsaved ? "none" : "contents" }}>
-          <div style={{ display: wbsView === "timeline" ? "none" : undefined }}>
+          <div style={{ display: wbsView === "timeline" || !wbsDetailsOpen ? "none" : undefined }}>
           {project.wbs_status !== "closed" && (
             <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", margin: "-2px 2px 12px" }}>
               <label style={{ display: "inline-flex", alignItems: "center", gap: 9, fontSize: 11.5, fontWeight: 600, color: "var(--text-secondary)", cursor: "pointer", userSelect: "none" }}>
@@ -7657,35 +7876,117 @@ export default function WbsPlanning() {
           <div style={{ display: wbsView === "wbs" && project.wbs_status === "closed" && !wbsDetailsExpanded ? "none" : undefined }}>
           <div style={{ display: wbsView === "timeline" ? "none" : undefined }}>
 
-          <div className="card" style={{ padding: 0, marginBottom: 10, overflow: "hidden" }}>
-            <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #e5edf6", flexWrap: "wrap" }}>
-              <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>2</span>
-              <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Work Breakdown Structure</div>
-              <div style={{ fontSize: 10.5, color: "var(--muted)" }}>{isSessionProject ? "Manage scheduled Training Delivery sessions and their status, facilitator, hours, and dates." : "Break the project into tasks and define the effort, assignee, and schedule."}</div>
-              <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={refreshDates}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                >
-                  <RefreshCw size={13} /> Refresh Dates
-                </button>
-
-                {canEditWbs && (
-                  isSessionProject ? (
+          <div className="card wbs-workspace-head">
+            <div className="wbs-head-row">
+              <span className="wbs-head-icon" aria-hidden="true"><ListPlus size={17} /></span>
+              <div style={{ minWidth: 0 }}>
+                <div className="wbs-head-title">Work Breakdown Structure</div>
+                <div className="wbs-head-sub">
+                  {isSessionProject
+                    ? "Manage scheduled Training Delivery sessions and their status, facilitator, hours, and dates."
+                    : isLifecycle
+                      ? "Add tasks and organize your plan by phases or modules. Use templates to get started quickly."
+                      : "Break the project into tasks and define the effort, assignee, and schedule."}
+                </div>
+              </div>
+              <div className="wbs-head-controls">
+                {hasModules && (
+                  <span className="wbs-head-group">
+                    <span className="wbs-seg-label">Group by</span>
+                    <span className="wbs-seg" role="group" aria-label="Group by">
+                      {(["phase", "module"] as const).map((mode) => (
+                        <button key={mode} type="button" aria-pressed={(groupByModule ? "module" : "phase") === mode} className={(groupByModule ? "module" : "phase") === mode ? "on" : ""} onClick={() => setWbsGroupMode(mode)}>
+                          {mode === "phase" ? "Phase" : "Module"}
+                        </button>
+                      ))}
+                    </span>
+                  </span>
+                )}
+                <span className="wbs-head-group">
+                  <span className="wbs-seg-label">View</span>
+                  <span className="wbs-seg" role="group" aria-label="Columns">
+                    {WBS_PRESETS.map((p) => (
+                      <button key={p} type="button" aria-pressed={wbsPreset === p} className={wbsPreset === p ? "on" : ""} title={WBS_PRESET_HINT[p]} onClick={() => setWbsPreset(p)}>
+                        {WBS_PRESET_LABEL[p]}
+                      </button>
+                    ))}
+                  </span>
+                </span>
+              </div>
+            </div>
+            <div className="wbs-toolbar-row">
+              {orderedTasks.length > 0 && (
+                <>
+                  <label className="wbs-search">
+                    <Search size={13} />
+                    <input value={wbsSearch} onChange={(e) => setWbsSearch(e.target.value)} placeholder="Search tasks" aria-label="Search tasks" />
+                    {wbsSearch && (
+                      <button type="button" onClick={() => setWbsSearch("")} aria-label="Clear search" style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "var(--muted)", display: "inline-flex", width: "auto" }}>
+                        <XIcon size={12} />
+                      </button>
+                    )}
+                  </label>
+                  {hasModules && (
+                    <select className={wbsFilterModule ? "on" : ""} value={wbsFilterModule} onChange={(e) => setWbsFilterModule(e.target.value)} aria-label="Module">
+                      <option value="">All modules</option>
+                      {wbsModuleNames.map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  )}
+                  <select className={wbsFilterAssignee ? "on" : ""} value={wbsFilterAssignee} onChange={(e) => setWbsFilterAssignee(e.target.value)} aria-label="Assignee">
+                    <option value="">All assignees</option>
+                    <option value="__none">Unassigned</option>
+                    {wbsAssigneeOptions.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                  <select className={wbsFilterStatus ? "on" : ""} value={wbsFilterStatus} onChange={(e) => setWbsFilterStatus(e.target.value)} aria-label="Status">
+                    <option value="">All statuses</option>
+                    {["Not Started", "In Progress", "Done", "Cancelled"].map((v) => (
+                      <option key={v} value={v}>{v}</option>
+                    ))}
+                  </select>
+                  {wbsWorkTypeOptions.length > 0 && (
+                    <select className={wbsFilterWorkType ? "on" : ""} value={wbsFilterWorkType} onChange={(e) => setWbsFilterWorkType(e.target.value)} aria-label="Work Type">
+                      <option value="">All work types</option>
+                      {wbsWorkTypeOptions.map((w) => (
+                        <option key={w.id} value={w.id}>{w.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  {wbsFiltersActive && (
+                    <button type="button" className="wbs-clear-btn" onClick={clearWbsFilters}>
+                      <XIcon size={12} /> Clear{wbsFilterPhase ? ` (${lifecyclePhases.find((x) => x.key === wbsFilterPhase)?.label ?? "phase"})` : ""}
+                    </button>
+                  )}
+                </>
+              )}
+              <div className="wbs-toolbar-actions">
+                {orderedTasks.length > 0 && (
+                  <button type="button" className="btn-secondary" onClick={refreshDates} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <RefreshCw size={13} /> Refresh Dates
+                  </button>
+                )}
+                {canEditWbs && isSessionProject && (
+                  <button type="button" className="btn-primary" onClick={() => setShowAddSession(true)} title="Add a Training Delivery session" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Plus size={13} /> Add Session
+                  </button>
+                )}
+                {canEditWbs && canAddTasks && !isSessionProject && (
+                  isLifecycle ? (
                     <button
                       type="button"
-                      className="btn-primary"
-                      onClick={() => setShowAddSession(true)}
-                      title="Add a Training Delivery session"
-                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                      className="btn-primary wbs-add-btn"
+                      aria-haspopup="menu"
+                      aria-expanded={!!wbsAddMenu}
+                      onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setWbsAddMenu(wbsAddMenu ? null : { x: r.right, y: r.bottom + 4 }); }}
                     >
-                      <Plus size={13} /> Add Session
+                      <Plus size={13} /> Add task <span className="wbs-add-caret"><ChevronDown size={13} /></span>
                     </button>
                   ) : (
                     <button type="button" className="btn-primary" onClick={() => { clearWbsFilters(); void addTopLevelTask(); }} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      <Plus size={13} /> Add Task
+                      <Plus size={13} /> Add task
                     </button>
                   )
                 )}
@@ -7766,117 +8067,7 @@ export default function WbsPlanning() {
               </button>
             </div>
           )}
-          {renderPhaseSetupBar()}
           {renderMilestonePicker()}
-          {isLifecycle && phaseKpis.length > 0 && orderedTasks.length > 0 && (
-            <div className="wbs-phase-kpis">
-              {phaseKpis.map((k) => {
-                const c = PHASE_COLORS[k.key] ?? PHASE_COLORS.analysis;
-                const on = wbsFilterPhase === k.key;
-                return (
-                  <button
-                    key={k.key}
-                    type="button"
-                    className={`wbs-phase-kpi${on ? " on" : ""}`}
-                    style={on ? { borderColor: c.fg, boxShadow: `0 0 0 1px ${c.fg}`, background: c.bg } : undefined}
-                    onClick={() => setWbsFilterPhase(on ? "" : k.key)}
-                    title={on ? "Click again to show all phases" : `Show only ${k.label} tasks`}
-                  >
-                    <span className="wbs-phase-kpi-label">
-                      <span style={{ width: 8, height: 8, borderRadius: 2, background: c.fg, flexShrink: 0 }} />
-                      {k.label}
-                    </span>
-                    <span className="wbs-phase-kpi-nums">
-                      <strong>{k.total ? `${k.pct}%` : "–"}</strong>
-                      <span>{k.total ? `${k.done} of ${k.total} done${k.active ? ` · ${k.active} in progress` : ""}` : "No tasks yet"}</span>
-                    </span>
-                    <span className="wbs-phase-kpi-bar">
-                      <span style={{ width: `${k.pct}%`, background: c.fg }} />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          {orderedTasks.length > 0 && (
-            <div className="card wbs-toolbar">
-              <label className="wbs-search">
-                <Search size={13} />
-                <input value={wbsSearch} onChange={(e) => setWbsSearch(e.target.value)} placeholder="Search tasks" aria-label="Search tasks" />
-                {wbsSearch && (
-                  <button type="button" onClick={() => setWbsSearch("")} aria-label="Clear search" style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: "var(--muted)", display: "inline-flex", width: "auto" }}>
-                    <XIcon size={12} />
-                  </button>
-                )}
-              </label>
-              {isLifecycle && phaseKpis.length > 0 && (
-                <select className={wbsFilterPhase ? "on" : ""} value={wbsFilterPhase} onChange={(e) => setWbsFilterPhase(e.target.value)} aria-label="Phase">
-                  <option value="">All phases</option>
-                  {phaseKpis.map((k) => (
-                    <option key={k.key} value={k.key}>{k.label}</option>
-                  ))}
-                </select>
-              )}
-              {hasModules && (
-                <select className={wbsFilterModule ? "on" : ""} value={wbsFilterModule} onChange={(e) => setWbsFilterModule(e.target.value)} aria-label="Module">
-                  <option value="">All modules</option>
-                  {wbsModuleNames.map((n) => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
-              )}
-              <select className={wbsFilterStatus ? "on" : ""} value={wbsFilterStatus} onChange={(e) => setWbsFilterStatus(e.target.value)} aria-label="Status">
-                <option value="">All statuses</option>
-                {["Not Started", "In Progress", "Done", "Cancelled"].map((v) => (
-                  <option key={v} value={v}>{v}</option>
-                ))}
-              </select>
-              <select className={wbsFilterAssignee ? "on" : ""} value={wbsFilterAssignee} onChange={(e) => setWbsFilterAssignee(e.target.value)} aria-label="Assignee">
-                <option value="">All assignees</option>
-                <option value="__none">Unassigned</option>
-                {wbsAssigneeOptions.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-              {wbsWorkTypeOptions.length > 0 && (
-                <select className={wbsFilterWorkType ? "on" : ""} value={wbsFilterWorkType} onChange={(e) => setWbsFilterWorkType(e.target.value)} aria-label="Work Type">
-                  <option value="">All work types</option>
-                  {wbsWorkTypeOptions.map((w) => (
-                    <option key={w.id} value={w.id}>{w.name}</option>
-                  ))}
-                </select>
-              )}
-              {wbsFiltersActive && (
-                <button type="button" className="wbs-clear-btn" onClick={clearWbsFilters}>
-                  <XIcon size={12} /> Clear
-                </button>
-              )}
-              <div style={{ marginLeft: "auto", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                {hasModules && (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <span className="wbs-seg-label">Group by</span>
-                    <span className="wbs-seg">
-                      {(["phase", "module"] as const).map((mode) => (
-                        <button key={mode} type="button" className={(groupByModule ? "module" : "phase") === mode ? "on" : ""} onClick={() => setWbsGroupMode(mode)}>
-                          {mode === "phase" ? "Phase" : "Module"}
-                        </button>
-                      ))}
-                    </span>
-                  </span>
-                )}
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <span className="wbs-seg-label">Columns</span>
-                  <span className="wbs-seg">
-                    {WBS_PRESETS.map((p) => (
-                      <button key={p} type="button" className={wbsPreset === p ? "on" : ""} title={WBS_PRESET_HINT[p]} onClick={() => setWbsPreset(p)}>
-                        {WBS_PRESET_LABEL[p]}
-                      </button>
-                    ))}
-                  </span>
-                </span>
-              </div>
-            </div>
-          )}
           <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "0 2px 7px", fontSize: 10.5, color: "var(--muted)" }}>
             <span><span className="wbs-required-start">●</span> Required before Start Project</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#fff", border: "1px solid #cfd8e3" }} /> Editable</span>
@@ -7954,52 +8145,10 @@ export default function WbsPlanning() {
                 </tr>
               </thead>
               <tbody>
-                {orderedTasks.length === 0 && (
+                {orderedTasks.length === 0 && !isLifecycle && (
                   <tr>
-                    <td colSpan={WBS_TOTAL_COLS} style={{ padding: "32px 0 34px", background: "#fff", position: "relative" }}>
-                      <div
-                        style={{
-                          position: "sticky",
-                          left: 0,
-                          width: "min(100%, calc(100vw - 250px))",
-                          margin: 0,
-                          display: "flex",
-                          justifyContent: "center",
-                          padding: "0 20px",
-                          boxSizing: "border-box",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: "min(720px, 100%)",
-                            display: "grid",
-                            gridTemplateColumns: "110px minmax(0,1fr)",
-                            gap: 22,
-                            alignItems: "center",
-                          }}
-                        >
-                        <div style={{ width: 96, height: 96, borderRadius: "50%", background: "#eef6ff", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-                          <div style={{ width: 54, height: 62, border: "1px solid #c8daf0", borderRadius: 8, background: "#fff", padding: "11px 9px", display: "grid", gap: 7 }}>
-                            {[0,1,2].map((n) => <div key={n} style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#d8e9fb" }} /><span style={{ height: 5, flex: 1, borderRadius: 3, background: "#dce6f2" }} /></div>)}
-                          </div>
-                          <span style={{ position: "absolute", right: 8, bottom: 8, width: 30, height: 30, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={17} /></span>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 15, fontWeight: 800, color: "#17324f" }}>Start building your work plan</div>
-                          <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5, marginTop: 5 }}>
-                            Create the first task and define who owns it, how much effort is expected, and when it starts. Once you add tasks, the schedule and project insights will appear here.
-                          </div>
-                          {canEditWbs && (
-                            <button type="button" className="btn-primary" onClick={addTopLevelTask} style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                              <Plus size={13} /> Add first task
-                            </button>
-                          )}
-                          <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 7, background: "#eef7ff", color: "#53708e", fontSize: 10.5 }}>
-                            <strong style={{ color: "#234f7d" }}>Tip:</strong> Add scoped hours and a start date to generate the project timeline and effort forecast.
-                          </div>
-                        </div>
-                        </div>
-                      </div>
+                    <td colSpan={WBS_TOTAL_COLS} style={{ padding: "14px 14px", fontSize: 11.5, color: "var(--muted)" }}>
+                      <span style={{ position: "sticky", left: 14 }}>No tasks yet.{canEditWbs && canAddTasks ? " Use Add task to create the first one." : ""}</span>
                     </td>
                   </tr>
                 )}
@@ -8496,7 +8645,7 @@ export default function WbsPlanning() {
                     </td>
                   </tr>
                 )}
-                {canEditWbs && canAddTasks && !wbsFiltersActive && (
+                {canEditWbs && canAddTasks && !wbsFiltersActive && !isLifecycle && (
                   <tr>
                     <td colSpan={WBS_TOTAL_COLS} className="add-row-cell">
                       <div className="add-row-trigger" onClick={addTopLevelTask}>
@@ -8517,37 +8666,14 @@ export default function WbsPlanning() {
             </table>
           </div>
 
-          {orderedTasks.length === 0 && (
-            <>
-              <section className="card" style={{ padding: 14, marginTop: 14 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                  <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>3</span>
-                  <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Schedule (Timeline)</div>
-                  <div style={{ fontSize: 10.5, color: "var(--muted)" }}>The project timeline will appear here once tasks have been added with dates and effort.</div>
-                </div>
-                <div style={{ border: "1px solid #dce7f3", borderRadius: 8, padding: "16px 18px", display: "flex", alignItems: "center", gap: 12, background: "#fbfdff" }}>
-                  <Calendar size={22} style={{ color: "#7892ad" }} />
-                  <div><div style={{ fontSize: 11.5, fontWeight: 700, color: "#17324f" }}>No schedule yet</div><div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Add at least one task with a start date and scoped hours to see the project timeline.</div></div>
-                </div>
-              </section>
-              <section className="card" style={{ padding: 14, marginTop: 14 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                  <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#1976ed", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>4</span>
-                  <div style={{ fontSize: 14, fontWeight: 750, color: "#17324f" }}>Project Insights</div>
-                  <div style={{ fontSize: 10.5, color: "var(--muted)" }}>Effort comparison, variance, and capacity insights will appear once the project has tasks and schedules.</div>
-                </div>
-                <div style={{ border: "1px solid #dce7f3", borderRadius: 8, padding: "16px 18px", background: "#fbfdff" }}>
-                  <div style={{ fontSize: 11.5, fontWeight: 700, color: "#17324f" }}>No data yet</div>
-                  <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>Add tasks with scoped hours to see effort comparison, variance, and capacity insights.</div>
-                </div>
-              </section>
-              <section className="card" style={{ padding: "10px 14px", marginTop: 14, display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ width: 28, height: 28, borderRadius: "50%", background: "#9fb5cf", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>5</span>
-                <div style={{ fontSize: 13, fontWeight: 750, color: "#17324f" }}>Project Closure</div>
-                <span style={{ padding: "3px 8px", borderRadius: 999, background: "#edf3fa", color: "#607892", fontSize: 10, fontWeight: 700 }}>Hidden until closing</span>
-                <div style={{ fontSize: 10.5, color: "var(--muted)" }}>This section appears when you initiate a Project Closure request.</div>
-              </section>
-            </>
+          {orderedTasks.length === 0 && !isSessionProject && (
+            <div className="wbs-guidance" role="note">
+              <Info size={15} color="var(--accent)" />
+              <span>
+                <strong>Tip:</strong> Start with a task in the relevant phase or use a template. You can also add modules later if this is a multi-module project.
+              </span>
+              <Link to="/knowledge-base?q=WBS" className="wbs-guidance-link">Learn more about planning in Tempo</Link>
+            </div>
           )}
 
           </div>

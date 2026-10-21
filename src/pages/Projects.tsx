@@ -301,9 +301,6 @@ export interface TaskRow {
   current_due_date: string;
   // phase175: due date in force at Start Project approval (or when added after Start). Never moves.
   committed_due_date?: string | null;
-  /** phase198 (#24): 'logged_late' | 'extended' when the due date was before the task was created. */
-  late_log_kind?: string | null;
-  late_log_confirmed_at?: string | null;
   committed_due_source?: string | null;
   estimated_hours: number | null;
   time_spent_hours: number | null;
