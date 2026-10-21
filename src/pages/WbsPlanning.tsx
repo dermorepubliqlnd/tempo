@@ -946,13 +946,6 @@ export default function WbsPlanning() {
   const [wbsDetailsOpen, setWbsDetailsOpen] = useState(false);
   // 2026-10-22 (Sandra): after the first save, ask how the plan will be built.
   // 2026-10-22 (Sandra): an empty new-lifecycle plan shows "How do you want to plan this project?" inside the WBS panel.
-  const [planStep, setPlanStep] = useState<"phases" | "approach">("phases");
-  const [planKind, setPlanKind] = useState<"phase" | "module" | "free" | null>(null);
-  const [planWithScoping, setPlanWithScoping] = useState(true);
-  const [planModuleName, setPlanModuleName] = useState("");
-  const [planModuleMaker, setPlanModuleMaker] = useState("");
-  const [planBusy, setPlanBusy] = useState(false);
-  const [planError, setPlanError] = useState("");
   const [wbsAddMenu, setWbsAddMenu] = useState<{ x: number; y: number } | null>(null);
   const [wbsPhaseMenu, setWbsPhaseMenu] = useState<{ key: string; x: number; y: number } | null>(null);
   function clearWbsFilters() {
@@ -4222,6 +4215,15 @@ export default function WbsPlanning() {
       // silent=true so state still refreshes underneath without the
       // full unmount/remount.
       await loadAll(true);
+      // R3 (2026-10-22, Sandra): a new lifecycle project starts with its
+      // Analysis & Scoping tasks. Design and Build modules are added once
+      // scoping is done and signed off; Implementation and Evaluation tasks
+      // come from their phase menus / templates.
+      if (wasInitialProjectInfoSave && isLifecycle && !isSessionProject && !project.is_operational && tasks.length === 0 && milestones.some((m) => m.phase_key === "analysis" && m.is_included)) {
+        const { error: tplError } = await supabase.rpc("r2_apply_template", { p_project_id: project.id, p_template_key: "scoping" });
+        if (tplError) await alert(friendlyError("add the Analysis & Scoping tasks", tplError));
+        else await loadAll(true);
+      }
       // First save only establishes Project Information and unlocks WBS planning.
       // The page transition itself is enough feedback; do not show the legacy
       // "Timelines have been saved" modal before the user has even built a WBS.
@@ -4407,8 +4409,7 @@ export default function WbsPlanning() {
   const includedMilestones = milestones.filter((m) => m.is_included);
   const phaseOfRoot = (t: TaskRow) => (t.wbs_phase && includedMilestones.some((m) => m.phase_key === t.wbs_phase) ? t.wbs_phase : null);
   const wbsPreset: WbsPreset = wbsPresetChoice ?? (isDraftProject ? "full" : "essential");
-  // Empty Draft on the new lifecycle: the guided setup replaces the WBS until the plan has tasks.
-  const showPlanSetup = isLifecycle && !isSessionProject && !project.is_operational && isDraftProject && orderedTasks.length === 0 && canEditWbs && canAddTasks;
+
   const wbsPresetCols = WBS_PRESET_COLS[wbsPreset];
   const wbsVisibleCols = WBS_TASK_COLUMN_ORDER.filter((k) => !wbsPresetCols || wbsPresetCols.includes(k));
   const colOn = (k: string) => wbsVisibleCols.includes(k);
@@ -4464,6 +4465,10 @@ export default function WbsPlanning() {
           return { key: ph.key, label: ph.label, done, active, total: leaves.length, pct: leaves.length ? Math.round((done * 100) / leaves.length) : 0 };
         })
     : [];
+  // R3: modules (Design + Build) open once Analysis & Scoping is 100% done (incl. Scope Sign-Off).
+  const analysisIncluded = includedMilestones.some((m) => m.phase_key === "analysis");
+  const analysisKpi = phaseKpis.find((k) => k.key === "analysis");
+  const scopeConfirmed = !analysisIncluded || (!!analysisKpi && analysisKpi.total > 0 && analysisKpi.done === analysisKpi.total);
   type WbsItem =
     | { kind: "task"; t: TaskRow & { depth: number } }
     | { kind: "phase"; key: string; label: string; count: number; hours: number; excluded?: boolean }
@@ -4475,7 +4480,9 @@ export default function WbsPlanning() {
   // phase194: "Group by Module" -- each module reads top to bottom from design
   // to sign-off. Phases, milestones and dates are unchanged underneath.
   const hasModules = isLifecycle && orderedTasks.some((t) => taskModuleById.has(t.id) && !t.is_archived);
-  const groupByModule = hasModules && (wbsGroupMode ?? "module") === "module";
+  // R3: one layout -- Analysis & Scoping as a whole, Design + Development by module.
+  const groupByModule = isLifecycle;
+  void wbsGroupMode;
   // Module view shows "Design / storyboard" instead of "Design / storyboard · M1 ..."
   // -- the module header already says which module. The full name is kept
   // everywhere else (My Tasks, dashboard), and edits keep the suffix.
@@ -4518,7 +4525,7 @@ export default function WbsPlanning() {
         if (n && phaseOf(t) && !names.includes(n)) names.push(n);
       }
       // 2026-10-22: one header so modules read as Design + Development, not as part of the phase above.
-      if (names.length) items.push({ kind: "modsection", count: names.length });
+      if (includedMilestones.some((m) => m.phase_key === "design" || m.phase_key === "development")) items.push({ kind: "modsection", count: names.length });
       for (const n of names) {
         const rows = orderedTasks.filter((t) => moduleOf(t) === n && phaseOf(t));
         const leaves = rows.filter((t) => !(t.depth === 0 && hasChildren(t.id)));
@@ -4598,8 +4605,11 @@ export default function WbsPlanning() {
     if (issues.noPhases) out.push({ key: "lc_phases", label: "No phases chosen", hint: "Turn on at least one phase for this project (above the WBS).", items: [], blocking: true });
     if (issues.tasksWithoutPhase.length)
       out.push({ key: "lc_task_phase", label: "Tasks not in a phase", hint: "Put each task in one of this project's phases (row menu → Move to phase).", items: issues.tasksWithoutPhase, blocking: true, overridable: true });
-    if (issues.milestonesWithoutTasks.length)
-      out.push({ key: "lc_milestone_tasks", label: "Milestones without linked tasks", hint: "Link each milestone to the tasks that must be finished to reach it.", items: issues.milestonesWithoutTasks, blocking: true, overridable: true });
+    // R3: Design / Development milestones get their tasks when modules are added after scope sign-off.
+    const moduleMs = new Set(milestones.filter((m) => m.phase_key === "design" || m.phase_key === "development").map((m) => m.name));
+    const missing = hasModules ? issues.milestonesWithoutTasks : issues.milestonesWithoutTasks.filter((n) => !moduleMs.has(n));
+    if (missing.length)
+      out.push({ key: "lc_milestone_tasks", label: "Milestones without linked tasks", hint: "Link each milestone to the tasks that must be finished to reach it.", items: missing, blocking: true, overridable: true });
     return out;
   }
 
@@ -4636,40 +4646,6 @@ export default function WbsPlanning() {
     delivery: { key: "delivery", title: "Add the Implementation template?", message: "Adds 10 delivery activities in order (pilot, LMS upload, scheduling, launch, monitoring, handover). Delete the ones this project doesn't need; the chain closes up around them.", label: "Use delivery template (10 tasks)" },
     evaluation: { key: "evaluation", title: "Add the Evaluation & Closure template?", message: "Adds 9 evaluation and close-out activities in order (L1 to L4, completion records, report, lessons learned). Delete the ones this project doesn't need.", label: "Use evaluation template (9 tasks)" },
   };
-  // 2026-10-22 (Sandra): guided plan setup for an empty Draft -- phases first,
-  // then how to build the plan. Uses the same template / module RPCs as the menus.
-  async function runPlanSetup() {
-    if (!project || !planKind || planBusy) return;
-    const included = milestones.filter((m) => m.is_included);
-    const analysisOn = included.some((m) => m.phase_key === "analysis");
-    const firstPhase = lifecyclePhases.find((ph) => included.some((m) => m.phase_key === ph.key));
-    const maker = planModuleMaker || me?.id || "";
-    if (planKind === "module" && !planModuleName.trim()) { setPlanError('Give the module a name, e.g. "M1 GMP Basics".'); return; }
-    if (planKind === "module" && !maker) { setPlanError("Pick who designs and builds the module."); return; }
-    setPlanError("");
-    const flushed = await flushPendingEdits();
-    if (!flushed) return;
-    if (!(await startDatePrompt.ensure(project))) return;
-    if (planKind === "free") {
-      setWbsGroupMode("phase");
-      await addTopLevelTask(firstPhase?.key);
-      return;
-    }
-    setPlanBusy(true);
-    if (planWithScoping && analysisOn) {
-      const { error } = await supabase.rpc("r2_apply_template", { p_project_id: project.id, p_template_key: "scoping" });
-      if (error) { setPlanBusy(false); setPlanError(friendlyError("add the Analysis & Scoping template", error).message ?? "Couldn't add the template."); return; }
-    }
-    if (planKind === "module") {
-      const { error } = await supabase.rpc("r2_add_module", { p_project_id: project.id, p_module_name: planModuleName.trim(), p_maker_id: maker });
-      if (error) { setPlanBusy(false); setPlanError(friendlyError("add the module", error).message ?? "Couldn't add the module."); await loadAll(true); return; }
-    }
-    setWbsGroupMode(planKind === "module" ? "module" : "phase");
-    setPlanBusy(false);
-    setPlanModuleName("");
-    await loadAll(true);
-  }
-
   async function applyScopingTemplate(phaseKey = "analysis") {
     if (!project) return;
     const tpl = PHASE_TEMPLATES[phaseKey];
@@ -4824,15 +4800,21 @@ export default function WbsPlanning() {
                 <span style={{ color: cd.fg }}>Design</span> <span style={{ color: "var(--muted)" }}>&amp;</span> <span style={{ color: cv.fg }}>Development</span>
               </span>
               <span className="wbs-phase-meta">by module · {it.count} module{it.count === 1 ? "" : "s"}</span>
+              {!scopeConfirmed && (
+                <span className="wbs-mod-gate" title="Design and Build start once Analysis & Scoping is complete and signed off.">
+                  Opens when Analysis &amp; Scoping is 100% done and signed off{analysisKpi && analysisKpi.total ? ` (${analysisKpi.done} of ${analysisKpi.total})` : ""}
+                </span>
+              )}
+              {scopeConfirmed && canEditWbs && canAddTasks && !isSessionProject && (
+                <button type="button" className={it.count === 0 ? "btn-primary wbs-mod-add" : "btn-secondary wbs-mod-add"} onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); }}>
+                  <Plus size={13} /> {it.count === 0 ? "Add your first module" : "Add module"}
+                </button>
+              )}
               <span className="wbs-phase-ms">
                 {dm && <><span className="wbs-ms-diamond" style={{ background: dm.reached_at ? "#16a34a" : "#f59e0b" }} />{dm.name}</>}
                 {vm && <><span className="wbs-ms-diamond" style={{ background: vm.reached_at ? "#16a34a" : "#f59e0b", marginLeft: 8 }} />{vm.name}</>}
               </span>
-              {canEditWbs && canAddTasks && !isSessionProject ? (
-                <button type="button" className="wbs-phase-more" aria-label="Add module" title="Add module" onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); }}>
-                  <Plus size={14} />
-                </button>
-              ) : <span className="wbs-phase-more-spacer" />}
+              <span className="wbs-phase-more-spacer" />
             </div>
           </td>
         </tr>
@@ -6191,7 +6173,7 @@ export default function WbsPlanning() {
         const close = () => setWbsAddMenu(null);
         const included = lifecyclePhases.filter((ph) => includedMilestones.some((m) => m.phase_key === ph.key));
         const hasPhaseTasks = (k: string) => orderedTasks.some((t) => phaseOfRoot(t) === k);
-        const canModule = included.some((ph) => ph.key === "design" || ph.key === "development");
+        const canModule = scopeConfirmed && included.some((ph) => ph.key === "design" || ph.key === "development");
         const templates = included.filter((ph) => PHASE_TEMPLATES[ph.key] && !hasPhaseTasks(ph.key));
         const item = (key: string, label: React.ReactNode, onClick: () => void, hint?: string) => (
           <button key={key} type="button" role="menuitem" className="wbs-menu-item" title={hint} onClick={() => { close(); clearWbsFilters(); onClick(); }}>{label}</button>
@@ -6241,7 +6223,7 @@ export default function WbsPlanning() {
             <div className="card wbs-menu" role="menu" aria-label={`${ph.label} actions`} onKeyDown={(e) => { if (e.key === "Escape") close(); }}
               style={{ left: Math.max(8, Math.min(wbsPhaseMenu.x - 240, window.innerWidth - 248)), top: Math.min(wbsPhaseMenu.y, window.innerHeight - 300) }}>
               {on && item("filter", filtered ? "Show all phases" : `Show only ${ph.label}`, () => setWbsFilterPhase(filtered ? "" : key))}
-              {canAdd && (key === "design" || key === "development") && item("module", <><ListPlus size={13} /> Add module</>, () => { clearWbsFilters(); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); })}
+              {canAdd && scopeConfirmed && (key === "design" || key === "development") && item("module", <><ListPlus size={13} /> Add module</>, () => { clearWbsFilters(); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); })}
               {canAdd && PHASE_TEMPLATES[key] && !hasTasks && item("tpl", <><Copy size={13} /> {PHASE_TEMPLATES[key].label}</>, () => { clearWbsFilters(); void applyScopingTemplate(key); }, PHASE_TEMPLATES[key].message)}
               {canAdd && item("add", <><Plus size={13} /> Add task in {ph.label}</>, () => { clearWbsFilters(); void addTopLevelTask(key); })}
               {on && hasTasks && pm.kind === "deliverables" && canEditWbs && item("link", <><Link2 size={13} /> Link tasks to {pm.name}</>, () => setMilestonePicker({ milestoneId: pm.id, x: wbsPhaseMenu.x - 240, y: wbsPhaseMenu.y }))}
@@ -7972,18 +7954,6 @@ export default function WbsPlanning() {
                 </div>
               </div>
               <div className="wbs-head-controls">
-                {hasModules && (
-                  <span className="wbs-head-group">
-                    <span className="wbs-seg-label">Group by</span>
-                    <span className="wbs-seg" role="group" aria-label="Group by">
-                      {(["phase", "module"] as const).map((mode) => (
-                        <button key={mode} type="button" aria-pressed={(groupByModule ? "module" : "phase") === mode} className={(groupByModule ? "module" : "phase") === mode ? "on" : ""} onClick={() => setWbsGroupMode(mode)}>
-                          {mode === "phase" ? "Phase" : "Module"}
-                        </button>
-                      ))}
-                    </span>
-                  </span>
-                )}
                 <span className="wbs-head-group">
                   <span className="wbs-seg-label">View</span>
                   <span className="wbs-seg" role="group" aria-label="Columns">
@@ -8055,7 +8025,7 @@ export default function WbsPlanning() {
                     <Plus size={13} /> Add Session
                   </button>
                 )}
-                {canEditWbs && canAddTasks && !isSessionProject && !showPlanSetup && (
+                {canEditWbs && canAddTasks && !isSessionProject && (
                   isLifecycle ? (
                     <button
                       type="button"
@@ -8074,90 +8044,6 @@ export default function WbsPlanning() {
                 )}
               </div>
             </div>
-            {showPlanSetup && (() => {
-              const included = lifecyclePhases.filter((ph) => includedMilestones.some((m) => m.phase_key === ph.key));
-              const analysisOn = included.some((ph) => ph.key === "analysis");
-              const moduleOk = included.some((ph) => ph.key === "design" || ph.key === "development");
-              const firstPhase = included.at(0);
-              const card = (k: "phase" | "module" | "free", title: string, body: string, disabled?: string) => (
-                <button type="button" className={`wbs-plan-choice${planKind === k ? " on" : ""}`} aria-pressed={planKind === k} disabled={!!disabled} title={disabled} onClick={() => { setPlanKind(k); setPlanError(""); }}>
-                  <span className="wbs-plan-radio" aria-hidden="true" />
-                  <strong>{title}</strong>
-                  <span>{disabled ?? body}</span>
-                </button>
-              );
-              return (
-                <div className="wbs-plan-panel">
-                  <div className="wbs-plan-steps">
-                    <span className={planStep === "phases" ? "on" : "done"}>1 · Phases</span>
-                    <span className="sep" />
-                    <span className={planStep === "approach" ? "on" : ""}>2 · How to build the plan</span>
-                  </div>
-                  {planStep === "phases" ? (
-                    <>
-                      <div className="wbs-plan-title">Which phases does this project need?</div>
-                      <div className="wbs-plan-sub">Untick any phase this project skips. They lock at Start Project.</div>
-                      <div className="wbs-plan-phases">
-                        {lifecyclePhases.map((ph) => {
-                          const m = milestones.find((x) => x.phase_key === ph.key);
-                          if (!m) return null;
-                          const c = PHASE_COLORS[ph.key] ?? PHASE_COLORS.analysis;
-                          return (
-                            <label key={ph.key} className="wbs-plan-phase" style={{ borderColor: m.is_included ? c.fg : undefined, background: m.is_included ? c.bg : undefined, color: m.is_included ? c.fg : undefined }}>
-                              <input type="checkbox" checked={m.is_included} onChange={() => void togglePhaseIncluded(m)} style={{ accentColor: c.fg, margin: 0 }} />
-                              {ph.label}
-                              <span className="wbs-plan-phase-ms">◆ {m.name}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                      <div className="wbs-plan-actions">
-                        <button type="button" className="btn-primary" disabled={included.length === 0} onClick={() => setPlanStep("approach")}>Next</button>
-                        {included.length === 0 && <span className="wbs-plan-note">Pick at least one phase.</span>}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="wbs-plan-title">How do you want to build the plan?</div>
-                      <div className="wbs-plan-sub">Phases: {included.map((ph) => ph.label).join(" → ")}. You can change the layout later with Group by.</div>
-                      <div className="wbs-plan-options">
-                        {card("phase", "By phase", "Add tasks phase by phase. Best for a single course or a small project.")}
-                        {card("module", "By module", "Each module gets its own Storyboard → Review → Sign-Off → Build → Review → Sign-Off chain across Design and Development. Best for several modules.", moduleOk ? undefined : "Needs the Design or Development phase (step 1).")}
-                        {card("free", "Free planning", `Start with one blank task in ${firstPhase?.label ?? "the first phase"} and build the plan your own way.`)}
-                      </div>
-                      {planKind === "module" && (
-                        <div className="wbs-plan-fields">
-                          <label>
-                            <span>First module name</span>
-                            <input value={planModuleName} onChange={(e) => setPlanModuleName(e.target.value)} placeholder="e.g. M1 GMP Basics" />
-                          </label>
-                          <label>
-                            <span>Designed and built by</span>
-                            <select value={planModuleMaker || me?.id || ""} onChange={(e) => setPlanModuleMaker(e.target.value)}>
-                              {people.filter((p) => p.is_active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                            </select>
-                          </label>
-                          <span className="wbs-plan-note">Reviews go to that person's supervisor and sign-offs to the project owner; change any assignee afterwards. Add more modules later from Add task.</span>
-                        </div>
-                      )}
-                      {planKind && planKind !== "free" && analysisOn && (
-                        <label className="wbs-plan-check">
-                          <input type="checkbox" checked={planWithScoping} onChange={(e) => setPlanWithScoping(e.target.checked)} />
-                          Also add the Analysis &amp; Scoping template (Discovery Call → Needs Analysis → Scope Statement → Review Scope → Scope Sign-Off)
-                        </label>
-                      )}
-                      {planError && <div className="wbs-plan-error">{planError}</div>}
-                      <div className="wbs-plan-actions">
-                        <button type="button" className="btn-secondary" disabled={planBusy} onClick={() => setPlanStep("phases")}>Back</button>
-                        <button type="button" className="btn-primary" disabled={!planKind || planBusy} onClick={() => void runPlanSetup()}>
-                          {planBusy ? "Creating…" : planKind === "free" ? "Start planning" : "Create plan"}
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })()}
           </div>
 
           {/* Sandra, 2026-07-29: "move the refresh dates button a bit
@@ -8242,7 +8128,7 @@ export default function WbsPlanning() {
           </div>
           {/* 2026-10-14 (Sandra): the table scrolls inside its own box so the
               column headers stay visible on long WBS lists. */}
-          <div className="card wbs-scroll-box" style={{ padding: 0, overflow: "auto", maxHeight: "calc(100vh - 120px)", display: showPlanSetup ? "none" : undefined }}>
+          <div className="card wbs-scroll-box" style={{ padding: 0, overflow: "auto", maxHeight: "calc(100vh - 120px)" }}>
             <table
               className="data-table"
               style={{
@@ -8835,7 +8721,7 @@ export default function WbsPlanning() {
             </table>
           </div>
 
-          {orderedTasks.length === 0 && !isSessionProject && !showPlanSetup && (
+          {orderedTasks.length === 0 && !isSessionProject && (
             <div className="wbs-guidance" role="note">
               <Info size={15} color="var(--accent)" />
               <span>
