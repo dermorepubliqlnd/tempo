@@ -4650,8 +4650,21 @@ export default function WbsPlanning() {
   }
 
   async function togglePhaseIncluded(m: ProjectMilestone) {
-    if (!isDraftProject || !canEditWbs) return;
+    if (!canEditWbs) return;
     const next = !m.is_included;
+    // phase204 (2026-10-22): after Start Project a phase can still be brought
+    // back (or an empty one skipped); the change goes into the Audit Trail.
+    if (!isDraftProject) {
+      const label = lifecyclePhases.find((x) => x.key === m.phase_key)?.label ?? "this phase";
+      const ok = await confirm({
+        title: next ? `Bring back ${label}?` : `Skip ${label}?`,
+        message: next
+          ? `${label} and its milestone (${m.name}) come back into this project's plan. The change is recorded in the Audit Trail.`
+          : `${label} and its milestone (${m.name}) are taken out of this project's plan. The change is recorded in the Audit Trail.`,
+        confirmLabel: next ? "Bring back phase" : "Skip phase",
+      });
+      if (!ok) return;
+    }
     setMilestones((prev) => prev.map((x) => (x.id === m.id ? { ...x, is_included: next } : x)));
     const { error } = await supabase.from("project_milestones").update({ is_included: next }).eq("id", m.id);
     if (error) {
@@ -4912,7 +4925,7 @@ export default function WbsPlanning() {
                 <span className="wbs-phase-name off">{it.label}</span>
                 <span className="wbs-phase-meta">Skipped for this project</span>
                 <span className="wbs-phase-ms off"><span className="wbs-ms-diamond" />{pm?.name}</span>
-                {isDraftProject && canEditWbs && canManageWbs && pm ? (
+                {canEditWbs && canManageWbs && pm ? (
                   <button type="button" className="wbs-phase-more" aria-label={`${it.label} actions`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setWbsPhaseMenu({ key: it.key, x: r.right, y: r.bottom + 4 }); }}>
                     <MoreHorizontal size={14} />
                   </button>
@@ -5056,6 +5069,7 @@ export default function WbsPlanning() {
     dependency_changed: "#7b4fb0",
     assignee_changed: "#2e75b6",
     type_changed: "#7b4fb0",
+    phase_changed: "#2e75b6",
   };
   const CHANGE_TYPE_SHORT_LABEL: Record<string, string> = {
     task_added: "New task",
@@ -5065,6 +5079,7 @@ export default function WbsPlanning() {
     dependency_changed: "Dependency changed",
     assignee_changed: "Assignee changed",
     type_changed: "Work / Output Type changed",
+    phase_changed: "Phase included / skipped",
   };
   function taskChangeKind(c: RevisionChangeRow): keyof typeof CHANGE_DOT_COLOR | null {
     if (c.change_type === "task_added") return "task_added";
@@ -6285,7 +6300,7 @@ export default function WbsPlanning() {
         const on = pm.is_included;
         const hasTasks = orderedTasks.some((t) => phaseOfRoot(t) === key);
         const canAdd = on && canEditWbs && canAddTasks && !isSessionProject && (key === "analysis" || scopeConfirmed);
-        const canToggle = isDraftProject && canEditWbs && canManageWbs;
+        const canToggle = canEditWbs && canManageWbs && (!hasTasks || !on);
         const filtered = wbsFilterPhase === key;
         const item = (k: string, label: React.ReactNode, onClick: () => void, hint?: string) => (
           <button key={k} type="button" role="menuitem" className="wbs-menu-item" title={hint} onClick={() => { close(); onClick(); }}>{label}</button>
@@ -6303,11 +6318,11 @@ export default function WbsPlanning() {
               {canToggle && (
                 <>
                   <div className="wbs-menu-sep" />
-                  {item("toggle", on ? "Skip this phase for this project" : "Include this phase", () => void togglePhaseIncluded(pm), "Phases lock at Start Project.")}
+                  {item("toggle", on ? "Skip this phase for this project" : (isDraftProject ? "Include this phase" : "Bring back this phase"), () => void togglePhaseIncluded(pm), isDraftProject ? undefined : "Recorded in the Audit Trail.")}
                 </>
               )}
               {on && key !== "analysis" && !scopeConfirmed && <div className="wbs-menu-note">Tasks open once Analysis &amp; Scoping is 100% done and signed off.{canToggle ? " You can still skip this phase now." : ""}</div>}
-              {!on && !canToggle && <div className="wbs-menu-note">Skipped for this project. Phases are set at Start Project.</div>}
+              {!on && !canToggle && <div className="wbs-menu-note">Skipped for this project. The project owner, their supervisor or Full Access can bring it back.</div>}
             </div>
           </>,
           document.body

@@ -31,6 +31,7 @@ const CHANGE_TYPE_LABEL: Record<string, string> = {
   dependency_changed: "Dependency changed",
   assignee_changed: "Assignee changed",
   type_changed: "Work / Output Type changed",
+  phase_changed: "Phase included / skipped",
 };
 
 interface ProjectRow {
