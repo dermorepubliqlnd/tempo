@@ -315,7 +315,9 @@ footer { font-size: 12px; color: var(--muted); }
     </div>
     <div class="legend">
       <div class="chip-card"><span class="pill p-ready">Ready</span><p>You can start. Log time and it moves to In Progress by itself.</p></div>
-      <div class="chip-card"><span class="pill p-btn">✓ Mark Done · ➤ Ready for Review · ✓ Pass QA · ✓ Approve</span><p>Your task is in progress. Click it, check the pop-up (date, Output Count, logged hours), confirm.</p></div>
+      <div class="chip-card"><span class="pill p-btn">➤ Ready for Review</span><p>Your work has a review after it (storyboard, build, scope statement). Hands it to the reviewer. You won't see Mark Done on these.</p></div>
+      <div class="chip-card"><span class="pill p-btn">✓ Mark Done</span><p>Your task has no review after it (for example Discovery Call, Data Gathering). Closes it.</p></div>
+      <div class="chip-card"><span class="pill p-btn">✓ Pass QA · ✓ Approve</span><p>You're the reviewer or the approver. Pass it on, or send it back For Revision.</p></div>
       <div class="chip-card"><span class="pill p-rev">↺ For Revision</span><p>On reviews and sign-offs. Sends the work back with your comment. A comment is required.</p></div>
       <div class="chip-card"><span class="pill p-btn">Resubmit</span><p>Your work came back. Read the comment on the tag, fix it, then Resubmit.</p></div>
       <div class="chip-card"><span class="pill p-wait">Waiting on Scope Sign-Off</span><p>An earlier task has to finish first. Hover to see who has it and when it's expected.</p></div>
@@ -363,6 +365,7 @@ footer { font-size: 12px; color: var(--muted); }
       <h2 id="t-rules">Good to know</h2>
       <div class="rules">
         <div class="rule"><b>Draft plans are private.</b> Only the owner's line and Full Access see the tasks, except people assigned Analysis &amp; Scoping work.</div>
+        <div class="rule"><b>One button, chosen for you.</b> Tempo shows only the button that fits the task. Setting a reviewed task to Done from the Status dropdown still sends it for review.</div>
         <div class="rule"><b>Done is done.</b> To change finished work, the review step sends it back For Revision. You can't reopen it yourself.</div>
         <div class="rule"><b>Plan changes</b> (names, dates, hours, assignees) are for the owner, their supervisor or Full Access. Everyone updates their own status and completion.</div>
         <div class="rule"><b>Group by Module</b> on the WBS shows each module's whole chain. Milestones stay on the phases.</div>
