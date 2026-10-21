@@ -680,7 +680,8 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       name: p.name, owner: ownerName(p.owner_id), category: (p.category ?? "").trim() || "—", planning: planOf(p), type: typeOf(p),
       priority: (p as { priority?: string | null }).priority || "—",
       health, progress: actualProgress(p.id, tasks as TaskRow[]), target, committed,
-      moved: target && committed && target > committed ? workingDayDelta(committed, target, holidaySet) : 0,
+      // Signed: + = working days past the commitment, − = ahead of it (Sandra 2026-10-21).
+      moved: target && committed ? workingDayDelta(committed, target, holidaySet) : 0,
       daysLate: !isOpA(p) && target && target < todayIso ? daysBetween(target, todayIso) : 0,
     };
   };
@@ -729,7 +730,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       const parts: string[] = [];
       if (late.length) parts.push(`${plural(late.length, "task")} past due (${late.slice(0, 2).map((t) => `${clip(t.name, 45)}, due ${md(t.current_due_date)}`).join("; ")}${late.length > 2 ? "; …" : ""})`);
       if (added.length) parts.push(`${plural(added.length, "task")} (${round1(addedH)}h) added after Start Project`);
-      if (r.moved) parts.push(`target ${r.moved} working days past the ${md(r.committed)} commitment`);
+      if (r.moved > 0) parts.push(`target ${r.moved} working days past the ${md(r.committed)} commitment`);
       if (e) parts.push(`extension ${e.status ?? "requested"} ${md(localDay(e.created_at))}: ${e.reason_category ?? "no reason"}${e.reason_notes ? ` — “${clip(e.reason_notes)}”` : ""}`);
       if (n?.body) parts.push(`latest note ${md(localDay(n.created_at))}: “${clip(n.body)}”`);
       if (r.health === "Schedule review") parts.push("dates need re-baselining after resume");

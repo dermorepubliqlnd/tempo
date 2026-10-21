@@ -372,12 +372,14 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     const X0 = 0.33, W = 12.67, FS = 10;
     const cols: { key: string; label: string; w: number; align?: "left" | "right" | "center" }[] = [
       { key: "priority", label: "Priority", w: 0.85 },
-      { key: "name", label: "Project", w: 4.1 },
-      { key: "category", label: "Category", w: 2.3 },
-      { key: "planning", label: "Planning", w: 0.95 },
+      { key: "name", label: "Project", w: 4.6 },
+      { key: "category", label: "Category", w: 2.0 },
       { key: "health", label: "Health", w: 1.75 },
-      { key: "progress", label: "Progress", w: 1.6 },
-      { key: "target", label: "Target date", w: 1.12 },
+      { key: "progress", label: "Progress", w: 1.15 },
+      // Sandra 2026-10-21: Target end = current plan after all approved extensions
+      // (what Health is judged on); vs Committed = working days vs the date committed at Start Project.
+      { key: "committed", label: "Target end", w: 1.12 },
+      { key: "vs", label: "vs Committed", w: 1.2, align: "center" },
     ];
     const colX: Record<string, number> = {};
     { let x = X0; for (const c of cols) { colX[c.key] = x; x += c.w; } }
@@ -398,14 +400,14 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
         else out.push(`TALK TRACK (${pg.group}${pg.cont ? ", cont." : ""} · slide ${pi + 1} of ${pages.length})`);
         out.push("HOW TO READ");
         out.push("- Sorted by Priority (High first), then Health (needs attention first), then Progress (furthest behind first), then target date.");
-        out.push("- Progress = Actual Progress in Tempo. Red date = past target. +Nd = working days the target is past the original commitment (Start Project).");
+        out.push("- Progress = Actual Progress in Tempo. Red date = past target. Target end = current plan after all approved extensions (Health is judged on it; red = already past). vs Committed = working days Target end is past the date committed at Start Project; — = on time.");
         if (otherCat?.members) out.push(`- "Other" in the category chart = ${otherCat.members.map((m) => `${m.label} (${m.count})`).join(", ")}.`);
         out.push("");
         out.push("ON THIS SLIDE");
         for (const ln of lines) {
           if (ln.kind === "group") { out.push(`${ln.label}${ln.cont ? " (cont.)" : ""} — ${plural(ln.count, "project")}`); continue; }
           const r = ln.row;
-          out.push(`- ${r.name}: ${r.priority === "—" ? "no priority set" : `${r.priority} priority`}, ${r.health}, ${r.progress ?? "–"}% done, target ${r.target ? fmtMD(r.target) : "not set"}${r.moved ? ` (moved +${r.moved}d from ${fmtMD(r.committed)})` : ""}${r.daysLate ? `, ${r.daysLate} days past target` : ""}.${r.why ? ` Why: ${r.why}.` : ""}`);
+          out.push(`- ${r.name}: ${r.priority === "—" ? "no priority set" : `${r.priority} priority`}, ${r.health}, ${r.progress ?? "–"}% done, target ${r.target ? fmtMD(r.target) : "not set"}${r.committed ? `, committed ${fmtMD(r.committed)} (${r.moved > 0 ? `+${r.moved} working days late vs commitment` : r.moved < 0 ? `${Math.abs(r.moved)} working days ahead` : "on commitment"})` : ""}${r.daysLate ? `, ${r.daysLate} days past target` : ""}.${r.why ? ` Why: ${r.why}.` : ""}`);
         }
         s.addNotes(out.join("\n"));
       }
@@ -465,20 +467,20 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
         if (zebra++ % 2) box(s, X0, y, W, LH, B.clinical, null, false);
         const cell = (k: string, text: string | Run[], o: Record<string, unknown> = {}) => txt(s, colX[k] + 0.04, y, colW(k) - 0.08, LH, text, { fontSize: FS, valign: "middle", ...o });
         cell("priority", r.priority === "—" ? "Not set" : r.priority, { fontFace: r.priority === "—" ? F : FB, color: PC[r.priority] ?? B.taupe });
-        cell("name", cut(r.name, 54));
-        cell("category", cut(r.category, 28), { color: B.mahogany });
-        cell("planning", r.planning, { color: B.mahogany });
+        cell("name", cut(r.name, 62));
+        cell("category", cut(r.category, 26), { color: B.mahogany });
         const hLabel = r.health === "Done on time · close pending" ? "Done · close pending" : r.health;
         cell("health", hLabel, { fontFace: FB, color: HC[r.health] ?? B.mahogany, fontSize: hLabel.length > 20 ? 9 : FS });
         // progress bar + %
-        const px = colX.progress + 0.06, bw = 0.95;
+        const px = colX.progress + 0.06, bw = 0.55;
         box(s, px, y + LH / 2 - 0.05, bw, 0.1, B.grid, null, false);
         if (r.progress != null && r.progress > 0) box(s, px, y + LH / 2 - 0.05, Math.max(0.03, bw * Math.min(100, r.progress) / 100), 0.1, BAR[r.health] ?? B.hydrate, null, false);
         txt(s, px + bw + 0.04, y, 0.55, LH, r.progress != null ? `${r.progress}%` : "–", { fontFace: FB, fontSize: FS, valign: "middle" });
-        // target date (+ days moved since Start Project)
-        const runs: Run[] = [{ text: r.target ? fmtMD(r.target) : "Not set", options: { fontFace: FB, fontSize: FS, color: r.daysLate ? B.renew : B.onyx } }];
-        if (r.moved) runs.push({ text: ` +${r.moved}d`, options: { fontFace: F, fontSize: 8.5, color: B.renew } });
-        cell("target", runs);
+        // Target end (Forecast End) + vs Committed in working days:
+        // +N red = later than the original commitment, −N / — green = on or ahead of it.
+        cell("committed", r.target ? fmtMD(r.target) : "Not set", { fontFace: FB, color: !r.target ? B.taupe : r.daysLate ? B.renew : B.onyx });
+        const vs = !r.committed ? "–" : r.moved > 0 ? `+${r.moved}` : r.moved < 0 ? `−${Math.abs(r.moved)}` : "—";
+        cell("vs", vs, { fontFace: FB, align: "center", color: !r.committed ? B.taupe : r.moved > 0 ? B.renew : B.calm });
       });
       // Health legend (Sandra 2026-10-20) + how to read, at the bottom of every slide.
       const LEG: [string, string, string][] = [
