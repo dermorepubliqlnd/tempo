@@ -539,7 +539,29 @@ export default function DataTable<T>({
     return (
       <tr
         key={key}
-        onClick={() => onRowClick?.(row)}
+        onClick={(e) => {
+          // 2026-10-22 (Sandra): Ctrl/Cmd+click a row adds or removes it;
+          // Shift+click selects the range from the last clicked row.
+          if (selectable && (e.ctrlKey || e.metaKey || e.shiftKey) && !(e.target as HTMLElement).closest("button, a, input, select, textarea, [contenteditable='true']")) {
+            e.preventDefault();
+            window.getSelection()?.removeAllRanges();
+            if (e.shiftKey && lastSelectedKeyRef.current && onSelectRange) {
+              const keys = sortedRows.map((r) => rowKey(r));
+              const from = keys.indexOf(lastSelectedKeyRef.current);
+              const to = keys.indexOf(key);
+              if (from !== -1 && to !== -1) {
+                const [start, end] = from < to ? [from, to] : [to, from];
+                onSelectRange(keys.slice(start, end + 1));
+                return;
+              }
+            }
+            lastSelectedKeyRef.current = key;
+            onToggleSelect?.(key);
+            return;
+          }
+          onRowClick?.(row);
+        }}
+        onMouseDown={selectable ? (e) => { if (e.shiftKey) e.preventDefault(); } : undefined}
         className={[
           isSelected ? "row-selected" : undefined,
           orderable && dragOverRowKey === key && dragRowKey !== key ? "row-drop-target" : undefined,

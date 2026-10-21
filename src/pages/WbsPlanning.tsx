@@ -1181,6 +1181,30 @@ export default function WbsPlanning() {
     return () => window.removeEventListener("keydown", onKey);
   }, [rowActionsMenu, moveParentTaskId, bulkMoveOpen, bulkCancelOpen]);
   const [bulkCancelReason, setBulkCancelReason] = useState("");
+  const lastSelectedTaskRef = useRef<string | null>(null);
+  const wbsShownTaskIdsRef = useRef<string[]>([]);
+  // Shift+click a checkbox selects every task between it and the last one clicked.
+  function selectTaskWithModifiers(taskId: string, e: React.MouseEvent) {
+    const from = lastSelectedTaskRef.current;
+    if (e.shiftKey && from) {
+      const keys = wbsShownTaskIdsRef.current;
+      const a = keys.indexOf(from);
+      const b = keys.indexOf(taskId);
+      if (a !== -1 && b !== -1) {
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        const select = !selectedTaskIds.has(taskId) || selectedTaskIds.has(from);
+        setSelectedTaskIds((prev) => {
+          const next = new Set(prev);
+          keys.slice(lo, hi + 1).forEach((k) => (select ? next.add(k) : next.delete(k)));
+          return next;
+        });
+        lastSelectedTaskRef.current = taskId;
+        return;
+      }
+    }
+    lastSelectedTaskRef.current = taskId;
+    toggleTaskSelected(taskId);
+  }
   function toggleTaskSelected(taskId: string) {
     setSelectedTaskIds((prev) => {
       const next = new Set(prev);
@@ -4638,6 +4662,7 @@ export default function WbsPlanning() {
         }
         return out;
       })();
+  wbsShownTaskIdsRef.current = wbsShownItems.flatMap((it) => (it.kind === "task" ? [it.t.id] : []));
 
   function lifecycleChecklistGroups(): ChecklistGroup[] {
     if (!isLifecycle) return [];
@@ -8582,10 +8607,10 @@ export default function WbsPlanning() {
                               type="checkbox"
                               className="wbs-row-select"
                               checked={selectedTaskIds.has(t.id)}
-                              onChange={() => toggleTaskSelected(t.id)}
-                              onClick={(e) => e.stopPropagation()}
+                              onChange={() => undefined}
+                              onClick={(e) => { e.stopPropagation(); selectTaskWithModifiers(t.id, e); }}
                               aria-label={`Select ${t.name}`}
-                              title="Select task"
+                              title="Select task · Shift+click to select a range"
                             />
                           )}
                           {rowEditable && selectedTaskIds.size === 0 && !wbsFiltersActive && (

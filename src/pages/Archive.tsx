@@ -142,6 +142,8 @@ export default function Archive() {
   }
 
   const rowKey = (r: ArchiveRow) => `${r.kind}-${r.id}`;
+  // Anyone who can restore something can select; only Full Access can delete permanently.
+  const canSelect = isFullAccess || rows.some((r) => canRestore(r));
   const selectedRows = rows.filter((r) => selected.has(rowKey(r)));
   const allVisibleSelected = visible.length > 0 && visible.every((r) => selected.has(rowKey(r)));
   function toggleRow(r: ArchiveRow) {
@@ -173,7 +175,7 @@ export default function Archive() {
     anchorKey.current = k;
   }
   function handleRowClick(r: ArchiveRow, e: ReactMouseEvent) {
-    if (!isFullAccess) return;
+    if (!canSelect) return;
     if (!(e.shiftKey || e.ctrlKey || e.metaKey)) return;
     if ((e.target as HTMLElement).closest("button, a, input")) return;
     e.preventDefault();
@@ -187,6 +189,33 @@ export default function Archive() {
       else visible.forEach((r) => next.add(rowKey(r)));
       return next;
     });
+  }
+
+  async function handleBulkRestore() {
+    const mine = selectedRows.filter((r) => canRestore(r));
+    const notMine = selectedRows.filter((r) => !canRestore(r));
+    if (mine.length === 0) {
+      await alert({ title: "Nothing you can restore", message: "Only the person who archived an item, or Full Access, can restore it." });
+      return;
+    }
+    const n = mine.length;
+    const ok = await confirm({
+      title: `Restore ${n} item${n === 1 ? "" : "s"}?`,
+      message: `Puts ${n === 1 ? "this item" : "these items"} and anything bundled with ${n === 1 ? "it" : "them"} back exactly where they were.` +
+        (notMine.length ? ` ${notMine.length} other selected item${notMine.length === 1 ? " was" : "s were"} archived by someone else and will be left as ${notMine.length === 1 ? "it is" : "they are"}.` : ""),
+      items: mine.map((r) => `${ARCHIVE_KIND_LABEL[r.kind]}: ${r.label}${r.ref ? ` (${r.ref})` : ""}`),
+      confirmLabel: `Restore ${n}`,
+    });
+    if (!ok) return;
+    setPurging(true);
+    const failed: string[] = [];
+    for (const r of mine) {
+      const { error } = await restoreItem(r.kind, r.id);
+      if (error) failed.push(`${r.label}: ${friendlyError("restore this item", error).message ?? error.message}`);
+    }
+    setPurging(false);
+    if (failed.length) await alert({ title: `${n - failed.length} of ${n} restored`, message: "These couldn't be restored:", items: failed });
+    load();
   }
 
   async function handlePurge() {
@@ -282,19 +311,28 @@ export default function Archive() {
         </button>
       </div>
 
-      {isFullAccess && selected.size > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10, padding: "8px 12px", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", background: "var(--danger-bg, rgba(220,38,38,.05))", fontSize: 12 }}>
+      {canSelect && selected.size > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10, padding: "8px 12px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", background: "var(--surface-2, #f5f6f8)", fontSize: 12 }}>
           <strong style={{ color: "var(--text)" }}>{selected.size} selected</strong>
           <span style={{ color: "var(--muted)" }}>Shift+click a row to select a range · Ctrl+click to add or remove one</span>
           <button onClick={() => setSelected(new Set())} style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>Clear</button>
           <span style={{ flex: 1 }} />
           <button
+            onClick={() => void handleBulkRestore()}
+            disabled={purging}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "var(--accent)", background: "var(--surface)", border: "1px solid var(--accent)", borderRadius: "var(--radius-sm)", padding: "6px 12px", cursor: purging ? "default" : "pointer" }}
+          >
+            <RotateCcw size={13} /> Restore
+          </button>
+          {isFullAccess && (
+          <button
             onClick={() => void handlePurge()}
             disabled={purging}
             style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "#fff", background: "var(--danger-text, #b91c1c)", border: "none", borderRadius: "var(--radius-sm)", padding: "7px 12px", cursor: purging ? "default" : "pointer" }}
           >
-            <Trash2 size={13} /> {purging ? "Deleting…" : "Delete permanently"}
+            <Trash2 size={13} /> {purging ? "Working…" : "Delete permanently"}
           </button>
+          )}
         </div>
       )}
 
@@ -307,7 +345,7 @@ export default function Archive() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "var(--surface-2, #f5f6f8)", borderBottom: "1px solid var(--border)" }}>
-                {isFullAccess && (
+                {canSelect && (
                   <th style={{ ...th, width: 34, textAlign: "center" }}>
                     <input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} aria-label="Select all shown" title="Select all shown" />
                   </th>
@@ -329,8 +367,8 @@ export default function Archive() {
                 const daysLeft = Math.max(0, Math.ceil((new Date(r.purge_at).getTime() - Date.now()) / 86400000));
                 const bundle = bundleText(r);
                 return (
-                  <tr key={key} onClick={(e) => handleRowClick(r, e)} onMouseDown={(e) => { if (isFullAccess && e.shiftKey) e.preventDefault(); }} style={{ borderBottom: "1px solid var(--border)", background: selected.has(key) ? "var(--danger-bg, rgba(220,38,38,.04))" : undefined }}>
-                    {isFullAccess && (
+                  <tr key={key} onClick={(e) => handleRowClick(r, e)} onMouseDown={(e) => { if (canSelect && e.shiftKey) e.preventDefault(); }} style={{ borderBottom: "1px solid var(--border)", background: selected.has(key) ? "var(--accent-soft, rgba(37,99,235,.06))" : undefined }}>
+                    {canSelect && (
                       <td style={{ ...td, textAlign: "center", width: 34 }}>
                         <input type="checkbox" checked={selected.has(key)} onChange={() => undefined} onClick={(e) => { e.stopPropagation(); handleSelectClick(r, e); }} aria-label={`Select ${r.label}`} title="Shift+click to select a range, Ctrl+click to add or remove" />
                       </td>
