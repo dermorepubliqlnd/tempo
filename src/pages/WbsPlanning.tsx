@@ -618,7 +618,7 @@ export default function WbsPlanning() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [people, setPeople] = useState<PersonRow[]>([]);
   // phase193: Add module dialog (declared up here -- hooks can't follow the early returns below).
-  const [moduleDlg, setModuleDlg] = useState<{ name: string; maker: string; busy: boolean; error: string } | null>(null);
+  const [moduleDlg, setModuleDlg] = useState<{ name: string; maker: string; dev?: string; busy: boolean; error: string } | null>(null);
   const assigneePicker = useAssigneePicker(people.filter((p) => p.is_active));
   // phase190b: on ongoing containers, non-owners without Full Access can add
   // tasks for themselves and the people below them in the reporting line.
@@ -4484,8 +4484,10 @@ export default function WbsPlanning() {
   // to sign-off. Phases, milestones and dates are unchanged underneath.
   const hasModules = isLifecycle && orderedTasks.some((t) => taskModuleById.has(t.id) && !t.is_archived);
   // R3: one layout -- Analysis & Scoping as a whole, Design + Development by module.
+  // 2026-10-22: Phase view (default) = Design and Development as phases, modules inside each;
+  // Module view = each module's whole Design -> Development chain together. Milestones stay on the phases.
   const groupByModule = isLifecycle;
-  void wbsGroupMode;
+  const moduleView = hasModules && wbsGroupMode === "module";
   // Module view shows "Design / storyboard" instead of "Design / storyboard · M1 ..."
   // -- the module header already says which module. The full name is kept
   // everywhere else (My Tasks, dashboard), and edits keep the suffix.
@@ -4527,6 +4529,35 @@ export default function WbsPlanning() {
         continue;
       }
       const moduleable = ph.key === "design" || ph.key === "development";
+      if (moduleView && moduleable) {
+        // Module view: non-module tasks stay under their phase; modules are placed once, after the last of Design / Development.
+        const loose = orderedTasks.filter((t) => phaseOf(t) === ph.key && !moduleOf(t));
+        if (loose.length) {
+          const lh = loose.filter((t) => !(t.depth === 0 && hasChildren(t.id))).reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
+          items.push({ kind: "phase", key: ph.key, label: ph.label, count: loose.filter((t) => t.depth === 0).length, hours: lh });
+          if (wbsFiltersActive || !collapsedPhases.has(ph.key)) for (const t of loose) items.push({ kind: "task", t });
+        }
+        const lastModPhase = includedMilestones.some((x) => x.phase_key === "development") ? "development" : "design";
+        if (ph.key === lastModPhase) {
+          const names: string[] = [];
+          for (const t of orderedTasks) { const n = moduleOf(t); const pk = phaseOf(t); if (n && (pk === "design" || pk === "development") && !names.includes(n)) names.push(n); }
+          items.push({ kind: "modsection", count: names.length });
+          for (const n of names) {
+            const mrows = orderedTasks.filter((t) => moduleOf(t) === n && (phaseOf(t) === "design" || phaseOf(t) === "development"));
+            const leaves = mrows.filter((t) => !(t.depth === 0 && hasChildren(t.id)));
+            const done = leaves.filter((t) => t.status === "Done" || t.status === "Cancelled").length;
+            const next = leaves.find((t) => t.status !== "Done" && t.status !== "Cancelled");
+            const stage = next ? `now: ${next.name.split(" · ").slice(0, next.name.split(" · ").length > 2 ? 2 : 1).join(" · ")}` : "complete";
+            items.push({ kind: "module", name: n, phaseKey: "all", done, total: leaves.length, stage, hours: leaves.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0) });
+            if (wbsFiltersActive || !collapsedPhases.has(`mod:all:${n}`)) for (const t of mrows) items.push({ kind: "task", t });
+          }
+          for (const mk of ["design", "development"]) {
+            const mm = includedMilestones.find((x) => x.phase_key === mk);
+            if (mm && orderedTasks.some((t) => phaseOf(t) === mk)) items.push({ kind: "milestone", m: mm });
+          }
+        }
+        continue;
+      }
       const rows = orderedTasks.filter((t) => phaseOf(t) === ph.key);
       const leafHours = rows.filter((t) => !(t.depth === 0 && hasChildren(t.id))).reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
       const names: string[] = [];
@@ -4654,15 +4685,39 @@ export default function WbsPlanning() {
   async function submitAddModule() {
     if (!project || !moduleDlg) return;
     if (!moduleDlg.name.trim()) { setModuleDlg({ ...moduleDlg, error: "Give the module a name, e.g. \"M1 Hygiene basics\"." }); return; }
-    if (!moduleDlg.maker) { setModuleDlg({ ...moduleDlg, error: "Pick who designs and builds it." }); return; }
     const flushed = await flushPendingEdits();
     if (!flushed) return;
     if (!(await startDatePrompt.ensure(project))) return;
     setModuleDlg({ ...moduleDlg, busy: true, error: "" });
-    const { error } = await supabase.rpc("r2_add_module", { p_project_id: project.id, p_module_name: moduleDlg.name.trim(), p_maker_id: moduleDlg.maker });
+    const modName = moduleDlg.name.trim();
+    const designer = moduleDlg.maker || null;
+    const developer = moduleDlg.dev || null;
+    const { error } = await supabase.rpc("r2_add_module", { p_project_id: project.id, p_module_name: modName, p_maker_id: designer });
     if (error) {
       setModuleDlg({ ...moduleDlg, busy: false, error: friendlyError("add the module", error).message ?? "Couldn't add the module." });
       return;
+    }
+    // 2026-10-22 (Sandra): the designer (ID) and the developer are usually two
+    // different people, both optional. The module function assigns one maker;
+    // set Build (and its review) to the developer, and leave a step open when
+    // nobody was picked (Draft only -- a started project keeps an assignee).
+    {
+      const isDraft = (project.wbs_status ?? "draft") === "draft";
+      const { data: modTasks } = await supabase.from("tasks").select("id,name").eq("project_id", project.id).eq("module_name", modName).eq("is_archived", false);
+      const byPrefix = (pre: string) => (modTasks ?? []).find((x: { id: string; name: string }) => x.name.startsWith(pre));
+      const patches: { id: string; assignee_id: string | null }[] = [];
+      const design = byPrefix("Design / Storyboard · ");
+      const build = byPrefix("Build · ");
+      const reviewBuild = byPrefix("Review · Build · ");
+      if (design && !designer && isDraft) patches.push({ id: design.id, assignee_id: null });
+      if (build && developer) patches.push({ id: build.id, assignee_id: developer });
+      else if (build && !developer && isDraft) patches.push({ id: build.id, assignee_id: null });
+      const devSup = developer ? people.find((pp) => pp.id === developer)?.reports_to ?? null : null;
+      if (reviewBuild && devSup) patches.push({ id: reviewBuild.id, assignee_id: devSup });
+      for (const pt of patches) {
+        const { error: upErr } = await supabase.from("tasks").update({ assignee_id: pt.assignee_id }).eq("id", pt.id);
+        if (upErr) { await alert(friendlyError("assign the module steps", upErr)); break; }
+      }
     }
     setModuleDlg(null);
     await loadAll(true);
@@ -4745,7 +4800,7 @@ export default function WbsPlanning() {
     if (it.kind === "module") {
       const key = `mod:${it.phaseKey ?? ""}:${it.name}`;
       const collapsed = collapsedPhases.has(key);
-      const c = PHASE_COLORS[it.phaseKey ?? "design"] ?? PHASE_COLORS.design;
+      const c = PHASE_COLORS[it.phaseKey === "all" ? "development" : it.phaseKey ?? "design"] ?? PHASE_COLORS.design;
       return (
         <tr key={`lc-mod-${it.phaseKey}-${it.name}`} className="wbs-module-row">
           <td colSpan={WBS_TOTAL_COLS} style={{ boxShadow: `inset 3px 0 0 ${c.fg}` }}>
@@ -4784,7 +4839,7 @@ export default function WbsPlanning() {
                 </span>
               )}
               {scopeConfirmed && canEditWbs && canAddTasks && !isSessionProject && (
-                <button type="button" className={it.count === 0 ? "btn-primary wbs-mod-add" : "btn-secondary wbs-mod-add"} onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); }}>
+                <button type="button" className={it.count === 0 ? "btn-primary wbs-mod-add" : "btn-secondary wbs-mod-add"} onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: "", dev: "", busy: false, error: "" }); }}>
                   <Plus size={13} /> {it.count === 0 ? "Add your first module" : "Add module"}
                 </button>
               )}
@@ -4803,7 +4858,7 @@ export default function WbsPlanning() {
         <tr key="lc-addmodule">
           <td colSpan={WBS_TOTAL_COLS} style={{ padding: 0, borderTop: "1px solid var(--border)" }}>
             <div style={{ ...sticky, padding: "6px 10px" }}>
-              <button type="button" onClick={() => setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" })} style={{ border: "1px dashed #94a3b8", background: "#fff", color: "#334155", borderRadius: 6, padding: "3px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <button type="button" onClick={() => setModuleDlg({ name: "", maker: "", dev: "", busy: false, error: "" })} style={{ border: "1px dashed #94a3b8", background: "#fff", color: "#334155", borderRadius: 6, padding: "3px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
                 <ListPlus size={12} /> Add module
               </button>
             </div>
@@ -4869,7 +4924,7 @@ export default function WbsPlanning() {
                 <span className="wbs-phase-meta" style={{ fontStyle: "italic" }}>Each module moves here once its storyboard is signed off</span>
               )}
               {!locked && it.key === "design" && scopeConfirmed && canEditWbs && canAddTasks && !isSessionProject && (
-                <button type="button" className={(it.modules ?? 0) === 0 ? "btn-primary wbs-mod-add" : "btn-secondary wbs-mod-add"} onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); }}>
+                <button type="button" className={(it.modules ?? 0) === 0 ? "btn-primary wbs-mod-add" : "btn-secondary wbs-mod-add"} onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: "", dev: "", busy: false, error: "" }); }}>
                   <Plus size={13} /> {(it.modules ?? 0) === 0 ? "Add your first module" : "Add module"}
                 </button>
               )}
@@ -6105,16 +6160,23 @@ export default function WbsPlanning() {
         <Modal title="Add module" onClose={() => (moduleDlg.busy ? undefined : setModuleDlg(null))} width={440}>
           <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
             <div style={{ color: "var(--muted)" }}>
-              Adds 6 linked tasks: <strong>Design / storyboard → Review → Sign-off</strong> in Design and <strong>Build → Review → Sign-off</strong> in Development. Reviews go to the person's supervisor and sign-offs to the project owner. Delete or reassign any step afterwards.
+              Adds 6 linked tasks: <strong>Design / storyboard → Review → Sign-off</strong> in Design and <strong>Build → Review → Sign-off</strong> in Development. Reviews go to the designer's / developer's supervisor and sign-offs to the project owner. Leave a name empty to assign it later; change any step afterwards.
             </div>
             <label style={{ display: "grid", gap: 4 }}>
-              <span style={{ fontWeight: 600 }}>Module name</span>
+              <span style={{ fontWeight: 600 }}>Module name <span style={{ color: "var(--danger-text)" }}>*</span></span>
               <input autoFocus value={moduleDlg.name} onChange={(e) => setModuleDlg({ ...moduleDlg, name: e.target.value, error: "" })} placeholder="M1 Hygiene basics" style={{ fontSize: 12.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }} />
             </label>
             <label style={{ display: "grid", gap: 4 }}>
-              <span style={{ fontWeight: 600 }}>Designs and builds it</span>
+              <span style={{ fontWeight: 600 }}>Designs it (storyboard) <span style={{ fontWeight: 400, color: "var(--muted)" }}>· optional</span></span>
               <select value={moduleDlg.maker} onChange={(e) => setModuleDlg({ ...moduleDlg, maker: e.target.value, error: "" })} style={{ fontSize: 12.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }}>
-                <option value="">Select a team member…</option>
+                <option value="">Not assigned yet</option>
+                {people.filter((pp) => pp.is_active).map((pp) => <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+              </select>
+            </label>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontWeight: 600 }}>Develops it (build) <span style={{ fontWeight: 400, color: "var(--muted)" }}>· optional</span></span>
+              <select value={moduleDlg.dev ?? ""} onChange={(e) => setModuleDlg({ ...moduleDlg, dev: e.target.value, error: "" })} style={{ fontSize: 12.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }}>
+                <option value="">Not assigned yet</option>
                 {people.filter((pp) => pp.is_active).map((pp) => <option key={pp.id} value={pp.id}>{pp.name}</option>)}
               </select>
             </label>
@@ -6180,7 +6242,7 @@ export default function WbsPlanning() {
               {canModule && (
                 <>
                   {templates.length > 0 && <div className="wbs-menu-sep" />}
-                  {item("module", <><ListPlus size={13} /> Add module</>, () => setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }), "Adds Design / Storyboard, Review and Sign-Off in Design, and Build, Review and Sign-Off in Development, linked in order")}
+                  {item("module", <><ListPlus size={13} /> Add module</>, () => setModuleDlg({ name: "", maker: "", dev: "", busy: false, error: "" }), "Adds Design / Storyboard, Review and Sign-Off in Design, and Build, Review and Sign-Off in Development, linked in order")}
                 </>
               )}
               {(templates.length > 0 || canModule) && <div className="wbs-menu-sep" />}
@@ -6211,7 +6273,7 @@ export default function WbsPlanning() {
             <div className="card wbs-menu" role="menu" aria-label={`${ph.label} actions`} onKeyDown={(e) => { if (e.key === "Escape") close(); }}
               style={{ left: Math.max(8, Math.min(wbsPhaseMenu.x - 240, window.innerWidth - 248)), top: Math.min(wbsPhaseMenu.y, window.innerHeight - 300) }}>
               {on && item("filter", filtered ? "Show all phases" : `Show only ${ph.label}`, () => setWbsFilterPhase(filtered ? "" : key))}
-              {canAdd && scopeConfirmed && (key === "design" || key === "development") && item("module", <><ListPlus size={13} /> Add module</>, () => { clearWbsFilters(); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); })}
+              {canAdd && scopeConfirmed && (key === "design" || key === "development") && item("module", <><ListPlus size={13} /> Add module</>, () => { clearWbsFilters(); setModuleDlg({ name: "", maker: "", dev: "", busy: false, error: "" }); })}
               {canAdd && PHASE_TEMPLATES[key] && !hasTasks && item("tpl", <><Copy size={13} /> {PHASE_TEMPLATES[key].label}</>, () => { clearWbsFilters(); void applyScopingTemplate(key); }, PHASE_TEMPLATES[key].message)}
               {canAdd && item("add", <><Plus size={13} /> Add task in {ph.label}</>, () => { clearWbsFilters(); void addTopLevelTask(key); })}
               {on && hasTasks && pm.kind === "deliverables" && canEditWbs && item("link", <><Link2 size={13} /> Link tasks to {pm.name}</>, () => setMilestonePicker({ milestoneId: pm.id, x: wbsPhaseMenu.x - 240, y: wbsPhaseMenu.y }))}
@@ -7943,6 +8005,18 @@ export default function WbsPlanning() {
                 </div>
               </div>
               <div className="wbs-head-controls">
+                {hasModules && (
+                  <span className="wbs-head-group">
+                    <span className="wbs-seg-label">Group by</span>
+                    <span className="wbs-seg" role="group" aria-label="Group by">
+                      {(["phase", "module"] as const).map((mode) => (
+                        <button key={mode} type="button" aria-pressed={(moduleView ? "module" : "phase") === mode} className={(moduleView ? "module" : "phase") === mode ? "on" : ""} onClick={() => setWbsGroupMode(mode)}>
+                          {mode === "phase" ? "Phase" : "Module"}
+                        </button>
+                      ))}
+                    </span>
+                  </span>
+                )}
                 <span className="wbs-head-group">
                   <span className="wbs-seg-label">View</span>
                   <span className="wbs-seg" role="group" aria-label="Columns">
