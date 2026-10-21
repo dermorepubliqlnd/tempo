@@ -6183,21 +6183,21 @@ export default function WbsPlanning() {
         <Modal title="Add module" onClose={() => (moduleDlg.busy ? undefined : setModuleDlg(null))} width={440}>
           <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
             <div style={{ color: "var(--muted)" }}>
-              Adds 6 linked tasks: <strong>Design / storyboard → Review → Sign-off</strong> in Design and <strong>Build → Review → Sign-off</strong> in Development. Reviews go to the designer's / developer's supervisor and sign-offs to the project owner. Leave a name empty to assign it later; change any step afterwards.
+              Adds 6 linked tasks: <strong>Design / storyboard → Review → Sign-off</strong> in Design and <strong>Build → Review → Sign-off</strong> in Development. Reviews go to the Instructional Designer's / Content Developer's supervisor and sign-offs to the project owner. Leave a name empty to assign it later; change any step afterwards.
             </div>
             <label style={{ display: "grid", gap: 4 }}>
               <span style={{ fontWeight: 600 }}>Module name <span style={{ color: "var(--danger-text)" }}>*</span></span>
               <input autoFocus value={moduleDlg.name} onChange={(e) => setModuleDlg({ ...moduleDlg, name: e.target.value, error: "" })} placeholder="M1 Hygiene basics" style={{ fontSize: 12.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }} />
             </label>
             <label style={{ display: "grid", gap: 4 }}>
-              <span style={{ fontWeight: 600 }}>Designs it (storyboard) <span style={{ fontWeight: 400, color: "var(--muted)" }}>· optional</span></span>
+              <span style={{ fontWeight: 600 }}>Instructional Designer <span style={{ fontWeight: 400, color: "var(--muted)" }}>· optional</span></span>
               <select value={moduleDlg.maker} onChange={(e) => setModuleDlg({ ...moduleDlg, maker: e.target.value, error: "" })} style={{ fontSize: 12.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }}>
                 <option value="">Not assigned yet</option>
                 {people.filter((pp) => pp.is_active).map((pp) => <option key={pp.id} value={pp.id}>{pp.name}</option>)}
               </select>
             </label>
             <label style={{ display: "grid", gap: 4 }}>
-              <span style={{ fontWeight: 600 }}>Develops it (build) <span style={{ fontWeight: 400, color: "var(--muted)" }}>· optional</span></span>
+              <span style={{ fontWeight: 600 }}>Content Developer <span style={{ fontWeight: 400, color: "var(--muted)" }}>· optional</span></span>
               <select value={moduleDlg.dev ?? ""} onChange={(e) => setModuleDlg({ ...moduleDlg, dev: e.target.value, error: "" })} style={{ fontSize: 12.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }}>
                 <option value="">Not assigned yet</option>
                 {people.filter((pp) => pp.is_active).map((pp) => <option key={pp.id} value={pp.id}>{pp.name}</option>)}
