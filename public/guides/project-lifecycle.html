@@ -2,499 +2,362 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tempo Project Lifecycle</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tempo Project Workflow</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Sora:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Sora:wght@600;700&display=swap">
 <style>
-/* Layout: a single reading column with a sticky section bar; the lifecycle is a five-lane track, the module is a loop. */
+/* Layout: a one-page job aid -- the phase track first, then the hand-off loop, then "read your Next action", roles and routines as compact cards. */
 :root {
-  --bg: #f5f7fb;
-  --surface: #ffffff;
-  --surface-2: #eef3f9;
+  --bg: #f4f7fb;
+  --card: #ffffff;
+  --soft: #edf2f8;
   --ink: #17324f;
-  --ink-2: #4a6079;
-  --muted: #6f8299;
-  --line: #dce6f1;
+  --ink-2: #47607a;
+  --muted: #6d8198;
+  --line: #d9e4f0;
   --accent: #1f6fd6;
-  --accent-soft: #e7f0fc;
+  --accent-soft: #e6effc;
+  --amber: #b45309;
+  --amber-soft: #fff3e0;
   --ok: #15803d;
-  --ok-soft: #e9f7ee;
-  --warn: #b45309;
-  --warn-soft: #fff4e5;
-  --ph-analysis: #2563eb; --ph-analysis-bg: #eff6ff;
-  --ph-design: #16a34a;   --ph-design-bg: #f0fdf4;
-  --ph-dev: #7c3aed;      --ph-dev-bg: #f5f3ff;
-  --ph-impl: #ea580c;     --ph-impl-bg: #fff7ed;
-  --ph-eval: #db2777;     --ph-eval-bg: #fdf2f8;
-  --font-body: "Figtree", "Segoe UI", system-ui, sans-serif;
-  --font-head: "Sora", "Figtree", "Segoe UI", system-ui, sans-serif;
-  --r: 12px;
+  --ok-soft: #e7f6ec;
+  --ph1: #2563eb; --ph1-bg: #eaf1fe;
+  --ph2: #16a34a; --ph2-bg: #e8f7ed;
+  --ph3: #7c3aed; --ph3-bg: #f1ebfe;
+  --ph4: #ea580c; --ph4-bg: #fdf0e6;
+  --ph5: #db2777; --ph5-bg: #fce9f2;
+  --display: "Sora", "Figtree", "Segoe UI", system-ui, sans-serif;
+  --body: "Figtree", "Segoe UI", system-ui, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1724; --surface: #162132; --surface-2: #1c2a3f; --ink: #e6edf6; --ink-2: #b8c6d8; --muted: #8b9cb2; --line: #2a3a52;
-    --accent: #6aa7ff; --accent-soft: #1a2c47; --ok: #4ade80; --ok-soft: #12301f; --warn: #fbbf24; --warn-soft: #33270f;
-    --ph-analysis: #60a5fa; --ph-analysis-bg: #172a46;
-    --ph-design: #4ade80;   --ph-design-bg: #12301f;
-    --ph-dev: #a78bfa;      --ph-dev-bg: #251c45;
-    --ph-impl: #fb923c;     --ph-impl-bg: #3a2211;
-    --ph-eval: #f472b6;     --ph-eval-bg: #3a1528;
+    --bg: #0e1622; --card: #152131; --soft: #1b2a3e; --ink: #e6edf6; --ink-2: #b9c7d8; --muted: #8b9db3; --line: #2a3b53;
+    --accent: #6aa7ff; --accent-soft: #19304f; --amber: #fbbf24; --amber-soft: #352710; --ok: #4ade80; --ok-soft: #12301f;
+    --ph1: #6ea0ff; --ph1-bg: #16294a; --ph2: #4ade80; --ph2-bg: #12301f; --ph3: #a78bfa; --ph3-bg: #251c45;
+    --ph4: #fb923c; --ph4-bg: #3a2211; --ph5: #f472b6; --ph5-bg: #3a1528;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f1724; --surface: #162132; --surface-2: #1c2a3f; --ink: #e6edf6; --ink-2: #b8c6d8; --muted: #8b9cb2; --line: #2a3a52;
-  --accent: #6aa7ff; --accent-soft: #1a2c47; --ok: #4ade80; --ok-soft: #12301f; --warn: #fbbf24; --warn-soft: #33270f;
-  --ph-analysis: #60a5fa; --ph-analysis-bg: #172a46;
-  --ph-design: #4ade80;   --ph-design-bg: #12301f;
-  --ph-dev: #a78bfa;      --ph-dev-bg: #251c45;
-  --ph-impl: #fb923c;     --ph-impl-bg: #3a2211;
-  --ph-eval: #f472b6;     --ph-eval-bg: #3a1528;
+  --bg: #0e1622; --card: #152131; --soft: #1b2a3e; --ink: #e6edf6; --ink-2: #b9c7d8; --muted: #8b9db3; --line: #2a3b53;
+  --accent: #6aa7ff; --accent-soft: #19304f; --amber: #fbbf24; --amber-soft: #352710; --ok: #4ade80; --ok-soft: #12301f;
+  --ph1: #6ea0ff; --ph1-bg: #16294a; --ph2: #4ade80; --ph2-bg: #12301f; --ph3: #a78bfa; --ph3-bg: #251c45;
+  --ph4: #fb923c; --ph4-bg: #3a2211; --ph5: #f472b6; --ph5-bg: #3a1528;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-body { margin: 0; }
-body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; }
-.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; }
-h1, h2, h3 { font-family: var(--font-head); text-wrap: balance; margin: 0; color: var(--ink); }
-h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; letter-spacing: -0.01em; }
-h2 { font-size: 21px; line-height: 1.25; }
-h3 { font-size: 15.5px; line-height: 1.3; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 14.5px; line-height: 1.5; }
+.wrap { max-width: 1140px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 26px 48px; display: grid; gap: 22px; }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; color: var(--ink); }
+h1 { font-size: clamp(24px, 3.4vw, 32px); line-height: 1.15; letter-spacing: -0.01em; }
+h2 { font-size: 17px; }
+h3 { font-size: 13.5px; }
 p { margin: 0; }
-.lede { color: var(--ink-2); max-width: 68ch; font-size: 16px; }
-.eyebrow { font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); }
 .muted { color: var(--muted); }
-.small { font-size: 13px; }
-a { color: var(--accent); }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.small { font-size: 12.5px; }
+header { display: grid; gap: 8px; }
+.lede { color: var(--ink-2); max-width: 70ch; }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.panel-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.panel-head .muted { font-size: 12.5px; }
 
-header.top { display: grid; gap: 12px; padding-block: 8px 22px; }
-.meta { display: flex; flex-wrap: wrap; gap: 8px; }
-.tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); }
+/* Phase track */
+.track-scroll { overflow-x: auto; padding-bottom: 4px; }
+.track { display: grid; grid-template-columns: 1fr 2.1fr 1fr 1fr; gap: 10px; min-width: 960px; align-items: stretch; }
+.phase { border-radius: 12px; border: 1px solid var(--line); background: var(--card); display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
+.phase-top { padding: 12px 14px 10px; display: grid; gap: 4px; border-bottom: 3px solid var(--c); background: var(--cb); }
+.phase-top h3 { color: var(--c); display: flex; align-items: center; gap: 8px; }
+.num { width: 22px; height: 22px; border-radius: 50%; background: var(--c); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 11.5px; font-family: var(--body); font-weight: 700; flex-shrink: 0; }
+.scope { font-size: 11.5px; color: var(--ink-2); }
+.phase-body { padding: 12px 14px; display: grid; gap: 8px; align-content: start; font-size: 13px; }
+.phase-body ul { margin: 0; padding-left: 16px; display: grid; gap: 2px; }
+.who { font-size: 12px; color: var(--muted); }
+.ms { padding: 9px 14px; border-top: 1px dashed var(--line); display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; }
+.diamond { width: 9px; height: 9px; transform: rotate(45deg); background: var(--c); flex-shrink: 0; }
+.dd { display: grid; grid-template-columns: 1fr 1fr; border-radius: 12px; border: 1px solid var(--line); background: var(--card); overflow: hidden; }
+.dd .phase { border: none; border-radius: 0; }
+.dd .phase + .phase { border-left: 1px solid var(--line); }
+.modbar { grid-column: 1 / -1; padding: 10px 14px 12px; background: var(--soft); border-top: 1px solid var(--line); display: grid; gap: 7px; }
+.modbar-title { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+.modrow { display: grid; grid-template-columns: 56px 1fr 1fr; gap: 6px; align-items: center; font-size: 12px; }
+.modrow .tag { font-weight: 700; color: var(--ink); }
+.chain { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.step { padding: 3px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 600; background: var(--card); border: 1px solid var(--line); white-space: nowrap; }
+.step.d { border-color: var(--ph2); color: var(--ph2); }
+.step.v { border-color: var(--ph3); color: var(--ph3); }
+.arrow { color: var(--muted); font-size: 11px; }
+.track-note { font-size: 12.5px; color: var(--ink-2); }
+.track-note b { color: var(--ink); }
 
-nav.sections { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); margin-inline: -20px; padding: 8px 20px; overflow-x: auto; white-space: nowrap; }
-nav.sections a { display: inline-block; padding: 6px 10px; margin-right: 2px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); text-decoration: none; }
-nav.sections a:hover { background: var(--surface); color: var(--ink); }
-
-section { padding-top: 40px; display: grid; gap: 16px; scroll-margin-top: 56px; }
-.section-head { display: grid; gap: 6px; }
-
-/* Lifecycle track */
-.track-scroll { overflow-x: auto; padding-bottom: 6px; }
-.track { display: grid; grid-template-columns: repeat(5, minmax(200px, 1fr)); gap: 10px; min-width: 1040px; }
-.lane { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
-.lane-head { padding: 12px 14px 10px; background: var(--lane-bg); border-bottom: 2px solid var(--lane); display: grid; gap: 4px; }
-.lane-head h3 { color: var(--lane); }
-.lane-head .sam { font-size: 11.5px; color: var(--ink-2); }
-.lane-body { padding: 12px 14px; display: grid; gap: 10px; align-content: start; font-size: 13.5px; }
-.lane-body ul { margin: 0; padding-left: 16px; display: grid; gap: 3px; }
-.lane-body .label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.lane-foot { padding: 10px 14px; border-top: 1px dashed var(--line); display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
-.diamond { width: 10px; height: 10px; transform: rotate(45deg); background: var(--lane); flex-shrink: 0; }
-.gate { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
-.gate-bar { display: grid; grid-template-columns: 1fr 4fr; gap: 10px; min-width: 1040px; margin-bottom: 8px; }
-.gate-cell { padding: 7px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 600; }
-.gate-draft { background: var(--surface-2); color: var(--ink-2); }
-.gate-live { background: var(--ok-soft); color: var(--ok); }
-
-/* Module loop */
-.loop-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; display: grid; gap: 14px; }
+/* Hand-off loop */
+.loop svg { width: 100%; height: auto; display: block; min-width: 640px; }
 .loop-scroll { overflow-x: auto; }
-.loop-scroll svg { display: block; min-width: 820px; width: 100%; height: auto; }
-.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--ink-2); }
-.legend span { display: inline-flex; align-items: center; gap: 6px; }
-.sw { width: 18px; height: 0; border-top: 2px solid var(--muted); }
-.sw.back { border-top: 2px dashed var(--warn); }
 
-/* Two-column cards */
-.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
-.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
-.card p, .card li { font-size: 14px; color: var(--ink-2); }
-.card ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+/* Next action legend */
+.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.chip-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 6px; align-content: start; background: var(--card); }
+.pill { justify-self: start; display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 7px; font-size: 12.5px; font-weight: 700; }
+.p-ready { color: var(--accent); background: var(--accent-soft); }
+.p-btn { color: #fff; background: var(--accent); }
+.p-rev { color: var(--amber); background: var(--amber-soft); border: 1px solid var(--amber); }
+.p-wait, .p-with { color: var(--ink-2); background: var(--soft); }
+.p-none { color: var(--muted); background: transparent; border: 1px dashed var(--line); }
+.chip-card p { font-size: 13px; color: var(--ink-2); }
 
-/* Buttons as they look in Tempo */
-.btn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 6px; font-size: 12.5px; font-weight: 700; white-space: nowrap; border: 1px solid transparent; }
-.btn-blue { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
-.btn-green { background: var(--ok-soft); color: var(--ok); border-color: var(--ok); }
-.btn-amber { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
-.pill { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; background: var(--surface-2); color: var(--ink-2); }
-
-/* Tables */
-.table-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
-table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 13.5px; }
-th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { font-size: 11.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: var(--surface-2); font-weight: 700; }
-tr:last-child td { border-bottom: none; }
-td.yes { color: var(--ok); font-weight: 600; }
-td.no { color: var(--muted); }
-
-/* Dashboard mock */
-.dash { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-.dash .card h3 { display: flex; align-items: center; gap: 8px; }
-.dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-.row { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
-.row:first-of-type { border-top: none; }
-.row b { font-weight: 600; color: var(--ink); }
-.row span { color: var(--muted); white-space: nowrap; }
-.example { font-size: 11.5px; color: var(--muted); font-style: italic; }
-
-.callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 14px; border-radius: 0 10px 10px 0; font-size: 14px; color: var(--ink); }
-footer { padding-top: 40px; font-size: 13px; color: var(--muted); }
+/* Roles and routines */
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.roles { display: grid; gap: 8px; }
+.role { display: grid; grid-template-columns: 150px 1fr; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.role:first-child { border-top: none; }
+.role b { color: var(--ink); }
+.role span { color: var(--ink-2); }
+ol.steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; counter-reset: s; }
+ol.steps li { counter-increment: s; display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; font-size: 13.5px; }
+ol.steps li::before { content: counter(s); width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-size: 12.5px; }
+ol.steps li span { color: var(--ink-2); }
+ol.steps li b { color: var(--ink); }
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.rule { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; font-size: 13px; color: var(--ink-2); border-radius: 0; }
+.rule b { color: var(--ink); }
+footer { font-size: 12px; color: var(--muted); }
 
 @media (max-width: 560px) {
-  body { font-size: 14.5px; }
-  .wrap { padding-inline: 16px; }
-  nav.sections { margin-inline: -16px; padding-inline: 16px; }
+  .role { grid-template-columns: 1fr; gap: 2px; }
+  body { font-size: 14px; }
 }
-@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
-html { scroll-behavior: smooth; }
 </style>
 </head>
 <body>
 
 <div class="wrap">
-  <header class="top">
-    <div class="eyebrow">Tempo user guide · From 16 Oct 2026</div>
-    <h1>How an L&amp;D project moves through Tempo</h1>
-    <p class="lede">Every new project follows the same five phases, from the first discovery call to the lessons-learned close-out. This guide shows what happens in each phase, how a module goes from storyboard to sign-off, who clicks which button, and what you'll see on your dashboard.</p>
-    <div class="meta">
-      <span class="tag">For: L&amp;D team, project owners, reviewers</span>
-      <span class="tag">Applies to projects created on or after 13 Oct 2026</span>
-      <span class="tag">Older projects work as before</span>
-    </div>
+  <header>
+    <div class="eyebrow">Tempo job aid · L&amp;D projects</div>
+    <h1>How a project moves through Tempo</h1>
+    <p class="lede">Five phases, one hand-off rule. Analysis &amp; Scoping covers the whole project; Design and Development run module by module. Use this page to check what happens next and what you should click.</p>
   </header>
 
-  <nav class="sections" aria-label="Sections">
-    <a href="#lifecycle">The five phases</a>
-    <a href="#module">A module, step by step</a>
-    <a href="#buttons">Next step buttons</a>
-    <a href="#dashboard">Your dashboard</a>
-    <a href="#who">Who can do what</a>
-    <a href="#wbs">Working in the WBS</a>
-    <a href="#tips">Good habits</a>
-  </nav>
-
-  <section id="lifecycle">
-    <div class="section-head">
-      <div class="eyebrow">1 · The lifecycle</div>
-      <h2>Five phases, each ending in a milestone</h2>
-      <p class="lede">The owner picks the phases a project needs while it's in Draft. They lock at <b>Start Project</b>. The project's phase moves forward on its own as each milestone is reached.</p>
+  <section class="panel" aria-labelledby="t-phases">
+    <div class="panel-head">
+      <h2 id="t-phases">The five phases</h2>
+      <span class="muted">Each phase ends in a milestone that Tempo ticks off when its tasks are done.</span>
     </div>
-
     <div class="track-scroll">
-      <div class="gate-bar" aria-hidden="true">
-        <div class="gate-cell gate-draft">Draft · planning is private to the owner's line</div>
-        <div class="gate-cell gate-live">Started · tasks show in everyone's My Tasks and dashboards</div>
-      </div>
       <div class="track">
-        <article class="lane" style="--lane: var(--ph-analysis); --lane-bg: var(--ph-analysis-bg)">
-          <div class="lane-head">
-            <h3>Analysis &amp; Scoping</h3>
-            <div class="sam">ADDIE Analysis · SAM Preparation</div>
+        <article class="phase" style="--c: var(--ph1); --cb: var(--ph1-bg)">
+          <div class="phase-top">
+            <h3><span class="num">1</span>Analysis &amp; Scoping</h3>
+            <div class="scope">Whole project · added on first save</div>
           </div>
-          <div class="lane-body">
-            <div class="label">Template tasks</div>
+          <div class="phase-body">
             <ul>
               <li>Discovery Call</li>
-              <li>Needs Analysis</li>
+              <li>Needs Analysis (data, learners, gaps)</li>
               <li>Scope Statement</li>
               <li>Review Scope</li>
               <li>Scope Sign-Off</li>
             </ul>
-            <p class="small muted">Runs before Start Project, so these tasks show for their assignees even while the project is in Draft.</p>
+            <div class="who">Runs while the project is still in Draft</div>
           </div>
-          <div class="lane-foot"><span class="diamond"></span>Scope Confirmed</div>
+          <div class="ms"><span class="diamond"></span>Scope Confirmed</div>
         </article>
 
-        <article class="lane" style="--lane: var(--ph-design); --lane-bg: var(--ph-design-bg)">
-          <div class="lane-head">
-            <h3>Design</h3>
-            <div class="sam">SAM Iterative Design</div>
+        <div class="dd">
+          <article class="phase" style="--c: var(--ph2); --cb: var(--ph2-bg)">
+            <div class="phase-top">
+              <h3><span class="num">2</span>Design</h3>
+              <div class="scope">Per module · Instructional Designer</div>
+            </div>
+            <div class="phase-body">
+              <ul>
+                <li>Design / Storyboard</li>
+                <li>Review · Design</li>
+                <li>Sign-Off · Design</li>
+              </ul>
+              <div class="who">Starts after the Scope Sign-Off</div>
+            </div>
+            <div class="ms"><span class="diamond"></span>Design Approved</div>
+          </article>
+          <article class="phase" style="--c: var(--ph3); --cb: var(--ph3-bg)">
+            <div class="phase-top">
+              <h3><span class="num">3</span>Development</h3>
+              <div class="scope">Per module · Content Developer</div>
+            </div>
+            <div class="phase-body">
+              <ul>
+                <li>Build</li>
+                <li>Review · Build</li>
+                <li>Sign-Off · Build</li>
+              </ul>
+              <div class="who">Each build starts after its own design sign-off</div>
+            </div>
+            <div class="ms"><span class="diamond"></span>Materials Approved</div>
+          </article>
+          <div class="modbar">
+            <div class="modbar-title">Modules move on their own</div>
+            <div class="modrow">
+              <span class="tag">M1</span>
+              <span class="chain"><span class="step d">Storyboard</span><span class="arrow">→</span><span class="step d">Review</span><span class="arrow">→</span><span class="step d">Sign-Off</span></span>
+              <span class="chain"><span class="arrow">→</span><span class="step v">Build</span><span class="arrow">→</span><span class="step v">Review</span><span class="arrow">→</span><span class="step v">Sign-Off</span></span>
+            </div>
+            <div class="modrow">
+              <span class="tag">M2</span>
+              <span class="chain"><span class="step d">Storyboard</span><span class="arrow">→</span><span class="step d">Review</span><span class="arrow">→</span><span class="step d">Sign-Off</span></span>
+              <span class="chain"><span class="arrow">→</span><span class="step v">Build</span><span class="arrow">→</span><span class="step v">Review</span><span class="arrow">→</span><span class="step v">Sign-Off</span></span>
+            </div>
           </div>
-          <div class="lane-body">
-            <div class="label">Per module</div>
+        </div>
+
+        <article class="phase" style="--c: var(--ph4); --cb: var(--ph4-bg)">
+          <div class="phase-top">
+            <h3><span class="num">4</span>Implementation</h3>
+            <div class="scope">Whole project · template</div>
+          </div>
+          <div class="phase-body">
             <ul>
-              <li>Design / Storyboard</li>
-              <li>Review · Design</li>
-              <li>Sign-Off · Design</li>
+              <li>Train-the-trainer, briefings</li>
+              <li>Pilot and fixes</li>
+              <li>Litmos upload, scheduling</li>
+              <li>Launch, reminders, monitoring</li>
+              <li>Hand over to Training Delivery</li>
             </ul>
-            <p class="small muted">Use <b>Add module</b> once for each module. Its Development steps are added at the same time.</p>
+            <div class="who">Keep only the steps you need</div>
           </div>
-          <div class="lane-foot"><span class="diamond"></span>Design Approved</div>
+          <div class="ms"><span class="diamond"></span>Program Delivered</div>
         </article>
 
-        <article class="lane" style="--lane: var(--ph-dev); --lane-bg: var(--ph-dev-bg)">
-          <div class="lane-head">
-            <h3>Development</h3>
-            <div class="sam">SAM Iterative Development</div>
+        <article class="phase" style="--c: var(--ph5); --cb: var(--ph5-bg)">
+          <div class="phase-top">
+            <h3><span class="num">5</span>Evaluation &amp; Closure</h3>
+            <div class="scope">Whole project · template</div>
           </div>
-          <div class="lane-body">
-            <div class="label">Per module</div>
+          <div class="phase-body">
             <ul>
-              <li>Build</li>
-              <li>Review · Build</li>
-              <li>Sign-Off · Build</li>
+              <li>L1 reaction, L2 results</li>
+              <li>L3 on-the-job check (30 days)</li>
+              <li>L4 KPI / NCR trend</li>
+              <li>Completion records, recert</li>
+              <li>Evaluation report, lessons learned</li>
             </ul>
-            <p class="small muted">Build starts once that module's design is signed off, so modules can move at different speeds.</p>
+            <div class="who">Kirkpatrick L1 to L4</div>
           </div>
-          <div class="lane-foot"><span class="diamond"></span>Materials Approved</div>
-        </article>
-
-        <article class="lane" style="--lane: var(--ph-impl); --lane-bg: var(--ph-impl-bg)">
-          <div class="lane-head">
-            <h3>Implementation</h3>
-            <div class="sam">ADDIE Implementation · SAM Rollout</div>
-          </div>
-          <div class="lane-body">
-            <div class="label">Template tasks (keep what you need)</div>
-            <ul>
-              <li>Train-the-Trainer / Facilitator Walkthrough</li>
-              <li>Manager and Buddy Briefing</li>
-              <li>Pilot or Dry Run, then Pilot Fixes</li>
-              <li>Upload to LMS (Litmos)</li>
-              <li>Schedule Batches with Supervisors</li>
-              <li>Launch Comms, Reminders</li>
-              <li>Monitor Completion (First 2 Weeks)</li>
-              <li>Hand Over to Training Delivery</li>
-            </ul>
-          </div>
-          <div class="lane-foot"><span class="diamond"></span>Program Delivered</div>
-        </article>
-
-        <article class="lane" style="--lane: var(--ph-eval); --lane-bg: var(--ph-eval-bg)">
-          <div class="lane-head">
-            <h3>Evaluation &amp; Closure</h3>
-            <div class="sam">Kirkpatrick L1 to L4 · Close-out</div>
-          </div>
-          <div class="lane-body">
-            <div class="label">Template tasks (keep what you need)</div>
-            <ul>
-              <li>L1 Reaction Survey Summary</li>
-              <li>L2 Assessment Results</li>
-              <li>L3 On-the-Job Check (30 Days)</li>
-              <li>Time-to-Competency Check</li>
-              <li>L4 KPI, Deviation or NCR Trend</li>
-              <li>Audit-Ready Completion Records</li>
-              <li>Evaluation Report</li>
-              <li>Lessons Learned and Close-Out</li>
-            </ul>
-          </div>
-          <div class="lane-foot"><span class="diamond"></span>Project Closed</div>
+          <div class="ms"><span class="diamond"></span>Project Closed</div>
         </article>
       </div>
     </div>
-    <p class="small muted">Each template adds its tasks already linked in order. Delete the ones a project doesn't need and the chain closes up around them. Work Types are suggested; Output Types are yours to choose.</p>
+    <p class="track-note"><b>Not every project needs every phase.</b> Remove a phase from its ⋯ menu on the WBS. Need it back later? <b>Add phase to project</b> works even after Start Project, and the change is recorded in the Audit Trail.</p>
   </section>
 
-  <section id="module">
-    <div class="section-head">
-      <div class="eyebrow">2 · Design and build</div>
-      <h2>A module, step by step</h2>
-      <p class="lede">Each module is one chain of six tasks. A review or sign-off can pass the work forward or send it back For Revision. That loop is how we iterate, SAM-style, without reopening anything.</p>
+  <section class="panel loop" aria-labelledby="t-loop">
+    <div class="panel-head">
+      <h2 id="t-loop">The hand-off rule</h2>
+      <span class="muted">Every piece of work goes to a reviewer, then an approver. Either can send it back with a comment.</span>
     </div>
-    <div class="loop-card">
-      <div class="loop-scroll">
-        <svg viewBox="0 0 980 230" role="img" aria-label="Module chain: Design / Storyboard, Review Design, Sign-Off Design, Build, Review Build, Sign-Off Build. Reviews and sign-offs can send work back For Revision to the step that produced it.">
-          <defs>
-            <marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"/></marker>
-            <marker id="arrb" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="var(--warn)"/></marker>
-          </defs>
-          <text x="10" y="22" font-family="var(--font-head)" font-size="13" font-weight="600" fill="var(--ph-design)">DESIGN</text>
-          <text x="505" y="22" font-family="var(--font-head)" font-size="13" font-weight="600" fill="var(--ph-dev)">DEVELOPMENT</text>
-          <g font-family="var(--font-body)" font-size="13" text-anchor="middle">
-            <rect x="10" y="40" width="140" height="56" rx="10" fill="var(--ph-design-bg)" stroke="var(--ph-design)"/>
-            <text x="80" y="64" fill="var(--ink)" font-weight="600">Design / Storyboard</text>
-            <text x="80" y="82" fill="var(--muted)" font-size="11.5">Ready for Review</text>
+    <div class="loop-scroll">
+      <svg viewBox="0 0 900 190" role="img" aria-label="Work, then Ready for Review, then Pass QA, then Approve. Review and sign-off can send the work back For Revision; the owner fixes it and clicks Resubmit.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker>
+          <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--amber)"/></marker>
+        </defs>
+        <g font-family="Figtree, Segoe UI, sans-serif" text-anchor="middle">
+          <rect x="10" y="30" width="190" height="64" rx="12" fill="var(--soft)" stroke="var(--line)"/>
+          <text x="105" y="56" font-size="14" font-weight="700" fill="var(--ink)">Do the work</text>
+          <text x="105" y="76" font-size="12" fill="var(--muted)">log your time as you go</text>
 
-            <rect x="175" y="40" width="140" height="56" rx="10" fill="var(--ph-design-bg)" stroke="var(--ph-design)"/>
-            <text x="245" y="64" fill="var(--ink)" font-weight="600">Review · Design</text>
-            <text x="245" y="82" fill="var(--muted)" font-size="11.5">Pass QA</text>
+          <rect x="240" y="30" width="190" height="64" rx="12" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="335" y="56" font-size="14" font-weight="700" fill="var(--accent)">Ready for Review</text>
+          <text x="335" y="76" font-size="12" fill="var(--ink-2)">owner of the work</text>
 
-            <rect x="340" y="40" width="140" height="56" rx="10" fill="var(--ph-design-bg)" stroke="var(--ph-design)"/>
-            <text x="410" y="64" fill="var(--ink)" font-weight="600">Sign-Off · Design</text>
-            <text x="410" y="82" fill="var(--muted)" font-size="11.5">Approve</text>
+          <rect x="470" y="30" width="190" height="64" rx="12" fill="var(--accent-soft)" stroke="var(--accent)"/>
+          <text x="565" y="56" font-size="14" font-weight="700" fill="var(--accent)">Pass QA</text>
+          <text x="565" y="76" font-size="12" fill="var(--ink-2)">reviewer</text>
 
-            <rect x="505" y="40" width="140" height="56" rx="10" fill="var(--ph-dev-bg)" stroke="var(--ph-dev)"/>
-            <text x="575" y="64" fill="var(--ink)" font-weight="600">Build</text>
-            <text x="575" y="82" fill="var(--muted)" font-size="11.5">Ready for Review</text>
-
-            <rect x="670" y="40" width="140" height="56" rx="10" fill="var(--ph-dev-bg)" stroke="var(--ph-dev)"/>
-            <text x="740" y="64" fill="var(--ink)" font-weight="600">Review · Build</text>
-            <text x="740" y="82" fill="var(--muted)" font-size="11.5">Pass QA</text>
-
-            <rect x="835" y="40" width="135" height="56" rx="10" fill="var(--ph-dev-bg)" stroke="var(--ph-dev)"/>
-            <text x="902" y="64" fill="var(--ink)" font-weight="600">Sign-Off · Build</text>
-            <text x="902" y="82" fill="var(--muted)" font-size="11.5">Approve</text>
-          </g>
-          <g stroke="var(--muted)" stroke-width="1.6" fill="none">
-            <line x1="150" y1="68" x2="173" y2="68" marker-end="url(#arr)"/>
-            <line x1="315" y1="68" x2="338" y2="68" marker-end="url(#arr)"/>
-            <line x1="480" y1="68" x2="503" y2="68" marker-end="url(#arr)"/>
-            <line x1="645" y1="68" x2="668" y2="68" marker-end="url(#arr)"/>
-            <line x1="810" y1="68" x2="833" y2="68" marker-end="url(#arr)"/>
-          </g>
-          <g stroke="var(--warn)" stroke-width="1.6" stroke-dasharray="5 4" fill="none">
-            <path d="M245,96 C245,140 80,140 80,100" marker-end="url(#arrb)"/>
-            <path d="M410,96 C410,175 80,175 80,100" marker-end="url(#arrb)"/>
-            <path d="M740,96 C740,140 575,140 575,100" marker-end="url(#arrb)"/>
-            <path d="M902,96 C902,175 575,175 575,100" marker-end="url(#arrb)"/>
-          </g>
-          <g font-family="var(--font-body)" font-size="11.5" fill="var(--warn)" text-anchor="middle">
-            <text x="162" y="134">For Revision</text>
-            <text x="245" y="190">For Revision</text>
-            <text x="657" y="134">For Revision</text>
-            <text x="738" y="190">For Revision</text>
-          </g>
-          <text x="10" y="218" font-family="var(--font-body)" font-size="12" fill="var(--muted)">Task names end with the module, e.g. "Build · Leadership 101", so everyone can see which module they're on.</text>
-        </svg>
-      </div>
-      <div class="legend">
-        <span><i class="sw"></i>Passes forward when the step is done</span>
-        <span><i class="sw back"></i>Sent back For Revision with a comment</span>
-      </div>
+          <rect x="700" y="30" width="190" height="64" rx="12" fill="var(--ok-soft)" stroke="var(--ok)"/>
+          <text x="795" y="56" font-size="14" font-weight="700" fill="var(--ok)">Approve</text>
+          <text x="795" y="76" font-size="12" fill="var(--ink-2)">approver · milestone moves</text>
+        </g>
+        <g stroke="var(--muted)" stroke-width="1.5" fill="none">
+          <line x1="200" y1="62" x2="236" y2="62" marker-end="url(#ar)"/>
+          <line x1="430" y1="62" x2="466" y2="62" marker-end="url(#ar)"/>
+          <line x1="660" y1="62" x2="696" y2="62" marker-end="url(#ar)"/>
+        </g>
+        <g stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="6 4" fill="none">
+          <path d="M565 94 C565 140 105 140 105 98" marker-end="url(#arb)"/>
+          <path d="M795 94 C795 170 105 170 105 98" marker-end="url(#arb)"/>
+        </g>
+        <g font-family="Figtree, Segoe UI, sans-serif" font-size="12.5" fill="var(--amber)" text-anchor="middle" font-weight="700">
+          <text x="335" y="128">For Revision + comment → fix it → Resubmit</text>
+          <text x="560" y="164">Approver can send it back too</text>
+        </g>
+      </svg>
     </div>
   </section>
 
-  <section id="buttons">
-    <div class="section-head">
-      <div class="eyebrow">3 · Hand-offs</div>
-      <h2>Next step buttons: who clicks what</h2>
-      <p class="lede">On new projects the <b>Next step</b> column tells you what to do. Status can still be changed in Tasks, but the buttons keep the review chain intact.</p>
+  <section class="panel" aria-labelledby="t-next">
+    <div class="panel-head">
+      <h2 id="t-next">Read your Next action</h2>
+      <span class="muted">Projects &amp; Tasks › My Tasks. The column only shows things for your tasks.</span>
     </div>
-    <div class="table-scroll">
-      <table>
-        <thead><tr><th>You see</th><th>On</th><th>Who clicks it</th><th>What happens</th></tr></thead>
-        <tbody>
-          <tr><td><span class="btn btn-blue">→ Ready for Review</span></td><td>Work a review depends on (storyboard, build, scope statement)</td><td>The assignee</td><td>Checks Logged hours and Output Count, marks it Done, and hands it to the reviewer. Shows <span class="pill">In review · name</span>.</td></tr>
-          <tr><td><span class="btn btn-green">✓ Pass QA</span></td><td>Review steps</td><td>The reviewer</td><td>Marks the review Done. The sign-off unlocks.</td></tr>
-          <tr><td><span class="btn btn-green">✓ Approve</span></td><td>Sign-off steps</td><td>The approver</td><td>Marks the sign-off Done. The next phase's work unlocks and the milestone moves.</td></tr>
-          <tr><td><span class="btn btn-amber">↺ For Revision</span></td><td>Review and sign-off steps</td><td>The reviewer or approver</td><td>Asks for a comment, sends the work back to In Progress, and adds 1 to its revision count. The owner sees it under <b>Sent back to you</b>.</td></tr>
-          <tr><td><span class="pill">Waiting</span></td><td>Any step whose earlier step isn't done</td><td>Nobody yet</td><td>Shows who it's waiting on and when it should be ready. It isn't on your to-do list yet.</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="callout">Finishing a task always opens the same <b>Complete task</b> pop-up: Reported Completion date, Work Type, Output Type, Output Count and Logged hours, with <b>+ Log time</b> if hours are missing. Work Type and Output Type changes are kept in the Audit Trail.</div>
-  </section>
-
-  <section id="dashboard">
-    <div class="section-head">
-      <div class="eyebrow">4 · My Dashboard</div>
-      <h2>Your to-do list shows only what needs you now</h2>
-      <p class="lede">Tasks that are waiting on someone else, parent tasks, and tasks of projects still being planned stay out of your to-do lists. They show under What's next instead.</p>
-    </div>
-    <p class="example">Example rows, for illustration only</p>
-    <div class="dash">
-      <div class="card">
-        <h3><span class="dot" style="background: var(--accent)"></span>My Work Today</h3>
-        <p class="small">Tasks you can work on now, scheduled for today.</p>
-        <div class="row"><b>Build · Leadership 101</b><span>Due 10/23</span></div>
-        <div class="row"><b>Needs Analysis</b><span>Due 10/20</span></div>
-      </div>
-      <div class="card">
-        <h3><span class="dot" style="background: var(--warn)"></span>Waiting for you</h3>
-        <p class="small">Reviews and sign-offs ready for you, and work sent back to you.</p>
-        <div class="row"><b>Review · Design · Module 2</b><span>To review</span></div>
-        <div class="row"><b>Design / Storyboard · Module 1</b><span>Sent back</span></div>
-      </div>
-      <div class="card">
-        <h3><span class="dot" style="background: var(--muted)"></span>What's next</h3>
-        <p class="small">Assigned to you, waiting on someone else's task.</p>
-        <div class="row"><b>Sign-Off · Build · Module 1</b><span>Waits on review</span></div>
-        <div class="row"><b>Pilot or Dry Run</b><span>Expected 11/10</span></div>
-      </div>
+    <div class="legend">
+      <div class="chip-card"><span class="pill p-ready">Ready</span><p>You can start. Log time and it moves to In Progress by itself.</p></div>
+      <div class="chip-card"><span class="pill p-btn">✓ Mark Done · ➤ Ready for Review · ✓ Pass QA · ✓ Approve</span><p>Your task is in progress. Click it, check the pop-up (date, Output Count, logged hours), confirm.</p></div>
+      <div class="chip-card"><span class="pill p-rev">↺ For Revision</span><p>On reviews and sign-offs. Sends the work back with your comment. A comment is required.</p></div>
+      <div class="chip-card"><span class="pill p-btn">Resubmit</span><p>Your work came back. Read the comment on the tag, fix it, then Resubmit.</p></div>
+      <div class="chip-card"><span class="pill p-wait">Waiting on Scope Sign-Off</span><p>An earlier task has to finish first. Hover to see who has it and when it's expected.</p></div>
+      <div class="chip-card"><span class="pill p-with">With Joseph San Jose</span><p>You've handed it over. Nothing to do until it's passed or sent back.</p></div>
+      <div class="chip-card"><span class="pill p-none">—</span><p>Not your task. Nothing for you here.</p></div>
     </div>
   </section>
 
-  <section id="who">
-    <div class="section-head">
-      <div class="eyebrow">5 · Permissions</div>
-      <h2>Who can do what</h2>
-      <p class="lede">Normal projects protect the plan; Ongoing projects (Training Delivery, Ongoing Task) let people log their own work.</p>
-    </div>
-    <div class="table-scroll">
-      <table>
-        <thead><tr><th>Action</th><th>Project owner, owner's supervisor, Full Access</th><th>Assignee · normal project</th><th>Anyone · Ongoing project</th></tr></thead>
-        <tbody>
-          <tr><td>Add tasks</td><td class="yes">Yes</td><td class="no">No</td><td class="yes">For themselves (supervisors for their team)</td></tr>
-          <tr><td>Change name, dates, hours, assignee</td><td class="yes">Yes</td><td class="no">No</td><td class="yes">On their own task, until its due date passes</td></tr>
-          <tr><td>Update status, completion, Output Count, notes</td><td class="yes">Yes</td><td class="yes">Yes, on their own task</td><td class="yes">Yes, on their own task</td></tr>
-          <tr><td>Move a due date after it has passed</td><td colspan="3">Request an extension. A task created after its due date shows <span class="pill">Logged late</span> or <span class="pill">Extended</span>; late logs over 3 working days need the owner, the assignee's manager or Full Access to confirm.</td></tr>
-          <tr><td>See a Draft project's tasks</td><td class="yes">Yes</td><td colspan="2">Only their own Analysis &amp; Scoping tasks, until Start Project</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
+  <div class="grid-2">
+    <section class="panel" aria-labelledby="t-roles">
+      <h2 id="t-roles">Who does what</h2>
+      <div class="roles">
+        <div class="role"><b>Project owner</b><span>Sets up the plan, removes phases the project skips, adds modules, requests Start Project, keeps assignees current.</span></div>
+        <div class="role"><b>Instructional Designer</b><span>Analysis &amp; Scoping work and each module's storyboard.</span></div>
+        <div class="role"><b>Content Developer</b><span>Builds each module once its design is signed off.</span></div>
+        <div class="role"><b>Reviewer (QA)</b><span>Pass QA or For Revision on every review step.</span></div>
+        <div class="role"><b>Approver</b><span>Signs off scope, design and build; approves Start Project.</span></div>
+      </div>
+    </section>
 
-  <section id="wbs">
-    <div class="section-head">
-      <div class="eyebrow">6 · The WBS page</div>
-      <h2>Working in the WBS</h2>
-    </div>
-    <div class="grid-3">
-      <div class="card">
-        <h3>Phase progress</h3>
-        <p>A card per phase shows % done, counting real tasks only. Click a card to show only that phase; click again for all.</p>
-      </div>
-      <div class="card">
-        <h3>Filters</h3>
-        <p>Search, Phase, Module, Status, Assignee and Work Type. While a filter is on, reordering and adding are paused. Use <b>Clear</b> to get everything back.</p>
-      </div>
-      <div class="card">
-        <h3>Column views</h3>
-        <ul>
-          <li><b>Essential:</b> who, status, hours, start and end</li>
-          <li><b>Planning:</b> adds Work Type, Output Type, Duration</li>
-          <li><b>Full:</b> every column</li>
-        </ul>
-      </div>
-      <div class="card">
-        <h3>Group by Module</h3>
-        <p>Lists each module from storyboard to sign-off, with its progress and current stage. Switch back to Phase any time.</p>
-      </div>
-      <div class="card">
-        <h3>Timeline</h3>
-        <p>The Gantt has its own tab on the project Overview and the WBS, in phase colours. Change dates on the WBS tab.</p>
-      </div>
-      <div class="card">
-        <h3>Moving tasks</h3>
-        <p>Move up / down stays inside a phase. To change a task's phase, use the row menu › Move to phase.</p>
-      </div>
-    </div>
-  </section>
+    <section class="panel" aria-labelledby="t-daily">
+      <h2 id="t-daily">Your routine, every day</h2>
+      <ol class="steps">
+        <li><span><b>Open My Dashboard.</b> Clear <b>Waiting for you</b> first: reviews, sign-offs and work sent back hold other people up.</span></li>
+        <li><span><b>Go to My Tasks.</b> Work down the <b>Next action</b> column: Ready, then buttons.</span></li>
+        <li><span><b>Log time as you go</b> (Time Tracking › Log time). Hand-offs need logged hours.</span></li>
+        <li><span><b>Click the button and check the pop-up:</b> Reported Completion is the day you finished, Output Count is 1 or more.</span></li>
+      </ol>
+    </section>
+  </div>
 
-  <section id="tips">
-    <div class="section-head">
-      <div class="eyebrow">7 · Good habits</div>
-      <h2>Habits that keep the plan honest</h2>
-    </div>
-    <div class="grid-2">
-      <div class="card">
-        <h3>Owners</h3>
-        <ul>
-          <li>Pick phases and apply templates in Draft, then delete what the project doesn't need.</li>
-          <li>Add one module per lesson or course piece, named the way the team talks about it.</li>
-          <li>Use the <b>Planning</b> view to fill Work Type and Output Type before Start Project.</li>
-          <li>Link each milestone to the tasks that must finish first.</li>
-        </ul>
-      </div>
-      <div class="card">
-        <h3>Everyone</h3>
-        <ul>
-          <li>Log time as you go, so <b>Ready for Review</b> isn't blocked by missing hours.</li>
-          <li>Give a clear, specific comment with <b>For Revision</b>: what to change and why.</li>
-          <li>Check <b>Waiting for you</b> first thing; reviews hold up other people.</li>
-          <li>Use the Complete pop-up's date for when the work actually finished.</li>
-        </ul>
-      </div>
-    </div>
-  </section>
+  <div class="grid-2">
+    <section class="panel" aria-labelledby="t-setup">
+      <h2 id="t-setup">Owner: setting up a project</h2>
+      <ol class="steps">
+        <li><span><b>New project</b> › name, owner, start date › <b>Save draft &amp; continue.</b> The Analysis &amp; Scoping tasks appear.</span></li>
+        <li><span><b>Show more details</b> and fill the 7 details needed before Start Project.</span></li>
+        <li><span><b>Remove the phases</b> the project doesn't need (phase ⋯ menu).</span></li>
+        <li><span><b>Assign</b> the scoping tasks, then <b>Add your first module</b> on the Design row (name; Instructional Designer and Content Developer optional).</span></li>
+        <li><span>Add Implementation or Evaluation tasks from <b>Add task › Use template</b>, then <b>Request Start Project</b>.</span></li>
+      </ol>
+    </section>
 
-  <footer>
-    Tempo · L&amp;D Resource Planning. Questions or ideas: use the <b>Feedback</b> page in Tempo. Full details are in the Knowledge Base under <b>October 16 Release</b>.
-  </footer>
+    <section class="panel" aria-labelledby="t-rules">
+      <h2 id="t-rules">Good to know</h2>
+      <div class="rules">
+        <div class="rule"><b>Draft plans are private.</b> Only the owner's line and Full Access see the tasks, except people assigned Analysis &amp; Scoping work.</div>
+        <div class="rule"><b>Done is done.</b> To change finished work, the review step sends it back For Revision. You can't reopen it yourself.</div>
+        <div class="rule"><b>Plan changes</b> (names, dates, hours, assignees) are for the owner, their supervisor or Full Access. Everyone updates their own status and completion.</div>
+        <div class="rule"><b>Group by Module</b> on the WBS shows each module's whole chain. Milestones stay on the phases.</div>
+      </div>
+    </section>
+  </div>
+
+  <footer>Tempo · L&amp;D Resource Planning · For projects created from 13 Oct 2026. Questions or ideas: the Feedback page in Tempo. Full details: Knowledge Base › October 23 Release.</footer>
 </div>
 </body>
 </html>
