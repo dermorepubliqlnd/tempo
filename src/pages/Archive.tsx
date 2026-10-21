@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { Search, RotateCcw, RefreshCw, Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import { useSession } from "../lib/useSession";
@@ -84,6 +84,7 @@ export default function Archive() {
   // 2026-10-22 (Sandra): Full Access can permanently delete, one or many at once.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [purging, setPurging] = useState(false);
+  const anchorKey = useRef<string | null>(null); // last clicked row, for Shift+click ranges
 
   async function load() {
     setLoading(true);
@@ -150,6 +151,34 @@ export default function Archive() {
       if (next.has(k)) next.delete(k); else next.add(k);
       return next;
     });
+  }
+  // Shift+click selects every row between the last clicked one and this one;
+  // Ctrl/Cmd+click (or a checkbox click) toggles just this row.
+  function handleSelectClick(r: ArchiveRow, e: ReactMouseEvent) {
+    const k = rowKey(r);
+    const keys = visible.map(rowKey);
+    const from = anchorKey.current ? keys.indexOf(anchorKey.current) : -1;
+    if (e.shiftKey && from >= 0) {
+      const to = keys.indexOf(k);
+      const [a, b] = from < to ? [from, to] : [to, from];
+      const select = !selected.has(k) || selected.has(anchorKey.current as string);
+      setSelected((prev) => {
+        const next = new Set(prev);
+        keys.slice(a, b + 1).forEach((x) => (select ? next.add(x) : next.delete(x)));
+        return next;
+      });
+    } else {
+      toggleRow(r);
+    }
+    anchorKey.current = k;
+  }
+  function handleRowClick(r: ArchiveRow, e: ReactMouseEvent) {
+    if (!isFullAccess) return;
+    if (!(e.shiftKey || e.ctrlKey || e.metaKey)) return;
+    if ((e.target as HTMLElement).closest("button, a, input")) return;
+    e.preventDefault();
+    window.getSelection()?.removeAllRanges();
+    handleSelectClick(r, e);
   }
   function toggleAllVisible() {
     setSelected((prev) => {
@@ -256,6 +285,7 @@ export default function Archive() {
       {isFullAccess && selected.size > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10, padding: "8px 12px", border: "1px solid var(--danger-text)", borderRadius: "var(--radius-sm)", background: "var(--danger-bg, rgba(220,38,38,.05))", fontSize: 12 }}>
           <strong style={{ color: "var(--text)" }}>{selected.size} selected</strong>
+          <span style={{ color: "var(--muted)" }}>Shift+click a row to select a range · Ctrl+click to add or remove one</span>
           <button onClick={() => setSelected(new Set())} style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>Clear</button>
           <span style={{ flex: 1 }} />
           <button
@@ -299,10 +329,10 @@ export default function Archive() {
                 const daysLeft = Math.max(0, Math.ceil((new Date(r.purge_at).getTime() - Date.now()) / 86400000));
                 const bundle = bundleText(r);
                 return (
-                  <tr key={key} style={{ borderBottom: "1px solid var(--border)", background: selected.has(key) ? "var(--danger-bg, rgba(220,38,38,.04))" : undefined }}>
+                  <tr key={key} onClick={(e) => handleRowClick(r, e)} onMouseDown={(e) => { if (isFullAccess && e.shiftKey) e.preventDefault(); }} style={{ borderBottom: "1px solid var(--border)", background: selected.has(key) ? "var(--danger-bg, rgba(220,38,38,.04))" : undefined }}>
                     {isFullAccess && (
                       <td style={{ ...td, textAlign: "center", width: 34 }}>
-                        <input type="checkbox" checked={selected.has(key)} onChange={() => toggleRow(r)} aria-label={`Select ${r.label}`} />
+                        <input type="checkbox" checked={selected.has(key)} onChange={() => undefined} onClick={(e) => { e.stopPropagation(); handleSelectClick(r, e); }} aria-label={`Select ${r.label}`} title="Shift+click to select a range, Ctrl+click to add or remove" />
                       </td>
                     )}
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
