@@ -101,12 +101,22 @@ header { display: grid; gap: 8px; }
 /* Next action legend */
 .legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
 .chip-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 6px; align-content: start; background: var(--card); }
-.pill { justify-self: start; display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 7px; font-size: 12.5px; font-weight: 700; }
-.p-ready { color: var(--accent); background: var(--accent-soft); }
-.p-btn { color: #fff; background: var(--accent); }
-.p-rev { color: var(--amber); background: var(--amber-soft); border: 1px solid var(--amber); }
-.p-wait, .p-with { color: var(--ink-2); background: var(--soft); }
-.p-none { color: var(--muted); background: transparent; border: 1px dashed var(--line); }
+.legend-group { display: grid; gap: 10px; }
+.legend-group + .legend-group { margin-top: 18px; }
+.legend-label { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+/* Statuses: plain text, nothing to click */
+.st { justify-self: start; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.st small { font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.st-ready { color: var(--accent); }
+.st-rev { color: var(--amber); }
+.st-none { color: var(--muted); }
+.st-none::before { display: none; }
+/* Buttons: look like buttons, you click them */
+.bt { justify-self: start; display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 6px; font-size: 12.5px; font-weight: 700; color: #fff; background: var(--accent); border: 1px solid var(--accent); box-shadow: 0 1px 0 rgba(0,0,0,.18); }
+.bt-out { color: var(--ink); background: var(--card); border-color: var(--line); }
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); margin-bottom: 16px; font-size: 13px; color: var(--ink-2); }
+.flow .ar { color: var(--muted); }
 .chip-card p { font-size: 13px; color: var(--ink-2); }
 
 /* Roles and routines */
@@ -313,16 +323,31 @@ footer { font-size: 12px; color: var(--muted); }
       <h2 id="t-next">Read your Next action</h2>
       <span class="muted">Projects &amp; Tasks › My Tasks. The column only shows things for your tasks.</span>
     </div>
-    <div class="legend">
-      <div class="chip-card"><span class="pill p-ready">Ready</span><p>You can start. Log time and it moves to In Progress by itself.</p></div>
-      <div class="chip-card"><span class="pill p-btn">➤ Ready for Review</span><p>Your work has a review after it (storyboard, build, scope statement). Hands it to the reviewer. You won't see Mark Done on these.</p></div>
-      <div class="chip-card"><span class="pill p-btn">✓ Mark Done</span><p>Your task has no review after it (for example Discovery Call, Data Gathering). Closes it.</p></div>
-      <div class="chip-card"><span class="pill p-btn">✓ Pass QA · ✓ Approve</span><p>You're the reviewer or the approver. Pass it on, or send it back For Revision.</p></div>
-      <div class="chip-card"><span class="pill p-rev">↺ For Revision</span><p>On reviews and sign-offs. Sends the work back with your comment. A comment is required.</p></div>
-      <div class="chip-card"><span class="pill p-btn">Resubmit</span><p>Your work came back. Read the comment on the tag, fix it, then Resubmit.</p></div>
-      <div class="chip-card"><span class="pill p-wait">Waiting on Scope Sign-Off</span><p>An earlier task has to finish first. Hover to see who has it and when it's expected.</p></div>
-      <div class="chip-card"><span class="pill p-with">With Joseph San Jose</span><p>You've handed it over. Nothing to do until it's passed or sent back.</p></div>
-      <div class="chip-card"><span class="pill p-none">—</span><p>Not your task. Nothing for you here.</p></div>
+    <div class="flow">
+      <span class="st st-ready">Ready</span><span class="ar">→</span>
+      <span><b>Log time</b> (task goes In Progress)</span><span class="ar">→</span>
+      <span>one button appears:</span>
+      <span class="bt">➤ Ready for Review</span><span>or</span><span class="bt">✓ Mark Done</span>
+    </div>
+    <div class="legend-group">
+      <div class="legend-label">Buttons: you click these</div>
+      <div class="legend">
+        <div class="chip-card"><span class="bt">➤ Ready for Review</span><p>Your work has a review after it (storyboard, build, scope statement). Hands it to the reviewer. You won't see Mark Done on these.</p></div>
+        <div class="chip-card"><span class="bt">✓ Mark Done</span><p>Your task has no review after it (for example Discovery Call, Data Gathering). Closes it.</p></div>
+        <div class="chip-card"><span class="bt">✓ Pass QA · ✓ Approve</span><p>You're the reviewer or the approver. Passes it on.</p></div>
+        <div class="chip-card"><span class="bt bt-out">↺ For Revision</span><p>Next to Pass QA / Approve. Sends the work back with your comment. A comment is required.</p></div>
+        <div class="chip-card"><span class="bt">Resubmit</span><p>Your work came back. Read the comment, fix it, then Resubmit.</p></div>
+      </div>
+    </div>
+    <div class="legend-group">
+      <div class="legend-label">Statuses: information only, nothing to click</div>
+      <div class="legend">
+        <div class="chip-card"><span class="st st-ready">Ready <small>· log time to start</small></span><p>Ready for work. Log time on it and it moves to In Progress; then your button appears.</p></div>
+        <div class="chip-card"><span class="st">Waiting on Scope Sign-Off</span><p>An earlier task has to finish first. Hover to see who has it and when it's expected.</p></div>
+        <div class="chip-card"><span class="st">With Joseph San Jose</span><p>You've handed it over. Nothing to do until it's passed or sent back.</p></div>
+        <div class="chip-card"><span class="st st-rev">For Revision · "comment"</span><p>Shown beside Resubmit when your work came back. Hover to read the full comment.</p></div>
+        <div class="chip-card"><span class="st st-none">—</span><p>Not your task. Nothing for you here.</p></div>
+      </div>
     </div>
   </section>
 
@@ -365,7 +390,7 @@ footer { font-size: 12px; color: var(--muted); }
       <h2 id="t-rules">Good to know</h2>
       <div class="rules">
         <div class="rule"><b>Draft plans are private.</b> Only the owner's line and Full Access see the tasks, except people assigned Analysis &amp; Scoping work.</div>
-        <div class="rule"><b>One button, chosen for you.</b> Tempo shows only the button that fits the task. Setting a reviewed task to Done from the Status dropdown still sends it for review.</div>
+        <div class="rule"><b>One button, chosen for you.</b> Once you log time, Tempo shows only the button that fits the task: Ready for Review if a review follows, otherwise Mark Done. Setting a reviewed task to Done from the Status dropdown still sends it for review.</div>
         <div class="rule"><b>Done is done.</b> To change finished work, the review step sends it back For Revision. You can't reopen it yourself.</div>
         <div class="rule"><b>Plan changes</b> (names, dates, hours, assignees) are for the owner, their supervisor or Full Access. Everyone updates their own status and completion.</div>
         <div class="rule"><b>Group by Module</b> on the WBS shows each module's whole chain. Milestones stay on the phases.</div>
@@ -375,5 +400,6 @@ footer { font-size: 12px; color: var(--muted); }
 
   <footer>Tempo · L&amp;D Resource Planning · For projects created from 13 Oct 2026. Questions or ideas: the Feedback page in Tempo. Full details: Knowledge Base › October 23 Release.</footer>
 </div>
+
 </body>
 </html>

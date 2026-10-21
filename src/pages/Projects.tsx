@@ -5611,7 +5611,12 @@ export default function Projects() {
               );
             }
             if (t.status !== "In Progress") {
-              return <span style={{ color: "var(--accent)", fontSize: 12, fontWeight: 600 }} title="Starts automatically when you log time on this task.">Ready</span>;
+              return (
+                <span style={{ fontSize: 12, whiteSpace: "nowrap" }} title="Log time on this task to start it. Your next button (Ready for Review or Mark Done) appears once it's In Progress.">
+                  <span style={{ color: "var(--accent)", fontWeight: 600 }}>Ready</span>
+                  <span style={{ color: "var(--muted)" }}> · log time to start</span>
+                </span>
+              );
             }
             if (!mine) return blank;
             const kind = reviewStepKind(t);
