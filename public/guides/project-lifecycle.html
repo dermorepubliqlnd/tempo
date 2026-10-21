@@ -66,7 +66,7 @@ header { display: grid; gap: 8px; }
 
 /* Phase track */
 .track-scroll { overflow-x: auto; padding-bottom: 4px; }
-.track { display: grid; grid-template-columns: 1fr 2.1fr 1fr 1fr; gap: 10px; min-width: 960px; align-items: stretch; }
+.track { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; min-width: 980px; align-items: stretch; }
 .phase { border-radius: 12px; border: 1px solid var(--line); background: var(--card); display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
 .phase-top { padding: 12px 14px 10px; display: grid; grid-template-rows: 24px auto; align-content: start; gap: 6px; height: 84px; border-bottom: 3px solid var(--c); background: var(--cb); }
 .phase-top h3 { color: var(--c); display: flex; align-items: center; gap: 8px; font-size: 13.5px; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -78,18 +78,19 @@ header { display: grid; gap: 8px; }
 .who { font-size: 12px; color: var(--muted); }
 .ms { padding: 9px 14px; border-top: 1px dashed var(--line); display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; }
 .diamond { width: 9px; height: 9px; transform: rotate(45deg); background: var(--c); flex-shrink: 0; }
-.dd { display: grid; grid-template-columns: 1fr 1fr; border-radius: 12px; border: 1px solid var(--line); background: var(--card); overflow: hidden; }
-.dd .phase { border: none; border-radius: 0; }
-.dd .phase + .phase { border-left: 1px solid var(--line); }
-.modbar { grid-column: 1 / -1; padding: 10px 14px 12px; background: var(--soft); border-top: 1px solid var(--line); display: grid; gap: 7px; }
-.modbar-title { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
-.modrow { display: grid; grid-template-columns: 56px 1fr 1fr; gap: 6px; align-items: center; font-size: 12px; }
-.modrow .tag { font-weight: 700; color: var(--ink); }
-.chain { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-.step { padding: 3px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 600; background: var(--card); border: 1px solid var(--line); white-space: nowrap; }
+.mods-scroll { overflow-x: auto; }
+.mods { min-width: 760px; display: grid; grid-template-columns: 110px 1fr 28px 1fr; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.mods > div { padding: 10px 14px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mods .h { border-top: none; font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.mods .h.d { background: var(--ph2-bg); color: var(--ph2); }
+.mods .h.v { background: var(--ph3-bg); color: var(--ph3); }
+.mods .h.m, .mods .h.gap { background: var(--soft); color: var(--ink-2); }
+.mods .gap { justify-content: center; color: var(--muted); padding: 10px 0; }
+.mods .m { font-weight: 700; font-size: 13px; color: var(--ink); }
+.step { padding: 4px 10px; border-radius: 7px; font-size: 12px; font-weight: 600; background: var(--card); border: 1px solid var(--line); white-space: nowrap; }
 .step.d { border-color: var(--ph2); color: var(--ph2); }
 .step.v { border-color: var(--ph3); color: var(--ph3); }
-.arrow { color: var(--muted); font-size: 11px; }
+.arrow { color: var(--muted); font-size: 12px; }
 .track-note { font-size: 12.5px; color: var(--ink-2); }
 .track-note b { color: var(--ink); }
 
@@ -165,7 +166,6 @@ footer { font-size: 12px; color: var(--muted); }
           <div class="ms"><span class="diamond"></span>Scope Confirmed</div>
         </article>
 
-        <div class="dd">
           <article class="phase" style="--c: var(--ph2); --cb: var(--ph2-bg)">
             <div class="phase-top">
               <h3><span class="num">2</span>Design</h3>
@@ -196,20 +196,6 @@ footer { font-size: 12px; color: var(--muted); }
             </div>
             <div class="ms"><span class="diamond"></span>Materials Approved</div>
           </article>
-          <div class="modbar">
-            <div class="modbar-title">Modules move on their own</div>
-            <div class="modrow">
-              <span class="tag">M1</span>
-              <span class="chain"><span class="step d">Storyboard</span><span class="arrow">→</span><span class="step d">Review</span><span class="arrow">→</span><span class="step d">Sign-Off</span></span>
-              <span class="chain"><span class="arrow">→</span><span class="step v">Build</span><span class="arrow">→</span><span class="step v">Review</span><span class="arrow">→</span><span class="step v">Sign-Off</span></span>
-            </div>
-            <div class="modrow">
-              <span class="tag">M2</span>
-              <span class="chain"><span class="step d">Storyboard</span><span class="arrow">→</span><span class="step d">Review</span><span class="arrow">→</span><span class="step d">Sign-Off</span></span>
-              <span class="chain"><span class="arrow">→</span><span class="step v">Build</span><span class="arrow">→</span><span class="step v">Review</span><span class="arrow">→</span><span class="step v">Sign-Off</span></span>
-            </div>
-          </div>
-        </div>
 
         <article class="phase" style="--c: var(--ph4); --cb: var(--ph4-bg)">
           <div class="phase-top">
@@ -249,6 +235,32 @@ footer { font-size: 12px; color: var(--muted); }
       </div>
     </div>
     <p class="track-note"><b>Not every project needs every phase.</b> Remove a phase from its ⋯ menu on the WBS. Need it back later? <b>Add phase to project</b> works even after Start Project, and the change is recorded in the Audit Trail.</p>
+  </section>
+
+  <section class="panel" aria-labelledby="t-mods">
+    <div class="panel-head">
+      <h2 id="t-mods">Design and Development, module by module</h2>
+      <span class="muted">Each module runs its own chain. A module's build starts as soon as its own design is signed off, so M2 can still be in Design while M1 is being built.</span>
+    </div>
+    <div class="mods-scroll">
+      <div class="mods" role="table" aria-label="Module chains">
+        <div class="h m" role="columnheader">Module</div>
+        <div class="h d" role="columnheader">2 · Design (Instructional Designer)</div>
+        <div class="h gap" aria-hidden="true"></div>
+        <div class="h v" role="columnheader">3 · Development (Content Developer)</div>
+
+        <div class="m" role="cell">M1</div>
+        <div role="cell"><span class="step d">Storyboard</span><span class="arrow">→</span><span class="step d">Review</span><span class="arrow">→</span><span class="step d">Sign-Off</span></div>
+        <div class="gap" aria-hidden="true">→</div>
+        <div role="cell"><span class="step v">Build</span><span class="arrow">→</span><span class="step v">Review</span><span class="arrow">→</span><span class="step v">Sign-Off</span></div>
+
+        <div class="m" role="cell">M2</div>
+        <div role="cell"><span class="step d">Storyboard</span><span class="arrow">→</span><span class="step d">Review</span><span class="arrow">→</span><span class="step d">Sign-Off</span></div>
+        <div class="gap" aria-hidden="true">→</div>
+        <div role="cell"><span class="step v">Build</span><span class="arrow">→</span><span class="step v">Review</span><span class="arrow">→</span><span class="step v">Sign-Off</span></div>
+      </div>
+    </div>
+    <p class="track-note"><b>Add a module</b> from the Design row on the WBS (<b>Add your first module</b>, then <b>Add module</b>). Its storyboard waits for the Scope Sign-Off. When every module's design is signed off, <b>Design Approved</b> is reached; when every build is signed off, <b>Materials Approved</b>.</p>
   </section>
 
   <section class="panel loop" aria-labelledby="t-loop">
