@@ -944,6 +944,8 @@ export default function WbsPlanning() {
   }
   // WBS UI Refresh 2.0: project details fold behind the summary strip; one Add task menu; phase row menus.
   const [wbsDetailsOpen, setWbsDetailsOpen] = useState(false);
+  // 2026-10-22 (Sandra): after the first save, ask how the plan will be built.
+  const [planChoiceOpen, setPlanChoiceOpen] = useState(false);
   const [wbsAddMenu, setWbsAddMenu] = useState<{ x: number; y: number } | null>(null);
   const [wbsPhaseMenu, setWbsPhaseMenu] = useState<{ key: string; x: number; y: number } | null>(null);
   function clearWbsFilters() {
@@ -4164,7 +4166,10 @@ export default function WbsPlanning() {
         .from("projects")
         .update(project.is_unsaved ? { scoping_effort_mode: activeMode, is_unsaved: false } : { scoping_effort_mode: activeMode })
         .eq("id", project.id);
-      if (!scopingModeError && project.is_unsaved) setProject((prev) => (prev ? { ...prev, is_unsaved: false } : prev));
+      if (!scopingModeError && project.is_unsaved) {
+        setProject((prev) => (prev ? { ...prev, is_unsaved: false } : prev));
+        if (isLifecycle && !isSessionProject && !project.is_operational) setPlanChoiceOpen(true);
+      }
       if (scopingModeError) {
         await alert({
           ...friendlyError("update the Scoping Effort setting", scopingModeError),
@@ -6051,6 +6056,26 @@ export default function WbsPlanning() {
       {dialog}
       {checklistDialog}
       {assigneePicker.element}
+      {planChoiceOpen && (
+        <Modal title="How do you want to plan this project?" onClose={() => setPlanChoiceOpen(false)} width={520}>
+          <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
+            <div style={{ color: "var(--muted)" }}>
+              Either way, the project runs through the same phases and starts with Analysis &amp; Scoping. This only sets how the WBS is laid out; you can switch any time with <strong>Group by</strong>.
+            </div>
+            <button type="button" className="wbs-plan-choice" onClick={() => { setWbsGroupMode("phase"); setPlanChoiceOpen(false); }}>
+              <strong>By phase</strong>
+              <span>Add tasks phase by phase. Best for a single course or a small project.</span>
+            </button>
+            <button type="button" className="wbs-plan-choice" onClick={() => { setWbsGroupMode("module"); setPlanChoiceOpen(false); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); }}>
+              <strong>By module</strong>
+              <span>Each module gets its own Design / Storyboard → Review → Sign-Off → Build → Review → Sign-Off chain. Best for a program with several modules. You'll name the first module next.</span>
+            </button>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button type="button" className="btn-secondary" onClick={() => setPlanChoiceOpen(false)}>Decide later</button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {moduleDlg && (
         <Modal title="Add module" onClose={() => (moduleDlg.busy ? undefined : setModuleDlg(null))} width={440}>
           <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
@@ -6121,21 +6146,21 @@ export default function WbsPlanning() {
             <div style={{ position: "fixed", inset: 0, zIndex: 1180 }} onClick={close} />
             <div className="card wbs-menu" role="menu" aria-label="Add" onKeyDown={(e) => { if (e.key === "Escape") close(); }}
               style={{ left: Math.max(8, Math.min(wbsAddMenu.x - 260, window.innerWidth - 268)), top: Math.min(wbsAddMenu.y, window.innerHeight - 360) }}>
-              <div className="wbs-menu-label">Add task</div>
-              {included.map((ph) => item(`t-${ph.key}`, <><span className="wbs-menu-dot" style={{ background: (PHASE_COLORS[ph.key] ?? PHASE_COLORS.analysis).fg }} />In {ph.label}</>, () => void addTopLevelTask(ph.key)))}
-              {canModule && (
-                <>
-                  <div className="wbs-menu-sep" />
-                  {item("module", <><ListPlus size={13} /> Add module</>, () => setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }), "Adds Design / Storyboard, Review and Sign-Off in Design, and Build, Review and Sign-Off in Development, linked in order")}
-                </>
-              )}
               {templates.length > 0 && (
                 <>
-                  <div className="wbs-menu-sep" />
                   <div className="wbs-menu-label">Use template</div>
                   {templates.map((ph) => item(`tpl-${ph.key}`, <><Copy size={13} /> {PHASE_TEMPLATES[ph.key].label}</>, () => void applyScopingTemplate(ph.key), PHASE_TEMPLATES[ph.key].message))}
                 </>
               )}
+              {canModule && (
+                <>
+                  {templates.length > 0 && <div className="wbs-menu-sep" />}
+                  {item("module", <><ListPlus size={13} /> Add module</>, () => setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }), "Adds Design / Storyboard, Review and Sign-Off in Design, and Build, Review and Sign-Off in Development, linked in order")}
+                </>
+              )}
+              {(templates.length > 0 || canModule) && <div className="wbs-menu-sep" />}
+              <div className="wbs-menu-label">Add task</div>
+              {included.map((ph) => item(`t-${ph.key}`, <><span className="wbs-menu-dot" style={{ background: (PHASE_COLORS[ph.key] ?? PHASE_COLORS.analysis).fg }} />In {ph.label}</>, () => void addTopLevelTask(ph.key)))}
             </div>
           </>,
           document.body
@@ -6161,9 +6186,9 @@ export default function WbsPlanning() {
             <div className="card wbs-menu" role="menu" aria-label={`${ph.label} actions`} onKeyDown={(e) => { if (e.key === "Escape") close(); }}
               style={{ left: Math.max(8, Math.min(wbsPhaseMenu.x - 240, window.innerWidth - 248)), top: Math.min(wbsPhaseMenu.y, window.innerHeight - 300) }}>
               {on && item("filter", filtered ? "Show all phases" : `Show only ${ph.label}`, () => setWbsFilterPhase(filtered ? "" : key))}
-              {canAdd && item("add", <><Plus size={13} /> Add task in {ph.label}</>, () => { clearWbsFilters(); void addTopLevelTask(key); })}
               {canAdd && (key === "design" || key === "development") && item("module", <><ListPlus size={13} /> Add module</>, () => { clearWbsFilters(); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); })}
               {canAdd && PHASE_TEMPLATES[key] && !hasTasks && item("tpl", <><Copy size={13} /> {PHASE_TEMPLATES[key].label}</>, () => { clearWbsFilters(); void applyScopingTemplate(key); }, PHASE_TEMPLATES[key].message)}
+              {canAdd && item("add", <><Plus size={13} /> Add task in {ph.label}</>, () => { clearWbsFilters(); void addTopLevelTask(key); })}
               {on && hasTasks && pm.kind === "deliverables" && canEditWbs && item("link", <><Link2 size={13} /> Link tasks to {pm.name}</>, () => setMilestonePicker({ milestoneId: pm.id, x: wbsPhaseMenu.x - 240, y: wbsPhaseMenu.y }))}
               {canToggle && (
                 <>
