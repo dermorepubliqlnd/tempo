@@ -42,6 +42,8 @@ export function weekLabel(start: string, end: string): string {
   return m1 === m2 ? `${m1} ${s.getDate()} – ${e.getDate()}, ${e.getFullYear()}` : `${m1} ${s.getDate()} – ${m2} ${e.getDate()}, ${e.getFullYear()}`;
 }
 
+const sinceLabel = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+
 export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña"): DeckText {
   const g = d.glance;
   // Sandra 2026-10-05: Delivery = projects only; no Utilization card.
@@ -72,10 +74,10 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
     coverSubtitle: `Week of ${weekLabel(d.week.start, d.week.end)}  ·  Prepared for ${preparedFor}`,
     titles: {
       glance: `${part1}; ${part2}`,
-      portfolio: `${d.ytd.total} projects this year; ${d.ytd.active} active plus ${d.ytd.operationalActive} ${d.opLabel === "Ongoing" ? "ongoing" : "in Training Delivery"}`,
+      portfolio: `${d.ytd.total} projects since ${sinceLabel(d.ytd.start)}; ${d.ytd.active} active plus ${d.ytd.operationalActive} ${d.opLabel === "Ongoing" ? "ongoing" : "in Training Delivery"}`,
       health: h.overdue.length ? `${h.overdue.length} of ${h.activeCount} active projects are overdue${h.offTrack ? `; ${h.offTrack} more off track` : ""}` : `No overdue projects among ${h.activeCount} active`,
       drivers: d.drivers.overdueCount && d.drivers.grewCount === Math.min(5, d.drivers.overdueCount) ? "Every overdue project grew after it started" : `${d.drivers.grewCount} of ${Math.min(5, d.drivers.overdueCount)} overdue projects grew after they started`,
-      mix: d.ytd.mix.bars[0] && d.ytd.mix.total ? `${d.ytd.mix.bars[0].label} takes ${pct(d.ytd.mix.bars[0].total / d.ytd.mix.total)} of scoped hours this year` : "Where this year’s effort went",
+      mix: d.ytd.mix.bars[0] && d.ytd.mix.total ? `${d.ytd.mix.bars[0].label} takes ${pct(d.ytd.mix.bars[0].total / d.ytd.mix.total)} of scoped hours since ${sinceLabel(d.ytd.start)}` : "Where the effort went",
       pipeline: `${plural(d.glance.intake, "project")} came in last week; ${d.glance.starting} start this week`,
       util: top ? `${top.name} ${top.people > 1 ? "carry" : "carries"} this week’s overload` : `Team planned at ${pct(d.util.roles[0]?.thisW ?? 0)} this week`,
       training: d.training.delivered

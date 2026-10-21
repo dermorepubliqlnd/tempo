@@ -137,8 +137,8 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
       txt(s, 2.45, yy + 0.2, 1.3, 0.7, String(val), { fontFace: FB, fontSize: 34, align: "right" });
       txt(s, 0.53, yy + 0.95, 3.25, 0.55, sub, { fontSize: 9.5, color: B.taupe });
     };
-    kpi(1.55, B.mahogany, "Total projects · YTD", y.total, `${y.completed} completed (${range}) + ${y.active + y.operationalActive + y.notStartedPaused} open today`);
-    kpi(3.28, B.hydrate, "Active projects", y.active, `In Progress project work as of ${fmtMD(d.generatedOn)} — same ${y.active} as the Health chart`);
+    kpi(1.55, B.mahogany, `Total projects · since ${fmtMD(y.start)}`, y.total, `${y.completed} completed (${range}) + ${y.active + y.operationalActive + y.notStartedPaused} open today`);
+    kpi(3.28, B.hydrate, "Active projects", y.active, `In Progress project work as of ${fmtMD(d.generatedOn)}: the same ${y.active} as the Health and Active Projects slides`);
     kpi(5.02, B.clarify, d.opLabel, y.operationalActive, d.opLabel === "Ongoing" ? "Training Delivery and ongoing containers (e.g. revision buckets), kept open while work comes in" : "Ongoing, session-based training kept open while sessions run — see Training delivery slide");
     // Movement by month
     card(s, 4.15, 1.55, 8.85, 5.07, "Portfolio movement", `Projects started vs. completed per month · ${range}`);
@@ -158,7 +158,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     const m = y.mix;
     const s = content("Work mix & effort allocation", t.titles.mix, "mix");
     card(s, 0.33, 1.55, 7.85, 5.07, "Estimated hours by Project Type, split by Planning Type",
-      `Year to date (${fmtMD(y.start)} – ${fmtMD(y.end)}) · ${h0(m.total)} across ${plural(m.projects, "project")}`);
+      `Since ${fmtMD(y.start)} (${fmtMD(y.start)} – ${fmtMD(y.end)}) · ${h0(m.total)} across ${plural(m.projects, "project")}`);
     const PT_COLORS = [B.hydrate, B.protect, B.clarify, B.rewind, B.calm, B.taupe];
     if (m.bars.length) {
       const labels = m.bars.map((b) => `${b.label} · ${m.total ? pct(b.total / m.total) : "0%"}`);
@@ -166,7 +166,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
         { x: 0.45, y: 2.4, w: 7.6, h: 4.1, barDir: "bar", barGrouping: "stacked", barGapWidthPct: 45, chartColors: m.planTypes.map((_, i) => PT_COLORS[i % PT_COLORS.length]),
           catAxisOrientation: "maxMin", valAxisHidden: true, valGridLine: { style: "none" }, catAxisLineShow: false, catAxisLabelFontFace: FB, catAxisLabelFontSize: 11,
           showValue: true, dataLabelFormatCode: '0"h";;;', dataLabelPosition: "ctr", dataLabelFontSize: 9.5, dataLabelColor: B.onyx, showLegend: true, legendPos: "b", legendFontSize: 10 });
-    } else txt(s, 0.55, 2.5, 7.3, 0.4, "No scoped hours year to date.", { fontSize: 11, color: B.mahogany });
+    } else txt(s, 0.55, 2.5, 7.3, 0.4, `No scoped hours since ${fmtMD(y.start)}.`, { fontSize: 11, color: B.mahogany });
     // right column: active Health + Phase
     const h = y.activeHealth;
     const HC: Record<string, string> = { "On track": B.calm, "Done on time · close pending": B.hydrate, "Done late · close pending": B.clarify, "At risk": B.protect, "Off track": B.brighten, Overdue: B.renew, "Not started": B.taupe, "Schedule review": B.rewind, "Health unavailable": B.linen };

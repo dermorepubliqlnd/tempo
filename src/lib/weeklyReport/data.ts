@@ -91,6 +91,9 @@ export interface WeeklyReportData {
   };
 }
 
+/** Tempo holds data from Aug 1, 2026 (Sandra 2026-10-21) -- portfolio periods never start earlier. */
+export const TRACKING_START = "2026-08-01";
+
 // ------------------------------------------------------------------ helpers
 export function eachDay(start: string, end: string): string[] {
   const out: string[] = [];
@@ -502,8 +505,11 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   // by month, Work Mix & Effort Allocation, Active Projects Health), but as of
   // the report week's Friday instead of today.
   const isOp = (p: P) => !!(p as { is_operational?: boolean | null }).is_operational;
-  const ytdStart = `${week.end.slice(0, 4)}-01-01`;
-  const ytdEnd = week.end;
+  // Sandra 2026-10-21: Tempo data starts Aug 2026, and every count on the
+  // Portfolio slides is AS OF THE GENERATION DATE -- the same moment as the
+  // Active Projects / Health slides -- so the numbers always agree.
+  const ytdStart = `${week.end.slice(0, 4)}-01-01` < TRACKING_START ? TRACKING_START : `${week.end.slice(0, 4)}-01-01`;
+  const ytdEnd = todayIso;
   // Sandra 2026-10-05: open projects are the CURRENT state (same as the
   // Health donut), completed counted Jan 1 -> report-week Friday.
   // Active projects (regular) and Training Delivery are shown separately.
@@ -512,11 +518,13 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   // so an open project planned to start after that Friday isn't counted.
   const pfYtd = portfolioInPeriod(live, ytdStart, ytdEnd);
   const yCompleted = pfYtd.completed.length;
-  const yOpActive = pfYtd.active.filter(isOp).length;
-  const yActive = pfYtd.active.length - yOpActive;
+  // Active = exactly the projects on the Active Projects / Health slides
+  // (activeP / activeAll), even one whose start date is later this week.
+  const yOpActive = activeAll.length - activeP.length;
+  const yActive = activeP.length;
   const yOther = pfYtd.notStarted.length + pfYtd.paused.length;
   const months: { label: string; from: string; to: string }[] = [];
-  for (let m = new Date(Number(ytdStart.slice(0, 4)), 0, 1); toISO(m) <= ytdEnd; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
+  for (let m = new Date(Number(ytdStart.slice(0, 4)), Number(ytdStart.slice(5, 7)) - 1, 1); toISO(m) <= ytdEnd; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
     const last = toISO(new Date(m.getFullYear(), m.getMonth() + 1, 0));
     months.push({ label: m.toLocaleDateString("en-US", { month: "short" }), from: toISO(m), to: last > ytdEnd ? ytdEnd : last });
   }
@@ -525,9 +533,8 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     started: live.filter((p) => p.wbs_status !== "draft" && !!p.start_date && d10(p.start_date) >= b.from && d10(p.start_date) <= b.to).length,
     completed: live.filter((p) => statusOf(p) === "Completed" && completionDateOf(p) >= b.from && completionDateOf(p) <= b.to).length,
   }));
-  // Skip the empty months before Tempo has any data (tracking started mid-year).
-  const firstActive = ytdMovementAll.findIndex((m) => m.started || m.completed);
-  const ytdMovement = firstActive > 0 ? ytdMovementAll.slice(Math.max(0, firstActive - 1)) : ytdMovementAll;
+  // Months start at TRACKING_START (Aug 2026), so there are no empty months before Tempo data.
+  const ytdMovement = ytdMovementAll;
   // Scoped Hours spread over each task's working days, counting only days in YTD.
   const ytdByProject = new Map<string, number>();
   for (const t of leaf) {
@@ -751,7 +758,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       `All paused projects (${pausedNowP.length}):`, bl(pausedNotes(pausedNowP)),
     ].join("\n"),
     portfolio: [
-      `Total year to date = projects completed ${md(ytdStart)} – ${md(ytdEnd)} + projects open today that started (or were planned to start) by ${md(ytdEnd)} (Cancelled excluded). Same rule as the Executive Dashboard's Total Projects.`,
+      `Total since ${md(ytdStart)} (Tempo data starts Aug 2026) = projects completed ${md(ytdStart)} – ${md(ytdEnd)} + projects open today (Cancelled excluded). All counts are as of ${md(ytdEnd)}, the same moment as the Health and Active Projects slides.`,
       `Total ${yCompleted + yActive + yOpActive + yOther} = ${yCompleted} completed + ${yActive} active projects + ${yOpActive} Training Delivery + ${yOther} not started or paused.`,
       `Active projects (${yActive}) = In Progress project work as of ${md(todayIso)} — the same ${yActive} on the Health donut:`, bl(activeP.map((p) => `${p.name} (owner ${who(p.owner_id)})`)),
       `${opLabel} (${yOpActive}) = ongoing projects kept open while work comes in (Training Delivery sessions${opLabel === "Ongoing" ? " and ongoing containers such as revision buckets" : ""}); health is always "Ongoing":`, bl(opActive.map((p) => p.name)),
