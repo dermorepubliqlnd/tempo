@@ -2001,3 +2001,8 @@ mark.kb-mark { background: #fff3c4; color: inherit; padding: 0 1px; border-radiu
 .wbs-plan-error { font-size: 12px; color: var(--danger-text); }
 .wbs-mod-gate { font-size: 11px; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
 .wbs-mod-add { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px !important; font-size: 11.5px !important; }
+.wbs-phase-row.is-locked td { background: #f8fafc; border-top: 1px solid #eef2f6; }
+.wbs-phase-row.is-locked .wbs-phase-name, .wbs-phase-row.is-locked .wbs-phase-ms { color: #94a3b8 !important; }
+.wbs-phase-row.is-locked .wbs-phase-name span { color: #94a3b8 !important; }
+.wbs-phase-row.is-locked .wbs-phase-num { background: #cbd5e1 !important; }
+.wbs-phase-row.is-locked .wbs-ms-diamond { background: #cbd5e1 !important; }

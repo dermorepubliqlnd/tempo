@@ -4790,8 +4790,8 @@ export default function WbsPlanning() {
       const vm = milestones.find((x) => x.phase_key === "development" && x.is_included);
       const numOf = (k: string) => lifecyclePhases.findIndex((x) => x.key === k) + 1;
       return (
-        <tr key="lc-modsection" className="wbs-phase-row">
-          <td colSpan={WBS_TOTAL_COLS} style={{ background: `linear-gradient(90deg, ${cd.bg}, ${cv.bg})`, borderTop: `1px solid ${cv.border}` }}>
+        <tr key="lc-modsection" className={`wbs-phase-row${!scopeConfirmed && it.count === 0 ? " is-locked" : ""}`}>
+          <td colSpan={WBS_TOTAL_COLS} style={!scopeConfirmed && it.count === 0 ? undefined : { background: `linear-gradient(90deg, ${cd.bg}, ${cv.bg})`, borderTop: `1px solid ${cv.border}` }}>
             <div style={{ ...sticky }} className="wbs-phase-inner">
               <span className="wbs-phase-chev" aria-hidden="true" />
               <span className="wbs-phase-num" style={{ background: cd.fg }}>{numOf("design")}</span>
@@ -4866,9 +4866,11 @@ export default function WbsPlanning() {
           </tr>
         );
       }
+      // R3 (2026-10-22): phases after Analysis & Scoping stay greyed until scoping is done and signed off.
+      const locked = !scopeConfirmed && it.key !== "analysis" && it.count === 0;
       return (
-        <tr key={`lc-ph-${it.key}`} className={`wbs-phase-row${filtered ? " is-filtered" : ""}`}>
-          <td colSpan={WBS_TOTAL_COLS} style={{ background: c.bg, borderTop: `1px solid ${c.border}` }}>
+        <tr key={`lc-ph-${it.key}`} className={`wbs-phase-row${filtered ? " is-filtered" : ""}${locked ? " is-locked" : ""}`}>
+          <td colSpan={WBS_TOTAL_COLS} style={locked ? undefined : { background: c.bg, borderTop: `1px solid ${c.border}` }}>
             <div style={{ ...sticky }} className="wbs-phase-inner">
               <button type="button" className="wbs-phase-chev" onClick={toggle} aria-expanded={!collapsed && it.count > 0} aria-label={`${collapsed ? "Expand" : "Collapse"} ${it.label}`} style={{ color: c.fg }}>
                 {collapsed || it.count === 0 ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
@@ -4884,7 +4886,7 @@ export default function WbsPlanning() {
               >
                 {it.label}
               </button>
-              <span className="wbs-phase-meta">{it.count} task{it.count === 1 ? "" : "s"} · {Math.round(it.hours * 10) / 10} hrs</span>
+              <span className="wbs-phase-meta">{locked ? "Opens after Analysis & Scoping" : `${it.count} task${it.count === 1 ? "" : "s"} · ${Math.round(it.hours * 10) / 10} hrs`}</span>
               {kpi && kpi.total > 0 && (
                 <span className="wbs-phase-pct" title={`${kpi.done} of ${kpi.total} tasks done${kpi.active ? `, ${kpi.active} in progress` : ""}`}>
                   <span className="wbs-phase-pct-bar"><span style={{ width: `${kpi.pct}%`, background: c.fg }} /></span>
@@ -6171,7 +6173,7 @@ export default function WbsPlanning() {
       )}
       {wbsAddMenu && project && (() => {
         const close = () => setWbsAddMenu(null);
-        const included = lifecyclePhases.filter((ph) => includedMilestones.some((m) => m.phase_key === ph.key));
+        const included = lifecyclePhases.filter((ph) => includedMilestones.some((m) => m.phase_key === ph.key) && (ph.key === "analysis" || scopeConfirmed));
         const hasPhaseTasks = (k: string) => orderedTasks.some((t) => phaseOfRoot(t) === k);
         const canModule = scopeConfirmed && included.some((ph) => ph.key === "design" || ph.key === "development");
         const templates = included.filter((ph) => PHASE_TEMPLATES[ph.key] && !hasPhaseTasks(ph.key));
@@ -6211,7 +6213,7 @@ export default function WbsPlanning() {
         if (!ph || !pm) return null;
         const on = pm.is_included;
         const hasTasks = orderedTasks.some((t) => phaseOfRoot(t) === key);
-        const canAdd = on && canEditWbs && canAddTasks && !isSessionProject;
+        const canAdd = on && canEditWbs && canAddTasks && !isSessionProject && (key === "analysis" || scopeConfirmed);
         const canToggle = isDraftProject && canEditWbs && canManageWbs;
         const filtered = wbsFilterPhase === key;
         const item = (k: string, label: React.ReactNode, onClick: () => void, hint?: string) => (
@@ -6233,6 +6235,7 @@ export default function WbsPlanning() {
                   {item("toggle", on ? "Skip this phase for this project" : "Include this phase", () => void togglePhaseIncluded(pm), "Phases lock at Start Project.")}
                 </>
               )}
+              {on && key !== "analysis" && !scopeConfirmed && <div className="wbs-menu-note">Tasks open once Analysis &amp; Scoping is 100% done and signed off.{canToggle ? " You can still skip this phase now." : ""}</div>}
               {!on && !canToggle && <div className="wbs-menu-note">Skipped for this project. Phases are set at Start Project.</div>}
             </div>
           </>,
