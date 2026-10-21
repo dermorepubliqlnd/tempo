@@ -12,7 +12,7 @@ import JSZip from "jszip";
 import type { WeeklyReportData, ProjLine } from "./data";
 import { fmtMD } from "./format";
 
-import { BRAND, utilColor, type DeckText, type SlideKey } from "./text";
+import { BRAND, utilColor, paginateActiveList, ACTIVE_LINES_PER_PAGE, type DeckText, type SlideKey } from "./text";
 const B = BRAND;
 const F = "Poppins";
 const FB = "Poppins SemiBold";
@@ -76,6 +76,12 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     txt(s, x + 0.2, y + 0.12, w - 0.4, 0.35, title, { fontFace: FB, fontSize: 14, color: titleColor });
     if (sub) txt(s, x + 0.2, y + 0.47, w - 0.4, 0.3, sub, { fontSize: 9.5, color: B.taupe });
   };
+  /** Light shade of a hex colour: mix with white (amt 0..1 = share of white). */
+  const tint = (hex: string, amt: number) => {
+    const n = parseInt(hex.replace("#", ""), 16);
+    const ch = (v: number) => Math.round(v + (255 - v) * amt).toString(16).padStart(2, "0");
+    return `${ch((n >> 16) & 255)}${ch((n >> 8) & 255)}${ch(n & 255)}`.toUpperCase();
+  };
   const cut = (n: string, max = 40) => (n.length > max ? `${n.slice(0, max - 1)}…` : n);
   const chartBase = { fontFace: F, catAxisLabelFontFace: F, valAxisLabelFontFace: F, legendFontFace: F, dataLabelFontFace: FB, catAxisLabelColor: B.mahogany, valAxisLabelColor: B.taupe, legendColor: B.mahogany } as Record<string, unknown>;
   const addChart = (s: Slide, type: unknown, data: unknown, opts: Record<string, unknown>, patch: ChartPatch | null = null) => {
@@ -131,8 +137,8 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
       txt(s, 2.45, yy + 0.2, 1.3, 0.7, String(val), { fontFace: FB, fontSize: 34, align: "right" });
       txt(s, 0.53, yy + 0.95, 3.25, 0.55, sub, { fontSize: 9.5, color: B.taupe });
     };
-    kpi(1.55, B.mahogany, "Total projects · YTD", y.total, `${y.completed} completed (${range}) + ${y.active + y.operationalActive + y.notStartedPaused} open today`);
-    kpi(3.28, B.hydrate, "Active projects", y.active, `In Progress project work as of ${fmtMD(d.generatedOn)} — same ${y.active} as the Health chart`);
+    kpi(1.55, B.mahogany, `Total projects · since ${fmtMD(y.start)}`, y.total, `${y.completed} completed (${range}) + ${y.active + y.operationalActive + y.notStartedPaused} open today`);
+    kpi(3.28, B.hydrate, "Active projects", y.active, `In Progress project work as of ${fmtMD(d.generatedOn)}: the same ${y.active} as the Health and Active Projects slides`);
     kpi(5.02, B.clarify, d.opLabel, y.operationalActive, d.opLabel === "Ongoing" ? "Training Delivery and ongoing containers (e.g. revision buckets), kept open while work comes in" : "Ongoing, session-based training kept open while sessions run — see Training delivery slide");
     // Movement by month
     card(s, 4.15, 1.55, 8.85, 5.07, "Portfolio movement", `Projects started vs. completed per month · ${range}`);
@@ -152,7 +158,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     const m = y.mix;
     const s = content("Work mix & effort allocation", t.titles.mix, "mix");
     card(s, 0.33, 1.55, 7.85, 5.07, "Estimated hours by Project Type, split by Planning Type",
-      `Year to date (${fmtMD(y.start)} – ${fmtMD(y.end)}) · ${h0(m.total)} across ${plural(m.projects, "project")}`);
+      `Since ${fmtMD(y.start)} (${fmtMD(y.start)} – ${fmtMD(y.end)}) · ${h0(m.total)} across ${plural(m.projects, "project")}`);
     const PT_COLORS = [B.hydrate, B.protect, B.clarify, B.rewind, B.calm, B.taupe];
     if (m.bars.length) {
       const labels = m.bars.map((b) => `${b.label} · ${m.total ? pct(b.total / m.total) : "0%"}`);
@@ -160,7 +166,7 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
         { x: 0.45, y: 2.4, w: 7.6, h: 4.1, barDir: "bar", barGrouping: "stacked", barGapWidthPct: 45, chartColors: m.planTypes.map((_, i) => PT_COLORS[i % PT_COLORS.length]),
           catAxisOrientation: "maxMin", valAxisHidden: true, valGridLine: { style: "none" }, catAxisLineShow: false, catAxisLabelFontFace: FB, catAxisLabelFontSize: 11,
           showValue: true, dataLabelFormatCode: '0"h";;;', dataLabelPosition: "ctr", dataLabelFontSize: 9.5, dataLabelColor: B.onyx, showLegend: true, legendPos: "b", legendFontSize: 10 });
-    } else txt(s, 0.55, 2.5, 7.3, 0.4, "No scoped hours year to date.", { fontSize: 11, color: B.mahogany });
+    } else txt(s, 0.55, 2.5, 7.3, 0.4, `No scoped hours since ${fmtMD(y.start)}.`, { fontSize: 11, color: B.mahogany });
     // right column: active Health + Phase
     const h = y.activeHealth;
     const HC: Record<string, string> = { "On track": B.calm, "Done on time · close pending": B.hydrate, "Done late · close pending": B.clarify, "At risk": B.protect, "Off track": B.brighten, Overdue: B.renew, "Not started": B.taupe, "Schedule review": B.rewind, "Health unavailable": B.linen };
@@ -346,6 +352,154 @@ export async function buildWeeklyDeck(d: WeeklyReportData, t: DeckText, template
     txt(s, 8.8, 1.75, 4.0, 0.35, "Read-out", { fontFace: FB, fontSize: 14 });
     const ro = o.rows.map((r) => `${r.label}: ${r.planned + r.adHoc} projects (${pct((r.planned + r.adHoc) / Math.max(1, o.total))}); ${r.adHoc} Ad Hoc (${pct(r.adHoc / Math.max(1, r.planned + r.adHoc))}).`);
     txt(s, 8.8, 2.2, 4.0, 4.2, bullets(ro.slice(0, 5), 11));
+  }
+
+  // ================================================================ 9 ACTIVE PROJECTS (Sandra 2026-10-13, 2026-10-20)
+  // Every active project for the cross-department weekly update. One slide
+  // (or more, "(cont.)") per Project Type, ongoing containers last. Each slide:
+  // KPI band, then Priority, Project, Category, Planning, Health, Progress,
+  // Target completion at 10pt, then a Health legend.
+  // Sort (data.ts): Priority > Health > Progress (furthest behind first) > Target.
+  if (t.include.activeList && d.activeList.total) {
+    const pages = paginateActiveList(d);
+    const HC: Record<string, string> = { "On track": B.calm, "Done on time · close pending": B.hydrate, "Done late · close pending": B.clarify, "At risk": B.amberText, "Off track": B.renew, Overdue: B.renew, "Not started": B.taupe, "Schedule review": B.rewind, Ongoing: B.taupe };
+    const BAR: Record<string, string> = { ...HC, "At risk": B.protect, "Off track": B.brighten, Ongoing: B.clarify };
+    const PC: Record<string, string> = { High: B.renew, Medium: B.amberText, Low: B.calm };
+    const GROUP_COLORS = [B.hydrate, B.rewind, B.calm, B.protect, B.repair, B.taupe];
+    const groupColor = new Map<string, string>();
+    let gi = 0;
+    for (const g of d.activeList.groups) groupColor.set(g.label, g.operational ? B.clarify : GROUP_COLORS[gi++ % GROUP_COLORS.length]);
+    const X0 = 0.33, W = 12.67, FS = 10;
+    const cols: { key: string; label: string; w: number; align?: "left" | "right" | "center" }[] = [
+      { key: "priority", label: "Priority", w: 0.85 },
+      { key: "name", label: "Project", w: 4.6 },
+      { key: "category", label: "Category", w: 2.0 },
+      { key: "health", label: "Health", w: 1.75 },
+      { key: "progress", label: "Progress", w: 1.15 },
+      // Sandra 2026-10-21: Target end = current plan after all approved extensions
+      // (what Health is judged on); vs Committed = working days vs the date committed at Start Project.
+      { key: "committed", label: "Target end", w: 1.12 },
+      { key: "vs", label: "vs Committed", w: 1.2, align: "center" },
+    ];
+    const colX: Record<string, number> = {};
+    { let x = X0; for (const c of cols) { colX[c.key] = x; x += c.w; } }
+    const colW = (k: string) => cols.find((c) => c.key === k)!.w;
+    const LH = 0.28;
+    const al = d.activeList;
+    const otherCat = al.categories.find((c) => c.members);
+    pages.forEach((pg, pi) => {
+      const lines = pg.lines;
+      // Sandra 2026-10-20: eyebrow = "Project status" (editable), title = "Active Projects - <Project Type>".
+      const s = content(t.titles.activeList || "Project status", `Active Projects - ${pg.operational ? "Ongoing containers" : pg.group}${pg.cont ? " (cont.)" : ""}`);
+      // Talk track on EVERY slide: slide 1 opens with the editable summary;
+      // each slide then walks its own rows, with the reason behind any
+      // Overdue / Off track / At risk project.
+      {
+        const out: string[] = [];
+        if (pi === 0) { const n = notesFor("activeList"); if (n) out.push(n, ""); }
+        else out.push(`TALK TRACK (${pg.group}${pg.cont ? ", cont." : ""} · slide ${pi + 1} of ${pages.length})`);
+        out.push("HOW TO READ");
+        out.push("- Sorted by Priority (High first), then Health (needs attention first), then Progress (furthest behind first), then target date.");
+        out.push("- Progress = Actual Progress in Tempo. Red date = past target. Target end = current plan after all approved extensions (Health is judged on it; red = already past). vs Committed = working days Target end is past the date committed at Start Project; — = on time.");
+        if (otherCat?.members) out.push(`- "Other" in the category chart = ${otherCat.members.map((m) => `${m.label} (${m.count})`).join(", ")}.`);
+        out.push("");
+        out.push("ON THIS SLIDE");
+        for (const ln of lines) {
+          if (ln.kind === "group") { out.push(`${ln.label}${ln.cont ? " (cont.)" : ""} — ${plural(ln.count, "project")}`); continue; }
+          const r = ln.row;
+          out.push(`- ${r.name}: ${r.priority === "—" ? "no priority set" : `${r.priority} priority`}, ${r.health}, ${r.progress ?? "–"}% done, target ${r.target ? fmtMD(r.target) : "not set"}${r.committed ? `, committed ${fmtMD(r.committed)} (${r.moved > 0 ? `+${r.moved} working days late vs commitment` : r.moved < 0 ? `${Math.abs(r.moved)} working days ahead` : "on commitment"})` : ""}${r.daysLate ? `, ${r.daysLate} days past target` : ""}.${r.why ? ` Why: ${r.why}.` : ""}`);
+        }
+        s.addNotes(out.join("\n"));
+      }
+      // Top band on every slide: KPI cards (total + one per Project Type) and
+      // the Category doughnut, both excluding ongoing containers.
+      // Sandra 2026-10-20: compact KPI cards (label right above the number)
+      // across the full width; Category doughnut moved to the top-right
+      // corner beside the title, so the list gets the space.
+      const BY = 1.42, BH = 0.78;
+      {
+        const kp: [string, string, string, boolean][] = [["Total active projects", String(al.project), B.mahogany, false]];
+        for (const g of al.groups) if (g.rows.length && !g.operational && kp.length < 5) kp.push([g.label, String(g.rows.length), groupColor.get(g.label) ?? B.taupe, g.label === pg.group]);
+        const KW = W, gap = 0.15, kw = (KW - gap * (kp.length - 1)) / kp.length;
+        kp.forEach(([lab, val, col, current], i) => {
+          const x = X0 + i * (kw + gap);
+          // Sandra 2026-10-20: cards are white; the Project Type on this slide is
+          // highlighted with a light tint of its own colour code.
+          box(s, x, BY, kw, BH, current ? tint(col, 0.86) : B.white);
+          box(s, x, BY, 0.07, BH, col, null, false);
+          txt(s, x + 0.2, BY + 0.07, kw - 0.3, 0.26, lab, { fontSize: 10, color: B.mahogany, valign: "top" });
+          txt(s, x + 0.2, BY + 0.31, kw - 0.3, 0.42, val, { fontFace: FB, fontSize: 24, color: B.onyx, valign: "middle" });
+        });
+        const cw = 5.2, cx = X0 + W - cw, CY = 0.24, CH = 1.06;
+        box(s, cx, CY, cw, CH);
+        const CAT_COLORS = [B.hydrate, B.calm, B.clarify, B.rewind, B.protect, B.repair, B.brighten, B.taupe];
+        const shown: [string, number][] = al.categories.map((c) => [c.label, c.count]);
+        if (!shown.length) shown.push(["None", 0]);
+        const colOf = (i: number) => (al.categories[i]?.members ? B.linen : CAT_COLORS[i % CAT_COLORS.length]);
+        addChart(s, pptx.ChartType.doughnut, [{ name: "Category", labels: shown.map((c) => c[0]), values: shown.map((c) => c[1]) }],
+          { x: cx + 0.06, y: CY + 0.05, w: 0.96, h: 0.96, holeSize: 58, showLegend: false, showValue: false, showPercent: false, showTitle: false, chartColors: shown.map((_, i) => colOf(i)), dataBorder: { pt: 1, color: B.white } });
+        txt(s, cx + 1.1, CY + 0.04, cw - 1.2, 0.26, "By category · excl. ongoing", { fontFace: FB, fontSize: 9.5, color: B.onyx });
+        const lw = (cw - 1.2) / 2;
+        shown.forEach(([lab, n], i) => {
+          const lx = cx + 1.1 + Math.floor(i / 3) * lw, ly = CY + 0.3 + (i % 3) * 0.24;
+          box(s, lx, ly + 0.065, 0.11, 0.11, colOf(i), null, false);
+          txt(s, lx + 0.15, ly, lw - 0.45, 0.24, cut(lab, 26), { fontSize: 8, color: B.mahogany, valign: "middle" });
+          txt(s, lx + lw - 0.38, ly, 0.33, 0.24, String(n), { fontFace: FB, fontSize: 8.5, align: "right", valign: "middle" });
+        });
+      }
+      // column header
+      const HY = BY + BH + 0.15;
+      box(s, X0, HY, W, 0.3, B.linen, null, false);
+      for (const c of cols) txt(s, colX[c.key] + 0.04, HY, c.w - 0.08, 0.3, c.label, { fontFace: FB, fontSize: FS, color: B.mahogany, valign: "middle", align: c.align ?? "left" });
+      const Y0 = HY + 0.32;
+      let zebra = 0;
+      lines.forEach((ln, li) => {
+        const y = Y0 + li * LH;
+        if (ln.kind === "group") {
+          zebra = 0;
+          const col = groupColor.get(ln.label) ?? B.taupe;
+          box(s, X0, y + 0.03, W, LH - 0.03, B.panel, null, false);
+          box(s, X0, y + 0.03, 0.07, LH - 0.03, col, null, false);
+          txt(s, X0 + 0.18, y + 0.02, 10, LH, rich([[ln.label + (ln.cont ? " (cont.)" : ""), true, 11], [`   ${plural(ln.count, "project")}${ln.operational ? "  ·  ongoing work kept open, e.g. Training Delivery" : ""}`, false, FS, B.taupe]], 11), { valign: "middle" });
+          return;
+        }
+        const r = ln.row;
+        if (zebra++ % 2) box(s, X0, y, W, LH, B.clinical, null, false);
+        const cell = (k: string, text: string | Run[], o: Record<string, unknown> = {}) => txt(s, colX[k] + 0.04, y, colW(k) - 0.08, LH, text, { fontSize: FS, valign: "middle", ...o });
+        cell("priority", r.priority === "—" ? "Not set" : r.priority, { fontFace: r.priority === "—" ? F : FB, color: PC[r.priority] ?? B.taupe });
+        cell("name", cut(r.name, 62));
+        cell("category", cut(r.category, 26), { color: B.mahogany });
+        const hLabel = r.health === "Done on time · close pending" ? "Done · close pending" : r.health;
+        cell("health", hLabel, { fontFace: FB, color: HC[r.health] ?? B.mahogany, fontSize: hLabel.length > 20 ? 9 : FS });
+        // progress bar + %
+        const px = colX.progress + 0.06, bw = 0.55;
+        box(s, px, y + LH / 2 - 0.05, bw, 0.1, B.grid, null, false);
+        if (r.progress != null && r.progress > 0) box(s, px, y + LH / 2 - 0.05, Math.max(0.03, bw * Math.min(100, r.progress) / 100), 0.1, BAR[r.health] ?? B.hydrate, null, false);
+        txt(s, px + bw + 0.04, y, 0.55, LH, r.progress != null ? `${r.progress}%` : "–", { fontFace: FB, fontSize: FS, valign: "middle" });
+        // Target end (Forecast End) + vs Committed in working days:
+        // +N red = later than the original commitment, −N / — green = on or ahead of it.
+        cell("committed", r.target ? fmtMD(r.target) : "Not set", { fontFace: FB, color: !r.target ? B.taupe : r.daysLate ? B.renew : B.onyx });
+        const vs = !r.committed ? "–" : r.moved > 0 ? `+${r.moved}` : r.moved < 0 ? `−${Math.abs(r.moved)}` : "—";
+        cell("vs", vs, { fontFace: FB, align: "center", color: !r.committed ? B.taupe : r.moved > 0 ? B.renew : B.calm });
+      });
+      // Health legend (Sandra 2026-10-20) + how to read, at the bottom of every slide.
+      const LEG: [string, string, string][] = [
+        ["On track", BAR["On track"], "within 10 pts of planned progress"],
+        ["At risk", BAR["At risk"], "11–20 pts behind"],
+        ["Off track", BAR["Off track"], "20+ pts behind"],
+        ["Overdue", BAR.Overdue, "past target, not finished"],
+        ["Done · close pending", BAR["Done on time · close pending"], "all tasks done, not closed yet"],
+      ];
+      const legRuns: Run[] = [{ text: "Health:  ", options: { fontFace: FB, fontSize: 8.5, color: B.onyx } }];
+      LEG.forEach(([lab, col, def], i) => {
+        legRuns.push({ text: "■ ", options: { fontFace: F, fontSize: 9, color: col } });
+        legRuns.push({ text: lab, options: { fontFace: FB, fontSize: 8.5, color: B.onyx } });
+        legRuns.push({ text: ` ${def}${i < LEG.length - 1 ? "    " : ""}`, options: { fontFace: F, fontSize: 8.5, color: B.taupe } });
+      });
+      const LY = Y0 + ACTIVE_LINES_PER_PAGE * LH + 0.02;
+      txt(s, X0, LY, W, 0.26, legRuns, { valign: "middle" });
+      // Sort order, definitions and "Other" categories live in the speaker notes (Sandra 2026-10-20).
+    });
   }
 
   const gen = (await pptx.write({ outputType: "arraybuffer" })) as ArrayBuffer;

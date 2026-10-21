@@ -809,7 +809,9 @@ select.inline-cell { cursor: pointer; }
 /* Task name cell: Notion-style sub-task affordances -- a collapse/expand
    chevron on parents that have a sub-task, and a bare "+" icon (hover-only)
    to add one, capped at parent + 1 sub-task level (no deeper nesting). */
-.task-name-cell { display: flex; align-items: center; gap: 4px; }
+.task-name-cell { display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* 2026-10-21: the note bubble keeps its space; the name ellipsizes instead. */
+.task-name-cell > .note-bubble-btn, .task-name-cell > .task-collapse-toggle, .task-name-cell > .task-collapse-spacer, .task-name-cell > .subtask-connector { flex-shrink: 0; }
 /* Sub-task rows (depth > 0) get a visible left guide line running the
    height of the row, not just a small connector glyph -- makes the
    parent/child relationship read as a tree at a glance, matching the

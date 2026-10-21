@@ -12,7 +12,7 @@ export const BRAND = {
 };
 const B = BRAND;
 
-export type SlideKey = "glance" | "portfolio" | "health" | "drivers" | "mix" | "pipeline" | "util" | "training" | "appendix";
+export type SlideKey = "glance" | "portfolio" | "health" | "drivers" | "mix" | "pipeline" | "util" | "training" | "appendix" | "activeList";
 export interface GlanceCard { tag: string; head: string; bullets: string[]; color: string }
 export interface DeckText {
   coverTitle: string;
@@ -20,7 +20,7 @@ export interface DeckText {
   titles: Record<SlideKey, string>;
   cards: GlanceCard[];
   asks: string[]; // "Label: text" -- label part rendered bold
-  include: { drivers: boolean; training: boolean; appendix: boolean };
+  include: { drivers: boolean; training: boolean; appendix: boolean; activeList: boolean };
   // Speaker notes per slide (from the data; editable on the Reports page).
   notes: Record<"cover" | SlideKey, string>;
 }
@@ -41,6 +41,8 @@ export function weekLabel(start: string, end: string): string {
   const m1 = s.toLocaleDateString("en-US", { month: "long" }), m2 = e.toLocaleDateString("en-US", { month: "long" });
   return m1 === m2 ? `${m1} ${s.getDate()} – ${e.getDate()}, ${e.getFullYear()}` : `${m1} ${s.getDate()} – ${m2} ${e.getDate()}, ${e.getFullYear()}`;
 }
+
+const sinceLabel = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", year: "numeric" });
 
 export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña"): DeckText {
   const g = d.glance;
@@ -72,10 +74,10 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
     coverSubtitle: `Week of ${weekLabel(d.week.start, d.week.end)}  ·  Prepared for ${preparedFor}`,
     titles: {
       glance: `${part1}; ${part2}`,
-      portfolio: `${d.ytd.total} projects this year; ${d.ytd.active} active plus ${d.ytd.operationalActive} ${d.opLabel === "Ongoing" ? "ongoing" : "in Training Delivery"}`,
+      portfolio: `${d.ytd.total} projects since ${sinceLabel(d.ytd.start)}; ${d.ytd.active} active plus ${d.ytd.operationalActive} ${d.opLabel === "Ongoing" ? "ongoing" : "in Training Delivery"}`,
       health: h.overdue.length ? `${h.overdue.length} of ${h.activeCount} active projects are overdue${h.offTrack ? `; ${h.offTrack} more off track` : ""}` : `No overdue projects among ${h.activeCount} active`,
       drivers: d.drivers.overdueCount && d.drivers.grewCount === Math.min(5, d.drivers.overdueCount) ? "Every overdue project grew after it started" : `${d.drivers.grewCount} of ${Math.min(5, d.drivers.overdueCount)} overdue projects grew after they started`,
-      mix: d.ytd.mix.bars[0] && d.ytd.mix.total ? `${d.ytd.mix.bars[0].label} takes ${pct(d.ytd.mix.bars[0].total / d.ytd.mix.total)} of scoped hours this year` : "Where this year’s effort went",
+      mix: d.ytd.mix.bars[0] && d.ytd.mix.total ? `${d.ytd.mix.bars[0].label} takes ${pct(d.ytd.mix.bars[0].total / d.ytd.mix.total)} of scoped hours since ${sinceLabel(d.ytd.start)}` : "Where the effort went",
       pipeline: `${plural(d.glance.intake, "project")} came in last week; ${d.glance.starting} start this week`,
       util: top ? `${top.name} ${top.people > 1 ? "carry" : "carries"} this week’s overload` : `Team planned at ${pct(d.util.roles[0]?.thisW ?? 0)} this week`,
       training: d.training.delivered
@@ -84,14 +86,44 @@ export function defaultDeckText(d: WeeklyReportData, preparedFor = "Brad Veleña
         ? `${plural(d.training.thisWeek, "session")} scheduled this week`
         : "No training sessions logged last week",
       appendix: "Overall portfolio mix — all projects to date",
+      activeList: "Project status",
     },
     cards: [
       { tag: "DELIVERY · LAST WEEK", head: `${plural(nDone, "project")} completed`, bullets: deliveryBul, color: B.calm },
       { tag: "PIPELINE", head: `${plural(g.starting, "project")} starting`, bullets: pipeBul, color: B.hydrate },
     ],
     asks,
-    include: { drivers: d.drivers.rows.length > 0, training: d.training.projects > 0, appendix: true },
+    include: { drivers: d.drivers.rows.length > 0, training: d.training.projects > 0, appendix: true, activeList: d.activeList.total > 0 },
     notes: { ...d.notes },
   };
 }
 
+
+// ------------------------------------------------------------------ active project list pagination (2026-10-13, 2026-10-20)
+// Shared by the deck and the Reports page (slide count). Sandra 2026-10-20:
+// each Project Type gets its own slide(s) -- a type never shares a slide with
+// another. One line = the group header or a project row; when a type runs
+// over, it continues on a "(cont.)" slide that repeats the header.
+// Every slide carries the KPI band + health legend, so all hold the same
+// number of lines (rows at 10pt).
+export const ACTIVE_LINES_PER_PAGE = 15;
+export type ActiveLine =
+  | { kind: "group"; label: string; operational: boolean; count: number; cont: boolean }
+  | { kind: "row"; row: WeeklyReportData["activeList"]["groups"][number]["rows"][number]; operational: boolean };
+export interface ActivePage { group: string; operational: boolean; cont: boolean; lines: ActiveLine[] }
+export function paginateActiveList(d: WeeklyReportData, per = ACTIVE_LINES_PER_PAGE): ActivePage[] {
+  const pages: ActivePage[] = [];
+  for (const g of d.activeList.groups) {
+    if (!g.rows.length) continue;
+    let cur: ActivePage | null = null;
+    for (const r of g.rows) {
+      if (!cur || cur.lines.length >= per) {
+        cur = { group: g.label, operational: g.operational, cont: !!cur, lines: [{ kind: "group", label: g.label, operational: g.operational, count: g.rows.length, cont: !!cur }] };
+        pages.push(cur);
+      }
+      cur.lines.push({ kind: "row", row: r, operational: g.operational });
+    }
+  }
+  return pages;
+}
+export const activeListPages = (d: WeeklyReportData) => paginateActiveList(d).length;

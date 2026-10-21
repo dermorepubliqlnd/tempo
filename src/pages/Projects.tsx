@@ -301,6 +301,9 @@ export interface TaskRow {
   current_due_date: string;
   // phase175: due date in force at Start Project approval (or when added after Start). Never moves.
   committed_due_date?: string | null;
+  /** phase198 (#24): 'logged_late' | 'extended' when the due date was before the task was created. */
+  late_log_kind?: string | null;
+  late_log_confirmed_at?: string | null;
   committed_due_source?: string | null;
   estimated_hours: number | null;
   time_spent_hours: number | null;
@@ -408,13 +411,24 @@ const PROJECT_COLUMN_ORDER = ["project_number", "name", "status", "health", "pha
 // (WBS Status), delivery (Status/Health/Phase/Due/Progress), effort
 // (Scoped/Spent/Variance) and schedule slippage (Days Extended). Owner
 // column hidden in "I own" views (it's always you); Created dropped.
-const PROJECT_SYSTEM_LEAD = ["project_number", "name", "owner", "status", "health", "phase", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
+// 2026-10-20 (Sandra, v2): ID, Project, Owner, Priority, Health, Stage, Phase,
+// Actual Progress, Due, vs Committed, My Next Due, My Open Tasks, My Hours.
+const PROJECT_SYSTEM_LEAD = ["project_number", "name", "owner", "priority", "health", "status", "phase", "actual_progress", "end_date", "committed_slip", "my_next_due", "my_open_tasks", "my_hours", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
 const PROJECT_SYSTEM_COLUMN_ORDER = [...PROJECT_SYSTEM_LEAD, ...PROJECT_COLUMN_ORDER.filter((k) => !PROJECT_SYSTEM_LEAD.includes(k))];
+// Column order used before 2026-10-20 -- a saved order still equal to it was never customized.
+const PROJECT_SYSTEM_LEAD_PRE_1020 = ["project_number", "name", "owner", "status", "health", "phase", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
+const PROJECT_SYSTEM_COLUMN_ORDER_PRE_1020 = [...PROJECT_SYSTEM_LEAD_PRE_1020, ...PROJECT_COLUMN_ORDER.filter((k) => !PROJECT_SYSTEM_LEAD_PRE_1020.includes(k))];
+// Interim order live briefly on 2026-10-20 (Priority before Project).
+const PROJECT_SYSTEM_LEAD_1020A = ["project_number", "priority", "name", "owner", "status", "health", "phase", "end_date", "committed_slip", "actual_progress", "my_open_tasks", "my_next_due", "my_hours", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "category", "planning_type", "project_type"];
+const PROJECT_SYSTEM_COLUMN_ORDER_1020A = [...PROJECT_SYSTEM_LEAD_1020A, ...PROJECT_COLUMN_ORDER.filter((k) => !PROJECT_SYSTEM_LEAD_1020A.includes(k))];
 const PROJECT_OWNER_VISIBLE = new Set(["project_number", "name", "status", "health", "phase", "end_date", "actual_progress", "priority", "estimated_hours", "time_spent_hours", "hours_variance", "days_extended", "committed_slip"]);
 // 2026-10-04 (Sandra): portfolio lens = "what am I involved in and what do
 // I owe on each" -- grouped by My Role, soonest Due first, with the
 // viewer's own open tasks / next due / hours instead of owner metrics.
-const PROJECT_ACTIVE_PORTFOLIO_VISIBLE = new Set(["project_number", "name", "owner", "status", "health", "end_date", "actual_progress", "my_open_tasks", "my_next_due", "my_hours"]);
+// 2026-10-20 (Sandra): Priority shown by default; Phase and vs Committed added
+// so owners read health in context (where it is in production, how far the
+// Due date has moved since Start Project).
+const PROJECT_ACTIVE_PORTFOLIO_VISIBLE = new Set(["project_number", "priority", "name", "owner", "status", "health", "phase", "end_date", "committed_slip", "actual_progress", "my_open_tasks", "my_next_due", "my_hours"]);
 const PROJECT_FULL_PORTFOLIO_VISIBLE = new Set([...PROJECT_ACTIVE_PORTFOLIO_VISIBLE]);
 const PROJECT_ORG_VISIBLE = new Set([...PROJECT_OWNER_VISIBLE, "owner", "category", "planning_type", "project_type"]);
 
@@ -496,6 +510,13 @@ function migrateTaskScope(v: TableView): TableView {
   };
 }
 
+const PORTFOLIO_SORTS: TableView["sorts"] = [
+  { key: "priority", direction: "desc" },
+  { key: "health", direction: "asc" },
+  { key: "actual_progress", direction: "asc" },
+  { key: "end_date", direction: "asc" },
+];
+
 function projectSystemView(
   id: string,
   name: string,
@@ -520,12 +541,27 @@ function projectSystemView(
     hiddenGroups: [],
     color: "neutral",
     showCount: false,
+    // 2026-10-20 (Sandra): portfolio views follow the weekly report's sort --
+    // Priority (High first, not set last), Health (needs attention first),
+    // Actual Progress (furthest behind first), then Due (soonest first).
     sorts: scope === "my_active_portfolio" || scope === "my_full_portfolio"
-      ? [{ key: "end_date", direction: "asc" }]
+      ? PORTFOLIO_SORTS
       : [{ key: "project_number", direction: "asc" }],
     progressDisplay: "bar",
   };
 }
+
+// Defaults retired on 2026-10-20: a saved value still equal to one of these
+// was never customized, so the new default replaces it (useTableViews).
+const PROJECT_SYSTEM_RETIRED_DEFAULTS: Record<string, Partial<Record<keyof TableView, unknown[]>>> = Object.fromEntries(
+  ["system_my_active_projects", "system_my_active_portfolio", "system_all_projects_i_own", "system_my_full_portfolio", "system_active_project_portfolio", "system_all_projects"].map((id) => [
+    id,
+    {
+      columnOrder: [PROJECT_SYSTEM_COLUMN_ORDER_PRE_1020, PROJECT_SYSTEM_COLUMN_ORDER_1020A],
+      ...(id === "system_my_active_portfolio" || id === "system_my_full_portfolio" ? { sorts: [[{ key: "end_date", direction: "asc" }]] } : {}),
+    },
+  ])
+);
 
 const PROJECT_SYSTEM_VIEWS: TableView[] = [
   projectSystemView("system_my_active_projects", "Active Projects I Own", "my_active_owned", "my", PROJECT_OWNER_VISIBLE, true),
@@ -577,7 +613,7 @@ function taskSystemView(
   scope: NonNullable<TableView["taskScope"]>,
   group: "my" | "organization",
   visible: Set<string>,
-  opts: { groupBy?: string | null; viewType?: TableView["viewType"]; sortKey?: string; isDefault?: boolean } = {}
+  opts: { groupBy?: string | null; viewType?: TableView["viewType"]; sortKey?: string; isDefault?: boolean; filters?: Partial<TableView>; sorts?: TableView["sorts"] } = {}
 ): TableView {
   return {
     id,
@@ -587,6 +623,7 @@ function taskSystemView(
     systemGroup: group,
     isDefaultView: !!opts.isDefault,
     ...scopeToTaskFilters(scope),
+    ...(opts.filters ?? {}),
     columnOrder: TASK_SYSTEM_COLUMN_ORDER,
     hiddenColumns: TASK_SYSTEM_COLUMN_ORDER.filter((key) => !visible.has(key)),
     columnWidths: {},
@@ -595,9 +632,15 @@ function taskSystemView(
     hideEmptyGroups: true,
     color: "neutral",
     showCount: false,
-    sorts: [{ key: opts.sortKey ?? "current_due_date", direction: "asc" }],
+    sorts: opts.sorts ?? [{ key: opts.sortKey ?? "current_due_date", direction: "asc" }],
   };
 }
+// Defaults retired on 2026-10-20 (see useTableViews installSystemViews): a
+// saved value still equal to one of these was never customized.
+const TASK_SYSTEM_RETIRED_DEFAULTS: Record<string, Partial<Record<keyof TableView, unknown[]>>> = {
+  system_tasks_owner_open: { groupBy: ["assignee"], sorts: [[{ key: "current_due_date", direction: "asc" }]] },
+};
+
 const TASK_SYSTEM_VIEWS: TableView[] = [
   taskSystemView("system_tasks_my_open", "My Open Tasks", "my_open", "my", TASK_MY_VISIBLE, { groupBy: "due_window", isDefault: true }),
   // R1 (2026-10-13): companion to My Open Tasks -- assigned to me but still
@@ -607,7 +650,14 @@ const TASK_SYSTEM_VIEWS: TableView[] = [
   taskSystemView("system_tasks_my_by_project", "My Tasks by Project", "my_open", "my", TASK_MY_VISIBLE, { groupBy: "project" }),
   taskSystemView("system_tasks_my_calendar", "My Task Calendar", "my_open", "my", TASK_MY_VISIBLE, { viewType: "calendar" }),
   taskSystemView("system_tasks_my_done", "My Completed Tasks", "my_done", "my", TASK_DONE_VISIBLE, { groupBy: "validation" }),
-  taskSystemView("system_tasks_owner_open", "Tasks in My Projects", "owner_open", "my", TASK_TEAM_VISIBLE, { groupBy: "assignee" }),
+  // 2026-10-20 (Sandra): every task, any status, in projects I own that are
+  // not officially closed (Closed / Cancelled left out), grouped by project
+  // and in WBS order (parent tasks with their sub-tasks, WBS sequence) -- no sort.
+  taskSystemView("system_tasks_owner_open", "Tasks in My Projects", "owner_open", "my", TASK_TEAM_VISIBLE, {
+    groupBy: "project",
+    filters: { filterStatuses: [], filterFlags: ["project_open"] },
+    sorts: [],
+  }),
   // R1 clean-up: review/QA/sign-off tasks in my projects with no Depends-on
   // link, so they can't be held back until the work is submitted.
   taskSystemView("system_tasks_owner_needs_link", "Review Tasks Missing a Dependency", "owner_needs_link", "my", TASK_TEAM_VISIBLE, { groupBy: "project", sortKey: "task_number" }),
@@ -770,6 +820,25 @@ export function projectCompletionDate(projectId: string, allTasks: TaskRow[], p?
   return fallback ? (fallback.length > 10 ? toISOWorkingDay(new Date(fallback)) : fallback) : null;
 }
 
+// 2026-10-21 (Sandra, P-0018): approved TASK extensions move task due dates
+// but not the project's End Date, so a project whose work was re-planned to
+// Nov 9 still read "Overdue" against its Oct 7 End Date. Forecast End = the
+// later of the End Date and the latest due date of its live (not archived,
+// not Cancelled) tasks -- the same "Forecast End" as the Overview's Schedule
+// Snapshot. Health, Project Due and vs Committed all read this date; the
+// original commitment stays visible through committed_end_date (vs Committed).
+export function forecastEndOf(p: ProjectRow, allTasks: TaskRow[]): string | null {
+  const end = p.end_date ? p.end_date.slice(0, 10) : null;
+  if (p.is_operational) return end;
+  let max = end;
+  for (const t of allTasks) {
+    if (t.project_id !== p.id || t.is_archived || t.status === "Cancelled" || !t.current_due_date) continue;
+    const d = t.current_due_date.slice(0, 10);
+    if (!max || d > max) max = d;
+  }
+  return max;
+}
+
 export function healthOf(
   p: ProjectRow,
   allTasks: TaskRow[],
@@ -818,7 +887,7 @@ export function healthOf(
   // thing left is marking the project Completed.
   if (actual === 100) {
     const doneOn = projectCompletionDate(p.id, allTasks, p);
-    const dueOn = p.end_date ? p.end_date.slice(0, 10) : null;
+    const dueOn = forecastEndOf(p, allTasks);
     if (doneOn && dueOn && doneOn > dueOn) return { label: "Done late · close pending", tone: "gold" };
     return { label: "Done on time · close pending", tone: "success" };
   }
@@ -828,11 +897,12 @@ export function healthOf(
   // started"'s "neutral" -- so the two don't render as an identical grey
   // pill (Sandra 2026-09-03: ok with both grey, just wants a different
   // shade/tone so they're tellable apart at a glance).
-  if (!p.start_date || !p.end_date) return { label: "Health unavailable", tone: "slate" };
+  const forecastEnd = forecastEndOf(p, allTasks);
+  if (!p.start_date || !forecastEnd) return { label: "Health unavailable", tone: "slate" };
 
   const today = new Date();
   const start = parseLocalDate(p.start_date);
-  const due = parseLocalDate(p.end_date);
+  const due = parseLocalDate(forecastEnd);
 
   if (today < start) return { label: "Not started", tone: "neutral" };
   if (today > due) return { label: "Overdue", tone: "danger" };
@@ -1066,7 +1136,7 @@ const CARD_MAX = 4;
 const TASK_CARD_DEFAULT = { primary: ["task_number", "project", "assignee", "current_due_date"], secondary: ["estimated_hours", "time_spent_hours", "due_date_ext"] };
 const PROJECT_CARD_DEFAULT = { primary: ["project_number", "owner", "end_date", "actual_progress"], secondary: ["estimated_hours", "time_spent_hours", "days_extended", "priority"] };
 const CARD_SHORT_LABELS: Record<string, string> = {
-  task_number: "ID", project_number: "ID", current_due_date: "Due", end_date: "Due", start_date: "Start",
+  task_number: "ID", project_number: "ID", current_due_date: "Due", end_date: "Project Due", start_date: "Start",
   estimated_hours: "Estimated", time_spent_hours: "Logged", due_date_ext: "Ext.", days_extended: "Extended",
   actual_progress: "Progress", hours_variance: "Var.", hours_variance_pct: "Var. %", time_log_status: "Logs",
   actual_completion_date: "Reported", validated_completion_date: "Confirmed", validated_by: "Validated by",
@@ -1404,7 +1474,7 @@ export default function Projects() {
       cancelled: st === "Cancelled",
       done,
       finishedOn: done ? projectCompletionDate(p.id, tasks, p) : null,
-      currentDue: p.end_date,
+      currentDue: forecastEndOf(p, tasks),
       holidays: holidayDates,
     });
   }
@@ -3087,7 +3157,7 @@ export default function Projects() {
     const allowed = PROJECT_SYSTEM_VIEWS.filter((v) => navAccess.views.has(v.id));
     const list = allowed.length ? allowed : PROJECT_SYSTEM_VIEWS.filter((v) => v.id === "system_my_active_portfolio");
     const def = list.find((v) => v.id === "system_my_active_portfolio") ?? list[0];
-    projectViews.installSystemViews(list, def.id, migrateProjectScope);
+    projectViews.installSystemViews(list, def.id, migrateProjectScope, PROJECT_SYSTEM_RETIRED_DEFAULTS);
     // installSystemViews is intentionally idempotent; PROJECT_SYSTEM_VIEWS is
     // module-level and stable so this only changes state when the saved set
     // actually differs.
@@ -3806,16 +3876,19 @@ export default function Projects() {
       },
       {
         key: "end_date",
-        label: "Due",
+        label: "Project Due",
         defaultWidth: 110,
         maxWidth: 140,
         // Governance lockdown (Sandra, 2026-07-29): see start_date above --
         // Due is also WBS-only now, not editable from this page.
         render: (p) => {
           const computed = projectDatesFromTasks(p.id);
+          // 2026-10-21: shows the Forecast End (after approved task extensions).
+          const fe = forecastEndOf(p, tasks);
+          const moved = !!fe && !!p.end_date && fe > p.end_date.slice(0, 10);
           return (
-            <span title={computed ? "Computed from this project's own tasks (latest task due date)" : "Set in this project's WBS page"}>
-              <InlineDate value={p.end_date} editable={false} onCommit={() => {}} />
+            <span title={moved ? `Forecast end after approved task extensions. End Date on record: ${formatDate(p.end_date)}. See vs Committed for the change from the original commitment.` : computed ? "Computed from this project's own tasks (latest task due date)" : "Set in this project's WBS page"}>
+              <InlineDate value={fe} editable={false} onCommit={() => {}} />
             </span>
           );
         },
@@ -3866,7 +3939,7 @@ export default function Projects() {
       },
       {
         key: "my_next_due",
-        label: "My Next Due",
+        label: "My Next Task Due",
         defaultWidth: 115,
         maxWidth: 150,
         render: (p) => {
@@ -4166,7 +4239,7 @@ export default function Projects() {
       boardGroupable: true,
     },
     { key: "start_date", label: "Start", getGroup: () => "", boardGroupable: false },
-    { key: "end_date", label: "Due", getGroup: () => "", boardGroupable: false },
+    { key: "end_date", label: "Project Due", getGroup: () => "", boardGroupable: false },
   ];
 
   // Computes Board's actual columns/getValue/drag-write-handler for
@@ -4319,9 +4392,9 @@ export default function Projects() {
     { key: "project_type", label: "Project Type", getValue: (p) => projectTypes.find((t) => t.id === p.project_type_id)?.name ?? "" },
     { key: "effort_level", label: "Complexity", getValue: (p) => PROJECT_EFFORT_LEVEL_OPTIONS.indexOf(p.effort_level ?? "") },
     { key: "start_date", label: "Start", getValue: (p) => (p.start_date ? new Date(p.start_date).getTime() : null) },
-    { key: "end_date", label: "Due", getValue: (p) => (p.end_date ? new Date(p.end_date).getTime() : null) },
+    { key: "end_date", label: "Project Due", getValue: (p) => { const fe = forecastEndOf(p, tasks); return fe ? new Date(fe).getTime() : null; } },
     { key: "my_open_tasks", label: "My Open Tasks", getValue: (p) => (myStatsByProject.get(p.id)?.hasTasks ? myStatsByProject.get(p.id)!.open : null) },
-    { key: "my_next_due", label: "My Next Due", getValue: (p) => { const d = myStatsByProject.get(p.id)?.nextDue; return d ? new Date(d).getTime() : null; } },
+    { key: "my_next_due", label: "My Next Task Due", getValue: (p) => { const d = myStatsByProject.get(p.id)?.nextDue; return d ? new Date(d).getTime() : null; } },
     { key: "my_hours", label: "My Hours", getValue: (p) => (myStatsByProject.get(p.id)?.hasTasks ? myStatsByProject.get(p.id)!.spent : null) },
     { key: "health", label: "Health", getValue: (p) => healthRank(healthOf(p, tasks, holidayDates).label) },
     { key: "actual_progress", label: "Actual Progress", getValue: (p) => actualProgress(p.id, tasks) ?? -1 },
@@ -6010,7 +6083,7 @@ export default function Projects() {
     const allowed = TASK_SYSTEM_VIEWS.filter((v) => navAccess.views.has(v.id) || (COMPANION[v.id] && navAccess.views.has(COMPANION[v.id])));
     const list = allowed.length ? allowed : TASK_SYSTEM_VIEWS.filter((v) => v.id === "system_tasks_my_open");
     const def = list.find((v) => v.id === "system_tasks_my_open") ?? list[0];
-    taskViews.installSystemViews(list, def.id, migrateTaskScope);
+    taskViews.installSystemViews(list, def.id, migrateTaskScope, TASK_SYSTEM_RETIRED_DEFAULTS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskViews.loaded, navAccess.loaded, navAccess.views]);
 
@@ -6184,6 +6257,10 @@ export default function Projects() {
       if (flags.includes("action_needed")) out = out.filter((t) => !isWaitingTask(t));
       if (flags.includes("waiting")) out = out.filter((t) => isWaitingTask(t));
       if (flags.includes("needs_dependency")) out = out.filter((t) => needsLink(t));
+      if (flags.includes("project_open")) {
+        const openPids = new Set(projects.filter((p) => { const st = projectStageOf(p); return st !== "Closed" && st !== "Cancelled"; }).map((p) => p.id));
+        out = out.filter((t) => openPids.has(t.project_id));
+      }
       const lp = legacy.filterPersonIds ?? [];
       if (lp.length > 0) out = out.filter((t) => lp.some((id) => (id === "me" ? t.assignee_id === me?.id : t.assignee_id === id)));
       const ls = legacy.filterStatuses ?? [];
@@ -7055,6 +7132,7 @@ export default function Projects() {
                     { value: "action_needed", label: "Action needed (ready to work on)" },
                     { value: "waiting", label: "Coming up (waiting on another task)" },
                     { value: "needs_dependency", label: "Review task missing a dependency" },
+                    { value: "project_open", label: "Project not closed (excl. Closed & Cancelled)" },
                   ],
                   selected: taskActiveView.filterFlags ?? [],
                   onChange: (next) => updateTaskView({ filterFlags: next as TableView["filterFlags"] }),
@@ -7118,6 +7196,7 @@ export default function Projects() {
             ...((taskActiveView.filterFlags ?? []).includes("action_needed") ? ["Action needed"] : []),
             ...((taskActiveView.filterFlags ?? []).includes("waiting") ? ["Coming up"] : []),
             ...((taskActiveView.filterFlags ?? []).includes("needs_dependency") ? ["Missing dependency"] : []),
+            ...((taskActiveView.filterFlags ?? []).includes("project_open") ? ["Project not closed"] : []),
           ]}
           onClearFilter={() => updateTaskView({ filterPersonIds: [], filterStatuses: [], filterProjectOwnerIds: [], filterFlags: [] })}
           containerRef={setTaskPillsRowEl}

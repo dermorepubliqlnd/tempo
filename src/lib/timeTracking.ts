@@ -329,22 +329,49 @@ export async function correctTimeEntry(
   return {};
 }
 
+// phase202 (2026-10-20, Sandra): Full Access moves a finalized NON-PROJECT
+// entry onto a project task (optionally re-timing it) in one step.
+export async function correctTimeEntryToTask(
+  entryId: string,
+  taskId: string,
+  startedAt: string,
+  endedAt: string,
+  notes: string,
+  trimEntryIds: string[] = []
+): Promise<{ error?: string }> {
+  const { error } = await supabase.rpc("correct_time_entry_to_task", {
+    p_entry_id: entryId,
+    p_task_id: taskId,
+    p_started_at: startedAt,
+    p_ended_at: endedAt,
+    p_notes: notes,
+    p_trim_entry_ids: trimEntryIds,
+  });
+  if (error) return { error: error.message };
+  return {};
+}
+
 // Phase 2 (phase102): employee-initiated correction requests on their
 // own confirmed/approved entry, decided in the Approval Center.
+// phase202: taskId = move this non-project entry to that project task.
 export async function requestTimeEntryCorrection(
   entryId: string,
   startedAt: string,
   endedAt: string,
   reason: string,
-  activityTypeId?: string
+  activityTypeId?: string,
+  taskId?: string
 ): Promise<{ id?: string; error?: string }> {
-  const { data, error } = await supabase.rpc("request_time_entry_correction", {
+  const args: Record<string, unknown> = {
     p_entry_id: entryId,
     p_started_at: startedAt,
     p_ended_at: endedAt,
     p_reason: reason,
     p_activity_type_id: activityTypeId ?? null,
-  });
+  };
+  // Only sent when moving, so a plain request keeps working before phase202 is applied.
+  if (taskId) args.p_task_id = taskId;
+  const { data, error } = await supabase.rpc("request_time_entry_correction", args);
   if (error) return { error: error.message };
   return { id: data as unknown as string };
 }
@@ -446,3 +473,39 @@ export async function submitFollowUpTimeEntry(
 export function timeLogId(n: number | null | undefined): string {
   return n ? `TL-${String(n).padStart(4, "0")}` : "—";
 }
+
+// phase202: tasks a person's non-project time can move to -- assigned to
+// them, not archived/Cancelled, not a parent task, project Active or Closing
+// with a locked baseline. The server re-checks all of this.
+export interface MoveTargetTask { id: string; task_number: number | null; name: string; status: string | null; project_id: string; project_name: string }
+export async function loadMoveTargetTasks(personId: string): Promise<MoveTargetTask[]> {
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("id,task_number,name,status,project_id,parent_task_id,project:projects ( id, name, stage, status, wbs_status, timelines_locked, is_archived )")
+    .eq("assignee_id", personId)
+    .eq("is_archived", false)
+    .neq("status", "Cancelled");
+  if (error || !data) return [];
+  type Row = { id: string; task_number: number | null; name: string; status: string | null; project_id: string; parent_task_id: string | null;
+    project: { id: string; name: string; stage: string | null; status: string | null; wbs_status: string | null; timelines_locked: boolean | null; is_archived: boolean | null } | null };
+  const rows = data as unknown as Row[];
+  const ids = rows.map((r) => r.id);
+  const parents = new Set<string>();
+  if (ids.length) {
+    const { data: kids } = await supabase.from("tasks").select("parent_task_id").eq("is_archived", false).in("parent_task_id", ids);
+    for (const k of (kids as { parent_task_id: string | null }[] | null) ?? []) if (k.parent_task_id) parents.add(k.parent_task_id);
+  }
+  const stageOf = (p: NonNullable<Row["project"]>) => {
+    if (p.stage) return p.stage;
+    if (p.status === "Cancelled") return "Cancelled";
+    if (p.wbs_status === "closed") return "Closed";
+    if (p.status === "Paused") return "Paused";
+    if (!p.wbs_status || p.wbs_status === "draft") return "Draft";
+    return "Active";
+  };
+  return rows
+    .filter((r) => r.project && !r.project.is_archived && r.project.timelines_locked && ["Active", "Closing"].includes(stageOf(r.project)) && !parents.has(r.id))
+    .map((r) => ({ id: r.id, task_number: r.task_number, name: r.name, status: r.status, project_id: r.project_id, project_name: r.project!.name }))
+    .sort((a, b) => a.project_name.localeCompare(b.project_name) || (a.task_number ?? 0) - (b.task_number ?? 0));
+}
+export const taskIdLabel = (n: number | null | undefined) => (n ? `T-${String(n).padStart(4, "0")}` : "T-—");

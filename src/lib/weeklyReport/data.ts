@@ -12,9 +12,9 @@
 //   * Development      = projects owned by anyone who is NOT a Trainer
 import { supabase } from "../supabaseClient";
 import { fetchAllRows } from "../fetchAllRows";
-import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from "../workingDays";
+import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet, workingDayDelta } from "../workingDays";
 import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, type UtilTaskRow, type UtilProjectRow } from "../dailyAllocation";
-import { healthOf, type ProjectRow, type TaskRow } from "../../pages/Projects";
+import { healthOf, actualProgress, forecastEndOf, type ProjectRow, type TaskRow } from "../../pages/Projects";
 import { fmtMD } from "./format";
 import { projectStatus, isActiveProject, isOverdueProject, isStartedProject, portfolioInPeriod } from "../metrics";
 
@@ -33,6 +33,17 @@ type P = ProjectRow & { actual_close_date?: string | null; is_unsaved?: boolean 
 type T = TaskRow & { created_at?: string | null; actual_completion_date?: string | null; is_archived?: boolean | null };
 
 export interface WeekRange { start: string; end: string }
+/** Appendix: one active project (Sandra 2026-10-13, cross-department weekly update). */
+export interface ActiveRow {
+  num: number | null; name: string; owner: string; category: string; planning: string; type: string;
+  /** Project Priority (High / Medium / Low), "—" when not set. */
+  priority: string;
+  health: string; progress: number | null; target: string; committed: string; moved: number; daysLate: number;
+  /** Why it needs attention (Overdue / Off track / At risk / Schedule review), from Tempo history. */
+  why?: string;
+  id?: string;
+}
+export interface ActiveGroup { label: string; operational: boolean; rows: ActiveRow[] }
 export interface ProjLine { name: string; type: string; planning: string; date: string; extra?: string; warn?: boolean }
 
 export interface WeeklyReportData {
@@ -64,7 +75,13 @@ export interface WeeklyReportData {
     activeHealth: { total: number; operationalExcluded: number; health: { label: string; count: number }[]; phase: { label: string; count: number }[] };
   };
   // Speaker notes per slide (plain text; "- " lines are bullets). Editable on the Reports page.
-  notes: Record<"cover" | "glance" | "portfolio" | "health" | "drivers" | "mix" | "pipeline" | "util" | "training" | "appendix", string>;
+  notes: Record<"cover" | "glance" | "portfolio" | "health" | "drivers" | "mix" | "pipeline" | "util" | "training" | "appendix" | "activeList", string>;
+  // Sandra 2026-10-13: appendix list of every active project, Operational first,
+  // then one group per Project Type (e.g. Internal Development), for the
+  // cross-department weekly update.
+  activeList: { total: number; operational: number; project: number; overdue: number; groups: ActiveGroup[];
+    /** Category split of active projects EXCLUDING ongoing containers; top 5 + "Other" when more than 6. */
+    categories: { label: string; count: number; members?: { label: string; count: number }[] }[] };
   // phase151: sessions in operational projects (e.g. quarterly Training Delivery).
   training: {
     projects: number;
@@ -73,6 +90,9 @@ export interface WeeklyReportData {
     trainers: { name: string; delivered: number; validated: number; hours: number; thisWeek: number; pastNotDone: number }[];
   };
 }
+
+/** Tempo holds data from Aug 1, 2026 (Sandra 2026-10-21) -- portfolio periods never start earlier. */
+export const TRACKING_START = "2026-08-01";
 
 // ------------------------------------------------------------------ helpers
 export function eachDay(start: string, end: string): string[] {
@@ -102,6 +122,8 @@ export function weekOf(monday: string, offsetWeeks = 0): WeekRange {
   const m = addDays(parseLocalDate(monday), offsetWeeks * 7);
   return { start: toISO(m), end: toISO(addDays(m, 4)) };
 }
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const listNames = (a: string[]) => (a.length <= 1 ? a.join("") : `${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}`);
 const d10 = (s: string | null | undefined) => (s ? s.slice(0, 10) : "");
 const localDay = (ts: string) => toISO(new Date(ts)); // never ts.slice(0,10) (UTC bug)
 const daysBetween = (a: string, b: string) => Math.round((parseLocalDate(b).getTime() - parseLocalDate(a).getTime()) / 86400000);
@@ -267,10 +289,12 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   const counts = new Map<string, number>();
   healthBy.forEach((l) => counts.set(l, (counts.get(l) ?? 0) + 1));
   const buckets = Array.from(counts.entries()).sort((a, b) => (ORDER.indexOf(a[0]) + 99 * +(ORDER.indexOf(a[0]) < 0)) - (ORDER.indexOf(b[0]) + 99 * +(ORDER.indexOf(b[0]) < 0))).map(([label, count]) => ({ label, count }));
+  // 2026-10-21: project dates = Forecast End (after approved task extensions), same as Health.
+  const fEnd = (p: P) => d10(forecastEndOf(p as ProjectRow, tasks as TaskRow[]) ?? p.end_date);
   const overdueLines = overdueP
-    .map((p) => ({ ...line(p, d10(p.end_date)), daysLate: Math.max(0, daysBetween(d10(p.end_date), todayIso)) }))
+    .map((p) => ({ ...line(p, fEnd(p)), daysLate: Math.max(0, daysBetween(fEnd(p), todayIso)) }))
     .sort((a, b) => b.daysLate - a.daysLate);
-  const dueThisWeek = activeP.filter((p) => inWeek(d10(p.end_date), thisWeek)).map((p) => line(p, d10(p.end_date))).sort((a, b) => a.date.localeCompare(b.date));
+  const dueThisWeek = activeP.filter((p) => inWeek(fEnd(p), thisWeek)).map((p) => line(p, fEnd(p))).sort((a, b) => a.date.localeCompare(b.date));
 
   // ------------------------------------------------------------ drivers (overdue projects)
   const ovIds = overdueP.map((p) => p.id);
@@ -294,12 +318,12 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     extCount = exts.length;
     noteCount = notesRows.length;
     driverRows = overdueLines.slice(0, 5).map((o) => {
-      const p = overdueP.find((x) => x.name === o.name && x.end_date && d10(x.end_date) === o.date) as P;
+      const p = overdueP.find((x) => x.name === o.name && fEnd(x) === o.date) as P;
       const b = baselines.get(p.id);
       const pl = leaf.filter((t) => t.project_id === p.id);
       const added = b ? pl.filter((t) => t.created_at && t.created_at > b.captured_at) : [];
       const addedH = added.reduce((s, t) => s + (Number(t.estimated_hours) || 0), 0);
-      const end = d10(p.end_date);
+      const end = fEnd(p);
       const addedLate = added.filter((t) => t.created_at && localDay(t.created_at) > end);
       const ch = changes.filter((c) => revProject.get(c.revision_id) === p.id);
       const cnt = (k: string) => ch.filter((c) => c.change_type === k).length;
@@ -483,8 +507,11 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   // by month, Work Mix & Effort Allocation, Active Projects Health), but as of
   // the report week's Friday instead of today.
   const isOp = (p: P) => !!(p as { is_operational?: boolean | null }).is_operational;
-  const ytdStart = `${week.end.slice(0, 4)}-01-01`;
-  const ytdEnd = week.end;
+  // Sandra 2026-10-21: Tempo data starts Aug 2026, and every count on the
+  // Portfolio slides is AS OF THE GENERATION DATE -- the same moment as the
+  // Active Projects / Health slides -- so the numbers always agree.
+  const ytdStart = `${week.end.slice(0, 4)}-01-01` < TRACKING_START ? TRACKING_START : `${week.end.slice(0, 4)}-01-01`;
+  const ytdEnd = todayIso;
   // Sandra 2026-10-05: open projects are the CURRENT state (same as the
   // Health donut), completed counted Jan 1 -> report-week Friday.
   // Active projects (regular) and Training Delivery are shown separately.
@@ -493,11 +520,13 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   // so an open project planned to start after that Friday isn't counted.
   const pfYtd = portfolioInPeriod(live, ytdStart, ytdEnd);
   const yCompleted = pfYtd.completed.length;
-  const yOpActive = pfYtd.active.filter(isOp).length;
-  const yActive = pfYtd.active.length - yOpActive;
+  // Active = exactly the projects on the Active Projects / Health slides
+  // (activeP / activeAll), even one whose start date is later this week.
+  const yOpActive = activeAll.length - activeP.length;
+  const yActive = activeP.length;
   const yOther = pfYtd.notStarted.length + pfYtd.paused.length;
   const months: { label: string; from: string; to: string }[] = [];
-  for (let m = new Date(Number(ytdStart.slice(0, 4)), 0, 1); toISO(m) <= ytdEnd; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
+  for (let m = new Date(Number(ytdStart.slice(0, 4)), Number(ytdStart.slice(5, 7)) - 1, 1); toISO(m) <= ytdEnd; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
     const last = toISO(new Date(m.getFullYear(), m.getMonth() + 1, 0));
     months.push({ label: m.toLocaleDateString("en-US", { month: "short" }), from: toISO(m), to: last > ytdEnd ? ytdEnd : last });
   }
@@ -506,9 +535,8 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
     started: live.filter((p) => p.wbs_status !== "draft" && !!p.start_date && d10(p.start_date) >= b.from && d10(p.start_date) <= b.to).length,
     completed: live.filter((p) => statusOf(p) === "Completed" && completionDateOf(p) >= b.from && completionDateOf(p) <= b.to).length,
   }));
-  // Skip the empty months before Tempo has any data (tracking started mid-year).
-  const firstActive = ytdMovementAll.findIndex((m) => m.started || m.completed);
-  const ytdMovement = firstActive > 0 ? ytdMovementAll.slice(Math.max(0, firstActive - 1)) : ytdMovementAll;
+  // Months start at TRACKING_START (Aug 2026), so there are no empty months before Tempo data.
+  const ytdMovement = ytdMovementAll;
   // Scoped Hours spread over each task's working days, counting only days in YTD.
   const ytdByProject = new Map<string, number>();
   for (const t of leaf) {
@@ -633,6 +661,92 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
   // Training
   const sessionLine = (t: T) => `${t.name} — ${who(t.assignee_id)}, ${md(t.status === "Done" ? t.actual_completion_date ?? t.current_due_date : t.current_due_date)}${t.status === "Done" ? (t.validated_completion_date ? ", validated" : ", awaiting validation") : ""}`;
 
+  // ------------------------------------------------------------ active project list (appendix, 2026-10-13)
+  const ownerName = (id: string | null) => {
+    const n = (id && personById.get(id)?.name) || "";
+    if (!n) return "—";
+    const parts = n.trim().split(/\s+/);
+    return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0]}.` : parts[0];
+  };
+  const isOpA = (p: P) => !!(p as { is_operational?: boolean | null }).is_operational;
+  const activeRow = (p: P): ActiveRow => {
+    // 2026-10-21: Target = Forecast End; +N = WORKING days past the original commitment.
+    const target = fEnd(p);
+    const committed = d10((p as { committed_end_date?: string | null }).committed_end_date ?? p.original_due_date ?? p.end_date);
+    const health = isOpA(p) ? "Ongoing" : healthBy.get(p.id) ?? "—";
+    return {
+      id: p.id,
+      num: (p as { project_number?: number }).project_number ?? null,
+      name: p.name, owner: ownerName(p.owner_id), category: (p.category ?? "").trim() || "—", planning: planOf(p), type: typeOf(p),
+      priority: (p as { priority?: string | null }).priority || "—",
+      health, progress: actualProgress(p.id, tasks as TaskRow[]), target, committed,
+      // Signed: + = working days past the commitment, − = ahead of it (Sandra 2026-10-21).
+      moved: target && committed ? workingDayDelta(committed, target, holidaySet) : 0,
+      daysLate: !isOpA(p) && target && target < todayIso ? daysBetween(target, todayIso) : 0,
+    };
+  };
+  // Sandra 2026-10-20: sort = Priority (High > Medium > Low > not set), then
+  // Health (needs attention first), then Actual Progress LOW to high (the one
+  // furthest behind first), then Target completion (earliest first).
+  const PRIORITY_RANK = ["High", "Medium", "Low"];
+  const pRank = (x: string) => { const i = PRIORITY_RANK.indexOf(x); return i < 0 ? PRIORITY_RANK.length : i; };
+  const HEALTH_RANK = ["Overdue", "Off track", "At risk", "Schedule review", "On track", "Done late · close pending", "Done on time · close pending", "Not started", "Ongoing"];
+  const hRank = (h: string) => { const i = HEALTH_RANK.indexOf(h); return i < 0 ? HEALTH_RANK.length : i; };
+  const byTarget = (a: ActiveRow, b: ActiveRow) =>
+    pRank(a.priority) - pRank(b.priority) || hRank(a.health) - hRank(b.health) || (a.progress ?? 101) - (b.progress ?? 101) || (a.target || "9999").localeCompare(b.target || "9999") || a.name.localeCompare(b.name);
+  const activeGroups: ActiveGroup[] = [];
+  const opRows = activeAll.filter(isOp).map(activeRow).sort(byTarget);
+  const projTypes = Array.from(new Set(activeP.map(typeOf)));
+  projTypes.sort((a, b) => (a === "No type" ? 1 : 0) - (b === "No type" ? 1 : 0) || activeP.filter((p) => typeOf(p) === b).length - activeP.filter((p) => typeOf(p) === a).length || a.localeCompare(b));
+  for (const t of projTypes) activeGroups.push({ label: t, operational: false, rows: activeP.filter((p) => typeOf(p) === t).map(activeRow).sort(byTarget) });
+  // Ongoing containers go last: they are listed but not counted as projects.
+  if (opRows.length) activeGroups.push({ label: "Ongoing containers", operational: true, rows: opRows });
+  // Talk track (Sandra 2026-10-13): capture WHY a project is off track,
+  // overdue or at risk -- extension reasons, project notes, scope added after
+  // Start Project, late tasks -- so the presenter can explain each one.
+  const ATTN = new Set(["Overdue", "Off track", "At risk", "Schedule review"]);
+  const attnRows = activeGroups.flatMap((g) => g.rows).filter((r) => ATTN.has(r.health) && r.id);
+  if (attnRows.length) {
+    const ids = attnRows.map((r) => r.id as string);
+    const [bl2, ext2, notes2] = await Promise.all([
+      supabase.from("project_baselines").select("project_id,captured_at,task_count").in("project_id", ids),
+      supabase.from("extension_requests").select("project_id,reason_category,reason_notes,status,created_at").in("project_id", ids).order("created_at", { ascending: false }),
+      supabase.from("project_notes").select("project_id,body,created_at").in("project_id", ids).order("created_at", { ascending: false }),
+    ]);
+    const base2 = new Map(((bl2.data as { project_id: string; captured_at: string; task_count: number }[]) ?? []).map((b) => [b.project_id, b]));
+    const ext2r = (ext2.data as { project_id: string; reason_category: string | null; reason_notes: string | null; status: string | null; created_at: string }[]) ?? [];
+    const notes2r = (notes2.data as { project_id: string; body: string | null; created_at: string }[]) ?? [];
+    const clip = (x: string, n = 110) => { const t = x.replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+    for (const r of attnRows) {
+      const pid = r.id as string;
+      const pl = leaf.filter((t) => t.project_id === pid && t.status !== "Cancelled");
+      const late = pl.filter((t) => t.status !== "Done" && t.current_due_date && d10(t.current_due_date) < todayIso)
+        .sort((a, b) => d10(a.current_due_date).localeCompare(d10(b.current_due_date)));
+      const b = base2.get(pid);
+      const added = b ? pl.filter((t) => t.created_at && t.created_at > b.captured_at) : [];
+      const addedH = added.reduce((n, t) => n + (Number(t.estimated_hours) || 0), 0);
+      const e = ext2r.find((x) => x.project_id === pid);
+      const n = notes2r.find((x) => x.project_id === pid);
+      const parts: string[] = [];
+      if (late.length) parts.push(`${plural(late.length, "task")} past due (${late.slice(0, 2).map((t) => `${clip(t.name, 45)}, due ${md(t.current_due_date)}`).join("; ")}${late.length > 2 ? "; …" : ""})`);
+      if (added.length) parts.push(`${plural(added.length, "task")} (${round1(addedH)}h) added after Start Project`);
+      if (r.moved > 0) parts.push(`target ${r.moved} working days past the ${md(r.committed)} commitment`);
+      if (e) parts.push(`extension ${e.status ?? "requested"} ${md(localDay(e.created_at))}: ${e.reason_category ?? "no reason"}${e.reason_notes ? ` — “${clip(e.reason_notes)}”` : ""}`);
+      if (n?.body) parts.push(`latest note ${md(localDay(n.created_at))}: “${clip(n.body)}”`);
+      if (r.health === "Schedule review") parts.push("dates need re-baselining after resume");
+      r.why = parts.length ? parts.join("; ") : "no reason logged in Tempo yet — ask the owner before the meeting";
+    }
+  }
+  // Sandra 2026-10-13: KPI cards + category doughnut count real projects only
+  // (Internal Development, Operations, ...), not ongoing containers.
+  const catCount = new Map<string, number>();
+  for (const g of activeGroups) if (!g.operational) for (const r of g.rows) catCount.set(r.category, (catCount.get(r.category) ?? 0) + 1);
+  const catSorted = Array.from(catCount.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([label, count]) => ({ label, count }));
+  const categories: WeeklyReportData["activeList"]["categories"] = catSorted.length > 6
+    ? [...catSorted.slice(0, 5), { label: "Other", count: catSorted.slice(5).reduce((n, c) => n + c.count, 0), members: catSorted.slice(5) }]
+    : catSorted;
+  const activeList = { total: activeAll.length, operational: opRows.length, project: activeP.length, overdue: overdueP.length, groups: activeGroups, categories };
+
   const notes: WeeklyReportData["notes"] = {
     cover: `Report week: ${md(week.start)} – ${md(week.end)} (Mon–Fri). "This week" = ${md(thisWeek.start)} – ${md(thisWeek.end)}. Generated ${md(todayIso)} from Tempo; health and paused figures are as of the generation date.`,
     glance: [
@@ -648,7 +762,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       `All paused projects (${pausedNowP.length}):`, bl(pausedNotes(pausedNowP)),
     ].join("\n"),
     portfolio: [
-      `Total year to date = projects completed ${md(ytdStart)} – ${md(ytdEnd)} + projects open today that started (or were planned to start) by ${md(ytdEnd)} (Cancelled excluded). Same rule as the Executive Dashboard's Total Projects.`,
+      `Total since ${md(ytdStart)} (Tempo data starts Aug 2026) = projects completed ${md(ytdStart)} – ${md(ytdEnd)} + projects open today (Cancelled excluded). All counts are as of ${md(ytdEnd)}, the same moment as the Health and Active Projects slides.`,
       `Total ${yCompleted + yActive + yOpActive + yOther} = ${yCompleted} completed + ${yActive} active projects + ${yOpActive} Training Delivery + ${yOther} not started or paused.`,
       `Active projects (${yActive}) = In Progress project work as of ${md(todayIso)} — the same ${yActive} on the Health donut:`, bl(activeP.map((p) => `${p.name} (owner ${who(p.owner_id)})`)),
       `${opLabel} (${yOpActive}) = ongoing projects kept open while work comes in (Training Delivery sessions${opLabel === "Ongoing" ? " and ongoing containers such as revision buckets" : ""}); health is always "Ongoing":`, bl(opActive.map((p) => p.name)),
@@ -702,6 +816,30 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       tCancelled.length ? `Cancelled last week (${tCancelled.length}):\n${bl(tCancelled.map((t) => `${t.name} — ${who(t.assignee_id)}${t.cancellation_reason ? `; reason: ${t.cancellation_reason}` : ""}`))}` : "",
     ].filter(Boolean).join("\n"),
     appendix: `All projects to date (excluding Cancelled) by Project Type, Planned vs Ad Hoc.${overall.untyped ? ` ${overall.untyped} project(s) have no Project Type yet: ${live.filter((p) => typeOf(p) === "No type").map((p) => p.name).slice(0, 8).join(", ")}.` : ""}`,
+    activeList: (() => {
+      const all = activeGroups.filter((g) => !g.operational).flatMap((g) => g.rows);
+      const other = categories.find((c) => c.members);
+      const attn = all.filter((r) => ATTN.has(r.health));
+      const onTrack = all.filter((r) => r.health === "On track").length;
+      const cats = new Map<string, number>();
+      all.forEach((r) => cats.set(r.category, (cats.get(r.category) ?? 0) + 1));
+      const topCats = Array.from(cats.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([c, n]) => `${c} (${n})`);
+      return [
+        "TALK TRACK",
+        `- We have ${plural(all.length, "active project")}: ${activeGroups.filter((g) => !g.operational).map((g) => `${g.rows.length} ${g.label}`).join(", ")}.${opRows.length ? ` On top of that, ${plural(opRows.length, "ongoing container")} (${listNames(opRows.map((r) => r.name))}) ${opRows.length === 1 ? "stays" : "stay"} open for recurring work and ${opRows.length === 1 ? "isn't" : "aren't"} counted as projects.` : ""}`,
+        other?.members ? `- "Other" in the category chart = ${listNames(other.members.map((m) => `${m.label} (${m.count})`))}.` : "",
+        topCats.length ? `- Most of the work is in ${listNames(topCats)}.` : "",
+        `- ${onTrack} ${onTrack === 1 ? "is" : "are"} on track; ${attn.length ? `${attn.length} need${attn.length === 1 ? "s" : ""} attention — I'll walk through those.` : "nothing needs escalation this week."}`,
+        (() => { const hi = all.filter((r) => r.priority === "High"); const hiAttn = hi.filter((r) => ATTN.has(r.health)); return hi.length ? `- ${plural(hi.length, "High-priority project")}${hiAttn.length ? `; ${hiAttn.length} of them need${hiAttn.length === 1 ? "s" : ""} attention (${listNames(hiAttn.map((r) => r.name))}).` : ", all on track."}` : ""; })(),
+        (() => { const np = all.filter((r) => r.priority === "—").length; return np ? `- ${plural(np, "project")} ${np === 1 ? "has" : "have"} no Priority set yet; ${np === 1 ? "it's" : "they're"} listed last on ${np === 1 ? "its" : "their"} slide.` : ""; })(),
+        "- Each Project Type has its own slide, sorted by Priority (High first), then Health (needs attention first), then Progress (furthest behind first), then target date.",
+        attn.length ? "\nNEEDS ATTENTION — why" : "",
+        ...attn.map((r) => `- ${r.name} (${r.priority === "—" ? "no priority" : `${r.priority} priority`}, ${r.health}, ${r.progress ?? "–"}%, target ${md(r.target)}): ${r.why ?? ""}`),
+        "\nDEFINITIONS",
+        "- Progress = Actual Progress in Tempo (hours-weighted task completion). Target = Forecast End (latest task due date after approved extensions, never earlier than the End Date); +Nd = working days past the date committed at Start Project.",
+        "- Health: On track = within 10 pts of where progress should be today; At risk = 11–20 pts behind; Off track = more than 20 pts behind; Overdue = past target date and not finished; Done · close pending = all tasks done, project not closed yet.",
+      ].filter(Boolean).join("\n");
+    })(),
   };
 
   return {
@@ -727,6 +865,7 @@ export async function loadWeeklyReport(monday: string): Promise<WeeklyReportData
       thisPlanned: team.tp, thisCap: team.tc, nextPlanned: team.np, nextCap: team.nc,
     },
     overall,
+    activeList,
   };
 }
 function round1(n: number) { return Math.round(n * 10) / 10; }
