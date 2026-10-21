@@ -945,7 +945,7 @@ export default function WbsPlanning() {
   // WBS UI Refresh 2.0: project details fold behind the summary strip; one Add task menu; phase row menus.
   const [wbsDetailsOpen, setWbsDetailsOpen] = useState(false);
   // 2026-10-22 (Sandra): after the first save, ask how the plan will be built.
-  const [planChoiceOpen, setPlanChoiceOpen] = useState(false);
+  const [planChoiceOpen, setPlanChoiceOpen] = useState<false | "choose" | "phases">(false);
   const [wbsAddMenu, setWbsAddMenu] = useState<{ x: number; y: number } | null>(null);
   const [wbsPhaseMenu, setWbsPhaseMenu] = useState<{ key: string; x: number; y: number } | null>(null);
   function clearWbsFilters() {
@@ -4168,7 +4168,7 @@ export default function WbsPlanning() {
         .eq("id", project.id);
       if (!scopingModeError && project.is_unsaved) {
         setProject((prev) => (prev ? { ...prev, is_unsaved: false } : prev));
-        if (isLifecycle && !isSessionProject && !project.is_operational) setPlanChoiceOpen(true);
+        if (isLifecycle && !isSessionProject && !project.is_operational) setPlanChoiceOpen("choose");
       }
       if (scopingModeError) {
         await alert({
@@ -6056,15 +6056,39 @@ export default function WbsPlanning() {
       {dialog}
       {checklistDialog}
       {assigneePicker.element}
-      {planChoiceOpen && (
+      {planChoiceOpen === "phases" && (
+        <Modal title="Which phases does this project need?" onClose={() => setPlanChoiceOpen(false)} width={520}>
+          <div style={{ display: "grid", gap: 10, fontSize: 12.5 }}>
+            <div style={{ color: "var(--muted)" }}>
+              Tick the phases this project will go through. You can change them on the WBS (phase ⋯ menu) until Start Project, when they lock.
+            </div>
+            {lifecyclePhases.map((ph) => {
+              const m = milestones.find((x) => x.phase_key === ph.key);
+              if (!m) return null;
+              const c = PHASE_COLORS[ph.key] ?? PHASE_COLORS.analysis;
+              return (
+                <label key={ph.key} className="wbs-plan-phase" style={{ borderColor: m.is_included ? c.border : undefined, background: m.is_included ? c.bg : undefined }}>
+                  <input type="checkbox" checked={m.is_included} onChange={() => void togglePhaseIncluded(m)} style={{ accentColor: c.fg }} />
+                  <span style={{ fontWeight: 700, color: m.is_included ? c.fg : "var(--muted)" }}>{ph.label}</span>
+                  <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--muted)" }}>◆ {m.name}</span>
+                </label>
+              );
+            })}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" className="btn-primary" onClick={() => setPlanChoiceOpen(false)}>Done</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {planChoiceOpen === "choose" && (
         <Modal title="How do you want to plan this project?" onClose={() => setPlanChoiceOpen(false)} width={520}>
           <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
             <div style={{ color: "var(--muted)" }}>
               Either way, the project runs through the same phases and starts with Analysis &amp; Scoping. This only sets how the WBS is laid out; you can switch any time with <strong>Group by</strong>.
             </div>
-            <button type="button" className="wbs-plan-choice" onClick={() => { setWbsGroupMode("phase"); setPlanChoiceOpen(false); }}>
+            <button type="button" className="wbs-plan-choice" onClick={() => { setWbsGroupMode("phase"); setPlanChoiceOpen("phases"); }}>
               <strong>By phase</strong>
-              <span>Add tasks phase by phase. Best for a single course or a small project.</span>
+              <span>Choose the phases this project needs, then add tasks phase by phase. Best for a single course or a small project.</span>
             </button>
             <button type="button" className="wbs-plan-choice" onClick={() => { setWbsGroupMode("module"); setPlanChoiceOpen(false); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); }}>
               <strong>By module</strong>

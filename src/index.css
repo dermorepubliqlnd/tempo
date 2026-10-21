@@ -1975,3 +1975,4 @@ mark.kb-mark { background: #fff3c4; color: inherit; padding: 0 1px; border-radiu
 .wbs-plan-choice:hover, .wbs-plan-choice:focus-visible { border-color: var(--accent); background: var(--accent-bg); outline: none; }
 .wbs-plan-choice strong { font-size: 13px; color: var(--navy); }
 .wbs-plan-choice span { font-size: 12px; color: var(--muted); line-height: 1.45; }
+.wbs-plan-phase { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; }
