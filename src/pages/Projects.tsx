@@ -5546,19 +5546,22 @@ export default function Projects() {
         // 2026-10-14 (Sandra): shown as "Next step" -- the action itself
         // (a button) instead of an "Action needed" pill, on new projects.
         key: "readiness",
-        label: "Next step",
+        label: "Next action",
         defaultWidth: 240,
         maxWidth: 360,
         render: (t) => {
           const isNew = r1ProjectIds.has(t.project_id);
           // A finished hand-off shows where the work is now.
+          // 2026-10-22 (Sandra): show only what concerns the person looking --
+          // their own next action. Other people's tasks stay blank.
+          const isMine = !!t.assignee_id && t.assignee_id === me?.id;
+          const blank = <span style={{ color: "var(--muted)" }}>—</span>;
           if (t.status === "Done" && isNew) {
-            const kind = reviewStepKind(t);
-            if (kind) return <span className="status-pill success">{kind === "approve" ? "Approved" : "QA passed"}</span>;
+            if (!isMine || reviewStepKind(t)) return blank;
             const open = reviewersOf(t).filter((x) => x.status !== "Done");
             if (open.length) {
               const who = people.find((p) => p.id === open[0].assignee_id)?.name ?? open[0].name;
-              return <span style={{ color: "var(--muted)", fontSize: 12 }} title={open.map((x) => x.name).join("\n")}>In review · {who}{open.length > 1 ? ` (+${open.length - 1})` : ""}</span>;
+              return <span style={{ color: "var(--muted)", fontSize: 12 }} title={open.map((x) => x.name).join("\n")}>With {who}{open.length > 1 ? ` (+${open.length - 1})` : ""}</span>;
             }
           }
           if (statusGroupOf(TASK_STATUS_GROUPED, t.status) === "complete" || statusGroupOf(TASK_STATUS_GROUPED, t.status) === "cancelled") return <span style={{ color: "var(--muted)" }}>—</span>;
@@ -5573,8 +5576,8 @@ export default function Projects() {
           // predecessor was sent back waits again, even if it was already
           // In Progress -- no Approve while the work behind it is reopened.
           if (!r || (r.state === "action" && !(isNew && r.waitingOn.length > 0))) {
-            if (!isNew) return <span className="status-pill success">Action needed</span>;
-            if (!isLeafTask(t)) return <span style={{ color: "var(--muted)", fontSize: 12 }} title="Finish the sub-tasks; this row follows them.">In sub-tasks</span>;
+            if (!isNew) return isMine ? <span className="status-pill success">Action needed</span> : blank;
+            if (!isLeafTask(t) || !isMine) return blank;
             const mine = canActOnTask(t);
             const who = people.find((p) => p.id === t.assignee_id)?.name ?? "Unassigned";
             // Returned for revision: resubmit, with the reviewer's comment.
@@ -5608,9 +5611,9 @@ export default function Projects() {
               );
             }
             if (t.status !== "In Progress") {
-              return <span style={{ color: "var(--accent)", fontSize: 12, fontWeight: 600 }} title="Starts automatically when time is logged on this task.">{t.assignee_id && t.assignee_id === me?.id ? "Ready · your turn" : `Ready · ${who}`}</span>;
+              return <span style={{ color: "var(--accent)", fontSize: 12, fontWeight: 600 }} title="Starts automatically when you log time on this task.">Ready</span>;
             }
-            if (!mine) return <span style={{ color: "var(--muted)", fontSize: 12 }}>In progress · {who}</span>;
+            if (!mine) return blank;
             const kind = reviewStepKind(t);
             if (kind) {
               return (
@@ -5639,11 +5642,13 @@ export default function Projects() {
               </button>
             );
           }
-          const label = waitingOnLabel(r, (id) => (id ? people.find((p) => p.id === id)?.name ?? null : null));
+          if (!isMine || !isLeafTask(t)) return blank;
           const exp = expectedUnlockDate(r);
+          const first = r.waitingOn.at(0);
+          const whoWait = first?.assigneeId ? people.find((p) => p.id === first.assigneeId)?.name : null;
           return (
-            <span className="status-pill neutral" title={`Waiting on: ${r.waitingOn.map((w) => w.name).join(", ")}${exp ? `\nExpected by ${formatDate(exp)}` : ""}`} style={{ cursor: "help" }}>
-              Waiting · {label}
+            <span style={{ color: "var(--muted)", fontSize: 12 }} title={`Waiting on: ${r.waitingOn.map((w) => w.name).join(", ")}${whoWait ? ` (${whoWait})` : ""}${exp ? `\nExpected by ${formatDate(exp)}` : ""}`}>
+              Waiting on {first?.name ?? "an earlier task"}{r.waitingOn.length > 1 ? ` (+${r.waitingOn.length - 1})` : ""}
             </span>
           );
         },
