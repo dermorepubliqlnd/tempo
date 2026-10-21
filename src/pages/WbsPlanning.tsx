@@ -4657,11 +4657,11 @@ export default function WbsPlanning() {
     if (!isDraftProject) {
       const label = lifecyclePhases.find((x) => x.key === m.phase_key)?.label ?? "this phase";
       const ok = await confirm({
-        title: next ? `Bring back ${label}?` : `Skip ${label}?`,
+        title: next ? `Add ${label} to this project?` : `Remove ${label} from this project?`,
         message: next
-          ? `${label} and its milestone (${m.name}) come back into this project's plan. The change is recorded in the Audit Trail.`
-          : `${label} and its milestone (${m.name}) are taken out of this project's plan. The change is recorded in the Audit Trail.`,
-        confirmLabel: next ? "Bring back phase" : "Skip phase",
+          ? `${label} and its milestone (${m.name}) are added to this project's plan. The change is recorded in the Audit Trail.`
+          : `${label} and its milestone (${m.name}) are removed from this project's plan. The change is recorded in the Audit Trail.`,
+        confirmLabel: next ? "Add phase" : "Remove phase",
       });
       if (!ok) return;
     }
@@ -4796,7 +4796,7 @@ export default function WbsPlanning() {
               type="button"
               disabled={!editable}
               onClick={() => void togglePhaseIncluded(m)}
-              title={editable ? (m.is_included ? "Click to skip this phase for this project" : "Click to include this phase") : m.is_included ? (current ? "Current phase" : "") : "Skipped for this project"}
+              title={editable ? (m.is_included ? "Click to skip this phase for this project" : "Click to include this phase") : m.is_included ? (current ? "Current phase" : "") : "Not included in this project"}
               style={{
                 display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600,
                 border: `1px ${m.is_included ? "solid" : "dashed"} ${m.is_included ? c.fg : "#cbd5e1"}`,
@@ -4923,7 +4923,7 @@ export default function WbsPlanning() {
                 <span className="wbs-phase-chev" aria-hidden="true" />
                 <span className="wbs-phase-num" style={{ background: "#cbd5e1" }}>{num}</span>
                 <span className="wbs-phase-name off">{it.label}</span>
-                <span className="wbs-phase-meta">Skipped for this project</span>
+                <span className="wbs-phase-meta">Not included in this project</span>
                 <span className="wbs-phase-ms off"><span className="wbs-ms-diamond" />{pm?.name}</span>
                 {canEditWbs && canManageWbs && pm ? (
                   <button type="button" className="wbs-phase-more" aria-label={`${it.label} actions`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setWbsPhaseMenu({ key: it.key, x: r.right, y: r.bottom + 4 }); }}>
@@ -5079,7 +5079,7 @@ export default function WbsPlanning() {
     dependency_changed: "Dependency changed",
     assignee_changed: "Assignee changed",
     type_changed: "Work / Output Type changed",
-    phase_changed: "Phase included / skipped",
+    phase_changed: "Phase added / removed",
   };
   function taskChangeKind(c: RevisionChangeRow): keyof typeof CHANGE_DOT_COLOR | null {
     if (c.change_type === "task_added") return "task_added";
@@ -6318,11 +6318,11 @@ export default function WbsPlanning() {
               {canToggle && (
                 <>
                   <div className="wbs-menu-sep" />
-                  {item("toggle", on ? "Skip this phase for this project" : (isDraftProject ? "Include this phase" : "Bring back this phase"), () => void togglePhaseIncluded(pm), isDraftProject ? undefined : "Recorded in the Audit Trail.")}
+                  {item("toggle", on ? "Remove phase from project" : "Add phase to project", () => void togglePhaseIncluded(pm), isDraftProject ? undefined : "Recorded in the Audit Trail.")}
                 </>
               )}
-              {on && key !== "analysis" && !scopeConfirmed && <div className="wbs-menu-note">Tasks open once Analysis &amp; Scoping is 100% done and signed off.{canToggle ? " You can still skip this phase now." : ""}</div>}
-              {!on && !canToggle && <div className="wbs-menu-note">Skipped for this project. The project owner, their supervisor or Full Access can bring it back.</div>}
+              {on && key !== "analysis" && !scopeConfirmed && <div className="wbs-menu-note">Tasks open once Analysis &amp; Scoping is 100% done and signed off.{canToggle ? " You can still remove this phase now." : ""}</div>}
+              {!on && !canToggle && <div className="wbs-menu-note">Not included in this project. The project owner, their supervisor or Full Access can add it.</div>}
             </div>
           </>,
           document.body
