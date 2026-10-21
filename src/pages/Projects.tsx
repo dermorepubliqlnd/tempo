@@ -79,7 +79,7 @@ import { useTimeTracking } from "../lib/TimeTrackingContext";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
 import { Play, Square, Info } from "lucide-react";
 import { isLifecycleProject, lifecycleLabelForProjectPhase } from "../lib/lifecycle";
-import { computeReadiness, waitingOnLabel, expectedUnlockDate, needsDependencyLink, isR1Project, looksLikeReviewTask, reviewKindOf, type ReadinessDep } from "../lib/taskReadiness";
+import { computeReadiness, waitingOnLabel, expectedUnlockDate, needsDependencyLink, isR1Project, stepKindOf, isReviewStep, workTypeNameMap, type ReadinessDep } from "../lib/taskReadiness";
 import {
   PROJECT_EFFORT_LEVEL_OPTIONS,
   PROJECT_EFFORT_LEVEL_TONES,
@@ -2010,14 +2010,15 @@ export default function Projects() {
     t.assignee_id === me?.id || me?.access_level === "full" || projects.find((p) => p.id === t.project_id)?.owner_id === me?.id;
   const isLeafTask = (t: TaskRow) => !tasks.some((x) => x.parent_task_id === t.id && !x.is_archived);
   /** Open review tasks that wait on this task. */
+  const wtNames = useMemo(() => workTypeNameMap(workTypes), [workTypes]);
   const reviewersOf = (t: TaskRow) =>
     taskDeps
       .filter((d) => d.depends_on_task_id === t.id)
       .map((d) => tasks.find((x) => x.id === d.task_id))
-      .filter((x): x is TaskRow => !!x && !x.is_archived && x.status !== "Cancelled" && looksLikeReviewTask(x.name));
+      .filter((x): x is TaskRow => !!x && !x.is_archived && x.status !== "Cancelled" && isReviewStep(x, wtNames));
   /** "qa" | "approve" when this task is itself a review step with a Depends-on link. */
   const reviewStepKind = (t: TaskRow) =>
-    r1ProjectIds.has(t.project_id) && isLeafTask(t) && taskDeps.some((d) => d.task_id === t.id) ? reviewKindOf(t.name) : null;
+    r1ProjectIds.has(t.project_id) && isLeafTask(t) && taskDeps.some((d) => d.task_id === t.id) ? stepKindOf(t, wtNames) : null;
   const isHandoffTask = (t: TaskRow) => r1ProjectIds.has(t.project_id) && isLeafTask(t) && !reviewStepKind(t) && reviewersOf(t).length > 0;
   const handoffToday = () => toISOWorkingDay(new Date());
   // 2026-10-14 (Sandra: "someone can re-open a done and signed-off task"):
@@ -2068,7 +2069,7 @@ export default function Projects() {
     setReturnDialog(null);
     loadAll();
   }
-  const needsLink = (t: TaskRow) => r1ProjectIds.has(t.project_id) && needsDependencyLink(t, taskDeps, tasks.some((x) => x.parent_task_id === t.id && !x.is_archived));
+  const needsLink = (t: TaskRow) => r1ProjectIds.has(t.project_id) && needsDependencyLink(t, taskDeps, tasks.some((x) => x.parent_task_id === t.id && !x.is_archived), wtNames);
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? "—";
   const taskName = (id: string | null) => tasks.find((t) => t.id === id)?.name ?? "—";
   const isProjectOwner = (projectId: string) => projects.find((p) => p.id === projectId)?.owner_id === me?.id;
@@ -5667,7 +5668,7 @@ export default function Projects() {
         render: (t) => ((t.revision_count ?? 0) > 0 ? <span className="status-pill warning">{t.revision_count}</span> : <span style={{ color: "var(--muted)" }}>0</span>),
       },
     ],
-    [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents, taskNoteCounts, routing, autoOn, readinessById, lastReturnByTask, taskDeps, r1ProjectIds]
+    [people, projects, me, timeEntries, tasks, running, timerBusy, collapsedParents, taskNoteCounts, routing, autoOn, readinessById, lastReturnByTask, taskDeps, r1ProjectIds, wtNames]
   );
 
   // Board cards get their own name renderer rather than reusing the table

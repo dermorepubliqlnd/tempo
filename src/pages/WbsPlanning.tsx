@@ -23,7 +23,7 @@ import { formatDate } from "../lib/formatDate";
 import { rollupHoursFor, formatHours, type TimeEntryRow } from "../lib/timeTracking";
 import { addDays, buildHolidaySet, isWorkingDay, parseLocalDate, toISO, workingDaysBetween, type HolidaySet } from "../lib/workingDays";
 import { fullCapacityScenario, capacityBasedScenario, packFullCapacityQueue, FULL_CAPACITY_DAILY_HOURS, type FullCapacityQueueTask } from "../lib/taskScheduling";
-import { isR1Project, reviewTasksMissingDependency, looksLikeReviewTask } from "../lib/taskReadiness";
+import { isR1Project, reviewTasksMissingDependency, isReviewStep, workTypeNameMap, QA_WORK_TYPE, SIGNOFF_WORK_TYPE } from "../lib/taskReadiness";
 import { FALLBACK_LIFECYCLE_PHASES, PHASE_COLORS, lifecycleStartIssues, type LifecyclePhase, type ProjectMilestone, type MilestoneDependency } from "../lib/lifecycle";
 import { buildForwardSchedule, type SchedTaskRow, type SchedProjectRow, type SchedAvailabilityRow } from "../lib/capacityScheduler";
 import { TASK_EFFORT_OPTIONS, TASK_EFFORT_DEFAULT_TONES, TASK_STATUS_GROUPED, statusGroupOf, PROJECT_EFFORT_LEVEL_OPTIONS, PROJECT_PRIORITY_OPTIONS, effortLevelLabel } from "../lib/notionOptions";
@@ -621,6 +621,8 @@ export default function WbsPlanning() {
   const [moduleDlg, setModuleDlg] = useState<{ name: string; maker: string; dev?: string; busy: boolean; error: string } | null>(null);
   // Layer 1 (2026-10-22, Sandra: "bullet proof" reviews): the owner picks what
   // happens after a task; Tempo adds correctly named, linked review steps.
+  // Guard rail (2026-10-21): a task tagged Quality Assurance / Sign-Off must say what it reviews.
+  const [reviewLinkDlg, setReviewLinkDlg] = useState<{ taskId: string; patch: Partial<TaskRow>; kind: string; choice: string } | null>(null);
   const [reviewDlg, setReviewDlg] = useState<{ taskId: string; mode: "review" | "review_signoff"; reviewer: string; approver: string; busy: boolean; error: string } | null>(null);
   const assigneePicker = useAssigneePicker(people.filter((p) => p.is_active));
   // phase190b: on ongoing containers, non-owners without Full Access can add
@@ -2548,7 +2550,7 @@ export default function WbsPlanning() {
       pastDated: pastDatedOpenTasks().map((t) => t.name || "Untitled task"),
       hasUnsavedChanges: forApprover ? false : hasUnsavedChanges,
       forApprover,
-      reviewTasksMissingDependency: isR1Project(project) ? reviewTasksMissingDependency(orderedTasks, dependencies) : [],
+      reviewTasksMissingDependency: isR1Project(project) ? reviewTasksMissingDependency(orderedTasks, dependencies, workTypeNameMap(workTypes)) : [],
       extraGroups: forApprover ? [] : lifecycleChecklistGroups(),
     });
   }
@@ -4784,10 +4786,23 @@ export default function WbsPlanning() {
     return dependencies
       .filter((d) => d.depends_on_task_id === taskId)
       .map((d) => tasks.find((x) => x.id === d.task_id))
-      .filter((x): x is TaskRow => !!x && !x.is_archived && x.status !== "Cancelled" && looksLikeReviewTask(x.name));
+      .filter((x): x is TaskRow => !!x && !x.is_archived && x.status !== "Cancelled" && isReviewStep(x, workTypeNameMap(workTypes)));
   }
   function isReviewStepTask(t: TaskRow) {
-    return looksLikeReviewTask(t.name) && dependencies.some((d) => d.task_id === t.id);
+    return isReviewStep(t, workTypeNameMap(workTypes)) && dependencies.some((d) => d.task_id === t.id);
+  }
+  // Tasks a review / sign-off can point at: same project, open leaf tasks, not itself.
+  function reviewTargetsFor(taskId: string) {
+    return orderedTasks.filter((x) => x.id !== taskId && !x.is_archived && x.status !== "Cancelled" && !hasChildren(x.id));
+  }
+  async function confirmReviewLink() {
+    if (!reviewLinkDlg) return;
+    const { taskId, patch, choice } = reviewLinkDlg;
+    if (!choice) return;
+    setReviewLinkDlg(null);
+    const blocked = isRelatedTask(taskId, choice) || wouldCreateDependencyCycle(taskId, choice);
+    await addDependency(taskId, choice); // explains a blocked link itself
+    if (!blocked) saveTaskField(taskId, patch);
   }
   function openReviewDlg(t: TaskRow) {
     if (!project) return;
@@ -4817,15 +4832,16 @@ export default function WbsPlanning() {
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     const lo = t.sort_order ?? Date.now();
     const hi = siblings[0]?.sort_order ?? lo + 1000;
-    const qaWt = workTypes.find((w) => w.name === "Quality Assurance")?.id ?? null;
+    const qaWt = workTypes.find((w) => w.name === QA_WORK_TYPE)?.id ?? null;
+    const soWt = workTypes.find((w) => w.name === SIGNOFF_WORK_TYPE)?.id ?? qaWt;
     const qaOut = outputTypes.find((o) => o.name === "QA Record")?.id ?? null;
     const noOut = outputTypes.find((o) => o.name === "No Deliverable/Activity Only")?.id ?? null;
     const phase = taskPhaseById.get(t.parent_task_id ?? t.id) ?? t.wbs_phase ?? null;
     const start = (t.start_date_standard ?? t.start_date_full ?? project.start_date ?? toISO(new Date())).slice(0, 10);
     const due = t.current_due_date ?? project.end_date ?? start;
     const steps = [
-      { name: `Review · ${baseName}`, assignee: reviewDlg.reviewer || null, hours: 1, out: qaOut, count: 1 },
-      ...(withSignOff ? [{ name: `Sign-Off · ${baseName}`, assignee: reviewDlg.approver || null, hours: 0.5, out: noOut, count: 0 }] : []),
+      { name: `Review · ${baseName}`, assignee: reviewDlg.reviewer || null, hours: 1, out: qaOut, count: 1, wt: qaWt },
+      ...(withSignOff ? [{ name: `Sign-Off · ${baseName}`, assignee: reviewDlg.approver || null, hours: 0.5, out: noOut, count: 0, wt: soWt }] : []),
     ];
     const created: string[] = [];
     for (let i = 0; i < steps.length; i++) {
@@ -4840,7 +4856,7 @@ export default function WbsPlanning() {
         start_full_auto: true, start_standard_auto: true,
         original_due_date: due, current_due_date: due,
         estimated_hours: st.hours,
-        work_type_id: qaWt,
+        work_type_id: st.wt,
         output_type_id: st.out,
         output_count: st.count,
         sort_order: lo + ((hi - lo) * (i + 1)) / (steps.length + 1),
@@ -6309,6 +6325,32 @@ export default function WbsPlanning() {
       {dialog}
       {checklistDialog}
       {assigneePicker.element}
+      {reviewLinkDlg && (() => {
+        const rt = tasks.find((x) => x.id === reviewLinkDlg.taskId);
+        const targets = reviewTargetsFor(reviewLinkDlg.taskId);
+        const isSo = reviewLinkDlg.kind === SIGNOFF_WORK_TYPE;
+        const phaseLabel = (id: string) => lifecyclePhases.find((ph) => ph.key === (taskPhaseById.get(id) ?? null))?.label ?? "";
+        return (
+          <Modal title={isSo ? "Which task does this sign off?" : "Which task does this review?"} onClose={() => setReviewLinkDlg(null)} width={460}>
+            <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
+              <div style={{ color: "var(--muted)" }}>
+                <strong style={{ color: "var(--text)" }}>{rt?.name || "This task"}</strong> is set to <strong style={{ color: "var(--text)" }}>{reviewLinkDlg.kind}</strong>. Pick the task it checks. It will wait for that task, and that task's owner gets <strong>Ready for Review</strong> instead of Mark Done.
+              </div>
+              <label style={{ display: "grid", gap: 4 }}>
+                <span style={{ fontWeight: 600 }}>{isSo ? "Signs off" : "Reviews"} <span style={{ color: "var(--danger-text)" }}>*</span></span>
+                <select autoFocus value={reviewLinkDlg.choice} onChange={(e) => setReviewLinkDlg({ ...reviewLinkDlg, choice: e.target.value })} style={{ fontSize: 12.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6 }}>
+                  <option value="">Choose a task…</option>
+                  {targets.map((x) => <option key={x.id} value={x.id}>{phaseLabel(x.id) ? `${phaseLabel(x.id)} › ` : ""}{x.name || "Untitled task"}</option>)}
+                </select>
+              </label>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button className="btn-secondary" onClick={() => setReviewLinkDlg(null)}>Cancel</button>
+                <button className="btn-primary" disabled={!reviewLinkDlg.choice} onClick={() => void confirmReviewLink()}>Link and save</button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
       {reviewDlg && (() => {
         const rt = tasks.find((x) => x.id === reviewDlg.taskId);
         const draftNow = (project?.wbs_status ?? "draft") === "draft";
@@ -8759,11 +8801,16 @@ export default function WbsPlanning() {
                                         (o) => o.is_active && workTypeOutputTypes.some((m) => m.work_type_id === match.id && m.output_type_id === o.id)
                                       )
                                     : [];
-                                  if (onlyOutput.length === 1 && !isParent) {
-                                    saveTaskField(t.id, { work_type_id: match!.id, output_type_id: onlyOutput[0].id });
-                                  } else {
-                                    saveTaskField(t.id, { work_type_id: match?.id ?? null });
+                                  const wtPatch: Partial<TaskRow> = onlyOutput.length === 1 && !isParent
+                                    ? { work_type_id: match!.id, output_type_id: onlyOutput[0].id }
+                                    : { work_type_id: match?.id ?? null };
+                                  // Guard rail: a review / sign-off must say which task it checks.
+                                  const isCheck = match && (match.name === QA_WORK_TYPE || match.name === SIGNOFF_WORK_TYPE);
+                                  if (isCheck && !isParent && isR1Project(project) && !dependencies.some((d) => d.task_id === t.id)) {
+                                    setReviewLinkDlg({ taskId: t.id, patch: wtPatch, kind: match!.name, choice: "" });
+                                    return;
                                   }
+                                  saveTaskField(t.id, wtPatch);
                                 }}
                               />
                             );

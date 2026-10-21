@@ -75,7 +75,7 @@ import { parseLocalDate, calendarDaysBetween } from "../lib/taskTiming";
 // Dashboard.tsx already follows) so this page's numbers can never drift
 // out of sync with what the Projects table itself shows for a project.
 import { wbsStatusMetaFor } from "../lib/wbsStatus";
-import { computeReadiness, waitingOnLabel, expectedUnlockDate, isR1Project, reviewKindOf, looksLikeReviewTask, type ReadinessDep } from "../lib/taskReadiness";
+import { computeReadiness, waitingOnLabel, expectedUnlockDate, isR1Project, stepKindOf, isReviewStep, workTypeNameMap, type ReadinessDep } from "../lib/taskReadiness";
 import { healthOf, actualProgress, countWorkingDays, projectCompletionDate, type ProjectRow, type TaskRow } from "./Projects";
 import {
   createAllocationEngine,
@@ -488,11 +488,18 @@ export default function MyDashboard() {
   // ---- Waiting for you (2026-10-14, Sandra: notifications on the dashboard) ----
   // New projects only. Three lists: reviews / sign-offs that are ready for me,
   // my work sent back For Revision, and my work sitting with a reviewer.
+  // Work Type decides review steps (QA / Sign-Off); names loaded once.
+  const [wtNames, setWtNames] = useState<Map<string, string> | null>(null);
+  useEffect(() => {
+    let off = false;
+    void supabase.from("work_types").select("id,name").then(({ data }) => { if (!off) setWtNames(workTypeNameMap((data as { id: string; name: string }[]) ?? [])); });
+    return () => { off = true; };
+  }, []);
   const waitingForYou = useMemo(() => {
     if (!me) return { toReview: [], sentBack: [], withReviewer: [] } as { toReview: typeof myOpenTasks; sentBack: typeof myOpenTasks; withReviewer: (TaskRow & { reviewer: TaskRow })[] };
     const r1 = new Set(projects.filter((p) => isR1Project(p)).map((p) => p.id));
     const hasPred = (id: string) => taskDeps.some((d) => d.task_id === id);
-    const toReview = myOpenTasks.filter((t) => r1.has(t.project_id) && !isWaiting(t) && hasPred(t.id) && !!reviewKindOf(t.name) && !myParentIds.has(t.id));
+    const toReview = myOpenTasks.filter((t) => r1.has(t.project_id) && !isWaiting(t) && hasPred(t.id) && !!stepKindOf(t, wtNames) && !myParentIds.has(t.id));
     const sentBack = myOpenTasks.filter((t) => r1.has(t.project_id) && (t.revision_count ?? 0) > 0 && t.status === "In Progress" && lastReturn.has(t.id));
     const withReviewer: (TaskRow & { reviewer: TaskRow })[] = [];
     for (const t of tasks) {
@@ -500,12 +507,12 @@ export default function MyDashboard() {
       const rv = taskDeps
         .filter((d) => d.depends_on_task_id === t.id)
         .map((d) => tasks.find((x) => x.id === d.task_id))
-        .find((x) => !!x && looksLikeReviewTask(x.name) && x.status !== "Done" && x.status !== "Cancelled");
+        .find((x) => !!x && isReviewStep(x, wtNames) && x.status !== "Done" && x.status !== "Cancelled");
       if (rv) withReviewer.push({ ...t, reviewer: rv });
     }
     return { toReview, sentBack, withReviewer };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me, projects, myOpenTasks, taskDeps, tasks, lastReturn, readinessById, myParentIds]);
+  }, [me, projects, myOpenTasks, taskDeps, tasks, lastReturn, readinessById, myParentIds, wtNames]);
   const waitingCount = waitingForYou.toReview.length + waitingForYou.sentBack.length;
   const overdueTasks = myActionTasks.filter((t) => isOverdueTask(t, t.project, todayIso, myParentIds.has(t.id)));
   const isPausedTask = (t: { project?: unknown }) => (t.project as PauseProjectInfo | null)?.status === "Paused";
@@ -1545,7 +1552,7 @@ export default function MyDashboard() {
                       <span style={{ color: "var(--muted)" }}>{tid(t)}</span>
                       <span style={{ ...clip, fontWeight: 600 }} title={t.name}>{t.name}</span>
                       <span style={clip} title={t.project?.name ?? ""}>{t.project?.name ?? "—"}</span>
-                      <span style={{ ...clip, color: "var(--muted)" }}>{reviewKindOf(t.name) === "approve" ? "Approve" : "Pass QA"} or send For Revision{pred ? ` · from ${nm(pred.assignee_id)}` : ""}</span>
+                      <span style={{ ...clip, color: "var(--muted)" }}>{stepKindOf(t, wtNames) === "approve" ? "Approve" : "Pass QA"} or send For Revision{pred ? ` · from ${nm(pred.assignee_id)}` : ""}</span>
                     </div>
                   );
                 })}

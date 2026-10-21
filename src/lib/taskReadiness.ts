@@ -36,6 +36,7 @@ export interface ReadinessTask {
   assignee_id: string | null;
   current_due_date?: string | null;
   is_archived?: boolean | null;
+  work_type_id?: string | null;
 }
 
 export interface WaitingOn {
@@ -157,15 +158,43 @@ export function reviewKindOf(name: string | null | undefined): "qa" | "approve" 
   return APPROVE_NAME_RE.test(name as string) ? "approve" : "qa";
 }
 
-/** Names of open review-type leaf tasks with no Depends-on link (Start Project check). */
-export function reviewTasksMissingDependency(tasks: (ReadinessTask & { parent_task_id?: string | null })[], deps: ReadinessDep[]): string[] {
-  const parents = new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
-  return tasks.filter((t) => needsDependencyLink(t, deps, parents.has(t.id))).map((t) => (t.name && t.name.trim() ? t.name : "Untitled task"));
+// 2026-10-21 (Sandra): the Work Type decides the step, not the name.
+//   Quality Assurance -> review (Pass QA), Sign-Off -> approval (Approve),
+//   any other work type -> ordinary work. Tasks with no work type yet fall
+//   back to the name rule above.
+export type WorkTypeNames = ReadonlyMap<string, string> | null | undefined;
+export const QA_WORK_TYPE = "Quality Assurance";
+export const SIGNOFF_WORK_TYPE = "Sign-Off";
+
+export function workTypeNameMap(list: { id: string; name: string }[] | null | undefined): Map<string, string> {
+  return new Map((list ?? []).map((w) => [w.id, w.name]));
 }
 
-export function needsDependencyLink(t: ReadinessTask & { parent_task_id?: string | null }, deps: ReadinessDep[], hasChildren: boolean): boolean {
+export function stepKindOf(t: { name?: string | null; work_type_id?: string | null }, wt: WorkTypeNames): "qa" | "approve" | null {
+  const wtName = t.work_type_id ? wt?.get(t.work_type_id) ?? null : null;
+  if (wtName === SIGNOFF_WORK_TYPE) return "approve";
+  if (wtName === QA_WORK_TYPE) {
+    // Until the Sign-Off work type exists, sign-offs are still tagged QA.
+    const hasSignOff = !!wt && [...wt.values()].includes(SIGNOFF_WORK_TYPE);
+    return !hasSignOff && t.name && APPROVE_NAME_RE.test(t.name) ? "approve" : "qa";
+  }
+  if (wtName) return null;
+  return reviewKindOf(t.name);
+}
+
+export function isReviewStep(t: { name?: string | null; work_type_id?: string | null }, wt: WorkTypeNames): boolean {
+  return !!stepKindOf(t, wt);
+}
+
+/** Names of open review / sign-off leaf tasks with no Depends-on link (Start Project check). */
+export function reviewTasksMissingDependency(tasks: (ReadinessTask & { parent_task_id?: string | null })[], deps: ReadinessDep[], wt?: WorkTypeNames): string[] {
+  const parents = new Set(tasks.filter((t) => t.parent_task_id).map((t) => t.parent_task_id as string));
+  return tasks.filter((t) => needsDependencyLink(t, deps, parents.has(t.id), wt)).map((t) => (t.name && t.name.trim() ? t.name : "Untitled task"));
+}
+
+export function needsDependencyLink(t: ReadinessTask & { parent_task_id?: string | null }, deps: ReadinessDep[], hasChildren: boolean, wt?: WorkTypeNames): boolean {
   if (isFinishedStatus(t.status) || t.is_archived) return false;
   if (hasChildren) return false; // parent rows roll up from their subtasks
-  if (!looksLikeReviewTask(t.name)) return false;
+  if (!isReviewStep(t, wt)) return false;
   return !deps.some((d) => d.task_id === t.id);
 }
