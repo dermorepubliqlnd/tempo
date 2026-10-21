@@ -4471,10 +4471,10 @@ export default function WbsPlanning() {
   const scopeConfirmed = !analysisIncluded || (!!analysisKpi && analysisKpi.total > 0 && analysisKpi.done === analysisKpi.total);
   type WbsItem =
     | { kind: "task"; t: TaskRow & { depth: number } }
-    | { kind: "phase"; key: string; label: string; count: number; hours: number; excluded?: boolean }
+    | { kind: "phase"; key: string; label: string; count: number; hours: number; excluded?: boolean; modules?: number }
     | { kind: "unphased"; count: number }
     | { kind: "milestone"; m: ProjectMilestone }
-    | { kind: "module"; name: string; done: number; total: number; stage: string; hours: number }
+    | { kind: "module"; name: string; done: number; total: number; stage: string; hours: number; phaseKey?: string }
     | { kind: "addmodule" }
     | { kind: "modsection"; count: number };
   // phase194: "Group by Module" -- each module reads top to bottom from design
@@ -4514,57 +4514,36 @@ export default function WbsPlanning() {
       for (const t of unphased) items.push({ kind: "task", t });
     }
     const moduleOf = (t: TaskRow & { depth: number }) => taskModuleById.get(t.depth === 0 ? t.id : t.parent_task_id ?? "") ?? null;
-    let modulesPlaced = false;
-    const heldMilestones: ProjectMilestone[] = [];
-    const placeModules = () => {
-      if (modulesPlaced) return;
-      modulesPlaced = true;
-      const names: string[] = [];
-      for (const t of orderedTasks) {
-        const n = moduleOf(t);
-        if (n && phaseOf(t) && !names.includes(n)) names.push(n);
-      }
-      // 2026-10-22: one header so modules read as Design + Development, not as part of the phase above.
-      if (includedMilestones.some((m) => m.phase_key === "design" || m.phase_key === "development")) items.push({ kind: "modsection", count: names.length });
-      for (const n of names) {
-        const rows = orderedTasks.filter((t) => moduleOf(t) === n && phaseOf(t));
-        const leaves = rows.filter((t) => !(t.depth === 0 && hasChildren(t.id)));
-        const done = leaves.filter((t) => t.status === "Done" || t.status === "Cancelled").length;
-        const next = leaves.find((t) => t.status !== "Done" && t.status !== "Cancelled");
-        const stage = next ? `now in ${next.name.split(" · ").slice(0, next.name.split(" · ").length > 2 ? 2 : 1).join(" · ")}` : "complete";
-        items.push({ kind: "module", name: n, done, total: leaves.length, stage, hours: leaves.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0) });
-        if (wbsFiltersActive || !collapsedPhases.has(`mod:${n}`)) for (const t of rows) items.push({ kind: "task", t });
-      }
-      for (const hm of heldMilestones) if (orderedTasks.some((t) => phaseOf(t) === hm.phase_key)) items.push({ kind: "milestone", m: hm });
-    };
+    // R3 (2026-10-22, Sandra): Design and Development stay separate phases, each
+    // worked module by module -- the ID storyboards a module in Design; once its
+    // storyboard is signed off, the same module moves to Development.
     for (const ph of lifecyclePhases) {
       const m = includedMilestones.find((x) => x.phase_key === ph.key);
       if (!m) {
-        // 2.0: phases switched off for this project stay visible, greyed out.
         if (milestones.some((x) => x.phase_key === ph.key)) items.push({ kind: "phase", key: ph.key, label: ph.label, count: 0, hours: 0, excluded: true });
         continue;
       }
       const moduleable = ph.key === "design" || ph.key === "development";
-      const rows = orderedTasks.filter((t) => phaseOf(t) === ph.key && !(groupByModule && moduleOf(t)));
-      if (groupByModule && moduleable) {
-        // Module tasks show under their module; anything else stays under the phase.
-        if (rows.length) {
-          const lh = rows.filter((t) => !(t.depth === 0 && hasChildren(t.id))).reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
-          items.push({ kind: "phase", key: ph.key, label: ph.label, count: rows.filter((t) => t.depth === 0).length, hours: lh });
-          if (wbsFiltersActive || !collapsedPhases.has(ph.key)) for (const t of rows) items.push({ kind: "task", t });
-        }
-        heldMilestones.push(m);
-        if (ph.key === "development" || !includedMilestones.some((x) => x.phase_key === "development")) placeModules();
-        continue;
-      }
-      if (groupByModule && !modulesPlaced && (ph.key === "delivery" || ph.key === "evaluation")) placeModules();
+      const rows = orderedTasks.filter((t) => phaseOf(t) === ph.key);
       const leafHours = rows.filter((t) => !(t.depth === 0 && hasChildren(t.id))).reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
-      items.push({ kind: "phase", key: ph.key, label: ph.label, count: rows.filter((t) => t.depth === 0).length, hours: leafHours });
-      if (wbsFiltersActive || !collapsedPhases.has(ph.key)) for (const t of rows) items.push({ kind: "task", t });
-      // 2.0: milestone details show under an open phase that has tasks; the name is on the phase row.
-      if (rows.length && !collapsedPhases.has(ph.key)) items.push({ kind: "milestone", m });
+      const names: string[] = [];
+      if (moduleable) for (const t of rows) { const n = moduleOf(t); if (n && !names.includes(n)) names.push(n); }
+      items.push({ kind: "phase", key: ph.key, label: ph.label, count: rows.filter((t) => t.depth === 0).length, hours: leafHours, modules: moduleable ? names.length : undefined });
+      const open = wbsFiltersActive || !collapsedPhases.has(ph.key);
+      if (open) {
+        for (const n of names) {
+          const mrows = rows.filter((t) => moduleOf(t) === n);
+          const leaves = mrows.filter((t) => !(t.depth === 0 && hasChildren(t.id)));
+          const done = leaves.filter((t) => t.status === "Done" || t.status === "Cancelled").length;
+          const next = leaves.find((t) => t.status !== "Done" && t.status !== "Cancelled");
+          const stage = next ? `now: ${next.name.split(" · ").slice(0, next.name.split(" · ").length > 2 ? 2 : 1).join(" · ")}` : "complete";
+          items.push({ kind: "module", name: n, phaseKey: ph.key, done, total: leaves.length, stage, hours: leaves.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0) });
+          if (wbsFiltersActive || !collapsedPhases.has(`mod:${ph.key}:${n}`)) for (const t of mrows) items.push({ kind: "task", t });
+        }
+        for (const t of rows) if (!moduleable || !moduleOf(t)) items.push({ kind: "task", t });
+      }
+      if (rows.length && open) items.push({ kind: "milestone", m });
     }
-    if (groupByModule) placeModules();
     return items;
   })();
   // While filtering: only matching tasks, each under its phase / module
@@ -4761,24 +4740,20 @@ export default function WbsPlanning() {
       );
     }
     if (it.kind === "module") {
-      const key = `mod:${it.name}`;
+      const key = `mod:${it.phaseKey ?? ""}:${it.name}`;
       const collapsed = collapsedPhases.has(key);
-      const fg = "#334155";
+      const c = PHASE_COLORS[it.phaseKey ?? "design"] ?? PHASE_COLORS.design;
       return (
-        <tr key={`lc-mod-${it.name}`}>
-          <td colSpan={WBS_TOTAL_COLS} style={{ padding: 0, background: "#f1f5f9", borderTop: "2px solid #cbd5e1" }}>
-            <div style={{ ...sticky, padding: "7px 10px" }}>
-              <button
-                type="button"
-                onClick={() => setCollapsedPhases((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; })}
-                style={{ border: "none", background: "transparent", cursor: "pointer", color: fg, display: "inline-flex", alignItems: "center", gap: 6, padding: 0 }}
-              >
+        <tr key={`lc-mod-${it.phaseKey}-${it.name}`} className="wbs-module-row">
+          <td colSpan={WBS_TOTAL_COLS} style={{ boxShadow: `inset 3px 0 0 ${c.fg}` }}>
+            <div style={{ ...sticky }} className="wbs-module-inner">
+              <button type="button" className="wbs-phase-chev" aria-expanded={!collapsed} aria-label={`${collapsed ? "Expand" : "Collapse"} ${it.name}`} onClick={() => setCollapsedPhases((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; })} style={{ color: c.fg }}>
                 {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                <strong style={{ fontSize: 13 }}>{it.name}</strong>
               </button>
-              <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                {it.done} of {it.total} done · {it.stage} · {Math.round(it.hours * 10) / 10} est. hrs
-              </span>
+              <span className="wbs-module-tag" style={{ color: c.fg, borderColor: c.border, background: c.bg }}>Module</span>
+              <strong className="wbs-module-name">{it.name}</strong>
+              <span className="wbs-phase-meta">{it.done} of {it.total} done · {Math.round(it.hours * 10) / 10} hrs</span>
+              <span className="wbs-module-stage">{it.stage}</span>
             </div>
           </td>
         </tr>
@@ -4886,7 +4861,15 @@ export default function WbsPlanning() {
               >
                 {it.label}
               </button>
-              <span className="wbs-phase-meta">{locked ? "Opens after Analysis & Scoping" : `${it.count} task${it.count === 1 ? "" : "s"} · ${Math.round(it.hours * 10) / 10} hrs`}</span>
+              <span className="wbs-phase-meta">{locked ? (it.key === "design" ? "Opens when Analysis & Scoping is 100% done and signed off" : "Opens after Analysis & Scoping") : it.modules !== undefined ? `${it.modules} module${it.modules === 1 ? "" : "s"} · ${Math.round(it.hours * 10) / 10} hrs` : `${it.count} task${it.count === 1 ? "" : "s"} · ${Math.round(it.hours * 10) / 10} hrs`}</span>
+              {!locked && it.key === "development" && it.modules === 0 && (
+                <span className="wbs-phase-meta" style={{ fontStyle: "italic" }}>Each module moves here once its storyboard is signed off</span>
+              )}
+              {!locked && it.key === "design" && scopeConfirmed && canEditWbs && canAddTasks && !isSessionProject && (
+                <button type="button" className={(it.modules ?? 0) === 0 ? "btn-primary wbs-mod-add" : "btn-secondary wbs-mod-add"} onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: me?.id ?? "", busy: false, error: "" }); }}>
+                  <Plus size={13} /> {(it.modules ?? 0) === 0 ? "Add your first module" : "Add module"}
+                </button>
+              )}
               {kpi && kpi.total > 0 && (
                 <span className="wbs-phase-pct" title={`${kpi.done} of ${kpi.total} tasks done${kpi.active ? `, ${kpi.active} in progress` : ""}`}>
                   <span className="wbs-phase-pct-bar"><span style={{ width: `${kpi.pct}%`, background: c.fg }} /></span>

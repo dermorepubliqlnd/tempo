@@ -2006,3 +2006,8 @@ mark.kb-mark { background: #fff3c4; color: inherit; padding: 0 1px; border-radiu
 .wbs-phase-row.is-locked .wbs-phase-name span { color: #94a3b8 !important; }
 .wbs-phase-row.is-locked .wbs-phase-num { background: #cbd5e1 !important; }
 .wbs-phase-row.is-locked .wbs-ms-diamond { background: #cbd5e1 !important; }
+.wbs-module-row td { padding: 0 !important; background: #fbfcfe; border-top: 1px solid #eef2f6; }
+.wbs-module-inner { display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 30px; min-height: 34px; }
+.wbs-module-tag { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; border: 1px solid; border-radius: 999px; padding: 1px 7px; }
+.wbs-module-name { font-size: 12.5px; color: #17324f; }
+.wbs-module-stage { font-size: 11px; color: #304963; background: #eef3f9; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
