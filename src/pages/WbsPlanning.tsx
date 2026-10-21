@@ -8068,7 +8068,7 @@ export default function WbsPlanning() {
             </div>
           )}
           {renderMilestonePicker()}
-          <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "0 2px 7px", fontSize: 10.5, color: "var(--muted)" }}>
+          <div style={{ display: orderedTasks.length === 0 ? "none" : "flex", alignItems: "center", gap: 14, margin: "0 2px 7px", fontSize: 10.5, color: "var(--muted)" }}>
             <span><span className="wbs-required-start">●</span> Required before Start Project</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#fff", border: "1px solid #cfd8e3" }} /> Editable</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#f3f5f7", border: "1px solid #dfe4ea" }} /> Auto-calculated / read-only</span>
@@ -8243,7 +8243,7 @@ export default function WbsPlanning() {
                           )}
                         </div>
                       </td>
-                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} style={{ overflow: "hidden", ...(wbsColStickyStyle("task", true, rowLocked) ?? {}) }}>
+                      <td className={rowEditable ? "wbs-editable-cell" : "wbs-readonly-cell"} title={t.name} style={{ overflow: "hidden", ...(wbsColStickyStyle("task", true, rowLocked) ?? {}) }}>
                         <div style={{ paddingLeft: t.depth * 16, fontWeight: t.depth === 0 ? 600 : 400, display: "flex", alignItems: "center", gap: 4 }}>
                           <span title={glyph.title} style={{ display: "inline-flex", flexShrink: 0 }}>
                             <glyph.Icon size={13} color={glyph.color} />
