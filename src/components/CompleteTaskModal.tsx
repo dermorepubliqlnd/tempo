@@ -6,6 +6,8 @@
 import { useEffect, useState } from "react";
 import DateInput from "./DateInput";
 import Modal from "./Modal";
+import { DialogHeader, SummaryBand } from "./DialogHeader";
+import { BadgeCheck, CalendarDays, CircleCheck, Info, Send, ShieldCheck, SquareCheckBig } from "lucide-react";
 import { formatDate } from "../lib/formatDate";
 
 export interface CompleteTaskInfo {
@@ -49,13 +51,15 @@ interface Props {
   notice?: string;
   /** New projects (2026-10-22): completion date is today, set automatically; no validation step. */
   autoDate?: boolean;
+  /** One line under the title, e.g. "Confirm the work details before sending this task to … for review." */
+  subtitle?: string;
 }
 
 const label: React.CSSProperties = { fontSize: 11.5, color: "var(--muted)", fontWeight: 600 };
 const value: React.CSSProperties = { fontSize: 12.5, color: "var(--text)" };
 const input: React.CSSProperties = { fontSize: 12.5, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--border)", fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
 
-export default function CompleteTaskModal({ info, initialDate, initialCount, today, actionLabel = "Mark Done", onLogTime, onCancel, onConfirm, onRevision, outcome, notice, autoDate }: Props) {
+export default function CompleteTaskModal({ info, initialDate, initialCount, today, actionLabel = "Mark Done", onLogTime, onCancel, onConfirm, onRevision, outcome, notice, autoDate, subtitle }: Props) {
   const te = info.typeEdit;
   const [wtId, setWtId] = useState<string>(te?.workTypeId ?? "");
   const [otId, setOtId] = useState<string>(te?.outputTypeId ?? "");
@@ -106,31 +110,39 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
     if (err) setError(err);
   }
 
-  return (
-    <Modal title={onRevision ? `${actionLabel} or send for revision?` : actionLabel === "Mark Done" ? "Complete task" : actionLabel} onClose={() => (busy ? undefined : onCancel())} width={480}>
-      <div style={{ display: "grid", gap: 14 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{info.name}</div>
+  // 2026-10-23 (Sandra's mock-up): header with icon, summary band, clearer fields.
+  const head =
+    actionLabel === "Ready for Review"
+      ? { title: "Submit for Review", button: "Submit for Review", icon: <SquareCheckBig size={22} /> }
+      : actionLabel === "Pass QA"
+        ? { title: "Pass QA", button: "Pass QA", icon: <ShieldCheck size={22} /> }
+        : actionLabel === "Approve"
+          ? { title: "Approve", button: "Approve", icon: <BadgeCheck size={22} /> }
+          : { title: "Complete task", button: "Mark Done", icon: <CircleCheck size={22} /> };
+  const fieldLabel: React.CSSProperties = { fontSize: 13, fontWeight: 600, color: "var(--text)" };
+  const box: React.CSSProperties = { ...input, fontSize: 13.5, padding: "9px 12px", borderRadius: 8 };
+  const helper: React.CSSProperties = { fontSize: 11.5, color: "var(--muted)" };
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div style={{ display: "grid", gap: 4 }}>
-            <span style={label}>Due date</span>
-            <span style={value}>{info.dueDate ? formatDate(info.dueDate) : "—"}</span>
-          </div>
-          {autoDate ? (
-            <div style={{ display: "grid", gap: 4 }}>
-              <span style={label}>Completion date</span>
-              <span style={value} title="Recorded automatically as the day you finish. No separate validation needed.">{formatDate(today)} <span style={{ color: "var(--muted)", fontSize: 11.5 }}>· today, recorded automatically</span></span>
-            </div>
-          ) : (
-            <label style={{ display: "grid", gap: 4 }}>
-              <span style={label}>Reported Completion *</span>
-              <DateInput value={date} max={today} onChange={(e) => setDate(e.target.value)} style={input} />
-            </label>
-          )}
+  return (
+    <Modal title={head.title} hideHeader onClose={() => (busy ? undefined : onCancel())} width={600}>
+      <div style={{ display: "grid", gap: 18, padding: "4px 4px 0" }}>
+        <DialogHeader icon={head.icon} title={head.title} subtitle={subtitle ?? outcome} onClose={busy ? undefined : onCancel} />
+
+        <SummaryBand
+          items={[
+            { label: "Task", value: <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={info.name}>{info.name}</span> },
+            { label: "Due date", value: <><CalendarDays size={15} style={{ color: "var(--muted)", flexShrink: 0 }} />{info.dueDate ? formatDate(info.dueDate) : "—"}</> },
+            autoDate
+              ? { label: "Completion date", value: <><CalendarDays size={15} style={{ color: "var(--muted)", flexShrink: 0 }} />{formatDate(today)}<span title="Recorded automatically as the day you submit. No separate validation needed." style={{ display: "inline-flex", color: "var(--accent)", cursor: "help" }}><Info size={14} /></span></>, hint: "Set automatically on submission" }
+              : { label: "Reported completion *", value: <DateInput value={date} max={today} onChange={(e) => setDate(e.target.value)} style={{ ...input, fontWeight: 400 }} /> },
+          ]}
+        />
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px 18px" }}>
           {te ? (
             <>
-              <label style={{ display: "grid", gap: 4 }}>
-                <span style={label}>Work Type</span>
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={fieldLabel}>Work type</span>
                 <select value={wtId} onChange={(e) => {
                   const next = e.target.value;
                   setWtId(next);
@@ -138,16 +150,16 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
                   const allowed = next ? te.links.filter((m) => m.work_type_id === next).map((m) => m.output_type_id) : [];
                   if (otId && allowed.length && !allowed.includes(otId)) setOtId(allowed.length === 1 ? allowed[0] : "");
                   else if (!otId && allowed.length === 1) setOtId(allowed[0]);
-                }} style={input}>
+                }} style={box}>
                   <option value="">—</option>
                   {te.workTypes.filter((w) => w.is_active !== false || w.id === wtId).map((w) => (
                     <option key={w.id} value={w.id}>{w.name}</option>
                   ))}
                 </select>
               </label>
-              <label style={{ display: "grid", gap: 4 }}>
-                <span style={label}>Output Type</span>
-                <select value={otId} onChange={(e) => setOtId(e.target.value)} style={!otId ? { ...input, borderColor: "var(--warning-text, #b45309)", background: "var(--warning-bg, #fff8e6)" } : input}>
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={fieldLabel}>Output type</span>
+                <select value={otId} onChange={(e) => setOtId(e.target.value)} style={!otId ? { ...box, borderColor: "var(--warning-text, #b45309)", background: "var(--warning-bg, #fff8e6)" } : box}>
                   <option value="">Please select output type</option>
                   {pickableOt.map((o) => (
                     <option key={o.id} value={o.id}>{o.name}</option>
@@ -157,21 +169,21 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
             </>
           ) : (
             <>
-              <div style={{ display: "grid", gap: 4 }}>
-                <span style={label}>Work Type</span>
+              <div style={{ display: "grid", gap: 6 }}>
+                <span style={fieldLabel}>Work type</span>
                 <span style={value}>{info.workTypeName ?? "—"}</span>
               </div>
-              <div style={{ display: "grid", gap: 4 }}>
-                <span style={label}>Output Type</span>
+              <div style={{ display: "grid", gap: 6 }}>
+                <span style={fieldLabel}>Output type</span>
                 <span style={value}>{outputTypeName ?? "—"}</span>
               </div>
             </>
           )}
-          <label style={{ display: "grid", gap: 4 }}>
-            <span style={label}>Output Count{countsDeliverable ? " *" : ""}</span>
+          <label style={{ display: "grid", gap: 6, alignContent: "start" }}>
+            <span style={fieldLabel}>Output count{countsDeliverable && !fixedOne ? <span style={{ color: "var(--danger-text)" }}> *</span> : null}</span>
             {countsDeliverable ? (
               fixedOne ? (
-                <span style={{ ...value, color: "var(--muted)" }} title="System Configuration always counts as 1 output.">1 · system configuration</span>
+                <span style={{ ...box, color: "var(--muted)", background: "var(--surface-2, #f4f6f9)" }} title="System Configuration always counts as 1 output.">1 · system configuration</span>
               ) : (
                 <input
                   type="number"
@@ -179,35 +191,38 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
                   step={1}
                   value={count}
                   onChange={(e) => setCount(e.target.value)}
-                  placeholder="Type how many"
+                  placeholder="Enter quantity"
                   title="How many outputs this task produced (1 or more)"
-                  // 2026-10-22 (Sandra): a grey "1" looked like a real entry. Light blue = type here.
-                  style={{ ...input, background: "#eaf3fe", borderColor: "#9cc3f0" }}
+                  // Light blue = type here (a grey "1" looked like a real entry).
+                  style={{ ...box, background: "#eaf3fe", borderColor: "#9cc3f0" }}
                 />
               )
             ) : (
-              <span style={{ ...value, color: "var(--muted)" }} title="This output type has no deliverable, so the count is always 0.">0 · no deliverable</span>
+              <span style={{ ...box, color: "var(--muted)", background: "var(--surface-2, #f4f6f9)" }} title="This output type has no deliverable, so the count is always 0.">0 · no deliverable</span>
             )}
+            {countsDeliverable && !fixedOne && <span style={helper}>Enter the total number of outputs completed for this task.</span>}
           </label>
-          <div style={{ display: "grid", gap: 4 }}>
-            <span style={label}>Logged hours *</span>
+          <div style={{ display: "grid", gap: 6, alignContent: "start" }}>
+            <span style={fieldLabel}>Time logged <span style={{ color: "var(--danger-text)" }}>*</span></span>
             {hoursOk ? (
-              // 2026-10-22 (Sandra): time already logged -> just show it; adding more stays possible but quiet.
-              <span style={{ ...value, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ color: "var(--success-text)", fontWeight: 700 }}>✓ {info.loggedHours.toFixed(2)}h logged</span>
-                {info.estimatedHours != null && <span style={{ color: "var(--muted)" }}>of {info.estimatedHours}h est.</span>}
-                <button type="button" onClick={onLogTime} title="Worked on it since your last log? Add that time too." style={{ background: "none", border: "none", padding: 0, color: "var(--muted)", cursor: "pointer", fontSize: 11.5, textDecoration: "underline" }}>
-                  Add more time
+              <>
+                <span style={{ ...box, display: "flex", alignItems: "center", gap: 8 }}>
+                  <CircleCheck size={17} style={{ color: "var(--success-text)", flexShrink: 0 }} />
+                  <strong style={{ color: "var(--success-text)" }}>{info.loggedHours.toFixed(2)}h logged</strong>
+                  {info.estimatedHours != null && <span style={{ color: "var(--muted)" }}>of {info.estimatedHours}h est.</span>}
+                </span>
+                <button type="button" onClick={onLogTime} title="Worked on it since your last log? Add that time too." style={{ justifySelf: "start", background: "none", border: "none", padding: 0, color: "var(--accent)", cursor: "pointer", fontSize: 12.5, textDecoration: "underline", width: "auto" }}>
+                  Log additional time
                 </button>
-              </span>
+              </>
             ) : (
-              <span style={{ ...value, color: "var(--danger-text)", fontWeight: 700 }}>0h · needed to finish</span>
+              <span style={{ ...box, color: "var(--danger-text)", fontWeight: 700 }}>0h · needed to finish</span>
             )}
           </div>
         </div>
 
         {!hoursOk && (
-          <div role="alert" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--warning-border, #f3d48b)", background: "var(--warning-bg, #fff8e6)", fontSize: 12.5 }}>
+          <div role="alert" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--warning-border, #f3d48b)", background: "var(--warning-bg, #fff8e6)", fontSize: 12.5 }}>
             {info.pendingHours > 0 ? (
               <span style={{ flex: 1, minWidth: 200 }}>Your {info.pendingHours.toFixed(2)}h is waiting for approval. You can finish once it's approved.</span>
             ) : (
@@ -219,19 +234,20 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
           </div>
         )}
 
-        <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
-          Check the details, then confirm. {outcome ?? "Status moves to Done."}{typesChanged ? " The Work Type / Output Type change is recorded in the Audit Trail." : ""}
-        </div>
+        {typesChanged && <div style={helper}>The Work Type / Output Type change is recorded in the Audit Trail.</div>}
         {notice && !error && <div role="status" style={{ color: "var(--success-text)", background: "var(--success-bg, rgba(22,163,74,.08))", borderRadius: 6, padding: "6px 8px", fontSize: 12, fontWeight: 600 }}>✓ {notice}</div>}
         {error && <div style={{ color: "var(--danger-text)", fontSize: 12 }}>{error}</div>}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button className="btn-secondary" disabled={busy} onClick={onCancel}>Cancel</button>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
+          <button className="btn-secondary" disabled={busy} onClick={onCancel} style={{ padding: "9px 20px" }}>Cancel</button>
           {onRevision && (
-            <button className="btn-secondary" disabled={busy} onClick={onRevision} style={{ color: "var(--warning-text)" }} title="Send the work back to its owner with a comment">
+            <button className="btn-secondary" disabled={busy} onClick={onRevision} style={{ padding: "9px 16px", color: "var(--warning-text)", display: "inline-flex", alignItems: "center", gap: 6 }} title="Send the work back to its owner with a comment">
               ↺ For Revision
             </button>
           )}
-          <button className="btn-primary" disabled={busy || !hoursOk} title={!hoursOk ? "Log your time on this task first" : undefined} onClick={() => void submit()}>{busy ? "Saving…" : actionLabel}</button>
+          <button className="btn-primary" disabled={busy || !hoursOk} title={!hoursOk ? "Log your time on this task first" : undefined} onClick={() => void submit()} style={{ padding: "9px 20px", display: "inline-flex", alignItems: "center", gap: 8 }}>
+            {actionLabel === "Ready for Review" ? <Send size={15} /> : <CircleCheck size={15} />}
+            {busy ? "Saving…" : head.button}
+          </button>
         </div>
       </div>
     </Modal>

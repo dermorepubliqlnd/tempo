@@ -19,6 +19,7 @@ import ViewTabs from "../components/ViewTabs";
 import { ViewLayoutSwitch } from "../components/ViewLayoutSwitch";
 import ViewSettingsMenu, { ViewFilterPills } from "../components/ViewSettingsMenu";
 import Modal from "../components/Modal";
+import { DialogHeader, SummaryBand } from "../components/DialogHeader";
 import { PauseProjectModal, ScheduleReviewModal } from "../components/PauseProjectModals";
 import { timingWithPause, type TimingResult } from "../lib/pause";
 import { METRIC_DEFINITIONS, isActiveProject, isOverdueProject, isOverdueTask, isDueThisWeek } from "../lib/metrics";
@@ -77,7 +78,7 @@ interface DeletedSpentHourRow {
 }
 import { useTimeTracking } from "../lib/TimeTrackingContext";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
-import { Play, Square, Info } from "lucide-react";
+import { Play, Square, Info, PencilLine, Send } from "lucide-react";
 import { isLifecycleProject, lifecycleLabelForProjectPhase } from "../lib/lifecycle";
 import { computeReadiness, waitingOnLabel, expectedUnlockDate, needsDependencyLink, isR1Project, stepKindOf, isReviewStep, workTypeNameMap, type ReadinessDep } from "../lib/taskReadiness";
 import {
@@ -6645,45 +6646,63 @@ export default function Projects() {
           }}
         />
       )}
-      {returnDialog && (
-        <Modal title="For Revision" onClose={() => (returnBusy ? undefined : setReturnDialog(null))} width={460}>
-          <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
-            <div style={{ color: "var(--muted)" }}>
-              From <strong style={{ color: "var(--text)" }}>{returnDialog.reviewName}</strong>. The work goes back to the person who did it as In Progress, and the revision is counted. When they resubmit, it comes straight back to you.
-            </div>
-            {returnDialog.candidates.length > 1 && (
-              <label style={{ display: "grid", gap: 4 }}>
-                <span style={{ fontWeight: 600 }}>Task to revise</span>
-                <select value={returnTarget} onChange={(e) => setReturnTarget(e.target.value)}>
-                  {returnDialog.candidates.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {returnDialog.candidates.length === 1 && (
-              <div>
-                <span style={{ fontWeight: 600 }}>Task to revise:</span> {returnDialog.candidates[0].name}
-              </div>
-            )}
-            <label style={{ display: "grid", gap: 4 }}>
-              <span style={{ fontWeight: 600 }}>What needs to change</span>
-              <textarea
-                value={returnComment}
-                onChange={(e) => { setReturnComment(e.target.value); if (returnError) setReturnError(""); }}
-                rows={4}
-                placeholder="Scenario 2 doesn't follow the SOP order. Swap steps 3 and 4."
-                style={{ width: "100%", boxSizing: "border-box", fontFamily: "inherit", fontSize: 12.5, padding: 8, borderRadius: 6, border: "1px solid var(--border)" }}
+      {returnDialog && (() => {
+        const target = returnDialog.candidates.find((c) => c.id === returnTarget) ?? returnDialog.candidates[0];
+        const MAX = 500;
+        return (
+          <Modal title="Request Revision" hideHeader onClose={() => (returnBusy ? undefined : setReturnDialog(null))} width={600}>
+            <div style={{ display: "grid", gap: 18, padding: "4px 4px 0" }}>
+              {/* 2026-10-23 (Sandra's mock-up) */}
+              <DialogHeader
+                icon={<PencilLine size={22} />}
+                title="Request Revision"
+                subtitle="Return this task to the assignee for changes. Once updated and resubmitted, it will return to you for review."
+                onClose={returnBusy ? undefined : () => setReturnDialog(null)}
               />
-            </label>
-            {returnError && <div style={{ color: "var(--danger-text)", fontSize: 12 }}>{returnError}</div>}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button className="btn-secondary" disabled={returnBusy} onClick={() => setReturnDialog(null)}>Cancel</button>
-              <button className="btn-primary" disabled={returnBusy} onClick={() => void submitReturn()}>{returnBusy ? "Sending…" : "Send for revision"}</button>
+              <SummaryBand
+                items={[
+                  {
+                    label: "Task",
+                    value:
+                      returnDialog.candidates.length > 1 ? (
+                        <select value={returnTarget} onChange={(e) => setReturnTarget(e.target.value)} style={{ fontSize: 13, padding: "4px 6px", borderRadius: 6, border: "1px solid var(--border)", maxWidth: "100%" }}>
+                          {returnDialog.candidates.map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={target?.name}>{target?.name ?? "—"}</span>
+                      ),
+                  },
+                  { label: "Current stage", value: <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={returnDialog.reviewName}>{returnDialog.reviewName}</span> },
+                ]}
+              />
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text)" }}>Revision instructions <span style={{ color: "var(--danger-text)" }}>*</span></span>
+                <textarea
+                  value={returnComment}
+                  maxLength={MAX}
+                  onChange={(e) => { setReturnComment(e.target.value.slice(0, MAX)); if (returnError) setReturnError(""); }}
+                  rows={4}
+                  placeholder="Scenario 2 doesn't follow the SOP sequence. Please swap steps 3 and 4."
+                  style={{ width: "100%", boxSizing: "border-box", fontFamily: "inherit", fontSize: 13.5, padding: "10px 12px", borderRadius: 8, border: "1px solid #9cc3f0", resize: "vertical" }}
+                />
+                <span style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11.5, color: "var(--muted)" }}>
+                  <span>Describe what needs to be corrected so the assignee can take action.</span>
+                  <span style={{ flexShrink: 0 }}>{returnComment.length}/{MAX}</span>
+                </span>
+              </label>
+              {returnError && <div style={{ color: "var(--danger-text)", fontSize: 12 }}>{returnError}</div>}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
+                <button className="btn-secondary" disabled={returnBusy} onClick={() => setReturnDialog(null)} style={{ padding: "9px 20px" }}>Cancel</button>
+                <button className="btn-primary" disabled={returnBusy || !returnComment.trim()} onClick={() => void submitReturn()} style={{ padding: "9px 20px", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <Send size={15} /> {returnBusy ? "Sending…" : "Request Revision"}
+                </button>
+              </div>
             </div>
-          </div>
-        </Modal>
-      )}
+          </Modal>
+        );
+      })()}
       <CancelTaskDialog
         open={Boolean(cancelTaskDialog)}
         taskLabel={cancelTaskDialog?.label ?? ""}
@@ -7515,6 +7534,14 @@ export default function Projects() {
             onConfirm={(date, count, types) => confirmTaskDone(ct, date, count, types)}
             outcome={completionWords(ct, completeDlg.actionLabel)[0]}
             autoDate={r1ProjectIds.has(ct.project_id)}
+            subtitle={(() => {
+              const w = completionWords(ct, completeDlg.actionLabel)[0];
+              if (completeDlg.actionLabel === "Ready for Review") {
+                const who = /to (.+) for review/.exec(w)?.[1];
+                return `Confirm the work details before sending this task to ${who ?? "the reviewer"} for review.`;
+              }
+              return `Confirm the details. ${w}`;
+            })()}
             notice={completeNotice}
             onRevision={reviewStepKind(ct) && canReturnFrom(ct) ? () => { setCompleteDlg(null); openReturnDialog(ct); } : undefined}
           />
