@@ -142,8 +142,9 @@ ol.steps li b { color: var(--ink); }
 /* Owner set-up: steps run across in one row (wrap on small screens). */
 .stack ol.steps { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
 .stack ol.steps li { grid-template-columns: 1fr; gap: 8px; align-content: start; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); font-size: 13px; }
-.stack .rules { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 18px; }
+@media (max-width: 900px) { .rules { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .rules { grid-template-columns: 1fr; } }
 .rule { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; font-size: 13px; color: var(--ink-2); border-radius: 0; }
 .rule b { color: var(--ink); }
 footer { font-size: 12px; color: var(--muted); }
@@ -427,8 +428,7 @@ footer { font-size: 12px; color: var(--muted); }
         <div class="rule"><b>Finish it when you finish it.</b> The completion date is the day you click the button (Mark Done, Ready for Review, Pass QA or Approve). There's no date to pick and no separate validation: the review and sign-off steps are the check. If work is sent back, the date you resubmit is the one that counts.</div>
         <div class="rule"><b>Done is done.</b> To change finished work, the review step sends it back For Revision. You can't reopen it yourself.</div>
         <div class="rule"><b>Plan changes</b> (names, dates, hours, assignees) are for the owner, their supervisor or Full Access. Everyone updates their own status and completion.</div>
-        <div class="rule"><b>One module per deliverable.</b> In Design and Development, each deliverable (e-learning, job aid, assessment) is its own module with its own review and sign-off, so it moves on its own. Sub-tasks aren't used there, and never under a review or sign-off step. The module header shows its status: Not Started, In Design, In Development, Sent back or Complete.</div>
-        <div class="rule"><b>Group by Module</b> on the WBS shows each module's whole chain. Milestones stay on the phases.</div>
+        <div class="rule"><b>One module per deliverable.</b> In Design and Development, each deliverable (e-learning, job aid, assessment) is its own module with its own review and sign-off, so it moves on its own. Sub-tasks aren't used there, and never under a review or sign-off step. The module header shows its status (Not Started, In Design, In Development, Sent back or Complete), and <b>Group by Module</b> on the WBS shows each module's whole chain.</div>
       </div>
     </section>
   </div>
