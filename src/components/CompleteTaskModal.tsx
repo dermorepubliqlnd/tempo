@@ -173,7 +173,17 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
               fixedOne ? (
                 <span style={{ ...value, color: "var(--muted)" }} title="System Configuration always counts as 1 output.">1 · system configuration</span>
               ) : (
-                <input type="number" min={1} step={1} value={count} onChange={(e) => setCount(e.target.value)} placeholder="1" style={input} />
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={count}
+                  onChange={(e) => setCount(e.target.value)}
+                  placeholder="Type how many"
+                  title="How many outputs this task produced (1 or more)"
+                  // 2026-10-22 (Sandra): a grey "1" looked like a real entry. Light blue = type here.
+                  style={{ ...input, background: "#eaf3fe", borderColor: "#9cc3f0" }}
+                />
               )
             ) : (
               <span style={{ ...value, color: "var(--muted)" }} title="This output type has no deliverable, so the count is always 0.">0 · no deliverable</span>
