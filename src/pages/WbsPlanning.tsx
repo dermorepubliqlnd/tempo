@@ -8859,11 +8859,6 @@ export default function WbsPlanning() {
                               }}
                             />
                           </div>
-                          {taskDescById.get(t.id) && (
-                            <span title={taskDescById.get(t.id)} style={{ display: "inline-flex", flexShrink: 0, color: "var(--muted)", cursor: "help" }}>
-                              <Info size={12} />
-                            </span>
-                          )}
                           {!!wbsNoteCounts.byTask[t.id] && (
                             <button
                               type="button"

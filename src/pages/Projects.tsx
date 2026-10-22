@@ -1444,8 +1444,17 @@ export default function Projects() {
   const navigate = useNavigate();
   // phase118: pause-aware Timing (Paused / Paused · Overdue / Review pending).
   // Declared as a function so it can read `projects` state declared below.
+  // 2026-10-23 (Sandra): in a Draft project, finished tasks and Analysis & Scoping
+  // work (which happens in Draft on new projects) still show their real timing
+  // (Early / On time / Late / Overdue); only the rest of the plan reads "Draft timeline".
+  function timingIsReal(t: TaskRow): boolean {
+    if (projectHasConfirmedBaseline(t.project_id)) return true;
+    const g = statusGroupOf(TASK_STATUS_GROUPED, t.status);
+    if (g === "complete" || g === "cancelled") return true;
+    return r1ProjectIds.has(t.project_id) && t.wbs_phase === "analysis";
+  }
   function taskTiming(t: TaskRow): TimingResult {
-    if (!projectHasConfirmedBaseline(t.project_id)) return { label: "Draft timeline", tone: "neutral" };
+    if (!timingIsReal(t)) return { label: "Draft timeline", tone: "neutral" };
     return timingWithPause(t, statusGroupOf(TASK_STATUS_GROUPED, t.status), projects.find((p) => p.id === t.project_id));
   }
   function projectHasConfirmedBaseline(projectId: string): boolean {
@@ -3068,6 +3077,16 @@ export default function Projects() {
     if (error) return friendlyError("mark the task Done", error).message ?? "Couldn't mark the task Done.";
     const next = tasks.map((row) => (row.id === t.id ? { ...row, ...patch, work_type_id: t.work_type_id, output_type_id: t.output_type_id, ...(countsDeliverable ? { output_count: outputCount } : {}) } : row));
     setTasks(next);
+    // The database fills the completion date and validation on new projects;
+    // read them back so the row shows them straight away (no stale "Validate").
+    {
+      const { data: fresh } = await supabase
+        .from("tasks")
+        .select("actual_completion_date,validated_completion_date,validated_by,validation_performed_at,validated_locked_at,auto_validated,submitted_on")
+        .eq("id", t.id)
+        .maybeSingle();
+      if (fresh) setTasks((prev) => prev.map((row) => (row.id === t.id ? { ...row, ...(fresh as Partial<TaskRow>) } : row)));
+    }
     const action = completeDlg?.actionLabel ?? "Mark Done";
     const words = completionWords(t, action);
     const resubmit = action === "Ready for Review" && (t.revision_count ?? 0) > 0;
@@ -4593,11 +4612,7 @@ export default function Projects() {
                     -- structural additions belong in WBS Planning. */}
                 <InlineText value={t.name} editable={false} bold={t._depth === 0} onCommit={(v) => updateTask(t.id, { name: v })} />
               </div>
-              {t.description && (
-                <span title={t.description} style={{ display: "inline-flex", flexShrink: 0, color: "var(--muted)", cursor: "help", marginRight: 2 }}>
-                  <Info size={12} />
-                </span>
-              )}
+              {/* 2026-10-23 (Sandra): task description ⓘ removed -- not on every task, and the terms are known in the team. */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -5853,7 +5868,7 @@ export default function Projects() {
 
   // 2026-10-04: Due window / Validation groupings for the Tasks system views.
   function dueWindowOf(t: TaskRow): string {
-    if (!projectHasConfirmedBaseline(t.project_id)) return "Draft timeline";
+    if (!timingIsReal(t)) return "Draft timeline";
     const d = t.current_due_date?.slice(0, 10);
     if (!d) return "No due date";
     const today = new Date();
