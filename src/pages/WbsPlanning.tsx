@@ -257,7 +257,7 @@ const WBS_PRESET_DATES: Record<WbsPreset, boolean[]> = {
   planning: [true, true, true, false, false, false],
   full: [true, true, true, true, true, true],
 };
-const TASK_STATUS_PILL_TONE: Record<string, string> = { "Not Started": "neutral", "In Progress": "blue", Done: "success", Cancelled: "danger" };
+const TASK_STATUS_PILL_TONE: Record<string, string> = { "Not Started": "neutral", "In Progress": "warning", Done: "success", Cancelled: "danger" };
 const WBS_FREEZE_STORAGE_KEY = "capaciq_wbs_freeze_task_col"; // legacy -- read once as a migration fallback
 const WBS_FREEZE_COL_STORAGE_KEY = "capaciq_wbs_freeze_col_key";
 const WBS_MIN_COL_WIDTH = 50;
