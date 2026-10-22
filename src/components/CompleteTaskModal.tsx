@@ -165,16 +165,33 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
           </label>
           <div style={{ display: "grid", gap: 4 }}>
             <span style={label}>Logged hours *</span>
-            <span style={{ ...value, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ color: hoursOk ? "var(--text)" : "var(--danger-text)", fontWeight: 600 }}>{info.loggedHours.toFixed(2)}h</span>
-              {info.estimatedHours != null && <span style={{ color: "var(--muted)" }}>of {info.estimatedHours}h est.</span>}
-              <button type="button" onClick={onLogTime} style={{ background: "none", border: "none", padding: 0, color: "var(--accent)", cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}>
-                + Log time
-              </button>
-            </span>
-            {info.pendingHours > 0 && <span style={{ fontSize: 11, color: "var(--muted)" }}>{info.pendingHours.toFixed(2)}h waiting for approval</span>}
+            {hoursOk ? (
+              // 2026-10-22 (Sandra): time already logged -> just show it; adding more stays possible but quiet.
+              <span style={{ ...value, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ color: "var(--success-text)", fontWeight: 700 }}>✓ {info.loggedHours.toFixed(2)}h logged</span>
+                {info.estimatedHours != null && <span style={{ color: "var(--muted)" }}>of {info.estimatedHours}h est.</span>}
+                <button type="button" onClick={onLogTime} title="Worked on it since your last log? Add that time too." style={{ background: "none", border: "none", padding: 0, color: "var(--muted)", cursor: "pointer", fontSize: 11.5, textDecoration: "underline" }}>
+                  Add more time
+                </button>
+              </span>
+            ) : (
+              <span style={{ ...value, color: "var(--danger-text)", fontWeight: 700 }}>0h · needed to finish</span>
+            )}
           </div>
         </div>
+
+        {!hoursOk && (
+          <div role="alert" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--warning-border, #f3d48b)", background: "var(--warning-bg, #fff8e6)", fontSize: 12.5 }}>
+            {info.pendingHours > 0 ? (
+              <span style={{ flex: 1, minWidth: 200 }}>Your {info.pendingHours.toFixed(2)}h is waiting for approval. You can finish once it's approved.</span>
+            ) : (
+              <>
+                <span style={{ flex: 1, minWidth: 200 }}><strong>No time logged on this task yet.</strong> Log your time first, then finish.</span>
+                <button type="button" className="btn-primary" onClick={onLogTime} style={{ padding: "5px 12px", fontSize: 12 }}>Log time</button>
+              </>
+            )}
+          </div>
+        )}
 
         <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
           Check the details, then confirm. {outcome ?? "Status moves to Done."}{typesChanged ? " The Work Type / Output Type change is recorded in the Audit Trail." : ""}
@@ -188,7 +205,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
               ↺ For Revision
             </button>
           )}
-          <button className="btn-primary" disabled={busy} onClick={() => void submit()}>{busy ? "Saving…" : actionLabel}</button>
+          <button className="btn-primary" disabled={busy || !hoursOk} title={!hoursOk ? "Log your time on this task first" : undefined} onClick={() => void submit()}>{busy ? "Saving…" : actionLabel}</button>
         </div>
       </div>
     </Modal>
