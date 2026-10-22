@@ -137,7 +137,7 @@ function renderMarkdownLite(source: string): string {
       closeList();
       const src = `${import.meta.env.BASE_URL}guides/${guideMatch[1]}.html`;
       html.push(
-        `<div class="kb-guide"><iframe src="${src}" title="Visual guide" loading="lazy" style="width:100%;height:78vh;min-height:520px;border:1px solid var(--border);border-radius:10px;background:#fff"></iframe><a href="${src}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:6px;font-size:12px">Open the guide in a new tab</a></div>`
+        `<div class="kb-guide"><iframe src="${src}" title="Visual guide" scrolling="no" onload="(function(f){try{var d=f.contentDocument;if(!d)return;var fit=function(){f.style.height=(d.documentElement.scrollHeight+2)+'px'};fit();if(window.ResizeObserver){new ResizeObserver(fit).observe(d.body)}}catch(e){f.style.height='78vh';f.setAttribute('scrolling','auto')}})(this)" style="width:100%;height:600px;overflow:hidden;border:1px solid var(--border);border-radius:10px;background:#fff;display:block"></iframe><a href="${src}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:6px;font-size:12px">Open the guide in a new tab</a></div>`
       );
       i++;
       continue;
