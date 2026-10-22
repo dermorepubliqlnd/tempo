@@ -5692,8 +5692,18 @@ export default function Projects() {
             if (!mine) return blank;
             const kind = reviewStepKind(t);
             if (kind) {
+              // 2026-10-22 (Sandra): show when the work came back after For Revision.
+              const resub = taskDeps
+                .filter((d) => d.task_id === t.id)
+                .map((d) => tasks.find((x) => x.id === d.depends_on_task_id))
+                .find((x) => !!x && (x.revision_count ?? 0) > 0 && x.status === "Done");
               return (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  {resub && (
+                    <span className="status-pill accent" title={`${resub.name} was revised and resubmitted (round ${(resub.revision_count ?? 0) + 1}).`} style={{ fontSize: 10 }}>
+                      Resubmitted
+                    </span>
+                  )}
                   <button type="button" style={btn(true)} onClick={(e) => { e.stopPropagation(); void markTaskDone(t, handoffToday(), false, kind); }}>
                     ✓ {kind === "approve" ? "Approve" : "Pass QA"}
                   </button>
