@@ -8259,6 +8259,39 @@ export default function WbsPlanning() {
           <div style={{ display: wbsView === "wbs" && project.wbs_status === "closed" && !wbsDetailsExpanded ? "none" : undefined }}>
           <div style={{ display: wbsView === "timeline" ? "none" : undefined }}>
 
+          {/* 2026-10-22 (Sandra): phase progress cards back above the WBS; click one to show only that phase. */}
+          {isLifecycle && phaseKpis.length > 0 && orderedTasks.length > 0 && (
+            <div className="wbs-phase-kpis">
+              {phaseKpis.map((k) => {
+                const c = PHASE_COLORS[k.key] ?? PHASE_COLORS.analysis;
+                const on = wbsFilterPhase === k.key;
+                return (
+                  <button
+                    key={k.key}
+                    type="button"
+                    className={`wbs-phase-kpi${on ? " on" : ""}`}
+                    style={on ? { borderColor: c.fg, boxShadow: `0 0 0 1px ${c.fg}`, background: c.bg } : undefined}
+                    onClick={() => setWbsFilterPhase(on ? "" : k.key)}
+                    aria-pressed={on}
+                    title={on ? "Click again to show all phases" : `Show only ${k.label} tasks`}
+                  >
+                    <span className="wbs-phase-kpi-label">
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: c.fg, flexShrink: 0 }} />
+                      {k.label}
+                    </span>
+                    <span className="wbs-phase-kpi-nums">
+                      <strong>{k.total ? `${k.pct}%` : "–"}</strong>
+                      <span>{k.total ? `${k.done} of ${k.total} done${k.active ? ` · ${k.active} in progress` : ""}` : "No tasks yet"}</span>
+                    </span>
+                    <span className="wbs-phase-kpi-bar">
+                      <span style={{ width: `${k.pct}%`, background: c.fg }} />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div className="card wbs-workspace-head">
             <div className="wbs-head-row">
               <span className="wbs-head-icon" aria-hidden="true"><ListPlus size={17} /></span>
