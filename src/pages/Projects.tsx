@@ -3076,6 +3076,12 @@ export default function Projects() {
     // below the moment any of its children next changes.
     if ("status" in patch) {
       ids = ids.filter((id) => !(!tasks.find((t) => t.id === id)?.parent_task_id && hasChildren(id)));
+      // Review-chain tasks move only through Next action (2026-10-22).
+      const chain = ids.map((id) => tasks.find((t) => t.id === id)).filter((t): t is TaskRow => !!t && r1ProjectIds.has(t.project_id) && (isHandoffTask(t) || !!reviewStepKind(t)));
+      if (chain.length) {
+        await alert({ title: "Some tasks weren't changed", message: "These are part of a review chain. Use their Next action button instead:", items: chain.map((t) => t.name) });
+        ids = ids.filter((id) => !chain.some((c) => c.id === id));
+      }
       if (patch.status !== "Done") {
         const blocked = ids.map((id) => tasks.find((t) => t.id === id)).filter((t): t is TaskRow => !!t && !!reopenBlockedReason(t));
         if (blocked.length) {
@@ -4688,6 +4694,20 @@ export default function Projects() {
               >
                 {pill}
               </button>
+            );
+          }
+          // 2026-10-22 (Sandra, UAT): tasks in a review chain move only through
+          // their Next action button (Ready for Review / Pass QA / Approve), so
+          // their Status isn't a dropdown on new projects.
+          if (r1ProjectIds.has(t.project_id) && (isHandoffTask(t) || reviewStepKind(t))) {
+            return (
+              <span
+                className={`status-pill ${statusTone(statusGroupOf(TASK_STATUS_GROUPED, t.status ?? ""))}`}
+                title={reviewStepKind(t) ? "Moves with Pass QA / Approve or For Revision in Next action." : "Moves with Ready for Review in Next action. Logging time starts it."}
+                style={{ cursor: "help" }}
+              >
+                {t.status ?? "Not Started"}
+              </span>
             );
           }
           return (
