@@ -120,8 +120,20 @@ interface ProjectRow {
   reopened_at: string | null;
   reopened_by: string | null;
 }
+// 2026-10-22 (Sandra): one module per deliverable; a module's status is read
+// from its whole chain (design -> development), never set by hand.
+type ModuleStatus = "Not Started" | "In Design" | "In Development" | "Sent back" | "Complete";
+const MODULE_STATUS_TONE: Record<ModuleStatus, { fg: string; bg: string; border: string }> = {
+  "Not Started": { fg: "#5b6f86", bg: "#f2f5f9", border: "#dbe3ec" },
+  "In Design": { fg: "#15803d", bg: "#ecfdf3", border: "#bbe7cb" },
+  "In Development": { fg: "#6d28d9", bg: "#f3efff", border: "#d9cdfb" },
+  "Sent back": { fg: "#b45309", bg: "#fff7e6", border: "#f3d48b" },
+  Complete: { fg: "#0f5132", bg: "#d1f2e0", border: "#9fd9b9" },
+};
+
 interface TaskRow {
   id: string;
+  revision_count?: number | null;
   // R2.1 (phase183): lifecycle phase group (new projects only).
   wbs_phase?: string | null;
   // phase115: used to default Actual Project Close Date.
@@ -1306,7 +1318,7 @@ export default function WbsPlanning() {
       supabase
         .from("tasks")
         .select(
-          "id,project_id,parent_task_id,name,assignee_id,status,due_locked,start_date,start_date_full,start_date_standard,start_full_auto,start_standard_auto,manual_end_date,current_due_date,estimated_hours,effort,work_type_id,output_type_id,output_count,cancellation_reason,is_archived,sort_order,actual_completion_date,cancelled_at"
+          "id,project_id,parent_task_id,name,assignee_id,status,due_locked,start_date,start_date_full,start_date_standard,start_full_auto,start_standard_auto,manual_end_date,current_due_date,estimated_hours,effort,work_type_id,output_type_id,output_count,cancellation_reason,is_archived,sort_order,actual_completion_date,cancelled_at,revision_count"
         )
         .eq("project_id", projectId)
         .eq("is_archived", false)
@@ -3192,7 +3204,20 @@ export default function WbsPlanning() {
     await loadAll(true);
   }
 
+  // 2026-10-22 (Sandra): one module per deliverable in Design and Development --
+  // no sub-tasks there, and never under a review / sign-off step.
+  function subtasksAllowed(t: TaskRow) {
+    if (isLifecycle) {
+      const ph = taskPhaseById.get(t.parent_task_id ?? t.id) ?? t.wbs_phase ?? null;
+      if (ph === "design" || ph === "development") return false;
+    }
+    return !isReviewStep(t, workTypeNameMap(workTypes));
+  }
   async function addSubtask(parent: TaskRow & { depth: number }) {
+    if (!subtasksAllowed(parent)) {
+      await alert({ title: "No sub-tasks here", message: "Design and Development use one module per deliverable, and review or sign-off steps can't have sub-tasks. To add another deliverable, use Add module." });
+      return;
+    }
     if (parent.depth > 0) return; // only 2 layers total: parent + 1 sub-task level
     // Same bugfix as addTopLevelTask above -- flush staged edits before
     // this insert's own loadAll() can discard them.
@@ -4529,7 +4554,7 @@ export default function WbsPlanning() {
     | { kind: "phase"; key: string; label: string; count: number; hours: number; excluded?: boolean; modules?: number }
     | { kind: "unphased"; count: number }
     | { kind: "milestone"; m: ProjectMilestone }
-    | { kind: "module"; name: string; done: number; total: number; stage: string; hours: number; phaseKey?: string }
+    | { kind: "module"; name: string; done: number; total: number; stage: string; hours: number; phaseKey?: string; status: ModuleStatus }
     | { kind: "addmodule" }
     | { kind: "modsection"; count: number };
   // phase194: "Group by Module" -- each module reads top to bottom from design
@@ -4571,6 +4596,16 @@ export default function WbsPlanning() {
       for (const t of unphased) items.push({ kind: "task", t });
     }
     const moduleOf = (t: TaskRow & { depth: number }) => taskModuleById.get(t.depth === 0 ? t.id : t.parent_task_id ?? "") ?? null;
+    const moduleStatusOf = (n: string): ModuleStatus => {
+      const chain = orderedTasks.filter((t) => moduleOf(t) === n && (phaseOf(t) === "design" || phaseOf(t) === "development") && !(t.depth === 0 && hasChildren(t.id)) && t.status !== "Cancelled");
+      if (!chain.length) return "Not Started";
+      if (chain.every((t) => t.status === "Done")) return "Complete";
+      if (chain.some((t) => t.status === "In Progress" && (t.revision_count ?? 0) > 0)) return "Sent back";
+      const design = chain.filter((t) => phaseOf(t) === "design");
+      if (design.length && design.every((t) => t.status === "Done")) return "In Development";
+      if (!design.length && chain.some((t) => t.status !== "Not Started")) return "In Development";
+      return chain.some((t) => t.status !== "Not Started") ? "In Design" : "Not Started";
+    };
     // R3 (2026-10-22, Sandra): Design and Development stay separate phases, each
     // worked module by module -- the ID storyboards a module in Design; once its
     // storyboard is signed off, the same module moves to Development.
@@ -4600,7 +4635,7 @@ export default function WbsPlanning() {
             const done = leaves.filter((t) => t.status === "Done" || t.status === "Cancelled").length;
             const next = leaves.find((t) => t.status !== "Done" && t.status !== "Cancelled");
             const stage = next ? `now: ${next.name.split(" · ").slice(0, next.name.split(" · ").length > 2 ? 2 : 1).join(" · ")}` : "complete";
-            items.push({ kind: "module", name: n, phaseKey: "all", done, total: leaves.length, stage, hours: leaves.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0) });
+            items.push({ kind: "module", name: n, phaseKey: "all", done, total: leaves.length, stage, hours: leaves.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0), status: moduleStatusOf(n) });
             if (wbsFiltersActive || !collapsedPhases.has(`mod:all:${n}`)) for (const t of mrows) items.push({ kind: "task", t });
           }
           for (const mk of ["design", "development"]) {
@@ -4623,7 +4658,7 @@ export default function WbsPlanning() {
           const done = leaves.filter((t) => t.status === "Done" || t.status === "Cancelled").length;
           const next = leaves.find((t) => t.status !== "Done" && t.status !== "Cancelled");
           const stage = next ? `now: ${next.name.split(" · ").slice(0, next.name.split(" · ").length > 2 ? 2 : 1).join(" · ")}` : "complete";
-          items.push({ kind: "module", name: n, phaseKey: ph.key, done, total: leaves.length, stage, hours: leaves.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0) });
+          items.push({ kind: "module", name: n, phaseKey: ph.key, done, total: leaves.length, stage, hours: leaves.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0), status: moduleStatusOf(n) });
           if (wbsFiltersActive || !collapsedPhases.has(`mod:${ph.key}:${n}`)) for (const t of mrows) items.push({ kind: "task", t });
         }
         for (const t of rows) if (!moduleable || !moduleOf(t)) items.push({ kind: "task", t });
@@ -5003,7 +5038,10 @@ export default function WbsPlanning() {
               <span className="wbs-module-tag" style={{ color: c.fg, borderColor: c.border, background: c.bg }}>Module</span>
               <strong className="wbs-module-name">{it.name}</strong>
               <span className="wbs-phase-meta">{it.done} of {it.total} done · {Math.round(it.hours * 10) / 10} hrs</span>
-              <span className="wbs-module-stage">{it.stage}</span>
+              {(() => { const tone = MODULE_STATUS_TONE[it.status]; return (
+                <span title="Module status, read from its design and development steps" style={{ fontSize: 10.5, fontWeight: 700, padding: "1px 8px", borderRadius: 999, color: tone.fg, background: tone.bg, border: `1px solid ${tone.border}`, whiteSpace: "nowrap" }}>{it.status}</span>
+              ); })()}
+              {it.status !== "Complete" && <span className="wbs-module-stage">{it.stage}</span>}
             </div>
           </td>
         </tr>
@@ -6615,7 +6653,7 @@ export default function WbsPlanning() {
                     ? menuItem("Review steps added", <CheckCircle2 size={13} />, () => undefined, { disabled: true })
                     : menuItem("Add review steps…", <CheckCircle2 size={13} />, () => openReviewDlg(task))
                 )}
-                {!isSessionProject && canAddTasks && task.depth === 0 && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
+                {!isSessionProject && canAddTasks && task.depth === 0 && subtasksAllowed(task) && menuItem("Add sub-task", <Plus size={13} />, () => void addSubtask(task))}
                 {!isSessionProject && canAddTasks && menuItem("Add task below", <CornerDownRight size={13} />, () => void addTaskBelow(task))}
                 {!isSessionProject && canAddTasks && menuItem("Duplicate", <Copy size={13} />, () => void duplicateTask(task))}
                 {menuItem(wbsNoteCounts.byTask[task.id] ? `Notes (${wbsNoteCounts.byTask[task.id]})` : "Add note", <MessageCircle size={13} />, () => setWbsNotes({ taskId: task.id }))}
@@ -8717,7 +8755,7 @@ export default function WbsPlanning() {
                             </button>
                           )}
                           <span className="wbs-row-actions">
-                          {rowEditable && canAddTasks && t.depth === 0 && (
+                          {rowEditable && canAddTasks && t.depth === 0 && subtasksAllowed(t) && (
                             <button
                               className="add-subtask-btn"
                               tabIndex={-1}
