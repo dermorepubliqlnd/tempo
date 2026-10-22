@@ -4563,7 +4563,7 @@ export default function WbsPlanning() {
   const analysisKpi = phaseKpis.find((k) => k.key === "analysis");
   // 2026-10-22 (Sandra): "Let's do the locking later" -- gate switched off for now.
   // To turn it back on: const scopeConfirmed = !analysisIncluded || (!!analysisKpi && analysisKpi.total > 0 && analysisKpi.done === analysisKpi.total);
-  const SCOPE_GATE_ON = false;
+  const SCOPE_GATE_ON = true; // 2026-10-22 (Sandra): phase lock on for launch
   const scopeConfirmed = !SCOPE_GATE_ON || !analysisIncluded || (!!analysisKpi && analysisKpi.total > 0 && analysisKpi.done === analysisKpi.total);
   type WbsItem =
     | { kind: "task"; t: TaskRow & { depth: number } }
