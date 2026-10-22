@@ -5031,7 +5031,7 @@ export default function WbsPlanning() {
                 </span>
               )}
               {scopeConfirmed && canEditWbs && canAddTasks && !isSessionProject && (
-                <button type="button" className={it.count === 0 ? "btn-primary wbs-mod-add" : "btn-secondary wbs-mod-add"} onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: "", dev: "", busy: false, error: "" }); }}>
+                <button type="button" className={it.count === 0 ? "btn-secondary wbs-mod-add wbs-mod-add-first" : "btn-secondary wbs-mod-add"} onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: "", dev: "", busy: false, error: "" }); }}>
                   <Plus size={13} /> {it.count === 0 ? "Add your first module" : "Add module"}
                 </button>
               )}
@@ -5116,7 +5116,7 @@ export default function WbsPlanning() {
                 <span className="wbs-phase-meta" style={{ fontStyle: "italic" }}>Each module moves here once its storyboard is signed off</span>
               )}
               {!locked && it.key === "design" && scopeConfirmed && canEditWbs && canAddTasks && !isSessionProject && (
-                <button type="button" className={(it.modules ?? 0) === 0 ? "btn-primary wbs-mod-add" : "btn-secondary wbs-mod-add"} onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: "", dev: "", busy: false, error: "" }); }}>
+                <button type="button" className={(it.modules ?? 0) === 0 ? "btn-secondary wbs-mod-add wbs-mod-add-first" : "btn-secondary wbs-mod-add"} onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: "", dev: "", busy: false, error: "" }); }}>
                   <Plus size={13} /> {(it.modules ?? 0) === 0 ? "Add your first module" : "Add module"}
                 </button>
               )}

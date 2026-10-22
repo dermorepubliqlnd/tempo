@@ -2000,7 +2000,11 @@ mark.kb-mark { background: #fff3c4; color: inherit; padding: 0 1px; border-radiu
 .wbs-plan-actions .wbs-plan-note { flex-basis: auto; }
 .wbs-plan-error { font-size: 12px; color: var(--danger-text); }
 .wbs-mod-gate { font-size: 11px; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
-.wbs-mod-add { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px !important; font-size: 11.5px !important; }
+.wbs-mod-add { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px !important; font-size: 11px !important; min-height: 0 !important; height: 22px !important; line-height: 1 !important; border-radius: 6px !important; }
+.wbs-mod-add svg { width: 12px; height: 12px; }
+/* 2026-10-22 (Sandra): smaller and lighter -- a soft accent tint, not a solid primary button. */
+.wbs-mod-add-first { background: var(--accent-soft, #e8f1fc) !important; color: var(--accent, #1f6fd6) !important; border: 1px solid #bcd5f3 !important; box-shadow: none !important; font-weight: 600 !important; }
+.wbs-mod-add-first:hover { background: #dbe9fa !important; border-color: #9fc2ee !important; }
 .wbs-phase-row.is-locked td { background: #f8fafc; border-top: 1px solid #eef2f6; }
 .wbs-phase-row.is-locked .wbs-phase-name, .wbs-phase-row.is-locked .wbs-phase-ms { color: #94a3b8 !important; }
 .wbs-phase-row.is-locked .wbs-phase-name span { color: #94a3b8 !important; }
