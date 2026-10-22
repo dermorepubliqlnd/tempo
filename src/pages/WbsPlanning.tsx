@@ -635,7 +635,7 @@ export default function WbsPlanning() {
   // happens after a task; Tempo adds correctly named, linked review steps.
   // Guard rail (2026-10-21): a task tagged Quality Assurance / Sign-Off must say what it reviews.
   // 2026-10-22 (Sandra): removing the last link from a review / sign-off step asks first.
-  const [reviewUnlinkDlg, setReviewUnlinkDlg] = useState<{ taskId: string; depId: string; isSignOff: boolean; choice: string; newWt: string } | null>(null);
+  const [reviewUnlinkDlg, setReviewUnlinkDlg] = useState<{ taskId: string; depId: string; isSignOff: boolean; mode: "relink" | "regular"; choice: string; newWt: string } | null>(null);
   const [reviewLinkDlg, setReviewLinkDlg] = useState<{ taskId: string; patch: Partial<TaskRow>; kind: string; choice: string } | null>(null);
   const [reviewDlg, setReviewDlg] = useState<{ taskId: string; mode: "review" | "review_signoff"; reviewer: string; approver: string; busy: boolean; error: string } | null>(null);
   const assigneePicker = useAssigneePicker(people.filter((p) => p.is_active));
@@ -1751,7 +1751,7 @@ export default function WbsPlanning() {
     const isCheck = wtName === QA_WORK_TYPE || wtName === SIGNOFF_WORK_TYPE;
     const last = dependsOnIdsFor(taskId).filter((id) => id !== dependsOnId).length === 0;
     if (t && isCheck && last && isR1Project(project)) {
-      setReviewUnlinkDlg({ taskId, depId: dependsOnId, isSignOff: wtName === SIGNOFF_WORK_TYPE, choice: "", newWt: "" });
+      setReviewUnlinkDlg({ taskId, depId: dependsOnId, isSignOff: wtName === SIGNOFF_WORK_TYPE, mode: "relink", choice: "", newWt: "" });
       return;
     }
     void removeDependency(taskId, dependsOnId);
@@ -6402,48 +6402,60 @@ export default function WbsPlanning() {
       {checklistDialog}
       {assigneePicker.element}
       {reviewUnlinkDlg && (() => {
-        const ut = tasks.find((x) => x.id === reviewUnlinkDlg.taskId);
-        const targets = reviewTargetsFor(reviewUnlinkDlg.taskId).filter((x) => x.id !== reviewUnlinkDlg.depId);
+        const d = reviewUnlinkDlg;
+        const ut = tasks.find((x) => x.id === d.taskId);
+        const targets = reviewTargetsFor(d.taskId).filter((x) => x.id !== d.depId);
         const otherWts = workTypes.filter((w) => w.is_active && w.name !== QA_WORK_TYPE && w.name !== SIGNOFF_WORK_TYPE);
-        const sel = { fontSize: 12.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6, flex: 1, minWidth: 0 } as const;
+        const kind = d.isSignOff ? "sign-off" : "review";
+        const flow = d.isSignOff ? "approval" : "review";
         const close = () => setReviewUnlinkDlg(null);
+        const ready = d.mode === "relink" ? !!d.choice : !!d.newWt;
+        const field = { fontSize: 12.5, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, width: "100%", background: "var(--surface, #fff)" } as const;
+        const card = (on: boolean) => ({ display: "grid", gap: 6, padding: "12px 14px", borderRadius: 10, border: `1px solid ${on ? "var(--border)" : "var(--border)"}`, background: on ? "var(--surface, #fff)" : "var(--surface-2, #f6f7f9)", boxShadow: on ? "0 1px 3px rgba(15,41,66,.08)" : "none", cursor: "pointer" } as const);
+        const option = (mode: "relink" | "regular", title: string, sub: string, body: React.ReactNode) => (
+          <div role="radio" aria-checked={d.mode === mode} tabIndex={0} style={card(d.mode === mode)} onClick={() => d.mode !== mode && setReviewUnlinkDlg({ ...d, mode })} onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); setReviewUnlinkDlg({ ...d, mode }); } }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span aria-hidden="true" style={{ width: 16, height: 16, borderRadius: "50%", flexShrink: 0, border: d.mode === mode ? "5px solid var(--accent)" : "none", background: d.mode === mode ? "#fff" : "#9aa5b1", boxSizing: "border-box" }} />
+              <strong style={{ fontSize: 13.5 }}>{title}</strong>
+            </span>
+            <span style={{ fontSize: 12, color: "var(--muted)", paddingLeft: 26 }}>{sub}</span>
+            {d.mode === mode && <div style={{ paddingLeft: 26, paddingTop: 4 }} onClick={(e) => e.stopPropagation()}>{body}</div>}
+          </div>
+        );
         return (
-          <Modal title={reviewUnlinkDlg.isSignOff ? "This is a sign-off step" : "This is a review step"} onClose={close} width={460}>
-            <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
-              <div style={{ color: "var(--muted)" }}>
-                <strong style={{ color: "var(--text)" }}>{ut?.name}</strong> needs a task to {reviewUnlinkDlg.isSignOff ? "sign off" : "review"}. Choose one:
+          <Modal title="Update dependency" onClose={close} width={500}>
+            <div style={{ display: "grid", gap: 14, fontSize: 13 }}>
+              <div>
+                <strong>{ut?.name}</strong> is a {kind} task. Removing its dependency may affect the {flow} workflow.
               </div>
-              <div style={{ display: "grid", gap: 4 }}>
-                <span style={{ fontWeight: 600 }}>Link it to another task</span>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <select value={reviewUnlinkDlg.choice} onChange={(e) => setReviewUnlinkDlg({ ...reviewUnlinkDlg, choice: e.target.value })} style={sel}>
-                    <option value="">Choose a task…</option>
+              <div style={{ fontWeight: 600 }}>How would you like to proceed?</div>
+              <div role="radiogroup" style={{ display: "grid", gap: 10 }}>
+                {option("relink", "Link to another task", `Keep this as a ${kind} step and select the task it should ${d.isSignOff ? "approve" : "review"}.`, (
+                  <select value={d.choice} onChange={(e) => setReviewUnlinkDlg({ ...d, choice: e.target.value })} style={field}>
+                    <option value="">Select a task…</option>
                     {targets.map((x) => <option key={x.id} value={x.id}>{x.name || "Untitled task"}</option>)}
                   </select>
-                  <button className="btn-primary" disabled={!reviewUnlinkDlg.choice} onClick={async () => {
-                    const d = reviewUnlinkDlg; close();
+                ))}
+                {option("regular", "Change to a regular task", `Remove its ${kind} role so it no longer requires ${d.isSignOff ? "an approval" : "a review"} dependency.`, (
+                  <select value={d.newWt} onChange={(e) => setReviewUnlinkDlg({ ...d, newWt: e.target.value })} style={field}>
+                    <option value="">Select a work type…</option>
+                    {otherWts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                  </select>
+                ))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+                <button className="btn-secondary" onClick={close}>Cancel</button>
+                <button className="btn-primary" disabled={!ready} onClick={async () => {
+                  close();
+                  if (d.mode === "relink") {
                     const blocked = isRelatedTask(d.taskId, d.choice) || wouldCreateDependencyCycle(d.taskId, d.choice);
                     await addDependency(d.taskId, d.choice); // explains a blocked link itself
                     if (!blocked) await removeDependency(d.taskId, d.depId);
-                  }}>Change link</button>
-                </div>
-              </div>
-              <div style={{ display: "grid", gap: 4 }}>
-                <span style={{ fontWeight: 600 }}>Not a {reviewUnlinkDlg.isSignOff ? "sign-off" : "review"}? Change the Work Type</span>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <select value={reviewUnlinkDlg.newWt} onChange={(e) => setReviewUnlinkDlg({ ...reviewUnlinkDlg, newWt: e.target.value })} style={sel}>
-                    <option value="">Choose a work type…</option>
-                    {otherWts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                  </select>
-                  <button className="btn-secondary" disabled={!reviewUnlinkDlg.newWt} onClick={async () => {
-                    const d = reviewUnlinkDlg; close();
+                  } else {
                     saveTaskField(d.taskId, { work_type_id: d.newWt });
                     await removeDependency(d.taskId, d.depId);
-                  }}>Change and remove link</button>
-                </div>
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button className="btn-secondary" onClick={close}>Cancel</button>
+                  }
+                }}>Update dependency</button>
               </div>
             </div>
           </Modal>
