@@ -1752,7 +1752,7 @@ export default function WbsPlanning() {
     const wtName = t?.work_type_id ? workTypes.find((w) => w.id === t.work_type_id)?.name ?? null : null;
     const isCheck = wtName === QA_WORK_TYPE || wtName === SIGNOFF_WORK_TYPE;
     const last = dependsOnIdsFor(taskId).filter((id) => id !== dependsOnId).length === 0;
-    if (t && isCheck && last && isR1Project(project)) {
+    if (t && isCheck && last && (isLifecycle && isR1Project(project))) {
       setReviewUnlinkDlg({ taskId, depId: dependsOnId, isSignOff: wtName === SIGNOFF_WORK_TYPE, mode: "relink", choice: "", newWt: "" });
       return;
     }
@@ -2601,7 +2601,7 @@ export default function WbsPlanning() {
       pastDated: pastDatedOpenTasks().map((t) => t.name || "Untitled task"),
       hasUnsavedChanges: forApprover ? false : hasUnsavedChanges,
       forApprover,
-      reviewTasksMissingDependency: isR1Project(project) ? reviewTasksMissingDependency(orderedTasks, dependencies, workTypeNameMap(workTypes)) : [],
+      reviewTasksMissingDependency: (isLifecycle && isR1Project(project)) ? reviewTasksMissingDependency(orderedTasks, dependencies, workTypeNameMap(workTypes)) : [],
       extraGroups: forApprover ? [] : lifecycleChecklistGroups(),
     });
   }
@@ -6423,7 +6423,7 @@ export default function WbsPlanning() {
                   close();
                   const patch = { work_type_id: d.wtId, output_type_id: d.choice, output_count: null };
                   // Still a review / sign-off without a link? Ask which task it checks first.
-                  if ((d.wtName === QA_WORK_TYPE || d.wtName === SIGNOFF_WORK_TYPE) && isR1Project(project) && !dependencies.some((x) => x.task_id === d.taskId)) {
+                  if ((d.wtName === QA_WORK_TYPE || d.wtName === SIGNOFF_WORK_TYPE) && (isLifecycle && isR1Project(project)) && !dependencies.some((x) => x.task_id === d.taskId)) {
                     setReviewLinkDlg({ taskId: d.taskId, patch, kind: d.wtName, choice: "" });
                     return;
                   }
@@ -9032,7 +9032,7 @@ export default function WbsPlanning() {
                                   }
                                   // Guard rail: a review / sign-off must say which task it checks.
                                   const isCheck = match && (match.name === QA_WORK_TYPE || match.name === SIGNOFF_WORK_TYPE);
-                                  if (isCheck && !isParent && isR1Project(project) && !dependencies.some((d) => d.task_id === t.id)) {
+                                  if (isCheck && !isParent && (isLifecycle && isR1Project(project)) && !dependencies.some((d) => d.task_id === t.id)) {
                                     setReviewLinkDlg({ taskId: t.id, patch: wtPatch, kind: match!.name, choice: "" });
                                     return;
                                   }

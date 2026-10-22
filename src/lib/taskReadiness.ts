@@ -17,8 +17,11 @@ export type ReadinessState = "action" | "waiting";
 // counts as new when it was created on or after this date (Manila time).
 export const R1_START_DATE = "2026-10-13";
 
-export function isR1Project(p: { created_at?: string | null } | null | undefined): boolean {
+export function isR1Project(p: { created_at?: string | null; lifecycle_version?: number | null } | null | undefined): boolean {
   if (!p || !p.created_at) return false;
+  // 2026-10-22 release check: projects created after 13 Oct on the old flow
+  // (lifecycle_version not 2, e.g. P-0117, P-0127) keep the old behaviour.
+  if ("lifecycle_version" in p && p.lifecycle_version !== 2) return false;
   const manila = new Date(new Date(p.created_at).getTime() + 8 * 3600000).toISOString().slice(0, 10);
   return manila >= R1_START_DATE;
 }
