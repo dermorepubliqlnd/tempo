@@ -66,7 +66,14 @@ header { display: grid; gap: 8px; }
 
 /* Phase track */
 .track-scroll { overflow-x: auto; padding-bottom: 4px; }
-.track { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; min-width: 980px; align-items: stretch; }
+.track { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; min-width: 980px; align-items: stretch; position: relative; }
+.stage-band { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; min-width: 980px; margin-bottom: 8px; }
+.stage { border-radius: 8px; padding: 7px 12px; font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.stage small { font-weight: 500; opacity: .85; }
+.stage-draft { grid-column: 1; background: var(--soft); color: var(--ink-2); border: 1px dashed var(--line); }
+.stage-live { grid-column: 2 / span 4; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); }
+.stage-live .flag { background: var(--accent); color: #fff; border-radius: 999px; padding: 2px 9px; font-size: 11.5px; white-space: nowrap; }
+.start-line { position: absolute; top: -8px; bottom: 0; left: calc((100% - 40px) / 5 + 5px); width: 0; border-left: 2px dashed var(--accent); pointer-events: none; }
 .phase { border-radius: 12px; border: 1px solid var(--line); background: var(--card); display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
 .phase-top { padding: 12px 14px 10px; display: grid; grid-template-rows: 24px auto; align-content: start; gap: 6px; height: 84px; border-bottom: 3px solid var(--c); background: var(--cb); }
 .phase-top h3 { color: var(--c); display: flex; align-items: center; gap: 8px; font-size: 13.5px; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -157,7 +164,12 @@ footer { font-size: 12px; color: var(--muted); }
       <span class="muted">Each phase ends in a milestone that Tempo ticks off when its tasks are done.</span>
     </div>
     <div class="track-scroll">
+      <div class="stage-band" aria-hidden="false">
+        <div class="stage stage-draft">In Draft <small>· before Start Project</small></div>
+        <div class="stage stage-live"><span class="flag">▶ Start Project</span> Phases 2 to 5 begin once the project is approved and started <small>· planned in Draft</small></div>
+      </div>
       <div class="track">
+        <span class="start-line" aria-hidden="true"></span>
         <article class="phase" style="--c: var(--ph1); --cb: var(--ph1-bg)">
           <div class="phase-top">
             <h3><span class="num">1</span>Analysis &amp; Scoping</h3>
