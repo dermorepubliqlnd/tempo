@@ -356,11 +356,31 @@ export default function DataTable<T>({
       ? groupOptions?.find((g) => g.key === view.groupBy2)
       : undefined;
   const allSortedRows = useMemo(() => {
-    if (!sortOptions || !view.sorts?.length) return rows;
-    return getParentId
-      ? sortRowsHierarchical(rows, view.sorts, sortOptions, rowKey, getParentId)
-      : sortRows(rows, view.sorts, sortOptions);
-  }, [rows, sortOptions, view.sorts, getParentId, rowKey]);
+    const sorted = !sortOptions || !view.sorts?.length
+      ? rows
+      : getParentId
+        ? sortRowsHierarchical(rows, view.sorts, sortOptions, rowKey, getParentId)
+        : sortRows(rows, view.sorts, sortOptions);
+    if (!activeGroupOption) return sorted;
+    // 2026-10-22 UAT bug (Sandra: groups showed (0) when Done was added to the
+    // filter): rows in hidden groups were paged before being dropped, so a page
+    // could be filled with rows nobody sees. Drop hidden / excluded groups
+    // first, then order rows group by group so each page holds whole groups.
+    const hidden = new Set(view.hiddenGroups ?? []);
+    const order = new Map<string, number>();
+    activeGroupOption.allGroups?.().forEach((g) => { if (!order.has(g)) order.set(g, order.size); });
+    const keyed: { row: T; g: string; i: number }[] = [];
+    sorted.forEach((row, i) => {
+      const raw = activeGroupOption.getGroup(row);
+      if (raw === GROUP_EXCLUDE) return;
+      const g = raw || "—";
+      if (hidden.has(g)) return;
+      if (!order.has(g)) order.set(g, order.size);
+      keyed.push({ row, g, i });
+    });
+    keyed.sort((a, b) => (order.get(a.g)! - order.get(b.g)!) || a.i - b.i);
+    return keyed.map((k) => k.row);
+  }, [rows, sortOptions, view.sorts, getParentId, rowKey, activeGroupOption, view.hiddenGroups]);
 
   // Pagination. Pages are built from "units" (a top-level row plus its
   // descendants that follow it) so a parent and its sub-tasks stay together.

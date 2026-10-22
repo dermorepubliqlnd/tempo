@@ -6584,10 +6584,24 @@ export default function WbsPlanning() {
               <div style={{ position: "fixed", inset: 0, zIndex: 1180 }} onClick={closeMenu} />
               <div
                 className="card"
+                // UAT bug (2026-10-22): the menu grew (Add review steps, Move to <phase>) and its
+                // last items fell below the screen on bottom rows. Measure it and open upward when
+                // it doesn't fit; scroll inside if the window is very short.
+                ref={(el) => {
+                  if (!el) return;
+                  const h = el.offsetHeight;
+                  const below = window.innerHeight - rowActionsMenu.y - 8;
+                  const top = h <= below ? rowActionsMenu.y : Math.max(8, Math.min(rowActionsMenu.y - h - 4, window.innerHeight - h - 8));
+                  el.style.top = `${top}px`;
+                  el.style.visibility = "visible";
+                }}
                 style={{
                   position: "fixed",
                   left: Math.min(rowActionsMenu.x - 220, window.innerWidth - 228),
-                  top: Math.min(rowActionsMenu.y, window.innerHeight - 330),
+                  top: rowActionsMenu.y,
+                  visibility: "hidden",
+                  maxHeight: "calc(100vh - 16px)",
+                  overflowY: "auto",
                   zIndex: 1181,
                   width: 220,
                   padding: 5,
