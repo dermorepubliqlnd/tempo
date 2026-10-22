@@ -107,6 +107,9 @@ function renderInline(text: string): string {
   return out;
 }
 
+// Fresh guide on every page load (the browser otherwise keeps an old copy of the job aid).
+const GUIDE_CACHE_KEY = Date.now();
+
 function renderMarkdownLite(source: string): string {
   const lines = source.replace(/\r\n/g, "\n").split("\n");
   const html: string[] = [];
@@ -158,7 +161,7 @@ function renderMarkdownLite(source: string): string {
     const guideMatch = /^\{\{guide:([a-z0-9-]+)\}\}$/.exec(trimmed);
     if (guideMatch) {
       closeList();
-      const src = `${import.meta.env.BASE_URL}guides/${guideMatch[1]}.html`;
+      const src = `${import.meta.env.BASE_URL}guides/${guideMatch[1]}.html?v=${GUIDE_CACHE_KEY}`;
       html.push(
         `<div class="kb-guide"><iframe src="${src}" title="Visual guide" scrolling="no" onload="(function(f){try{var d=f.contentDocument;if(!d)return;var fit=function(){f.style.height=(d.documentElement.scrollHeight+2)+'px'};fit();if(window.ResizeObserver){new ResizeObserver(fit).observe(d.body)}}catch(e){f.style.height='78vh';f.setAttribute('scrolling','auto')}})(this)" style="width:100%;height:600px;overflow:hidden;border:1px solid var(--border);border-radius:10px;background:#fff;display:block"></iframe><a href="${src}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:6px;font-size:12px">Open the guide in a new tab</a></div>`
       );
