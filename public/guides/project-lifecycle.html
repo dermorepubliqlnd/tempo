@@ -297,7 +297,7 @@ footer { font-size: 12px; color: var(--muted); }
       <span class="muted">Every piece of work goes to a reviewer, then an approver. Either can send it back with a comment.</span>
     </div>
     <div class="loop-scroll">
-      <svg viewBox="0 0 900 190" role="img" aria-label="Work, then Ready for Review, then Pass QA, then Approve. Review and sign-off can send the work back For Revision; the owner fixes it and clicks Resubmit.">
+      <svg viewBox="0 0 900 230" role="img" aria-label="Work, then Ready for Review, then Pass QA, then Approve. Review and sign-off can send the work back For Revision; the owner fixes it and clicks Resubmit.">
         <defs>
           <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker>
           <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--amber)"/></marker>
@@ -325,12 +325,12 @@ footer { font-size: 12px; color: var(--muted); }
           <line x1="660" y1="62" x2="696" y2="62" marker-end="url(#ar)"/>
         </g>
         <g stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="6 4" fill="none">
-          <path d="M565 94 C565 140 105 140 105 98" marker-end="url(#arb)"/>
-          <path d="M795 94 C795 170 105 170 105 98" marker-end="url(#arb)"/>
+          <path d="M565 94 C565 128 105 128 105 98" marker-end="url(#arb)"/>
+          <path d="M795 94 C795 210 105 210 105 98" marker-end="url(#arb)"/>
         </g>
-        <g font-family="Figtree, Segoe UI, sans-serif" font-size="12.5" fill="var(--amber)" text-anchor="middle" font-weight="700">
-          <text x="335" y="128">For Revision + comment → fix it → Resubmit</text>
-          <text x="560" y="164">Approver can send it back too</text>
+        <g font-family="Figtree, Segoe UI, sans-serif" font-size="12.5" fill="var(--amber)" text-anchor="middle" font-weight="700" stroke="var(--card)" stroke-width="6" stroke-linejoin="round" paint-order="stroke">
+          <text x="400" y="144">Reviewer: For Revision + comment → fix it → Resubmit</text>
+          <text x="560" y="218">Approver: For Revision goes straight back to the doer, then back to the approver</text>
         </g>
       </svg>
     </div>
