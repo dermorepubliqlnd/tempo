@@ -147,8 +147,8 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
               </label>
               <label style={{ display: "grid", gap: 4 }}>
                 <span style={label}>Output Type</span>
-                <select value={otId} onChange={(e) => setOtId(e.target.value)} style={input}>
-                  <option value="">—</option>
+                <select value={otId} onChange={(e) => setOtId(e.target.value)} style={!otId ? { ...input, borderColor: "var(--warning-text, #b45309)", background: "var(--warning-bg, #fff8e6)" } : input}>
+                  <option value="">Please select output type</option>
                   {pickableOt.map((o) => (
                     <option key={o.id} value={o.id}>{o.name}</option>
                   ))}

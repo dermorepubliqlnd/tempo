@@ -636,6 +636,8 @@ export default function WbsPlanning() {
   // Guard rail (2026-10-21): a task tagged Quality Assurance / Sign-Off must say what it reviews.
   // 2026-10-22 (Sandra): removing the last link from a review / sign-off step asks first.
   const [reviewUnlinkDlg, setReviewUnlinkDlg] = useState<{ taskId: string; depId: string; isSignOff: boolean; mode: "relink" | "regular"; choice: string; newWt: string } | null>(null);
+  // 2026-10-22 (Sandra): a new Work Type whose outputs don't include the current one asks for the Output Type.
+  const [outputPickDlg, setOutputPickDlg] = useState<{ taskId: string; wtId: string; wtName: string; options: { id: string; name: string }[]; choice: string } | null>(null);
   const [reviewLinkDlg, setReviewLinkDlg] = useState<{ taskId: string; patch: Partial<TaskRow>; kind: string; choice: string } | null>(null);
   const [reviewDlg, setReviewDlg] = useState<{ taskId: string; mode: "review" | "review_signoff"; reviewer: string; approver: string; busy: boolean; error: string } | null>(null);
   const assigneePicker = useAssigneePicker(people.filter((p) => p.is_active));
@@ -6401,6 +6403,28 @@ export default function WbsPlanning() {
       {dialog}
       {checklistDialog}
       {assigneePicker.element}
+      {outputPickDlg && (() => {
+        const d = outputPickDlg;
+        const pt = tasks.find((x) => x.id === d.taskId);
+        const close = () => setOutputPickDlg(null);
+        return (
+          <Modal title="Please select output type" onClose={close} width={420}>
+            <div style={{ display: "grid", gap: 12, fontSize: 13 }}>
+              <div style={{ color: "var(--muted)" }}>
+                <strong style={{ color: "var(--text)" }}>{pt?.name}</strong> is now <strong style={{ color: "var(--text)" }}>{d.wtName}</strong>. Its current Output Type doesn't belong to this Work Type.
+              </div>
+              <select autoFocus value={d.choice} onChange={(e) => setOutputPickDlg({ ...d, choice: e.target.value })} style={{ fontSize: 12.5, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8 }}>
+                <option value="">Select an output type…</option>
+                {d.options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button className="btn-secondary" onClick={close}>Cancel</button>
+                <button className="btn-primary" disabled={!d.choice} onClick={() => { close(); saveTaskField(d.taskId, { work_type_id: d.wtId, output_type_id: d.choice, output_count: null }); }}>Save</button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
       {reviewUnlinkDlg && (() => {
         const d = reviewUnlinkDlg;
         const ut = tasks.find((x) => x.id === d.taskId);
@@ -8993,6 +9017,10 @@ export default function WbsPlanning() {
                                     : fits
                                       ? { work_type_id: match?.id ?? null }
                                       : { work_type_id: match!.id, output_type_id: null, output_count: null };
+                                  if (!fits && onlyOutput.length > 1 && !isParent) {
+                                    setOutputPickDlg({ taskId: t.id, wtId: match!.id, wtName: match!.name, options: onlyOutput.map((o) => ({ id: o.id, name: o.name })), choice: "" });
+                                    return;
+                                  }
                                   // Guard rail: a review / sign-off must say which task it checks.
                                   const isCheck = match && (match.name === QA_WORK_TYPE || match.name === SIGNOFF_WORK_TYPE);
                                   if (isCheck && !isParent && isR1Project(project) && !dependencies.some((d) => d.task_id === t.id)) {
