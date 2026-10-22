@@ -710,7 +710,10 @@ export default function KnowledgeBase() {
         {dialog}
         {topBar([{ label: "Knowledge Base", to: "/knowledge-base" }, { label: cat?.name ?? "Topic", to: cat ? `/knowledge-base/category/${cat.id}` : undefined }, { label: entry.title }])}
         <div className="card" style={{ padding: "22px 28px" }}>
-          <div style={{ maxWidth: READING_WIDTH }}>
+          {/* 2026-10-22 (Sandra): an embedded visual guide uses the card's full width;
+              the article text keeps its reading width. */}
+          <style>{`.kb-wide > *:not(.kb-content), .kb-wide .kb-content > *:not(.kb-guide) { max-width: ${READING_WIDTH}px; }`}</style>
+          <div className={/\{\{guide:/.test(entry.content) ? "kb-wide" : undefined} style={{ maxWidth: /\{\{guide:/.test(entry.content) && editingEntryId !== entry.id ? "none" : READING_WIDTH }}>
             {editingEntryId === entry.id ? (
               <EntryEditor entry={entry} saving={saving} onSave={(t, c) => saveEntry(entry, t, c)} onCancel={() => setEditingEntryId(null)} />
             ) : (
