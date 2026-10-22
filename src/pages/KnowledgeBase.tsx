@@ -19,7 +19,7 @@
 //
 // Content is markdown-lite plain text: #/##/### headers ("###" becomes a
 // collapsible section), **bold**, *italic*, "- " bullets, "1. " lists,
-// "| a | b |" tables, {tone:Label} pills.
+// "| a | b |" tables, {tone:Label} pills, {{guide:name}} embeds a visual guide.
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Plus, Pencil, Trash2, ChevronRight, History, X, Search, Pin, PinOff, FileText, Star, Clock, Settings2 } from "lucide-react";
@@ -125,6 +125,20 @@ function renderMarkdownLite(source: string): string {
 
     if (!trimmed) {
       closeList();
+      i++;
+      continue;
+    }
+
+    // 2026-10-22 (Sandra): "{{guide:project-lifecycle}}" on its own line embeds
+    // one of Tempo's own visual guides (public/guides/<name>.html) in the article,
+    // with a link to open it full page.
+    const guideMatch = /^\{\{guide:([a-z0-9-]+)\}\}$/.exec(trimmed);
+    if (guideMatch) {
+      closeList();
+      const src = `${import.meta.env.BASE_URL}guides/${guideMatch[1]}.html`;
+      html.push(
+        `<div class="kb-guide"><iframe src="${src}" title="Visual guide" loading="lazy" style="width:100%;height:78vh;min-height:520px;border:1px solid var(--border);border-radius:10px;background:#fff"></iframe><a href="${src}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:6px;font-size:12px">Open the guide in a new tab</a></div>`
+      );
       i++;
       continue;
     }
