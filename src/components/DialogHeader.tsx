@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { X } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Info, X } from "lucide-react";
 
 // 2026-10-23 (Sandra's mock-ups): shared header and summary band for the
 // hand-off dialogs (Submit for Review / Pass QA / Approve / Request Revision).
@@ -31,5 +31,34 @@ export function SummaryBand({ items }: { items: { label: string; value: ReactNod
         </div>
       ))}
     </div>
+  );
+}
+
+/** Small ⓘ with a tooltip that shows on hover, keyboard focus or click/tap. */
+export function InfoTip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        type="button"
+        aria-label={text}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onClick={(e) => { e.preventDefault(); setOpen((o) => !o); }}
+        style={{ display: "inline-flex", background: "none", border: "none", padding: 0, color: "var(--accent)", cursor: "help", width: "auto" }}
+      >
+        <Info size={14} />
+      </button>
+      {open && (
+        <span
+          role="tooltip"
+          style={{ position: "absolute", bottom: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)", zIndex: 5, width: "max-content", maxWidth: 220, padding: "6px 9px", borderRadius: 6, background: "#0f2942", color: "#fff", fontSize: 11.5, fontWeight: 500, lineHeight: 1.4, boxShadow: "0 6px 16px rgba(15,41,66,.25)", whiteSpace: "normal" }}
+        >
+          {text}
+        </span>
+      )}
+    </span>
   );
 }

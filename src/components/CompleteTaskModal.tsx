@@ -6,8 +6,8 @@
 import { useEffect, useState } from "react";
 import DateInput from "./DateInput";
 import Modal from "./Modal";
-import { DialogHeader, SummaryBand } from "./DialogHeader";
-import { BadgeCheck, CalendarDays, CircleCheck, Info, Send, ShieldCheck, SquareCheckBig } from "lucide-react";
+import { DialogHeader, InfoTip, SummaryBand } from "./DialogHeader";
+import { BadgeCheck, CalendarDays, CircleCheck, Send, ShieldCheck, SquareCheckBig } from "lucide-react";
 import { formatDate } from "../lib/formatDate";
 
 export interface CompleteTaskInfo {
@@ -22,6 +22,8 @@ export interface CompleteTaskInfo {
   loggedHours: number;
   /** Hours logged but still waiting for approval (shown, not counted). */
   pendingHours: number;
+  /** Hours logged since the task last came back For Revision (null = it never did). */
+  revisionHours?: number | null;
   /** phase189: when set, Work Type / Output Type are editable (changes go to the Audit Trail). */
   typeEdit?: {
     workTypeId: string | null;
@@ -85,7 +87,9 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [countsDeliverable, fixedOne]);
 
-  const hoursOk = info.loggedHours > 0;
+  // 2026-10-23 (Sandra): after For Revision, time must be logged again before resubmitting.
+  const needsRevisionTime = info.revisionHours != null && info.revisionHours <= 0;
+  const hoursOk = info.loggedHours > 0 && !needsRevisionTime;
   const countNum = Number(count);
   const countOk = !countsDeliverable || (count.trim() !== "" && Number.isInteger(countNum) && countNum >= 1);
   const dateOk = autoDate || (!!date && date <= today);
@@ -94,7 +98,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
     const problems: string[] = [];
     if (!dateOk) problems.push(date ? "Reported Completion can't be in the future." : "Enter the Reported Completion date.");
     if (countsDeliverable && !countOk) problems.push(`Enter how many ${outputTypeName ?? "outputs"} this task produced (1 or more).`);
-    if (!hoursOk) problems.push(info.pendingHours > 0 ? "Your logged time is still waiting for approval. It counts once approved." : "Log your time on this task first.");
+    if (!hoursOk) problems.push(needsRevisionTime ? "Log the time you spent on the revision first." : info.pendingHours > 0 ? "Your logged time is still waiting for approval. It counts once approved." : "Log your time on this task first.");
     if (problems.length) {
       setError(problems.join(" "));
       return;
@@ -133,7 +137,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
             { label: "Task", value: <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={info.name}>{info.name}</span> },
             { label: "Due date", value: <><CalendarDays size={15} style={{ color: "var(--muted)", flexShrink: 0 }} />{info.dueDate ? formatDate(info.dueDate) : "—"}</> },
             autoDate
-              ? { label: "Completion date", value: <><CalendarDays size={15} style={{ color: "var(--muted)", flexShrink: 0 }} />{formatDate(today)}<span title="Recorded automatically as the day you submit. No separate validation needed." style={{ display: "inline-flex", color: "var(--accent)", cursor: "help" }}><Info size={14} /></span></>, hint: "Set automatically on submission" }
+              ? { label: "Completion date", value: <><CalendarDays size={15} style={{ color: "var(--muted)", flexShrink: 0 }} />{formatDate(today)}<InfoTip text="Set automatically on submission." /></> }
               : { label: "Reported completion *", value: <DateInput value={date} max={today} onChange={(e) => setDate(e.target.value)} style={{ ...input, fontWeight: 400 }} /> },
           ]}
         />
@@ -216,14 +220,19 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
                 </button>
               </>
             ) : (
-              <span style={{ ...box, color: "var(--danger-text)", fontWeight: 700 }}>0h · needed to finish</span>
+              <span style={{ ...box, color: "var(--danger-text)", fontWeight: 700 }}>{needsRevisionTime ? `${info.loggedHours.toFixed(2)}h · none since it came back` : "0h · needed to finish"}</span>
             )}
           </div>
         </div>
 
         {!hoursOk && (
           <div role="alert" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--warning-border, #f3d48b)", background: "var(--warning-bg, #fff8e6)", fontSize: 12.5 }}>
-            {info.pendingHours > 0 ? (
+            {needsRevisionTime ? (
+              <>
+                <span style={{ flex: 1, minWidth: 200 }}><strong>This came back For Revision.</strong> Log the time you spent on the revision, then resubmit.</span>
+                <button type="button" className="btn-primary" onClick={onLogTime} style={{ padding: "5px 12px", fontSize: 12 }}>Log time</button>
+              </>
+            ) : info.pendingHours > 0 ? (
               <span style={{ flex: 1, minWidth: 200 }}>Your {info.pendingHours.toFixed(2)}h is waiting for approval. You can finish once it's approved.</span>
             ) : (
               <>

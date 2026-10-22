@@ -7532,6 +7532,14 @@ export default function Projects() {
               estimatedHours: ct.estimated_hours,
               loggedHours: ownHoursFor(timeEntries, ct.id),
               pendingHours: Math.round((pendingMin / 60) * 100) / 100,
+              revisionHours: (() => {
+                const ret = r1ProjectIds.has(ct.project_id) && (ct.revision_count ?? 0) > 0 ? lastReturnByTask.get(ct.id) : undefined;
+                if (!ret?.created_at) return null;
+                const mins = timeEntries
+                  .filter((e) => e.task_id === ct.id && !e.is_archived && e.created_at > ret.created_at)
+                  .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
+                return Math.round((mins / 60) * 100) / 100;
+              })(),
               typeEdit: {
                 workTypeId: ct.work_type_id,
                 outputTypeId: ct.output_type_id,
