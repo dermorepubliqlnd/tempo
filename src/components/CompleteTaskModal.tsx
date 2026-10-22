@@ -47,13 +47,15 @@ interface Props {
   outcome?: string;
   /** Green confirmation shown in the pop-up, e.g. after time was logged. */
   notice?: string;
+  /** New projects (2026-10-22): completion date is today, set automatically; no validation step. */
+  autoDate?: boolean;
 }
 
 const label: React.CSSProperties = { fontSize: 11.5, color: "var(--muted)", fontWeight: 600 };
 const value: React.CSSProperties = { fontSize: 12.5, color: "var(--text)" };
 const input: React.CSSProperties = { fontSize: 12.5, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--border)", fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
 
-export default function CompleteTaskModal({ info, initialDate, initialCount, today, actionLabel = "Mark Done", onLogTime, onCancel, onConfirm, onRevision, outcome, notice }: Props) {
+export default function CompleteTaskModal({ info, initialDate, initialCount, today, actionLabel = "Mark Done", onLogTime, onCancel, onConfirm, onRevision, outcome, notice, autoDate }: Props) {
   const te = info.typeEdit;
   const [wtId, setWtId] = useState<string>(te?.workTypeId ?? "");
   const [otId, setOtId] = useState<string>(te?.outputTypeId ?? "");
@@ -82,7 +84,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
   const hoursOk = info.loggedHours > 0;
   const countNum = Number(count);
   const countOk = !countsDeliverable || (count.trim() !== "" && Number.isInteger(countNum) && countNum >= 1);
-  const dateOk = !!date && date <= today;
+  const dateOk = autoDate || (!!date && date <= today);
 
   async function submit() {
     const problems: string[] = [];
@@ -99,7 +101,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
       setBusy(false);
       return;
     }
-    const err = await onConfirm(date, countsDeliverable ? countNum : 0, typesChanged ? { workTypeId: wtId || null, outputTypeId: otId || null } : undefined);
+    const err = await onConfirm(autoDate ? today : date, countsDeliverable ? countNum : 0, typesChanged ? { workTypeId: wtId || null, outputTypeId: otId || null } : undefined);
     setBusy(false);
     if (err) setError(err);
   }
@@ -114,10 +116,17 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
             <span style={label}>Due date</span>
             <span style={value}>{info.dueDate ? formatDate(info.dueDate) : "—"}</span>
           </div>
-          <label style={{ display: "grid", gap: 4 }}>
-            <span style={label}>Reported Completion *</span>
-            <DateInput value={date} max={today} onChange={(e) => setDate(e.target.value)} style={input} />
-          </label>
+          {autoDate ? (
+            <div style={{ display: "grid", gap: 4 }}>
+              <span style={label}>Completion date</span>
+              <span style={value} title="Recorded automatically as the day you finish. No separate validation needed.">{formatDate(today)} <span style={{ color: "var(--muted)", fontSize: 11.5 }}>· today, recorded automatically</span></span>
+            </div>
+          ) : (
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={label}>Reported Completion *</span>
+              <DateInput value={date} max={today} onChange={(e) => setDate(e.target.value)} style={input} />
+            </label>
+          )}
           {te ? (
             <>
               <label style={{ display: "grid", gap: 4 }}>

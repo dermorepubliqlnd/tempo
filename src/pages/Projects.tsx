@@ -7514,6 +7514,7 @@ export default function Projects() {
             onCancel={() => { setCompleteDlg(null); setCompleteNotice(""); }}
             onConfirm={(date, count, types) => confirmTaskDone(ct, date, count, types)}
             outcome={completionWords(ct, completeDlg.actionLabel)[0]}
+            autoDate={r1ProjectIds.has(ct.project_id)}
             notice={completeNotice}
             onRevision={reviewStepKind(ct) && canReturnFrom(ct) ? () => { setCompleteDlg(null); openReturnDialog(ct); } : undefined}
           />
