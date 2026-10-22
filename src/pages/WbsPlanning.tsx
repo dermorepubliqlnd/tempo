@@ -634,6 +634,8 @@ export default function WbsPlanning() {
   // Layer 1 (2026-10-22, Sandra: "bullet proof" reviews): the owner picks what
   // happens after a task; Tempo adds correctly named, linked review steps.
   // Guard rail (2026-10-21): a task tagged Quality Assurance / Sign-Off must say what it reviews.
+  // 2026-10-22 (Sandra): removing the last link from a review / sign-off step asks first.
+  const [reviewUnlinkDlg, setReviewUnlinkDlg] = useState<{ taskId: string; depId: string; isSignOff: boolean; choice: string; newWt: string } | null>(null);
   const [reviewLinkDlg, setReviewLinkDlg] = useState<{ taskId: string; patch: Partial<TaskRow>; kind: string; choice: string } | null>(null);
   const [reviewDlg, setReviewDlg] = useState<{ taskId: string; mode: "review" | "review_signoff"; reviewer: string; approver: string; busy: boolean; error: string } | null>(null);
   const assigneePicker = useAssigneePicker(people.filter((p) => p.is_active));
@@ -1743,6 +1745,17 @@ export default function WbsPlanning() {
     if (Object.keys(patch).length) saveTaskField(taskId, patch);
   }
 
+  function requestRemoveDependency(taskId: string, dependsOnId: string) {
+    const t = tasks.find((x) => x.id === taskId);
+    const wtName = t?.work_type_id ? workTypes.find((w) => w.id === t.work_type_id)?.name ?? null : null;
+    const isCheck = wtName === QA_WORK_TYPE || wtName === SIGNOFF_WORK_TYPE;
+    const last = dependsOnIdsFor(taskId).filter((id) => id !== dependsOnId).length === 0;
+    if (t && isCheck && last && isR1Project(project)) {
+      setReviewUnlinkDlg({ taskId, depId: dependsOnId, isSignOff: wtName === SIGNOFF_WORK_TYPE, choice: "", newWt: "" });
+      return;
+    }
+    void removeDependency(taskId, dependsOnId);
+  }
   async function removeDependency(taskId: string, dependsOnId: string) {
     setDependencies((prev) => prev.filter((d) => !(d.task_id === taskId && d.depends_on_task_id === dependsOnId)));
     const { error } = await supabase.from("task_dependencies").delete().eq("task_id", taskId).eq("depends_on_task_id", dependsOnId);
@@ -6388,6 +6401,54 @@ export default function WbsPlanning() {
       {dialog}
       {checklistDialog}
       {assigneePicker.element}
+      {reviewUnlinkDlg && (() => {
+        const ut = tasks.find((x) => x.id === reviewUnlinkDlg.taskId);
+        const targets = reviewTargetsFor(reviewUnlinkDlg.taskId).filter((x) => x.id !== reviewUnlinkDlg.depId);
+        const otherWts = workTypes.filter((w) => w.is_active && w.name !== QA_WORK_TYPE && w.name !== SIGNOFF_WORK_TYPE);
+        const sel = { fontSize: 12.5, padding: "6px 8px", border: "1px solid var(--border)", borderRadius: 6, flex: 1, minWidth: 0 } as const;
+        const close = () => setReviewUnlinkDlg(null);
+        return (
+          <Modal title={reviewUnlinkDlg.isSignOff ? "This is a sign-off step" : "This is a review step"} onClose={close} width={460}>
+            <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
+              <div style={{ color: "var(--muted)" }}>
+                <strong style={{ color: "var(--text)" }}>{ut?.name}</strong> needs a task to {reviewUnlinkDlg.isSignOff ? "sign off" : "review"}. Choose one:
+              </div>
+              <div style={{ display: "grid", gap: 4 }}>
+                <span style={{ fontWeight: 600 }}>Link it to another task</span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <select value={reviewUnlinkDlg.choice} onChange={(e) => setReviewUnlinkDlg({ ...reviewUnlinkDlg, choice: e.target.value })} style={sel}>
+                    <option value="">Choose a task…</option>
+                    {targets.map((x) => <option key={x.id} value={x.id}>{x.name || "Untitled task"}</option>)}
+                  </select>
+                  <button className="btn-primary" disabled={!reviewUnlinkDlg.choice} onClick={async () => {
+                    const d = reviewUnlinkDlg; close();
+                    const blocked = isRelatedTask(d.taskId, d.choice) || wouldCreateDependencyCycle(d.taskId, d.choice);
+                    await addDependency(d.taskId, d.choice); // explains a blocked link itself
+                    if (!blocked) await removeDependency(d.taskId, d.depId);
+                  }}>Change link</button>
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: 4 }}>
+                <span style={{ fontWeight: 600 }}>Not a {reviewUnlinkDlg.isSignOff ? "sign-off" : "review"}? Change the Work Type</span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <select value={reviewUnlinkDlg.newWt} onChange={(e) => setReviewUnlinkDlg({ ...reviewUnlinkDlg, newWt: e.target.value })} style={sel}>
+                    <option value="">Choose a work type…</option>
+                    {otherWts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                  </select>
+                  <button className="btn-secondary" disabled={!reviewUnlinkDlg.newWt} onClick={async () => {
+                    const d = reviewUnlinkDlg; close();
+                    saveTaskField(d.taskId, { work_type_id: d.newWt });
+                    await removeDependency(d.taskId, d.depId);
+                  }}>Change and remove link</button>
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn-secondary" onClick={close}>Cancel</button>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
       {reviewLinkDlg && (() => {
         const rt = tasks.find((x) => x.id === reviewLinkDlg.taskId);
         const targets = reviewTargetsFor(reviewLinkDlg.taskId);
@@ -8794,7 +8855,7 @@ export default function WbsPlanning() {
                           onToggle={() => setDepPickerOpenFor((prev) => (prev === t.id ? null : t.id))}
                           onClose={() => setDepPickerOpenFor(null)}
                           onAdd={(depId) => addDependency(t.id, depId)}
-                          onRemove={(depId) => removeDependency(t.id, depId)}
+                          onRemove={(depId) => requestRemoveDependency(t.id, depId)}
                         />
                         {/* 2026-09-10: non-blocking dependency warning --
                             cancelling a task never blocks the cancel or
