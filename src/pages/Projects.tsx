@@ -4480,6 +4480,12 @@ export default function Projects() {
   // immediately editable inline via the normal Name cell.
   async function addSubtask(parent: TaskWithDepth) {
     if (parent._depth > 0) return; // only 2 layers total: parent + 1 sub-task level
+    // 2026-10-22 (Sandra): one module per deliverable -- no sub-tasks in Design /
+    // Development, and never under a review or sign-off step (new projects).
+    if (r1ProjectIds.has(parent.project_id) && (parent.wbs_phase === "design" || parent.wbs_phase === "development" || isReviewStep(parent, wtNames))) {
+      await alert({ title: "No sub-tasks here", message: "Design and Development use one module per deliverable, and review or sign-off steps can't have sub-tasks. To add another deliverable, use Add module on the WBS." });
+      return;
+    }
     // Phase 26: closure is final -- also enforced by
     // enforce_closed_project_lock, this is just the friendlier message.
     if (isProjectClosed(parent.project_id)) {
