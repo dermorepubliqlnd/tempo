@@ -144,7 +144,7 @@ function renderMarkdownLite(source: string): string {
         const [title, body, todo] = lines[i].trim().slice(3).split("||").map((x) => x.trim());
         n++;
         cards.push(
-          `<div class="kb-card"><div class="kb-card-head"><span class="kb-card-num">${n}</span><span class="kb-card-title">${renderInline(title ?? "")}</span></div>` +
+          `<div class="kb-card${todo ? "" : " kb-card-nodo"}"><div class="kb-card-head"><span class="kb-card-num">${n}</span><span class="kb-card-title">${renderInline(title ?? "")}</span></div>` +
             (body ? `<div class="kb-card-body">${renderInline(body)}</div>` : "") +
             (todo ? `<div class="kb-card-do"><span class="kb-card-do-label">What you do</span>${renderInline(todo)}</div>` : "") +
             `</div>`
@@ -741,10 +741,16 @@ export default function KnowledgeBase() {
           {/* 2026-10-22 (Sandra): an embedded visual guide uses the card's full width;
               the article text keeps its reading width. */}
           <style>{`.kb-wide > *:not(.kb-content), .kb-wide .kb-content > *:not(.kb-guide):not(.kb-cards) { max-width: ${READING_WIDTH}px; }
-.kb-cards { display: grid; grid-template-columns: repeat(var(--kb-cols, 3), minmax(0, 1fr)); gap: 12px; margin: 10px 0 18px; }
+.kb-cards { display: grid; grid-template-columns: repeat(var(--kb-cols, 3), minmax(0, 1fr)); column-gap: 12px; row-gap: 12px; margin: 10px 0 18px; }
 @media (max-width: 1100px) { .kb-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .kb-cards { grid-template-columns: 1fr; } }
 .kb-card { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface, #fff); box-shadow: 0 1px 2px rgba(15,41,66,.05); }
+@supports (grid-template-rows: subgrid) {
+  /* Title, text and "What you do" line up across every card in a row. */
+  .kb-card { display: grid; grid-template-rows: subgrid; grid-row: span 3; row-gap: 8px; align-content: start; }
+  .kb-card-nodo { grid-row: span 2; }
+  .kb-card-do { align-self: start; }
+}
 .kb-card-head { display: flex; align-items: center; gap: 10px; }
 .kb-card-num { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 12.5px; font-weight: 700; color: #fff; background: var(--accent); }
 .kb-card-title { font-size: 14px; font-weight: 700; color: var(--navy, var(--text)); line-height: 1.3; }
