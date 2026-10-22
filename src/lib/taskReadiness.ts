@@ -69,7 +69,16 @@ export function isFinishedStatus(status: string | null | undefined): boolean {
  *   longer block anything).
  * - A task with no predecessors is "action".
  */
-export function computeReadiness(tasks: ReadinessTask[], deps: ReadinessDep[], appliesTo: (t: ReadinessTask) => boolean = () => true): Map<string, Readiness> {
+export function computeReadiness(
+  tasks: ReadinessTask[],
+  deps: ReadinessDep[],
+  appliesTo: (t: ReadinessTask) => boolean = () => true,
+  // 2026-10-22 (Sandra): review / sign-off steps. A check waits on the work it
+  // checks even through an earlier, finished check (Sign-Off -> Review -> work):
+  // when the approver sends work back to the doer, the sign-off waits for the
+  // doer, not the reviewer. A check's own "In Progress" never skips the wait.
+  isCheck?: (t: ReadinessTask) => boolean,
+): Map<string, Readiness> {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const predsOf = new Map<string, string[]>();
   for (const d of deps) {
@@ -81,16 +90,26 @@ export function computeReadiness(tasks: ReadinessTask[], deps: ReadinessDep[], a
   for (const t of tasks) {
     const preds = predsOf.get(t.id) ?? [];
     const open: WaitingOn[] = [];
-    for (const pid of preds) {
+    const tIsCheck = !!isCheck && isCheck(t);
+    const seenUp = new Set<string>();
+    const visit = (pid: string, depth: number) => {
+      if (seenUp.has(pid)) return;
+      seenUp.add(pid);
       const p = byId.get(pid);
-      if (!p || p.is_archived || isFinishedStatus(p.status)) continue;
+      if (!p || p.is_archived) return;
+      if (isFinishedStatus(p.status)) {
+        // Look past a finished check to the work behind it (checks only).
+        if (tIsCheck && depth < 5 && p.status === "Done" && isCheck!(p)) for (const up of predsOf.get(p.id) ?? []) visit(up, depth + 1);
+        return;
+      }
       open.push({ id: p.id, name: p.name, status: p.status, assigneeId: p.assignee_id, dueDate: p.current_due_date ?? null });
-    }
+    };
+    for (const pid of preds) visit(pid, 0);
     if (!appliesTo(t)) {
       out.set(t.id, { state: "action", waitingOn: [] });
       continue;
     }
-    const started = t.status === "In Progress";
+    const started = t.status === "In Progress" && !tIsCheck;
     out.set(t.id, { state: open.length > 0 && !started ? "waiting" : "action", waitingOn: open });
   }
   // A parent row only rolls up its sub-tasks (2026-10-13 test: "Needs

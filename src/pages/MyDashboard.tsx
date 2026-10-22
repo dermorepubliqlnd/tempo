@@ -453,10 +453,17 @@ export default function MyDashboard() {
   // the materials were sent). Tasks still waiting on another task go to the
   // Coming Up card instead of My Work Today / Due lists.
   // New projects only (created on/after R1_START_DATE); older ones unchanged.
+  // Work Type decides review steps (QA / Sign-Off); names loaded once.
+  const [wtNames, setWtNames] = useState<Map<string, string> | null>(null);
+  useEffect(() => {
+    let off = false;
+    void supabase.from("work_types").select("id,name").then(({ data }) => { if (!off) setWtNames(workTypeNameMap((data as { id: string; name: string }[]) ?? [])); });
+    return () => { off = true; };
+  }, []);
   const readinessById = useMemo(() => {
     const r1 = new Set(projects.filter((p) => isR1Project(p)).map((p) => p.id));
-    return computeReadiness(tasks, taskDeps, (t) => r1.has((t as TaskRow).project_id));
-  }, [tasks, taskDeps, projects]);
+    return computeReadiness(tasks, taskDeps, (t) => r1.has((t as TaskRow).project_id), (t) => isReviewStep(t, wtNames));
+  }, [tasks, taskDeps, projects, wtNames]);
   const isWaiting = (t: { id: string }) => readinessById.get(t.id)?.state === "waiting";
   const myOpenTasks = useMemo(() => {
     if (!me) return [];
@@ -488,13 +495,6 @@ export default function MyDashboard() {
   // ---- Waiting for you (2026-10-14, Sandra: notifications on the dashboard) ----
   // New projects only. Three lists: reviews / sign-offs that are ready for me,
   // my work sent back For Revision, and my work sitting with a reviewer.
-  // Work Type decides review steps (QA / Sign-Off); names loaded once.
-  const [wtNames, setWtNames] = useState<Map<string, string> | null>(null);
-  useEffect(() => {
-    let off = false;
-    void supabase.from("work_types").select("id,name").then(({ data }) => { if (!off) setWtNames(workTypeNameMap((data as { id: string; name: string }[]) ?? [])); });
-    return () => { off = true; };
-  }, []);
   const waitingForYou = useMemo(() => {
     if (!me) return { toReview: [], sentBack: [], withReviewer: [] } as { toReview: typeof myOpenTasks; sentBack: typeof myOpenTasks; withReviewer: (TaskRow & { reviewer: TaskRow })[] };
     const r1 = new Set(projects.filter((p) => isR1Project(p)).map((p) => p.id));

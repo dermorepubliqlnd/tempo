@@ -1997,7 +1997,11 @@ export default function Projects() {
   // R1 Actionable To-Do (2026-10-13): assigned != actionable.
   // New projects only (created on/after R1_START_DATE); older ones unchanged.
   const r1ProjectIds = useMemo(() => new Set(projects.filter((p) => isR1Project(p)).map((p) => p.id)), [projects]);
-  const readinessById = useMemo(() => computeReadiness(tasks, taskDeps, (t) => r1ProjectIds.has((t as TaskRow).project_id)), [tasks, taskDeps, r1ProjectIds]);
+  const wtNames = useMemo(() => workTypeNameMap(workTypes), [workTypes]);
+  const readinessById = useMemo(
+    () => computeReadiness(tasks, taskDeps, (t) => r1ProjectIds.has((t as TaskRow).project_id), (t) => isReviewStep(t, wtNames)),
+    [tasks, taskDeps, r1ProjectIds, wtNames]
+  );
   const isWaitingTask = (t: TaskRow) => readinessById.get(t.id)?.state === "waiting";
   // phase188: finished tasks this task depends on -- what a reviewer can return.
   // 2026-10-22 (Sandra): For Revision goes back to the person who did the work.
@@ -2032,7 +2036,6 @@ export default function Projects() {
     t.assignee_id === me?.id || me?.access_level === "full" || projects.find((p) => p.id === t.project_id)?.owner_id === me?.id;
   const isLeafTask = (t: TaskRow) => !tasks.some((x) => x.parent_task_id === t.id && !x.is_archived);
   /** Open review tasks that wait on this task. */
-  const wtNames = useMemo(() => workTypeNameMap(workTypes), [workTypes]);
   const reviewersOf = (t: TaskRow) =>
     taskDeps
       .filter((d) => d.depends_on_task_id === t.id)
@@ -3021,7 +3024,11 @@ export default function Projects() {
   /** Plain words for what finishing this task does: [before, after]. */
   function completionWords(t: TaskRow, actionLabel: string): [string, string] {
     if (actionLabel === "Ready for Review") {
-      const rv = reviewersOf(t)[0];
+      // After a sign-off sent it back, the earlier review is already Done --
+      // name the first check that is still open (the approver).
+      let rv: TaskRow | undefined = reviewersOf(t)[0];
+      for (let i = 0; i < 5 && rv && rv.status === "Done"; i++) rv = reviewersOf(rv)[0] ?? rv;
+      if (rv && rv.status === "Done") rv = reviewersOf(t)[0];
       const who = personName(rv?.assignee_id);
       return [who ? `Sends your work to ${who} for review.` : "Sends your work for review.", who ? `Sent to ${who} for review.` : "Sent for review."];
     }
@@ -5706,10 +5713,13 @@ export default function Projects() {
             const kind = reviewStepKind(t);
             if (kind) {
               // 2026-10-22 (Sandra): show when the work came back after For Revision.
-              const resub = taskDeps
-                .filter((d) => d.task_id === t.id)
-                .map((d) => tasks.find((x) => x.id === d.depends_on_task_id))
-                .find((x) => !!x && (x.revision_count ?? 0) > 0 && x.status === "Done");
+              const upstream = (id: string, depth: number): TaskRow[] =>
+                taskDeps
+                  .filter((d) => d.task_id === id)
+                  .map((d) => tasks.find((x) => x.id === d.depends_on_task_id))
+                  .filter((x): x is TaskRow => !!x)
+                  .flatMap((x) => (depth < 4 && isReviewStep(x, wtNames) && x.status === "Done" ? upstream(x.id, depth + 1) : [x]));
+              const resub = upstream(t.id, 0).find((x) => (x.revision_count ?? 0) > 0 && x.status === "Done");
               return (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   {resub && (
@@ -6639,7 +6649,7 @@ export default function Projects() {
         <Modal title="For Revision" onClose={() => (returnBusy ? undefined : setReturnDialog(null))} width={460}>
           <div style={{ display: "grid", gap: 12, fontSize: 12.5 }}>
             <div style={{ color: "var(--muted)" }}>
-              From <strong style={{ color: "var(--text)" }}>{returnDialog.reviewName}</strong>. The work goes back to the person who did it as In Progress, and the revision is counted. Any review in between checks it again before it comes back to you.
+              From <strong style={{ color: "var(--text)" }}>{returnDialog.reviewName}</strong>. The work goes back to the person who did it as In Progress, and the revision is counted. When they resubmit, it comes straight back to you.
             </div>
             {returnDialog.candidates.length > 1 && (
               <label style={{ display: "grid", gap: 4 }}>
