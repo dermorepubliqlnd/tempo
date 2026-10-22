@@ -228,7 +228,7 @@ const WBS_COL_WIDTHS_STORAGE_KEY = "capaciq_wbs_task_col_widths";
 type WbsPreset = "essential" | "planning" | "full";
 const WBS_PRESET_STORAGE_KEY = "capaciq_wbs_view_preset";
 const WBS_PRESETS: WbsPreset[] = ["essential", "planning", "full"];
-const WBS_PRESET_LABEL: Record<WbsPreset, string> = { essential: "Essential", planning: "Planning", full: "Full" };
+const WBS_PRESET_LABEL: Record<WbsPreset, string> = { essential: "Essential", planning: "Standard", full: "Full" };
 const WBS_PRESET_HINT: Record<WbsPreset, string> = {
   essential: "Task, Depends on, Assignee, Status, Estimated Hours, Forecasted Start and End",
   planning: "Essential plus Work Type, Output Type and Forecasted Duration",
