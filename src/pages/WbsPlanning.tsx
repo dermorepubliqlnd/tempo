@@ -6419,7 +6419,16 @@ export default function WbsPlanning() {
               </select>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 <button className="btn-secondary" onClick={close}>Cancel</button>
-                <button className="btn-primary" disabled={!d.choice} onClick={() => { close(); saveTaskField(d.taskId, { work_type_id: d.wtId, output_type_id: d.choice, output_count: null }); }}>Save</button>
+                <button className="btn-primary" disabled={!d.choice} onClick={() => {
+                  close();
+                  const patch = { work_type_id: d.wtId, output_type_id: d.choice, output_count: null };
+                  // Still a review / sign-off without a link? Ask which task it checks first.
+                  if ((d.wtName === QA_WORK_TYPE || d.wtName === SIGNOFF_WORK_TYPE) && isR1Project(project) && !dependencies.some((x) => x.task_id === d.taskId)) {
+                    setReviewLinkDlg({ taskId: d.taskId, patch, kind: d.wtName, choice: "" });
+                    return;
+                  }
+                  saveTaskField(d.taskId, patch);
+                }}>Save</button>
               </div>
             </div>
           </Modal>
