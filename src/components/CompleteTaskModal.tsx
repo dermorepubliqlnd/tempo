@@ -131,7 +131,14 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
             <>
               <label style={{ display: "grid", gap: 4 }}>
                 <span style={label}>Work Type</span>
-                <select value={wtId} onChange={(e) => setWtId(e.target.value)} style={input}>
+                <select value={wtId} onChange={(e) => {
+                  const next = e.target.value;
+                  setWtId(next);
+                  // Clear an Output Type that doesn't belong to the new Work Type.
+                  const allowed = next ? te.links.filter((m) => m.work_type_id === next).map((m) => m.output_type_id) : [];
+                  if (otId && allowed.length && !allowed.includes(otId)) setOtId(allowed.length === 1 ? allowed[0] : "");
+                  else if (!otId && allowed.length === 1) setOtId(allowed[0]);
+                }} style={input}>
                   <option value="">—</option>
                   {te.workTypes.filter((w) => w.is_active !== false || w.id === wtId).map((w) => (
                     <option key={w.id} value={w.id}>{w.name}</option>

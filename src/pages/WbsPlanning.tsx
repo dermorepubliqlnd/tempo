@@ -8972,9 +8972,15 @@ export default function WbsPlanning() {
                                         (o) => o.is_active && workTypeOutputTypes.some((m) => m.work_type_id === match.id && m.output_type_id === o.id)
                                       )
                                     : [];
+                                  // 2026-10-22 (Sandra): an Output Type that doesn't belong to the
+                                  // new Work Type is cleared (e.g. QA Record under Learning Design &
+                                  // Analysis), so the right one gets picked.
+                                  const fits = !t.output_type_id || !match || onlyOutput.length === 0 || onlyOutput.some((o) => o.id === t.output_type_id);
                                   const wtPatch: Partial<TaskRow> = onlyOutput.length === 1 && !isParent
                                     ? { work_type_id: match!.id, output_type_id: onlyOutput[0].id }
-                                    : { work_type_id: match?.id ?? null };
+                                    : fits
+                                      ? { work_type_id: match?.id ?? null }
+                                      : { work_type_id: match!.id, output_type_id: null, output_count: null };
                                   // Guard rail: a review / sign-off must say which task it checks.
                                   const isCheck = match && (match.name === QA_WORK_TYPE || match.name === SIGNOFF_WORK_TYPE);
                                   if (isCheck && !isParent && isR1Project(project) && !dependencies.some((d) => d.task_id === t.id)) {
