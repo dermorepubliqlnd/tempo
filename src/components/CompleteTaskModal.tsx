@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import DateInput from "./DateInput";
 import Modal from "./Modal";
 import { DialogHeader, InfoTip, SummaryBand } from "./DialogHeader";
-import { BadgeCheck, CalendarDays, CircleCheck, Send, ShieldCheck, SquareCheckBig } from "lucide-react";
+import { BadgeCheck, CalendarDays, CircleCheck, Clock3, Send, ShieldCheck, SquareCheckBig } from "lucide-react";
 import { formatDate } from "../lib/formatDate";
 
 export interface CompleteTaskInfo {
@@ -208,7 +208,17 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
           </label>
           <div style={{ display: "grid", gap: 6, alignContent: "start" }}>
             <span style={fieldLabel}>Time logged <span style={{ color: "var(--danger-text)" }}>*</span></span>
-            {hoursOk ? (
+            {needsRevisionTime ? (
+              // 2026-10-23 (Sandra's mock-up): total so far, soft red "0h since revision request".
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10, paddingTop: 2 }}>
+                <Clock3 size={20} style={{ color: "var(--muted)", flexShrink: 0, marginTop: 1 }} />
+                <div style={{ display: "grid", gap: 2, fontSize: 13 }}>
+                  <strong style={{ color: "var(--text)" }}>{info.loggedHours.toFixed(2)}h total</strong>
+                  <span style={{ color: "#c2410c", fontSize: 12.5 }}>0h since revision request</span>
+                  {info.estimatedHours != null && <span style={{ color: "var(--muted)", fontSize: 12.5 }}>of {info.estimatedHours}h est.</span>}
+                </div>
+              </div>
+            ) : hoursOk ? (
               <>
                 <span style={{ ...box, display: "flex", alignItems: "center", gap: 8 }}>
                   <CircleCheck size={17} style={{ color: "var(--success-text)", flexShrink: 0 }} />
@@ -220,7 +230,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
                 </button>
               </>
             ) : (
-              <span style={{ ...box, color: "var(--danger-text)", fontWeight: 700 }}>{needsRevisionTime ? `${info.loggedHours.toFixed(2)}h · none since it came back` : "0h · needed to finish"}</span>
+              <span style={{ ...box, color: "var(--danger-text)", fontWeight: 700 }}>0h · needed to finish</span>
             )}
           </div>
         </div>
@@ -229,8 +239,12 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
           <div role="alert" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--warning-border, #f3d48b)", background: "var(--warning-bg, #fff8e6)", fontSize: 12.5 }}>
             {needsRevisionTime ? (
               <>
-                <span style={{ flex: 1, minWidth: 200 }}><strong>This came back For Revision.</strong> Log the time you spent on the revision, then resubmit.</span>
-                <button type="button" className="btn-primary" onClick={onLogTime} style={{ padding: "5px 12px", fontSize: 12 }}>Log time</button>
+                <span aria-hidden="true" style={{ flexShrink: 0, width: 26, height: 26, borderRadius: "50%", display: "grid", placeItems: "center", background: "#f59e0b", color: "#fff", fontWeight: 800, fontSize: 15 }}>!</span>
+                <span style={{ flex: 1, minWidth: 200, display: "grid", gap: 2 }}>
+                  <strong style={{ fontSize: 13.5, color: "var(--text)" }}>Revision time required</strong>
+                  <span style={{ color: "var(--text-secondary)" }}>Log time spent on revisions before resubmitting.</span>
+                </span>
+                <button type="button" className="btn-secondary" onClick={onLogTime} style={{ padding: "7px 16px", fontSize: 12.5, background: "#fff" }}>Log time</button>
               </>
             ) : info.pendingHours > 0 ? (
               <span style={{ flex: 1, minWidth: 200 }}>Your {info.pendingHours.toFixed(2)}h is waiting for approval. You can finish once it's approved.</span>
