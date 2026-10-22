@@ -635,7 +635,7 @@ export default function WbsPlanning() {
   // happens after a task; Tempo adds correctly named, linked review steps.
   // Guard rail (2026-10-21): a task tagged Quality Assurance / Sign-Off must say what it reviews.
   // 2026-10-22 (Sandra): removing the last link from a review / sign-off step asks first.
-  const [reviewUnlinkDlg, setReviewUnlinkDlg] = useState<{ taskId: string; depId: string; isSignOff: boolean; mode: "relink" | "regular"; choice: string; newWt: string } | null>(null);
+  const [reviewUnlinkDlg, setReviewUnlinkDlg] = useState<{ taskId: string; depId: string; isSignOff: boolean; mode: "relink" | "regular"; choice: string; newWt: string; newOt: string } | null>(null);
   // 2026-10-22 (Sandra): a new Work Type whose outputs don't include the current one asks for the Output Type.
   const [outputPickDlg, setOutputPickDlg] = useState<{ taskId: string; wtId: string; wtName: string; options: { id: string; name: string }[]; choice: string } | null>(null);
   const [reviewLinkDlg, setReviewLinkDlg] = useState<{ taskId: string; patch: Partial<TaskRow>; kind: string; choice: string } | null>(null);
@@ -1753,7 +1753,7 @@ export default function WbsPlanning() {
     const isCheck = wtName === QA_WORK_TYPE || wtName === SIGNOFF_WORK_TYPE;
     const last = dependsOnIdsFor(taskId).filter((id) => id !== dependsOnId).length === 0;
     if (t && isCheck && last && (isLifecycle && isR1Project(project))) {
-      setReviewUnlinkDlg({ taskId, depId: dependsOnId, isSignOff: wtName === SIGNOFF_WORK_TYPE, mode: "relink", choice: "", newWt: "" });
+      setReviewUnlinkDlg({ taskId, depId: dependsOnId, isSignOff: wtName === SIGNOFF_WORK_TYPE, mode: "relink", choice: "", newWt: "", newOt: "" });
       return;
     }
     void removeDependency(taskId, dependsOnId);
@@ -2269,6 +2269,7 @@ export default function WbsPlanning() {
         // future" grid (this scheduler's other caller, which keeps the old
         // floor-at-today behavior on purpose).
         floorEffectiveStartAtFromDate: false,
+        rowOrderFirstProjectIds: isLifecycle && projectId ? new Set<string>([projectId]) : undefined,
         // phase127n: other projects' work is reserved exactly as the
         // Committed row shows it (even spread, overbooking stays put), so a
         // free day in Available bandwidth is a day this project can use.
@@ -6442,7 +6443,13 @@ export default function WbsPlanning() {
         const kind = d.isSignOff ? "sign-off" : "review";
         const flow = d.isSignOff ? "approval" : "review";
         const close = () => setReviewUnlinkDlg(null);
-        const ready = d.mode === "relink" ? !!d.choice : !!d.newWt;
+        // Output Types allowed for the chosen Work Type; ask when the current one doesn't fit.
+        const allowedOt = d.newWt ? outputTypes.filter((o) => o.is_active && workTypeOutputTypes.some((m) => m.work_type_id === d.newWt && m.output_type_id === o.id)) : [];
+        const curOt = ut?.output_type_id ?? null;
+        const otFits = !allowedOt.length || (!!curOt && allowedOt.some((o) => o.id === curOt));
+        const autoOt = !otFits && allowedOt.length === 1 ? allowedOt[0].id : "";
+        const needOt = !otFits && allowedOt.length > 1;
+        const ready = d.mode === "relink" ? !!d.choice : !!d.newWt && (!needOt || !!d.newOt);
         const field = { fontSize: 12.5, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 8, width: "100%", background: "var(--surface, #fff)" } as const;
         const card = (on: boolean) => ({ display: "grid", gap: 6, padding: "12px 14px", borderRadius: 10, border: `1px solid ${on ? "var(--border)" : "var(--border)"}`, background: on ? "var(--surface, #fff)" : "var(--surface-2, #f6f7f9)", boxShadow: on ? "0 1px 3px rgba(15,41,66,.08)" : "none", cursor: "pointer" } as const);
         const option = (mode: "relink" | "regular", title: string, sub: string, body: React.ReactNode) => (
@@ -6470,10 +6477,18 @@ export default function WbsPlanning() {
                   </select>
                 ))}
                 {option("regular", "Change to a regular task", `Remove its ${kind} role so it no longer requires ${d.isSignOff ? "an approval" : "a review"} dependency.`, (
-                  <select value={d.newWt} onChange={(e) => setReviewUnlinkDlg({ ...d, newWt: e.target.value })} style={field}>
-                    <option value="">Select a work type…</option>
-                    {otherWts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                  </select>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <select value={d.newWt} onChange={(e) => setReviewUnlinkDlg({ ...d, newWt: e.target.value, newOt: "" })} style={field}>
+                      <option value="">Select a work type…</option>
+                      {otherWts.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                    </select>
+                    {needOt && (
+                      <select value={d.newOt} onChange={(e) => setReviewUnlinkDlg({ ...d, newOt: e.target.value })} style={!d.newOt ? { ...field, borderColor: "var(--warning-text, #b45309)", background: "var(--warning-bg, #fff8e6)" } : field}>
+                        <option value="">Please select output type</option>
+                        {allowedOt.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                      </select>
+                    )}
+                  </div>
                 ))}
               </div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
@@ -6485,7 +6500,8 @@ export default function WbsPlanning() {
                     await addDependency(d.taskId, d.choice); // explains a blocked link itself
                     if (!blocked) await removeDependency(d.taskId, d.depId);
                   } else {
-                    saveTaskField(d.taskId, { work_type_id: d.newWt });
+                    const otPatch = needOt ? { output_type_id: d.newOt, output_count: null } : autoOt ? { output_type_id: autoOt, output_count: null } : {};
+                    saveTaskField(d.taskId, { work_type_id: d.newWt, ...otPatch });
                     await removeDependency(d.taskId, d.depId);
                   }
                 }}>Update dependency</button>

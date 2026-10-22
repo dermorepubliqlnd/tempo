@@ -160,6 +160,10 @@ export interface ForwardScheduleArgs {
   // A task smaller than the threshold may still start where it fits.
   // Omitted/0 = old behavior (WBS passes 1).
   minStartFreeHours?: number;
+  // 2026-10-22 (Sandra): for these projects (new lifecycle), unlinked tasks of the
+  // same person that start together queue in WBS row order (before due date),
+  // so moving a row and clicking Refresh Dates changes the sequence.
+  rowOrderFirstProjectIds?: Set<string>;
 }
 
 export interface ForwardScheduleDay {
@@ -279,6 +283,10 @@ export function buildForwardSchedule(args: ForwardScheduleArgs): ForwardSchedule
       const aStart = effectiveStart(a).getTime();
       const bStart = effectiveStart(b).getTime();
       if (aStart !== bStart) return aStart - bStart;
+      if (
+        args.rowOrderFirstProjectIds && a.project_id === b.project_id && args.rowOrderFirstProjectIds.has(a.project_id) &&
+        a.sort_order != null && b.sort_order != null && a.sort_order !== b.sort_order
+      ) return a.sort_order - b.sort_order;
       if (a.current_due_date !== b.current_due_date) return a.current_due_date < b.current_due_date ? -1 : 1;
       // Bugfix (2026-08-21, Sandra: same-day AM/PM training pair queued in
       // an unpredictable order): previously fell straight to comparing
