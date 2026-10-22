@@ -19,7 +19,8 @@
 //
 // Content is markdown-lite plain text: #/##/### headers ("###" becomes a
 // collapsible section), **bold**, *italic*, "- " bullets, "1. " lists,
-// "| a | b |" tables, {tone:Label} pills, {{guide:name}} embeds a visual guide.
+// "| a | b |" tables, {tone:Label} pills, {{guide:name}} embeds a visual guide,
+// "@@ Title || body || what you do" lines make a numbered card grid.
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Plus, Pencil, Trash2, ChevronRight, History, X, Search, Pin, PinOff, FileText, Star, Clock, Settings2 } from "lucide-react";
@@ -126,6 +127,28 @@ function renderMarkdownLite(source: string): string {
     if (!trimmed) {
       closeList();
       i++;
+      continue;
+    }
+
+    // 2026-10-22 (Sandra: "make this visually appealing"): change cards.
+    // Consecutive lines "@@ Title || What changed || What you do" render as a
+    // numbered card grid (the last part is optional).
+    if (trimmed.startsWith("@@ ")) {
+      closeList();
+      const cards: string[] = [];
+      let n = 0;
+      while (i < lines.length && lines[i].trim().startsWith("@@ ")) {
+        const [title, body, todo] = lines[i].trim().slice(3).split("||").map((x) => x.trim());
+        n++;
+        cards.push(
+          `<div class="kb-card"><div class="kb-card-head"><span class="kb-card-num">${n}</span><span class="kb-card-title">${renderInline(title ?? "")}</span></div>` +
+            (body ? `<div class="kb-card-body">${renderInline(body)}</div>` : "") +
+            (todo ? `<div class="kb-card-do"><span class="kb-card-do-label">What you do</span>${renderInline(todo)}</div>` : "") +
+            `</div>`
+        );
+        i++;
+      }
+      html.push(`<div class="kb-cards">${cards.join("")}</div>`);
       continue;
     }
 
@@ -712,8 +735,16 @@ export default function KnowledgeBase() {
         <div className="card" style={{ padding: "22px 28px" }}>
           {/* 2026-10-22 (Sandra): an embedded visual guide uses the card's full width;
               the article text keeps its reading width. */}
-          <style>{`.kb-wide > *:not(.kb-content), .kb-wide .kb-content > *:not(.kb-guide) { max-width: ${READING_WIDTH}px; }`}</style>
-          <div className={/\{\{guide:/.test(entry.content) ? "kb-wide" : undefined} style={{ maxWidth: /\{\{guide:/.test(entry.content) && editingEntryId !== entry.id ? "none" : READING_WIDTH }}>
+          <style>{`.kb-wide > *:not(.kb-content), .kb-wide .kb-content > *:not(.kb-guide):not(.kb-cards) { max-width: ${READING_WIDTH}px; }
+.kb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin: 10px 0 18px; }
+.kb-card { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface, #fff); box-shadow: 0 1px 2px rgba(15,41,66,.05); }
+.kb-card-head { display: flex; align-items: center; gap: 10px; }
+.kb-card-num { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 12.5px; font-weight: 700; color: #fff; background: var(--accent); }
+.kb-card-title { font-size: 14px; font-weight: 700; color: var(--navy, var(--text)); line-height: 1.3; }
+.kb-card-body { font-size: 12.5px; line-height: 1.55; color: var(--text-secondary); flex: 1; }
+.kb-card-do { font-size: 12.5px; line-height: 1.5; color: var(--text); background: var(--accent-soft, #eaf2fd); border-radius: 8px; padding: 8px 10px; }
+.kb-card-do-label { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); margin-bottom: 2px; }`}</style>
+          <div className={/\{\{guide:|^@@ /m.test(entry.content) ? "kb-wide" : undefined} style={{ maxWidth: /\{\{guide:|^@@ /m.test(entry.content) && editingEntryId !== entry.id ? "none" : READING_WIDTH }}>
             {editingEntryId === entry.id ? (
               <EntryEditor entry={entry} saving={saving} onSave={(t, c) => saveEntry(entry, t, c)} onCancel={() => setEditingEntryId(null)} />
             ) : (
