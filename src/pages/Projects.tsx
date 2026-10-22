@@ -1709,10 +1709,11 @@ export default function Projects() {
   const [completeLogTime, setCompleteLogTime] = useState(false);
   // 2026-10-22 (Sandra): say what happened -- time saved, work handed over.
   const [completeNotice, setCompleteNotice] = useState("");
-  const [doneToast, setDoneToast] = useState("");
+  // 2026-10-22 (Sandra): every hand-off confirms itself -- title + who has it now.
+  const [doneToast, setDoneToast] = useState<{ title: string; detail: string; tone: "ok" | "warn" } | null>(null);
   useEffect(() => {
     if (!doneToast) return;
-    const h = window.setTimeout(() => setDoneToast(""), 5000);
+    const h = window.setTimeout(() => setDoneToast(null), 7000);
     return () => window.clearTimeout(h);
   }, [doneToast]);
   // phase189: Work Type -> Output Type links, for the pop-up's Output Type list.
@@ -2073,6 +2074,11 @@ export default function Projects() {
     if (error) {
       setReturnError(friendlyError("send the task for revision", error).message ?? "Couldn't send the task for revision.");
       return;
+    }
+    {
+      const wt = tasks.find((x) => x.id === returnTarget);
+      const who = personName(wt?.assignee_id);
+      setDoneToast({ title: "Sent back for revision", detail: `${wt?.name ?? "The work"} is back with ${who ?? "its owner"}, with your comment.`, tone: "warn" });
     }
     setReturnDialog(null);
     loadAll();
@@ -3041,10 +3047,13 @@ export default function Projects() {
     if (error) return friendlyError("mark the task Done", error).message ?? "Couldn't mark the task Done.";
     const next = tasks.map((row) => (row.id === t.id ? { ...row, ...patch, work_type_id: t.work_type_id, output_type_id: t.output_type_id, ...(countsDeliverable ? { output_count: outputCount } : {}) } : row));
     setTasks(next);
-    const words = completionWords(t, completeDlg?.actionLabel ?? "Mark Done");
+    const action = completeDlg?.actionLabel ?? "Mark Done";
+    const words = completionWords(t, action);
+    const resubmit = action === "Ready for Review" && (t.revision_count ?? 0) > 0;
+    const title = action === "Ready for Review" ? (resubmit ? "Resubmitted for review" : "Submitted for review") : action === "Pass QA" ? "QA passed" : action === "Approve" ? "Approved" : "Marked as done";
     setCompleteDlg(null);
     setCompleteNotice("");
-    setDoneToast(`${t.name}: ${words[1]}`);
+    setDoneToast({ title, detail: `${t.name} · ${words[1]}`, tone: "ok" });
     await recomputeAncestorStatus(t.id, next);
     return null;
   }
@@ -7408,8 +7417,13 @@ export default function Projects() {
       </div>
 
       {doneToast && (
-        <div role="status" aria-live="polite" onClick={() => setDoneToast("")} style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 1300, background: "#0f2942", color: "#fff", padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, boxShadow: "0 8px 24px rgba(15,41,66,.25)", maxWidth: "min(560px, calc(100vw - 32px))", cursor: "pointer" }}>
-          <span style={{ color: "#4ade80", marginRight: 8 }}>✓</span>{doneToast}
+        <div role="status" aria-live="polite" style={{ position: "fixed", right: 20, bottom: 20, zIndex: 1300, display: "flex", gap: 12, alignItems: "flex-start", background: "#fff", color: "#0f2942", padding: "12px 14px 12px 12px", borderRadius: 10, border: `1px solid ${doneToast.tone === "ok" ? "#9fd9b9" : "#f3d48b"}`, borderLeft: `5px solid ${doneToast.tone === "ok" ? "#16a34a" : "#d97706"}`, boxShadow: "0 12px 32px rgba(15,41,66,.22)", width: "min(400px, calc(100vw - 32px))" }}>
+          <span aria-hidden="true" style={{ flexShrink: 0, width: 26, height: 26, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 14, fontWeight: 800, color: "#fff", background: doneToast.tone === "ok" ? "#16a34a" : "#d97706" }}>{doneToast.tone === "ok" ? "✓" : "↺"}</span>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: "block", fontSize: 14, fontWeight: 700 }}>{doneToast.title}</span>
+            <span style={{ display: "block", fontSize: 12.5, color: "#435a73", marginTop: 2 }}>{doneToast.detail}</span>
+          </span>
+          <button type="button" onClick={() => setDoneToast(null)} aria-label="Close" style={{ border: "none", background: "transparent", color: "#6d8198", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 2, width: "auto" }}>×</button>
         </div>
       )}
       {completeDlg && (() => {
