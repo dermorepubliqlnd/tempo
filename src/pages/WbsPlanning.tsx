@@ -8820,7 +8820,7 @@ export default function WbsPlanning() {
                               title="Select task · Shift+click to select a range"
                             />
                           )}
-                          {rowEditable && selectedTaskIds.size === 0 && !wbsFiltersActive && (
+                          {rowEditable && !wbsFiltersActive && (
                             <span
                               className="row-grip-btn wbs-row-grip"
                               draggable
