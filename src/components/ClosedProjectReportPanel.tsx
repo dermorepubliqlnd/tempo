@@ -86,6 +86,8 @@ export default function ClosedProjectReportPanel({
   const [closeoutTasks, setCloseoutTasks] = useState<SnapshotTaskRow[]>([]);
   const [people, setPeople] = useState<PersonLite[]>([]);
   const [loading, setLoading] = useState(true);
+  // phase226 (2026-10-23): dates pushed by a task finished late.
+  const [shifts, setShifts] = useState<{ task_id: string; source_task_id: string | null; source_task_name: string | null; days_late: number | null; previous_due: string; new_due: string; source_finished: string | null }[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -107,6 +109,7 @@ export default function ClosedProjectReportPanel({
         supabase.from("people").select("id,name"),
       ]);
       if (!active) return;
+      supabase.from("task_schedule_shifts").select("task_id,source_task_id,source_task_name,days_late,previous_due,new_due,source_finished").eq("project_id", projectId).order("created_at").then(({ data }) => { if (active) setShifts((data as typeof shifts) ?? []); });
       setTasks((tks as TaskRow[]) ?? []);
       setBaseline((bl as BaselineRow) ?? null);
       setCloseout((co as CloseoutRow) ?? null);
@@ -168,6 +171,19 @@ export default function ClosedProjectReportPanel({
   const addedHoursTotal = addedTasks.reduce((sum, t) => sum + (t.estimated_hours ?? 0), 0);
   const grownHoursTotal = grownTasks.reduce((sum, t) => sum + t.delta, 0);
 
+  // Late hand-offs: one line per late task, with the tasks it pushed.
+  const lateHandoffs = (() => {
+    const bySource = new Map<string, { name: string; daysLate: number; finished: string | null; shifted: string[] }>();
+    const nameOf = (id: string) => tasks.find((t) => t.id === id)?.name ?? "a task";
+    for (const sh of shifts) {
+      const key = sh.source_task_id ?? sh.source_task_name ?? "?";
+      const cur = bySource.get(key) ?? { name: sh.source_task_name ?? "A task", daysLate: sh.days_late ?? 0, finished: sh.source_finished, shifted: [] };
+      cur.shifted.push(`${nameOf(sh.task_id)} (${formatDate(sh.previous_due)} → ${formatDate(sh.new_due)})`);
+      bySource.set(key, cur);
+    }
+    return [...bySource.values()];
+  })();
+
   function buildInsight(): string {
     if (!finalTotals || endDaysDelta === null) {
       if (endDaysDelta !== null && endDaysDelta > 0) {
@@ -203,7 +219,11 @@ export default function ClosedProjectReportPanel({
     if (grownTasks.length > 0) {
       causes.push(`${grownTasks.length} existing task${grownTasks.length === 1 ? "" : "s"} that grew in scope (+${grownHoursTotal}h)`);
     }
-    const causeText = causes.length > 0 ? ` Likely contributors: ${causes.join("; ")}.` : " No added or grown tasks account for it -- worth a closer look at what else shifted the timeline.";
+    if (lateHandoffs.length > 0) {
+      const pushed = lateHandoffs.reduce((n, h) => n + h.shifted.length, 0);
+      causes.push(`${lateHandoffs.length} late hand-off${lateHandoffs.length === 1 ? "" : "s"} that pushed ${pushed} later task${pushed === 1 ? "" : "s"} (see Late hand-offs)`);
+    }
+    const causeText = causes.length > 0 ? ` Likely contributors: ${causes.join("; ")}.` : " No added or grown tasks or late hand-offs account for it -- worth a closer look at what else shifted the timeline.";
     return `Closed ${endDaysDelta} day(s) later than its baseline end date.${causeText}`;
   }
   const insightText = buildInsight();
@@ -277,6 +297,19 @@ export default function ClosedProjectReportPanel({
           <div style={{ fontSize: 12.5, color: "#312e81", lineHeight: 1.5 }}>{insightText}</div>
         </div>
       </div>
+
+      {lateHandoffs.length > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>Late hand-offs</div>
+          <div style={{ display: "grid", gap: 8, fontSize: 12.5, lineHeight: 1.45 }}>
+            {lateHandoffs.map((h, i) => (
+              <div key={i}>
+                <strong>{h.name}</strong> finished {h.daysLate} working day{h.daysLate === 1 ? "" : "s"} late{h.finished ? ` (${formatDate(h.finished)})` : ""}. Shifted: {h.shifted.join("; ")}.
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {(lessonsLearnedWorked || lessonsLearnedNotWorked) && (
         <div className="card" style={{ padding: 14, marginBottom: 14, display: "flex", gap: 14, flexWrap: "wrap" }}>

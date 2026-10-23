@@ -1539,6 +1539,8 @@ export default function Projects() {
   type ReturnEvent = { task_id: string; comment: string | null; round: number; actor_id: string | null; created_at: string; review_task_id?: string | null };
   // 2026-10-23 (Sandra): the review / sign-off step that sent work back must log time again once it is resubmitted.
   const [reReviewSince, setReReviewSince] = useState<Map<string, string>>(new Map());
+  // phase226: why a due date was shifted (latest late hand-off per task).
+  const [shiftByTask, setShiftByTask] = useState<Map<string, { source_task_name: string | null; days_late: number | null; previous_due: string; new_due: string }>>(new Map());
   const [lastReturnByTask, setLastReturnByTask] = useState<Map<string, ReturnEvent>>(new Map());
   const [returnDialog, setReturnDialog] = useState<{ reviewTaskId: string; reviewName: string; candidates: { id: string; name: string }[] } | null>(null);
   const [returnTarget, setReturnTarget] = useState<string>("");
@@ -1928,6 +1930,11 @@ export default function Projects() {
     setProjects(nextProjects);
     setTasks(nextTasks);
     fetchAllRows<ReadinessDep>((f, t) => supabase.from("task_dependencies").select("task_id,depends_on_task_id").order("task_id").order("depends_on_task_id").range(f, t)).then(({ data }) => setTaskDeps(data));
+    fetchAllRows<{ task_id: string; source_task_name: string | null; days_late: number | null; previous_due: string; new_due: string }>((f, t) => supabase.from("task_schedule_shifts").select("task_id,source_task_name,days_late,previous_due,new_due").order("created_at", { ascending: false }).order("id").range(f, t)).then(({ data }) => {
+      const m = new Map<string, { source_task_name: string | null; days_late: number | null; previous_due: string; new_due: string }>();
+      for (const e of data ?? []) if (!m.has(e.task_id)) m.set(e.task_id, e);
+      setShiftByTask(m);
+    });
     fetchAllRows<ReturnEvent & { action: string }>((f, t) => supabase.from("task_review_events").select("task_id,review_task_id,action,comment,round,actor_id,created_at").in("action", ["returned", "completed"]).order("created_at", { ascending: false }).order("id").range(f, t)).then(({ data }) => {
       const m = new Map<string, ReturnEvent>();
       const byReview = new Map<string, ReturnEvent>();
@@ -5135,7 +5142,13 @@ export default function Projects() {
           return (
             <button
               onClick={() => setExtDetailTask(t)}
-              title="Click to see extension request details or request one"
+              title={(() => {
+                if (status.label !== "Shifted") return "Click to see extension request details or request one";
+                const sh = shiftByTask.get(t.id);
+                return sh
+                  ? `Shifted ${formatDate(sh.previous_due)} → ${formatDate(sh.new_due)} because ${sh.source_task_name ?? "the task before it"} finished ${sh.days_late ?? 0} working day${sh.days_late === 1 ? "" : "s"} late. Not counted as this task's extension.`
+                  : "Moved because a task before it was extended or finished late. Not counted as this task's extension.";
+              })()}
               style={{ background: "none", border: "none", cursor: "pointer", font: "inherit", padding: 0 }}
             >
               <span className={`status-pill ${status.tone}`}>{status.label}</span>

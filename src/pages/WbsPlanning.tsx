@@ -635,6 +635,16 @@ export default function WbsPlanning() {
   // happens after a task; Tempo adds correctly named, linked review steps.
   // Guard rail (2026-10-21): a task tagged Quality Assurance / Sign-Off must say what it reviews.
   // 2026-10-22 (Sandra): removing the last link from a review / sign-off step asks first.
+  // 2026-10-23 (Sandra's mock-up): "Include Analysis & Scoping?" on the first save, then a confirmation card.
+  const [scopeAsk, setScopeAsk] = useState<{ resolve: (v: boolean) => void } | null>(null);
+  const [scopeToast, setScopeToast] = useState<{ title: string; body: string } | null>(null);
+  const [scopeTip, setScopeTip] = useState(false);
+  const scopeToastTimer = useRef<number | null>(null);
+  const showScopeToast = (t: { title: string; body: string }) => {
+    setScopeToast(t);
+    if (scopeToastTimer.current) window.clearTimeout(scopeToastTimer.current);
+    scopeToastTimer.current = window.setTimeout(() => setScopeToast(null), 7000);
+  };
   const [reviewUnlinkDlg, setReviewUnlinkDlg] = useState<{ taskId: string; depId: string; isSignOff: boolean; mode: "relink" | "regular"; choice: string; newWt: string; newOt: string } | null>(null);
   // 2026-10-22 (Sandra): a new Work Type whose outputs don't include the current one asks for the Output Type.
   const [outputPickDlg, setOutputPickDlg] = useState<{ taskId: string; wtId: string; wtName: string; options: { id: string; name: string }[]; choice: string } | null>(null);
@@ -4317,23 +4327,22 @@ export default function WbsPlanning() {
       // 2026-10-23 (Sandra): ask first. No = skip the phase (greyed out like
       // any other skipped phase, can be added back from its ⋯ menu).
       const wantsScoping = !!analysisMs && wasInitialProjectInfoSave && isLifecycle && !isSessionProject && !project.is_operational && tasks.length === 0
-        ? await confirm({
-            title: "Start with Analysis & Scoping?",
-            message: "Yes adds the 5 standard scoping tasks, and Design opens once scoping is signed off. No skips the phase, so you can plan Design and the other phases straight away. You can add the phase back later from its ⋯ menu.",
-            confirmLabel: "Yes, start with scoping",
-            cancelLabel: "No, skip it",
-          })
+        ? await new Promise<boolean>((resolve) => setScopeAsk({ resolve }))
         : null;
       if (wantsScoping === false && analysisMs) {
         setMilestones((prev) => prev.map((x) => (x.id === analysisMs.id ? { ...x, is_included: false } : x)));
         const { error: skipErr } = await supabase.from("project_milestones").update({ is_included: false }).eq("id", analysisMs.id);
         if (skipErr) await alert(friendlyError("skip Analysis & Scoping", skipErr));
+        else showScopeToast({ title: "Analysis & Scoping skipped", body: "You can add this phase later from the phase menu." });
         await loadAll(true);
       }
       if (wantsScoping) {
         const { error: tplError } = await supabase.rpc("r2_apply_template", { p_project_id: project.id, p_template_key: "scoping" });
         if (tplError) await alert(friendlyError("add the Analysis & Scoping tasks", tplError));
-        else await loadAll(true);
+        else {
+          await loadAll(true);
+          showScopeToast({ title: "Analysis & Scoping added", body: "5 standard tasks have been added to your project." });
+        }
       }
       // First save only establishes Project Information and unlocks WBS planning.
       // The page transition itself is enough feedback; do not show the legacy
@@ -6481,6 +6490,47 @@ export default function WbsPlanning() {
           </Modal>
         );
       })()}
+      {scopeAsk && createPortal(
+        <div style={{ position: "fixed", inset: 0, zIndex: 1300, background: "rgba(15,41,66,.35)", display: "grid", placeItems: "center", padding: 16 }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="scope-ask-title" className="card" style={{ width: "min(440px, 100%)", padding: "22px 24px 20px", borderRadius: 12, boxShadow: "0 18px 40px rgba(15,41,66,.22)", position: "relative" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h3 id="scope-ask-title" style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Include Analysis &amp; Scoping?</h3>
+              <span style={{ position: "relative", display: "inline-flex" }}>
+                <button type="button" aria-label="How phase dependencies work" onMouseEnter={() => setScopeTip(true)} onMouseLeave={() => setScopeTip(false)} onFocus={() => setScopeTip(true)} onBlur={() => setScopeTip(false)} onClick={() => setScopeTip((o) => !o)}
+                  style={{ width: 22, height: 22, borderRadius: "50%", border: "none", padding: 0, display: "grid", placeItems: "center", background: scopeTip ? "var(--accent)" : "var(--accent-soft, #e3eefb)", color: scopeTip ? "#fff" : "var(--accent)", fontWeight: 700, fontSize: 12, fontStyle: "italic", cursor: "help" }}>i</button>
+                {scopeTip && (
+                  <div role="tooltip" style={{ position: "absolute", top: -6, left: "calc(100% + 12px)", width: 250, zIndex: 2, background: "#fff", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 12px 28px rgba(15,41,66,.18)", padding: "12px 14px", fontSize: 12.5, lineHeight: 1.45 }}>
+                    <strong style={{ display: "block", marginBottom: 6, fontSize: 13 }}>How phase dependencies work</strong>
+                    <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 3 }}>
+                      <li>Including this phase adds the 5 standard scoping tasks.</li>
+                      <li>Design opens after scoping is completed and signed off.</li>
+                      <li>Skipping this phase lets you plan the remaining phases now.</li>
+                      <li>You can add Analysis &amp; Scoping later from the phase menu.</li>
+                    </ul>
+                  </div>
+                )}
+              </span>
+            </div>
+            <p style={{ margin: "10px 0 20px", color: "var(--text-secondary)", fontSize: 14, lineHeight: 1.5 }}>Would you like to start your project with the standard scoping tasks?</p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button type="button" className="btn-secondary" onClick={() => { const r = scopeAsk.resolve; setScopeAsk(null); setScopeTip(false); r(false); }} style={{ minWidth: 120 }}>Skip phase</button>
+              <button type="button" className="btn-primary" autoFocus onClick={() => { const r = scopeAsk.resolve; setScopeAsk(null); setScopeTip(false); r(true); }} style={{ minWidth: 130 }}>Include phase</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+      {scopeToast && createPortal(
+        <div role="status" style={{ position: "fixed", right: 20, bottom: 20, zIndex: 1300, width: "min(360px, calc(100vw - 32px))", display: "flex", alignItems: "flex-start", gap: 10, padding: "12px 14px", borderRadius: 10, background: "var(--success-bg, #ecf8f0)", border: "1px solid var(--success-border, #bfe5cc)", boxShadow: "0 10px 24px rgba(15,41,66,.14)" }}>
+          <CheckCircle2 size={22} style={{ color: "#fff", fill: "var(--success-text, #16a34a)", flexShrink: 0 }} />
+          <div style={{ flex: 1, display: "grid", gap: 2, fontSize: 13 }}>
+            <strong>{scopeToast.title}</strong>
+            <span style={{ color: "var(--text-secondary)" }}>{scopeToast.body}</span>
+          </div>
+          <button type="button" aria-label="Dismiss" onClick={() => setScopeToast(null)} style={{ background: "none", border: "none", padding: 2, color: "var(--muted)", cursor: "pointer", width: "auto", fontSize: 16, lineHeight: 1 }}>×</button>
+        </div>,
+        document.body
+      )}
       {reviewUnlinkDlg && (() => {
         const d = reviewUnlinkDlg;
         const ut = tasks.find((x) => x.id === d.taskId);
