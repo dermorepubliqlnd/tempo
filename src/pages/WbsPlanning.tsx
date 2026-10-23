@@ -4312,7 +4312,24 @@ export default function WbsPlanning() {
       // Analysis & Scoping tasks. Design and Build modules are added once
       // scoping is done and signed off; Implementation and Evaluation tasks
       // come from their phase menus / templates.
-      if (wasInitialProjectInfoSave && isLifecycle && !isSessionProject && !project.is_operational && tasks.length === 0 && milestones.some((m) => m.phase_key === "analysis" && m.is_included)) {
+      const analysisMs = milestones.find((m) => m.phase_key === "analysis" && m.is_included);
+      // 2026-10-23 (Sandra): ask first. No = skip the phase (greyed out like
+      // any other skipped phase, can be added back from its ⋯ menu).
+      const wantsScoping = !!analysisMs && wasInitialProjectInfoSave && isLifecycle && !isSessionProject && !project.is_operational && tasks.length === 0
+        ? await confirm({
+            title: "Start with Analysis & Scoping?",
+            message: "Yes adds the 5 standard scoping tasks, and Design opens once scoping is signed off. No skips the phase, so you can plan Design and the other phases straight away. You can add the phase back later from its ⋯ menu.",
+            confirmLabel: "Yes, start with scoping",
+            cancelLabel: "No, skip it",
+          })
+        : null;
+      if (wantsScoping === false && analysisMs) {
+        setMilestones((prev) => prev.map((x) => (x.id === analysisMs.id ? { ...x, is_included: false } : x)));
+        const { error: skipErr } = await supabase.from("project_milestones").update({ is_included: false }).eq("id", analysisMs.id);
+        if (skipErr) await alert(friendlyError("skip Analysis & Scoping", skipErr));
+        await loadAll(true);
+      }
+      if (wantsScoping) {
         const { error: tplError } = await supabase.rpc("r2_apply_template", { p_project_id: project.id, p_template_key: "scoping" });
         if (tplError) await alert(friendlyError("add the Analysis & Scoping tasks", tplError));
         else await loadAll(true);
