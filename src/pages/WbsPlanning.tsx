@@ -4016,6 +4016,18 @@ export default function WbsPlanning() {
       // only, closed projects and Done tasks still refused. A draft
       // locks nothing, so it keeps taking the plain update below.
       const rest: Partial<TaskRow> = { ...patch };
+      // 2026-10-23 (Sandra, BBB): a date/plan patch staged while a task was
+      // still open must not be written once it is Done -- the Done lock
+      // refused it and the whole Save (incl. the new dependency's dates)
+      // stopped. Done/Cancelled tasks keep their plan; drop those fields.
+      {
+        const cur = tasks.find((x) => x.id === taskId);
+        if (cur && isLockedStatus(cur.status) && !("status" in rest)) {
+          for (const k of ["name", "estimated_hours", "effort", "work_type_id", "assignee_id", "start_date", "start_date_full", "start_date_standard", "start_full_auto", "start_standard_auto", "manual_end_date", "current_due_date", "original_due_date"]) {
+            delete (rest as Record<string, unknown>)[k];
+          }
+        }
+      }
       const movesStandardStart = project !== null && project.wbs_status !== "draft" && "start_date_standard" in rest;
       const nextStandardStart = (rest.start_date_standard ?? null) as string | null;
       if (movesStandardStart) delete rest.start_date_standard;
