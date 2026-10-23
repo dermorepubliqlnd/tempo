@@ -1721,6 +1721,8 @@ export default function Projects() {
   // 2026-10-14 (Sandra): Complete task pop-up (see markTaskDone).
   const [completeDlg, setCompleteDlg] = useState<{ taskId: string; date: string; actionLabel: string } | null>(null);
   const [completeLogTime, setCompleteLogTime] = useState(false);
+  // 2026-10-23 (Sandra): For Revision also needs the reviewer's time logged first.
+  const [returnLogTime, setReturnLogTime] = useState(false);
   // 2026-10-22 (Sandra): say what happened -- time saved, work handed over.
   const [completeNotice, setCompleteNotice] = useState("");
   // 2026-10-22 (Sandra): every hand-off confirms itself -- title + who has it now.
@@ -6692,6 +6694,12 @@ export default function Projects() {
       {returnDialog && (() => {
         const target = returnDialog.candidates.find((c) => c.id === returnTarget) ?? returnDialog.candidates[0];
         const MAX = 500;
+        const rvTask = tasks.find((x) => x.id === returnDialog.reviewTaskId);
+        const reSince = reReviewSince.get(returnDialog.reviewTaskId);
+        const reviewMins = timeEntries
+          .filter((e) => e.task_id === returnDialog.reviewTaskId && !e.is_archived && (!reSince || e.created_at > reSince))
+          .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
+        const needsReviewTime = !!rvTask && r1ProjectIds.has(rvTask.project_id) && reviewMins <= 0;
         return (
           <Modal title="Request Revision" hideHeader onClose={() => (returnBusy ? undefined : setReturnDialog(null))} width={600}>
             <div style={{ display: "grid", gap: 18, padding: "4px 4px 0" }}>
@@ -6735,10 +6743,20 @@ export default function Projects() {
                   <span style={{ flexShrink: 0 }}>{returnComment.length}/{MAX}</span>
                 </span>
               </label>
+              {needsReviewTime && (
+                <div role="alert" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--warning-border, #f3d48b)", background: "var(--warning-bg, #fff8e6)", fontSize: 12.5 }}>
+                  <span aria-hidden="true" style={{ flexShrink: 0, width: 26, height: 26, borderRadius: "50%", display: "grid", placeItems: "center", background: "#f59e0b", color: "#fff", fontWeight: 800, fontSize: 15 }}>!</span>
+                  <span style={{ flex: 1, minWidth: 200, display: "grid", gap: 2 }}>
+                    <strong style={{ fontSize: 13.5, color: "var(--text)" }}>Review time required</strong>
+                    <span style={{ color: "var(--text-secondary)" }}>{reSince ? "Log the time you spent reviewing the resubmitted work before sending it back." : "Log the time you spent reviewing before sending it back."}</span>
+                  </span>
+                  <button type="button" className="btn-secondary" onClick={() => setReturnLogTime(true)} style={{ padding: "7px 16px", fontSize: 12.5, background: "#fff" }}>Log time</button>
+                </div>
+              )}
               {returnError && <div style={{ color: "var(--danger-text)", fontSize: 12 }}>{returnError}</div>}
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
                 <button className="btn-secondary" disabled={returnBusy} onClick={() => setReturnDialog(null)} style={{ padding: "9px 20px" }}>Cancel</button>
-                <button className="btn-primary" disabled={returnBusy || !returnComment.trim()} onClick={() => void submitReturn()} style={{ padding: "9px 20px", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <button className="btn-primary" disabled={returnBusy || !returnComment.trim() || needsReviewTime} onClick={() => void submitReturn()} style={{ padding: "9px 20px", display: "inline-flex", alignItems: "center", gap: 8 }}>
                   <Send size={15} /> {returnBusy ? "Sending…" : "Request Revision"}
                 </button>
               </div>
@@ -7606,6 +7624,18 @@ export default function Projects() {
           />
         );
       })()}
+      {returnDialog && returnLogTime && me && (
+        <LogTimeModal
+          personId={me.id}
+          isFullAccess={me.access_level === "full"}
+          presetTaskId={returnDialog.reviewTaskId}
+          onClose={() => setReturnLogTime(false)}
+          onSaved={() => {
+            setReturnLogTime(false);
+            loadAll();
+          }}
+        />
+      )}
       {completeDlg && completeLogTime && me && (
         <LogTimeModal
           personId={me.id}
