@@ -24,6 +24,8 @@ export interface CompleteTaskInfo {
   pendingHours: number;
   /** Hours logged since the task last came back For Revision (null = it never did). */
   revisionHours?: number | null;
+  /** 'review' = a review / sign-off step re-checking resubmitted work (2026-10-23). */
+  revisionRole?: "doer" | "review";
   /** phase189: when set, Work Type / Output Type are editable (changes go to the Audit Trail). */
   typeEdit?: {
     workTypeId: string | null;
@@ -90,6 +92,10 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
   // 2026-10-23 (Sandra): after For Revision, time must be logged again before resubmitting.
   const needsRevisionTime = info.revisionHours != null && info.revisionHours <= 0;
   const hoursOk = info.loggedHours > 0 && !needsRevisionTime;
+  const reReview = info.revisionRole === "review";
+  const revWords = reReview
+    ? { since: "0h since it was resubmitted", title: "Review time required", body: "Log the time you spent reviewing the resubmitted work before you finish.", error: "Log the time you spent reviewing the resubmission first." }
+    : { since: "0h since revision request", title: "Revision time required", body: "Log time spent on revisions before resubmitting.", error: "Log the time you spent on the revision first." };
   const countNum = Number(count);
   const countOk = !countsDeliverable || (count.trim() !== "" && Number.isInteger(countNum) && countNum >= 1);
   const dateOk = autoDate || (!!date && date <= today);
@@ -98,7 +104,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
     const problems: string[] = [];
     if (!dateOk) problems.push(date ? "Reported Completion can't be in the future." : "Enter the Reported Completion date.");
     if (countsDeliverable && !countOk) problems.push(`Enter how many ${outputTypeName ?? "outputs"} this task produced (1 or more).`);
-    if (!hoursOk) problems.push(needsRevisionTime ? "Log the time you spent on the revision first." : info.pendingHours > 0 ? "Your logged time is still waiting for approval. It counts once approved." : "Log your time on this task first.");
+    if (!hoursOk) problems.push(needsRevisionTime ? revWords.error : info.pendingHours > 0 ? "Your logged time is still waiting for approval. It counts once approved." : "Log your time on this task first.");
     if (problems.length) {
       setError(problems.join(" "));
       return;
@@ -214,7 +220,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
                 <Clock3 size={20} style={{ color: "var(--muted)", flexShrink: 0, marginTop: 1 }} />
                 <div style={{ display: "grid", gap: 2, fontSize: 13 }}>
                   <strong style={{ color: "var(--text)" }}>{info.loggedHours.toFixed(2)}h total</strong>
-                  <span style={{ color: "#c2410c", fontSize: 12.5 }}>0h since revision request</span>
+                  <span style={{ color: "#c2410c", fontSize: 12.5 }}>{revWords.since}</span>
                   {info.estimatedHours != null && <span style={{ color: "var(--muted)", fontSize: 12.5 }}>of {info.estimatedHours}h est.</span>}
                 </div>
               </div>
@@ -241,8 +247,8 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
               <>
                 <span aria-hidden="true" style={{ flexShrink: 0, width: 26, height: 26, borderRadius: "50%", display: "grid", placeItems: "center", background: "#f59e0b", color: "#fff", fontWeight: 800, fontSize: 15 }}>!</span>
                 <span style={{ flex: 1, minWidth: 200, display: "grid", gap: 2 }}>
-                  <strong style={{ fontSize: 13.5, color: "var(--text)" }}>Revision time required</strong>
-                  <span style={{ color: "var(--text-secondary)" }}>Log time spent on revisions before resubmitting.</span>
+                  <strong style={{ fontSize: 13.5, color: "var(--text)" }}>{revWords.title}</strong>
+                  <span style={{ color: "var(--text-secondary)" }}>{revWords.body}</span>
                 </span>
                 <button type="button" className="btn-secondary" onClick={onLogTime} style={{ padding: "7px 16px", fontSize: 12.5, background: "#fff" }}>Log time</button>
               </>

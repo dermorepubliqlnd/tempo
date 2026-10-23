@@ -1536,7 +1536,9 @@ export default function Projects() {
   // R1 Actionable To-Do: Depends-on links, read-only here.
   const [taskDeps, setTaskDeps] = useState<ReadinessDep[]>([]);
   // phase188 Return / request revision: latest "returned" event per task.
-  type ReturnEvent = { task_id: string; comment: string | null; round: number; actor_id: string | null; created_at: string };
+  type ReturnEvent = { task_id: string; comment: string | null; round: number; actor_id: string | null; created_at: string; review_task_id?: string | null };
+  // 2026-10-23 (Sandra): the review / sign-off step that sent work back must log time again once it is resubmitted.
+  const [reReviewSince, setReReviewSince] = useState<Map<string, string>>(new Map());
   const [lastReturnByTask, setLastReturnByTask] = useState<Map<string, ReturnEvent>>(new Map());
   const [returnDialog, setReturnDialog] = useState<{ reviewTaskId: string; reviewName: string; candidates: { id: string; name: string }[] } | null>(null);
   const [returnTarget, setReturnTarget] = useState<string>("");
@@ -1926,10 +1928,23 @@ export default function Projects() {
     setProjects(nextProjects);
     setTasks(nextTasks);
     fetchAllRows<ReadinessDep>((f, t) => supabase.from("task_dependencies").select("task_id,depends_on_task_id").order("task_id").order("depends_on_task_id").range(f, t)).then(({ data }) => setTaskDeps(data));
-    fetchAllRows<ReturnEvent>((f, t) => supabase.from("task_review_events").select("task_id,comment,round,actor_id,created_at").eq("action", "returned").order("created_at", { ascending: false }).order("id").range(f, t)).then(({ data }) => {
+    fetchAllRows<ReturnEvent & { action: string }>((f, t) => supabase.from("task_review_events").select("task_id,review_task_id,action,comment,round,actor_id,created_at").in("action", ["returned", "completed"]).order("created_at", { ascending: false }).order("id").range(f, t)).then(({ data }) => {
       const m = new Map<string, ReturnEvent>();
-      for (const e of data) if (!m.has(e.task_id)) m.set(e.task_id, e);
+      const byReview = new Map<string, ReturnEvent>();
+      for (const e of data) {
+        if (e.action !== "returned") continue;
+        if (!m.has(e.task_id)) m.set(e.task_id, e);
+        if (e.review_task_id && !byReview.has(e.review_task_id)) byReview.set(e.review_task_id, e);
+      }
+      // A step that sent work back: count its time from the resubmission
+      // (the work task's next completion), else from the return itself.
+      const since = new Map<string, string>();
+      for (const [reviewId, ret] of byReview) {
+        const resub = data.filter((e) => e.action === "completed" && e.task_id === ret.task_id && e.created_at > ret.created_at).map((e) => e.created_at).sort()[0];
+        since.set(reviewId, resub ?? ret.created_at);
+      }
       setLastReturnByTask(m);
+      setReReviewSince(since);
     });
     setPeople((peopleData as PersonOption[]) ?? []);
     setChainPeople((chainPeopleData as { id: string; reports_to: string | null; is_active: boolean }[]) ?? []);
@@ -7532,8 +7547,16 @@ export default function Projects() {
               estimatedHours: ct.estimated_hours,
               loggedHours: ownHoursFor(timeEntries, ct.id),
               pendingHours: Math.round((pendingMin / 60) * 100) / 100,
+              revisionRole: !(r1ProjectIds.has(ct.project_id) && (ct.revision_count ?? 0) > 0 && lastReturnByTask.get(ct.id)) && r1ProjectIds.has(ct.project_id) && reReviewSince.has(ct.id) ? "review" : "doer",
               revisionHours: (() => {
                 const ret = r1ProjectIds.has(ct.project_id) && (ct.revision_count ?? 0) > 0 ? lastReturnByTask.get(ct.id) : undefined;
+                const reSince = !ret && r1ProjectIds.has(ct.project_id) ? reReviewSince.get(ct.id) : undefined;
+                if (reSince) {
+                  const mins = timeEntries
+                    .filter((e) => e.task_id === ct.id && !e.is_archived && e.created_at > reSince)
+                    .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
+                  return Math.round((mins / 60) * 100) / 100;
+                }
                 if (!ret?.created_at) return null;
                 const mins = timeEntries
                   .filter((e) => e.task_id === ct.id && !e.is_archived && e.created_at > ret.created_at)
