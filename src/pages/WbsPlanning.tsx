@@ -5141,7 +5141,7 @@ export default function WbsPlanning() {
               )}
               {scopeConfirmed && canEditWbs && canAddTasks && !isSessionProject && (
                 <button type="button" className={it.count === 0 ? "btn-secondary wbs-mod-add wbs-mod-add-first" : "btn-secondary wbs-mod-add"} onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: "", dev: "", busy: false, error: "" }); }}>
-                  <Plus size={13} /> {it.count === 0 ? "Add your first module" : "Add module"}
+                  <Plus size={13} /> Add deliverable
                 </button>
               )}
               <span className="wbs-phase-ms">
@@ -5226,7 +5226,7 @@ export default function WbsPlanning() {
               )}
               {!locked && it.key === "design" && scopeConfirmed && canEditWbs && canAddTasks && !isSessionProject && (
                 <button type="button" className={(it.modules ?? 0) === 0 ? "btn-secondary wbs-mod-add wbs-mod-add-first" : "btn-secondary wbs-mod-add"} onClick={() => { clearWbsFilters(); setModuleDlg({ name: "", maker: "", dev: "", busy: false, error: "" }); }}>
-                  <Plus size={13} /> {(it.modules ?? 0) === 0 ? "Add your first module" : "Add module"}
+                  <Plus size={13} /> Add deliverable
                 </button>
               )}
               {kpi && kpi.total > 0 && (
