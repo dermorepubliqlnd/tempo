@@ -4733,6 +4733,34 @@ export default function WbsPlanning() {
   async function togglePhaseIncluded(m: ProjectMilestone) {
     if (!canEditWbs) return;
     const next = !m.is_included;
+    const label0 = lifecyclePhases.find((x) => x.key === m.phase_key)?.label ?? "this phase";
+    const phaseRoots = !next ? orderedTasks.filter((t) => t.depth === 0 && phaseOfRoot(t) === m.phase_key) : [];
+    if (phaseRoots.length && isDraftProject) {
+      const ids = phaseRoots.flatMap((t) => [t.id, ...tasks.filter((x) => x.parent_task_id === t.id).map((x) => x.id)]);
+      const logged = await loggedHoursOnTasks(ids);
+      const ok = await confirm({
+        title: `Remove ${label0} from this project?`,
+        message: `Its ${phaseRoots.length} task${phaseRoots.length > 1 ? "s" : ""} move to the Archive and the phase is skipped.${m.phase_key === "analysis" ? " Design and the other phases open straight away." : ""}${logged.entries > 0 ? ` ${logged.hours.toFixed(2)}h of logged time goes with them.` : ""} You can add the phase back later from its ⋯ menu.`,
+        confirmLabel: "Remove phase",
+        danger: true,
+      });
+      if (!ok) return;
+      const flushed = await flushPendingEdits();
+      if (!flushed) return;
+      for (const t of phaseRoots) {
+        const { error } = await archiveItem("task", t.id, `${label0} removed from the project`);
+        if (error) {
+          await alert(friendlyError("move the phase's tasks to the Archive", error));
+          await loadAll(true);
+          return;
+        }
+      }
+      setMilestones((prev) => prev.map((x) => (x.id === m.id ? { ...x, is_included: false } : x)));
+      const { error } = await supabase.from("project_milestones").update({ is_included: false }).eq("id", m.id);
+      if (error) await alert(friendlyError("remove this phase", error));
+      await loadAll(true);
+      return;
+    }
     // phase204 (2026-10-22): after Start Project a phase can still be brought
     // back (or an empty one skipped); the change goes into the Audit Trail.
     if (!isDraftProject) {
@@ -6685,7 +6713,10 @@ export default function WbsPlanning() {
         const on = pm.is_included;
         const hasTasks = orderedTasks.some((t) => phaseOfRoot(t) === key);
         const canAdd = on && canEditWbs && canAddTasks && !isSessionProject && (key === "analysis" || scopeConfirmed);
-        const canToggle = canEditWbs && canManageWbs && (!hasTasks || !on);
+        // 2026-10-23 (Sandra: "what if we don't need Analysis & Scoping?"): while
+        // the project is still a Draft, a phase can be removed together with
+        // its tasks (they move to the Archive). After Start, empty phases only.
+        const canToggle = canEditWbs && canManageWbs && (!hasTasks || !on || isDraftProject);
         const filtered = wbsFilterPhase === key;
         const item = (k: string, label: React.ReactNode, onClick: () => void, hint?: string) => (
           <button key={k} type="button" role="menuitem" className="wbs-menu-item" title={hint} onClick={() => { close(); onClick(); }}>{label}</button>
@@ -6708,6 +6739,7 @@ export default function WbsPlanning() {
               )}
               {on && key !== "analysis" && !scopeConfirmed && <div className="wbs-menu-note">Tasks open once Analysis &amp; Scoping is 100% done and signed off.{canToggle ? " You can still remove this phase now." : ""}</div>}
               {!on && !canToggle && <div className="wbs-menu-note">Not included in this project. The project owner, their supervisor or Full Access can add it.</div>}
+              {on && hasTasks && !isDraftProject && canEditWbs && canManageWbs && <div className="wbs-menu-note">To remove this phase, move, cancel or archive its tasks first.</div>}
             </div>
           </>,
           document.body
