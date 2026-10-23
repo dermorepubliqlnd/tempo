@@ -4166,7 +4166,8 @@ export default function WbsPlanning() {
           confirmLabel: "Save timelines",
         };
     // 2026-10-23 (Sandra): no confirm on the first save -- "Save draft & continue" is already explicit.
-    if (!project.is_unsaved && !(await confirm(confirmMsg))) return;
+    // 2026-10-23 (Sandra): no extra click while the project is a Draft either.
+    if (!project.is_unsaved && project.wbs_status !== "draft" && !(await confirm(confirmMsg))) return;
 
     setSaving(true);
     try {
@@ -4359,7 +4360,9 @@ export default function WbsPlanning() {
       // First save only establishes Project Information and unlocks WBS planning.
       // The page transition itself is enough feedback; do not show the legacy
       // "Timelines have been saved" modal before the user has even built a WBS.
-      if (!wasInitialProjectInfoSave) {
+      if (!wasInitialProjectInfoSave && project.wbs_status === "draft") {
+        showScopeToast({ title: "Draft saved", body: "Your changes to this draft are saved." });
+      } else if (!wasInitialProjectInfoSave) {
         await alert(
           project.wbs_status === "draft"
             ? { title: "Draft saved", message: "Your changes to this draft are saved." }
