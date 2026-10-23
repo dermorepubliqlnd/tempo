@@ -4143,7 +4143,8 @@ export default function WbsPlanning() {
           }`,
           confirmLabel: "Save timelines",
         };
-    if (!(await confirm(confirmMsg))) return;
+    // 2026-10-23 (Sandra): no confirm on the first save -- "Save draft & continue" is already explicit.
+    if (!project.is_unsaved && !(await confirm(confirmMsg))) return;
 
     setSaving(true);
     try {
