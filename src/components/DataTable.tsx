@@ -64,6 +64,10 @@ interface DataTableProps<T> {
   // with a scroll-synced transform because the horizontal-scroll wrapper
   // would otherwise trap position:sticky.
   stickyHeaderAnchor?: React.RefObject<HTMLElement | null>;
+  // 2026-10-23 (Sandra): context rows (e.g. a filtered sub-task's parent) --
+  // greyed, not counted, not selectable, only contextColumns rendered.
+  isContextRow?: (row: T) => boolean;
+  contextColumns?: string[];
 }
 
 // ~1.3cm at 96dpi -- narrow enough for icon-only columns, but still a
@@ -99,6 +103,8 @@ export default function DataTable<T>({
   selectedKeys,
   onToggleSelect,
   onToggleSelectAll,
+  isContextRow,
+  contextColumns,
   onSelectRange,
   orderable,
   compactGutter,
@@ -555,18 +561,20 @@ export default function DataTable<T>({
 
   function renderRow(row: T) {
     const key = rowKey(row);
-    const isSelected = Boolean(selectable && selectedKeys?.includes(key));
+    const isCtx = isContextRow?.(row) ?? false;
+    const isSelected = Boolean(selectable && !isCtx && selectedKeys?.includes(key));
     return (
       <tr
         key={key}
         onClick={(e) => {
           // 2026-10-22 (Sandra): Ctrl/Cmd+click a row adds or removes it;
           // Shift+click selects the range from the last clicked row.
+          if (isCtx) return;
           if (selectable && (e.ctrlKey || e.metaKey || e.shiftKey) && !(e.target as HTMLElement).closest("button, a, input, select, textarea, [contenteditable='true']")) {
             e.preventDefault();
             window.getSelection()?.removeAllRanges();
             if (e.shiftKey && lastSelectedKeyRef.current && onSelectRange) {
-              const keys = sortedRows.map((r) => rowKey(r));
+              const keys = sortedRows.filter((r) => !isContextRow?.(r)).map((r) => rowKey(r));
               const from = keys.indexOf(lastSelectedKeyRef.current);
               const to = keys.indexOf(key);
               if (from !== -1 && to !== -1) {
@@ -584,6 +592,7 @@ export default function DataTable<T>({
         onMouseDown={selectable ? (e) => { if (e.shiftKey) e.preventDefault(); } : undefined}
         className={[
           isSelected ? "row-selected" : undefined,
+          isCtx ? "row-context" : undefined,
           orderable && dragOverRowKey === key && dragRowKey !== key ? "row-drop-target" : undefined,
         ]
           .filter(Boolean)
@@ -622,7 +631,7 @@ export default function DataTable<T>({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="row-gutter-inner" style={{ paddingLeft: gutterPadding }}>
-              {orderable && (
+              {orderable && !isCtx && (
                 <span
                   className="row-grip-btn"
                   draggable
@@ -636,7 +645,7 @@ export default function DataTable<T>({
                   <GripVertical size={13} />
                 </span>
               )}
-              {selectable && (
+              {selectable && !isCtx && (
                 <input
                   type="checkbox"
                   className="row-checkbox"
@@ -654,7 +663,7 @@ export default function DataTable<T>({
                     // it needs no special handling beyond not being
                     // treated as a range anchor reset oddly.
                     if (e.shiftKey && lastSelectedKeyRef.current && onSelectRange) {
-                      const keys = sortedRows.map((r) => rowKey(r));
+                      const keys = sortedRows.filter((r) => !isContextRow?.(r)).map((r) => rowKey(r));
                       const from = keys.indexOf(lastSelectedKeyRef.current);
                       const to = keys.indexOf(key);
                       if (from !== -1 && to !== -1) {
@@ -692,7 +701,7 @@ export default function DataTable<T>({
               whiteSpace: "nowrap",
             }}
           >
-            {c.render(row)}
+            {isCtx && !(contextColumns ?? ["name"]).includes(c.key) ? null : c.render(row)}
           </td>
           );
         })}
@@ -824,7 +833,7 @@ export default function DataTable<T>({
                         groupName
                       );
                     })()}
-                    <span style={{ opacity: 0.7, fontWeight: 400 }}>({groupRows.length})</span>
+                    <span style={{ opacity: 0.7, fontWeight: 400 }}>({isContextRow ? groupRows.filter((r) => !isContextRow(r)).length : groupRows.length})</span>
                   </span>
                 </td>
               </tr>
@@ -876,7 +885,7 @@ export default function DataTable<T>({
                                 subName
                               );
                             })()}
-                            <span style={{ opacity: 0.7, fontWeight: 400 }}>({subRows.length})</span>
+                            <span style={{ opacity: 0.7, fontWeight: 400 }}>({isContextRow ? subRows.filter((r) => !isContextRow(r)).length : subRows.length})</span>
                           </span>
                         </td>
                       </tr>

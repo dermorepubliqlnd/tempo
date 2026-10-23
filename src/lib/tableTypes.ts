@@ -270,6 +270,8 @@ export interface TableView {
   // see DataTable.tsx); "Then by" sub-groups are never pre-seeded, so
   // they're never zero-count by construction and need no equivalent.
   hideEmptyGroups?: boolean;
+  /** 2026-10-23: Tasks list -- show a filtered sub-task's parent, greyed, for context (default on). */
+  showParentContext?: boolean;
   color: string;
   showCount: boolean;
   sorts: SortRule[];

@@ -38,6 +38,9 @@ interface ViewControlsProps<T> {
   onHideEmptyGroupsChange?: (value: boolean) => void;
   showCount: boolean;
   onShowCountChange: (value: boolean) => void;
+  /** Tasks only: show a filtered sub-task's parent for context. */
+  showParentContext?: boolean;
+  onShowParentContextChange?: (value: boolean) => void;
   sortOptions: SortOption<T>[];
   sorts: SortRule[];
   onSortsChange: (sorts: SortRule[]) => void;
@@ -269,6 +272,8 @@ export default function ViewSettingsMenu<T>({
   onHideEmptyGroupsChange,
   showCount,
   onShowCountChange,
+  showParentContext,
+  onShowParentContextChange,
   sortOptions,
   sorts,
   onSortsChange,
@@ -613,6 +618,12 @@ export default function ViewSettingsMenu<T>({
               <input type="checkbox" checked={showCount} onChange={(e) => onShowCountChange(e.target.checked)} />
               Show count in this view's tab
             </label>
+            {onShowParentContextChange && (
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginTop: 6, cursor: "pointer" }} title="When a sub-task matches your filters, its parent task appears above it (greyed) so you can see what it belongs to.">
+                <input type="checkbox" checked={showParentContext !== false} onChange={(e) => onShowParentContextChange(e.target.checked)} />
+                Show parent tasks
+              </label>
+            )}
           </>
         )}
       </IconPopoverButton>

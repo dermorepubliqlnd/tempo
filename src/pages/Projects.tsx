@@ -1793,6 +1793,8 @@ export default function Projects() {
   // view, since which sub-task groups are collapsed is a personal
   // reading preference, not team-shared config.
   const COLLAPSED_PARENTS_STORAGE_KEY = "capaciq_tasks_collapsed_parents";
+  // 2026-10-23 (Sandra): parents shown (greyed) above filtered sub-tasks.
+  const contextParentIdsRef = useRef<Set<string>>(new Set());
   const [collapsedParents, setCollapsedParentsState] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem(COLLAPSED_PARENTS_STORAGE_KEY);
@@ -4606,6 +4608,15 @@ export default function Projects() {
         minWidth: 180,
         maxWidth: 480,
         render: (t) => {
+          if (contextParentIdsRef.current.has(t.id)) {
+            return (
+              <div className="task-name-cell" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }} title="Parent task, shown for context. It doesn't match your filters.">
+                <span className="task-collapse-spacer" />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", fontWeight: 600 }}>{t.name}</span>
+                <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted)", border: "1px solid var(--border)", borderRadius: 999, padding: "1px 7px" }}>Parent</span>
+              </div>
+            );
+          }
           const children = t._depth === 0 && hasChildren(t.id);
           const collapsed = children && collapsedParents.includes(t.id);
           return (
@@ -6435,6 +6446,32 @@ export default function Projects() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleTasks, taskActiveView, me?.id, projects, tasks, quickList, myOwnedProjectIds, readinessById, taskDeps]);
 
+  // 2026-10-23 (Sandra): when a sub-task matches the filters but its parent
+  // doesn't, show the parent above it (greyed, no actions, not counted).
+  const showParentCtx = taskActiveView.showParentContext !== false && !quickList;
+  const parentCtx = useMemo(() => {
+    const ids = new Set<string>();
+    const firstChild = new Map<string, TaskWithDepth>();
+    if (!showParentCtx) return { rows: filteredVisibleTasks, ids, firstChild };
+    const present = new Set(filteredVisibleTasks.map((t) => t.id));
+    const byId = new Map(visibleTasks.map((t) => [t.id, t]));
+    const out: TaskWithDepth[] = [];
+    for (const t of filteredVisibleTasks) {
+      const pid = t.parent_task_id;
+      if (pid && !present.has(pid)) {
+        if (!firstChild.has(pid)) firstChild.set(pid, t);
+        const parent = byId.get(pid);
+        if (parent && !ids.has(pid)) {
+          ids.add(pid);
+          out.push(parent);
+        }
+      }
+      out.push(t);
+    }
+    return { rows: ids.size ? out : filteredVisibleTasks, ids, firstChild };
+  }, [filteredVisibleTasks, visibleTasks, showParentCtx]);
+  contextParentIdsRef.current = parentCtx.ids;
+
   // Instant, Notion-style row creation (mirrors createBlankProject): insert
   // a sensibly-defaulted task immediately and let the person fill it in via
   // the same inline cells every other row uses, instead of a separate
@@ -7297,6 +7334,8 @@ export default function Projects() {
               onHideEmptyGroupsChange={(hideEmptyGroups) => updateTaskView({ hideEmptyGroups })}
               showCount={taskActiveView.showCount}
               onShowCountChange={(showCount) => updateTaskView({ showCount })}
+              showParentContext={taskActiveView.showParentContext}
+              onShowParentContextChange={taskActiveView.viewType === "board" || taskActiveView.viewType === "timeline" || taskActiveView.viewType === "calendar" ? undefined : (showParentContext) => updateTaskView({ showParentContext })}
               sortOptions={taskSortOptions}
               sorts={taskActiveView.sorts}
               onSortsChange={(sorts) => updateTaskView({ sorts })}
@@ -7519,12 +7558,14 @@ export default function Projects() {
           <div className="data-table-dense">
             <DataTable
               columns={taskColumns}
-              rows={filteredVisibleTasks}
+              rows={parentCtx.rows}
               rowKey={(t) => t.id}
               getParentId={(t) => t.parent_task_id}
               view={taskActiveView}
               onViewChange={updateTaskView}
-              groupOptions={taskGroupOptions}
+              groupOptions={parentCtx.ids.size ? taskGroupOptions.map((o) => ({ ...o, getGroup: (t: TaskWithDepth) => o.getGroup(parentCtx.ids.has(t.id) ? parentCtx.firstChild.get(t.id) ?? t : t) })) : taskGroupOptions}
+              isContextRow={(t) => parentCtx.ids.has(t.id)}
+              contextColumns={["name", "task_number"]}
               sortOptions={taskSortOptions}
               collapseAllContainer={taskPillsRowEl}
               pageSizeOptions={[50, 100, 150]}
