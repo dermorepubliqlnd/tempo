@@ -6321,7 +6321,7 @@ export default function WbsPlanning() {
         .wbs-phase-pct-bar { width: 54px; height: 4px; border-radius: 999px; background: rgba(15,41,66,.1); overflow: hidden; display: inline-block; }
         .wbs-phase-pct-bar > span { display: block; height: 100%; }
         .wbs-phase-current { font-size: 10px; font-weight: 700; border: 1px solid; border-radius: 999px; padding: 1px 7px; background: #fff; white-space: nowrap; }
-        .wbs-phase-ms { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 600; color: #17324f; white-space: nowrap; padding-left: 12px; border-left: 1px solid rgba(15,41,66,.12); }
+        .wbs-phase-ms { margin-left: auto; display: inline-flex; align-items: center; justify-content: flex-start; gap: 7px; font-size: 11.5px; font-weight: 600; color: #17324f; white-space: nowrap; padding-left: 12px; border-left: 1px solid rgba(15,41,66,.12); width: 172px; flex-shrink: 0; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; } /* 2026-10-23: fixed width so milestones line up */
         .wbs-phase-ms.off { color: #94a3b8; font-weight: 500; }
         .wbs-ms-diamond { width: 9px; height: 9px; transform: rotate(45deg); background: #cbd5e1; display: inline-block; flex-shrink: 0; }
         .wbs-phase-more { border: none; background: transparent; cursor: pointer; display: inline-flex; padding: 3px; border-radius: 5px; color: var(--muted); width: auto; }
