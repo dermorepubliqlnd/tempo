@@ -119,6 +119,8 @@ My Dashboard `/` · Team (Executive) Dashboard · Projects & Tasks · Project Ov
 
 **My Dashboard (as of 23 Oct):** KPI cards (Active Projects, Tasks Due This Week, Overdue Tasks, My pending requests, Utilization This Week, Hours Logged This Week) · Awaiting My Approval · Needs My Attention chips · My Work Today · Overdue & Due This Week.
 
+**Project end dates (27 Oct):** every screen shows the **Target End** = `forecastEndOf()` in `Projects.tsx` (the later of `end_date` and the latest live task due date, i.e. the plan after approved extensions and shifts). The commitment stays in `committed_end_date` (fallback `original_due_date`, then `end_date`). My Dashboard "My Projects" columns: ID · Project · Health · Progress · Committed End · Target End · +/- (working days, `workingDayDelta`, same as the weekly report). Team Dashboard date range also uses the Target End.
+
 ## 7. Parked for next release (Friday 30 Oct 2026)
 
 Details: `briefs/Tempo_Release_Oct30_Backlog.md` and `briefs/Tempo_Task_Completion_Rules_Brief.md` (with UI mockups 1–4).
