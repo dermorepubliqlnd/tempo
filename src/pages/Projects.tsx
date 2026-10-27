@@ -4585,9 +4585,10 @@ export default function Projects() {
     navigate(`/projects/${data.id}/wbs`);
   }
 
+  const allTaskTree = useMemo(() => buildTaskTree(tasks), [tasks]);
   const visibleTasks = useMemo(
-    () => buildTaskTree(tasks).filter((t) => !(t.parent_task_id && collapsedParents.includes(t.parent_task_id))),
-    [tasks, collapsedParents]
+    () => allTaskTree.filter((t) => !(t.parent_task_id && collapsedParents.includes(t.parent_task_id))),
+    [allTaskTree, collapsedParents]
   );
   const hasChildren = (taskId: string) => tasks.some((t) => t.parent_task_id === taskId);
 
@@ -6439,8 +6440,16 @@ export default function Projects() {
   // rationale).
   const filteredVisibleTasks = useMemo(() => {
     const view = taskActiveView;
-    let out = visibleTasks;
-    if (quickList) return out.filter((t) => quickMatch(quickList, t, myOwnedProjectIds));
+    // 2026-10-27 (Sandra: "are we sure we're not hiding any open task?"):
+    // filter the FULL tree, then hide a sub-task under a collapsed parent only
+    // when that parent itself is listed -- a collapsed parent that doesn't
+    // match the filters can't hide the user's own sub-tasks any more.
+    const collapseAfterFilter = (rows: TaskWithDepth[]) => {
+      const present = new Set(rows.map((t) => t.id));
+      return rows.filter((t) => !(t.parent_task_id && collapsedParents.includes(t.parent_task_id) && present.has(t.parent_task_id)));
+    };
+    let out = allTaskTree;
+    if (quickList) return collapseAfterFilter(out.filter((t) => quickMatch(quickList, t, myOwnedProjectIds)));
     // phase157c: visible filters only (Assigned to / Status / Project owner /
     // Attention). A legacy taskScope still on the view is applied through the
     // same filters until the view is migrated on load.
@@ -6482,9 +6491,9 @@ export default function Projects() {
       const statuses = view.filterStatuses;
       out = out.filter((t) => statuses.includes(t.status ?? ""));
     }
-    return out;
+    return collapseAfterFilter(out);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleTasks, taskActiveView, me?.id, projects, tasks, quickList, myOwnedProjectIds, readinessById, taskDeps]);
+  }, [allTaskTree, collapsedParents, taskActiveView, me?.id, projects, tasks, quickList, myOwnedProjectIds, readinessById, taskDeps]);
 
   // 2026-10-23 (Sandra): when a sub-task matches the filters but its parent
   // doesn't, show the parent above it (greyed, no actions, not counted).
