@@ -2,7 +2,7 @@
 
 Read this first in every Tempo session. It explains how Tempo is built, the rules currently live, how releases work, and what's parked. **Keep it current** (see "Maintaining this file" at the bottom).
 
-Last updated: 27 Oct 2026 (task completion rules released, phase228)
+Last updated: 27 Oct 2026, end of day (completion rules, dashboard My Tasks, Tasks views, utilization fix; phase230)
 
 ---
 
@@ -125,6 +125,12 @@ My Dashboard `/` · Team (Executive) Dashboard · Projects & Tasks · Project Ov
 
 **My Dashboard (as of 27 Oct):** KPI cards (Active Projects, **Due Next 7 Business Days** "Today – [date]", Overdue Tasks, My pending requests, Utilization This Week, Hours Logged This Week) · Awaiting My Approval · Needs My Attention chips · **My Tasks** (one list, each task once, replaced My Work Today and Overdue & Next 7 Business Days on 27 Oct): Overdue · Next 7 business days (today counts) · Next 2 weeks (business days 8–14) · Later (after that or no due date; collapsed). Tasks waiting on someone else stay in What's next. Hide-for-today is no longer shown. The window is today plus business days until 7 are covered (today counts; weekends and holidays skipped) via `nextBusinessDaysWindow` / `isDueBetween` in `lib/metrics.ts`, sorted by due date; Done tasks (incl. awaiting validation) are excluded. Utilization / Hours Logged / Missing hours stay weekly.
 
+**Projects & Tasks, task list (27 Oct):**
+- A sub-task that matches the filters while its parent doesn't shows the parent above it as a greyed **PARENT** context row: name and ID only, no actions, not counted, not selectable. Per-view switch **Show parent tasks** (`showParentContext`, default on). List view only.
+- Collapse is applied **after** filtering (`allTaskTree` → `collapseAfterFilter`), so a collapsed parent that isn't listed can't hide the user's own sub-tasks.
+- Read-only Status pills (review-chain, parent, cancelled, non-editable) use `.inline-select-static` so they line up with editable ones.
+- Task statuses are only Not Started / In Progress / Done / Cancelled. "For Revision" and "Resubmitted" are tags, not statuses. So My Open Tasks = Me + Not Started + In Progress covers every open task. Tasks with no assignee (12 on 27 Oct) are in nobody's My Open Tasks; owners see them in "Tasks in My Projects".
+
 **Project end dates (27 Oct):** every screen shows the **Target End** = `forecastEndOf()` in `Projects.tsx` (the later of `end_date` and the latest live task due date, i.e. the plan after approved extensions and shifts). The commitment stays in `committed_end_date` (fallback `original_due_date`, then `end_date`). My Dashboard "My Projects" columns: ID · Project · Health · Progress · Committed End · Target End · +/- (working days, `workingDayDelta`, same as the weekly report). Team Dashboard date range also uses the Target End.
 
 ## 7. Parked for next release (Friday 30 Oct 2026)
@@ -134,6 +140,14 @@ Details: `briefs/Tempo_Release_Oct30_Backlog.md` and `briefs/Tempo_Task_Completi
 1. ~~Task completion rules~~ **released 27 Oct 2026 (phase228)**, see section 5. Announced as the **October 28 Release** (KB-0034, phase229), which also covers that tasks after a late one may shift.
 2. ~~My Dashboard "Next 7 business days"~~ **released 27 Oct** (see section 6).
 3. ~~Bug: Utilization This Week 1438%~~ **fixed 27 Oct (phase230)**, see section 5.
+5. **Still open (no release date):**
+   - Job aid / Project Lifecycle guide (`guides/`, `public/guides/project-lifecycle.html`): add the Include/Skip scoping prompt, "Shifted" dates, completion rules, Review time before For Revision, My Tasks grouping.
+   - KB wording sweep: KB 6, 7, 10, 15, 32 still say older projects use a typed completion date. Align with KB-0034.
+   - UAT checklist (Docs artifact f1e83ef3-…, node 7807d35b-ad28): add everything released after 23 Oct. UAT round-2 results (sections B, D, E) never came back.
+   - `TEMPO_SYSTEM_MAP.md` is from 13 Oct; refresh after the Oct 30 release.
+   - **GitHub access key for Claude's pushes expires 20 Nov 2026.** Sandra creates a new fine-grained token (repo `tempo`, Contents read/write) and pastes it in chat. Deploys themselves don't use it. Never write the key into any file: the repo is public.
+   - Backlog: KB clean-up (32 → ~18 articles), "First submitted" report column, revision notes history, 3 older tasks with mismatched Output Types, follow up the 12 unassigned open tasks.
+   - Parked by Sandra (decided not to build): review clock pause during For Revision (planned durations already include revision rounds; doers request extensions); automatic "wait for Scope Sign-Off" on Design tasks (link manually when needed).
 4. **Released 27 Oct:** Tasks system views: "Coming Up (Waiting on Others)" removed and merged into **My Open Tasks**, which shows all my open tasks again (Next action column shows Ready / Waiting on…). The R1 `action_needed` filter is retired on My Open Tasks, My Tasks by Project and My Task Calendar (`TASK_SYSTEM_RETIRED_DEFAULTS`).
 
 ## 8. Folder layout
@@ -141,7 +155,7 @@ Details: `briefs/Tempo_Release_Oct30_Backlog.md` and `briefs/Tempo_Task_Completi
 | Folder / file | Contents |
 |---|---|
 | `CLAUDE.md`, `TEMPO_SYSTEM_MAP.md` | This file and the full system map |
-| `sql/` | All phase SQL files (phase183 onward) + `uat_setup_oct15.sql`. **Save new phase files here** and also commit each one to the repo's `supabase/` folder (synced up to phase229 on 27 Oct 2026) |
+| `sql/` | All phase SQL files (phase183 onward) + `uat_setup_oct15.sql`. **Save new phase files here** and also commit each one to the repo's `supabase/` folder (synced up to phase230 on 27 Oct 2026). **Public repo:** in test/dry-run scripts use a placeholder like `<test-user-id>` instead of real user IDs. GitGuardian flagged `request.jwt.claims` + Sandra's user ID on 27 Oct (incident #39151564): a false positive, no secret, but avoid it going forward |
 | `briefs/` | Upcoming release briefs, backlog, mockups, governance brief. **Save new briefs here** |
 | `guides/` | User-facing guides (Workflow Job Aid, Project Lifecycle Guide) |
 | `test-steps/` | Past release test steps |
