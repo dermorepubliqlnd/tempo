@@ -932,6 +932,7 @@ tr:hover .add-subtask-btn { opacity: 1; }
    arrows. Click a cell to activate its dropdown. */
 .inline-select-trigger { cursor: pointer; border-radius: var(--radius-sm); padding: 3px 4px; display: inline-flex; }
 .inline-select-trigger:hover { background: var(--hover-bg); }
+.inline-select-static { padding: 3px 4px; display: inline-flex; }
 
 /* Est./Spent hours cells: plain numeric input, no spinner arrows */
 input.inline-cell[type="number"]::-webkit-outer-spin-button,

@@ -114,7 +114,8 @@ export function InlineSelect({ value, onCommit, options, editable, allowEmpty, e
   }, [isEditing]);
 
   if (!editable)
-    return renderReadOnly ? <>{renderReadOnly(value)}</> : (
+    // 2026-10-27: same 4px inset as the editable trigger, so read-only pills line up.
+    return renderReadOnly ? <span className="inline-select-static">{renderReadOnly(value)}</span> : (
       <span title={value || undefined} style={{ display: "inline-block", maxWidth: "100%", verticalAlign: "bottom", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value || emptyLabel}</span>
     );
 

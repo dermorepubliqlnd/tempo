@@ -4752,11 +4752,13 @@ export default function Projects() {
           // status change).
           if (isParent) {
             return t.status ? (
-              <span
-                className={`status-pill ${statusTone(statusGroupOf(TASK_STATUS_GROUPED, t.status))}`}
-                title="Computed from this task's own sub-tasks -- Done only once every sub-task is Done."
-              >
-                {t.status}
+              <span className="inline-select-static">
+                <span
+                  className={`status-pill ${statusTone(statusGroupOf(TASK_STATUS_GROUPED, t.status))}`}
+                  title="Computed from this task's own sub-tasks -- Done only once every sub-task is Done."
+                >
+                  {t.status}
+                </span>
               </span>
             ) : (
               "—"
@@ -4776,7 +4778,7 @@ export default function Projects() {
                 Cancelled
               </span>
             );
-            if (!canUncancel) return pill;
+            if (!canUncancel) return <span className="inline-select-static">{pill}</span>;
             return (
               <button
                 onClick={async () => {
@@ -4807,12 +4809,14 @@ export default function Projects() {
           // their Status isn't a dropdown on new projects.
           if (r1ProjectIds.has(t.project_id) && (isHandoffTask(t) || reviewStepKind(t))) {
             return (
-              <span
-                className={`status-pill ${statusTone(statusGroupOf(TASK_STATUS_GROUPED, t.status ?? ""))}`}
-                title={reviewStepKind(t) ? "Moves with Pass QA / Approve or For Revision in Next action." : "Moves with Ready for Review in Next action. Logging time starts it."}
-                style={{ cursor: "help" }}
-              >
-                {t.status ?? "Not Started"}
+              <span className="inline-select-static">
+                <span
+                  className={`status-pill ${statusTone(statusGroupOf(TASK_STATUS_GROUPED, t.status ?? ""))}`}
+                  title={reviewStepKind(t) ? "Moves with Pass QA / Approve or For Revision in Next action." : "Moves with Ready for Review in Next action. Logging time starts it."}
+                  style={{ cursor: "help" }}
+                >
+                  {t.status ?? "Not Started"}
+                </span>
               </span>
             );
           }
