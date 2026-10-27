@@ -134,7 +134,7 @@ Details: `briefs/Tempo_Release_Oct30_Backlog.md` and `briefs/Tempo_Task_Completi
 | Folder / file | Contents |
 |---|---|
 | `CLAUDE.md`, `TEMPO_SYSTEM_MAP.md` | This file and the full system map |
-| `sql/` | All phase SQL files (phase183 onward) + `uat_setup_oct15.sql`. **Save new phase files here.** GitHub has only phase1–182, so these may be the only record: commit them to the repo's `supabase/` folder |
+| `sql/` | All phase SQL files (phase183 onward) + `uat_setup_oct15.sql`. **Save new phase files here** and also commit each one to the repo's `supabase/` folder (synced up to phase229 on 27 Oct 2026) |
 | `briefs/` | Upcoming release briefs, backlog, mockups, governance brief. **Save new briefs here** |
 | `guides/` | User-facing guides (Workflow Job Aid, Project Lifecycle Guide) |
 | `test-steps/` | Past release test steps |
