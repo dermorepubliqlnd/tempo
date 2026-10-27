@@ -46,6 +46,8 @@ export const METRIC_DEFINITIONS = {
     "Total projects: projects completed in the period, plus open projects (In Progress, Not Started or Paused) that started, or were planned to start, by the end of the period. Cancelled projects are left out.",
   dueThisWeek:
     "Due this week: open tasks in started projects due from today through Sunday. Overdue tasks and tasks in paused projects aren't included.",
+  dueNext7BusinessDays:
+    "Due in the next 7 business days: open tasks in started projects due from today through the 7th business day (today counts; weekends and holidays are skipped). Overdue tasks, finished tasks waiting for validation and tasks in paused projects aren't included.",
   missingHours:
     "Missing hours: expected hours minus Final logged hours, per person, on completed working days this week (Monday to yesterday; today isn't counted). People not expected to log time are left out.",
   plannedUtilization:
@@ -154,6 +156,32 @@ export function dueThisWeekRange(today: Date = new Date()): { start: string; end
   d.setHours(0, 0, 0, 0);
   const dow = (d.getDay() + 6) % 7; // Mon = 0
   return { start: toISO(d), end: toISO(addDays(d, 6 - dow)) };
+}
+
+/** 2026-10-27 (Sandra): today plus business days until 7 business days are
+ * covered (today counts if it is one). Weekends and holidays are skipped. */
+export function nextBusinessDaysWindow(today: Date, holidays: Set<string>, n = 7): { start: string; end: string } {
+  const d = new Date(today);
+  d.setHours(0, 0, 0, 0);
+  let count = 0;
+  let last = toISO(d);
+  for (let i = 0, cur = new Date(d); i < 60 && count < n; i++, cur = addDays(cur, 1)) {
+    const iso = toISO(cur);
+    if (cur.getDay() !== 0 && cur.getDay() !== 6 && !holidays.has(iso)) {
+      count++;
+      last = iso;
+    }
+  }
+  return { start: toISO(d), end: last };
+}
+
+/** Same rules as isDueThisWeek, for any window (inclusive ISO dates). */
+export function isDueBetween(t: MetricTask, project: MetricProject | null | undefined, startIso: string, endIso: string, isParent = false): boolean {
+  if (isParent || !isOpenTask(t) || !project || !isStartedProject(project)) return false;
+  const s = projectStatus(project);
+  if (s === "Completed" || s === "Cancelled" || s === "Paused") return false;
+  const due = t.current_due_date?.slice(0, 10);
+  return !!due && due >= startIso && due <= endIso;
 }
 
 /** Due this week = open, started project, not paused, due today..Sunday. */

@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { tierOf, displayPct, UTIL_LEGEND } from "../lib/utilizationBands";
 import { type PauseProjectInfo } from "../lib/pause";
-import { METRIC_DEFINITIONS, LOGGED_VS_EXPECTED_LABEL, isOverdueTask, isDueThisWeek, isActiveProject, isStartedProject } from "../lib/metrics";
+import { METRIC_DEFINITIONS, LOGGED_VS_EXPECTED_LABEL, isOverdueTask, isDueBetween, nextBusinessDaysWindow, isActiveProject, isStartedProject } from "../lib/metrics";
 import { supabase } from "../lib/supabaseClient";
 import { fetchAllRows } from "../lib/fetchAllRows";
 import Modal from "../components/Modal";
@@ -713,7 +713,15 @@ export default function MyDashboard() {
   // 2026-10-08 (Sandra, item I): Due this week = today through Sunday,
   // overdue not included (lib/metrics.ts) -- same as the Tasks KPI card.
   // Was Mon-Fri including past days (which double-counted overdue tasks).
-  const tasksThisWeek = myActionTasks.filter((t) => isDueThisWeek(t, t.project, new Date(), myParentIds.has(t.id)));
+  // 2026-10-27 (Sandra): "Next 7 business days" instead of this week --
+  // anchored to today, weekends and holidays skipped, sorted by due date.
+  const next7 = nextBusinessDaysWindow(new Date(), holidayDateStrings);
+  const next7Label = new Date(next7.end + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const tasksThisWeek = myActionTasks
+    .filter((t) => isDueBetween(t, t.project, next7.start, next7.end, myParentIds.has(t.id)))
+    .sort((a, b) => (a.current_due_date ?? "").localeCompare(b.current_due_date ?? ""));
+  const dueTodayInWindow = tasksThisWeek.filter((t) => t.current_due_date?.slice(0, 10) === todayIso);
+  const dueLaterInWindow = tasksThisWeek.filter((t) => t.current_due_date?.slice(0, 10) !== todayIso);
   // 2026-10-02 (Sandra): full-width deadline card -- overdue first, then
   // the rest of this week (today onward; past days this week are overdue).
   const dueRestOfWeek = tasksThisWeek;
@@ -1105,7 +1113,7 @@ export default function MyDashboard() {
 
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
         <MetricCard icon={<Folder size={16} />} colors={METRIC_COLORS.blue} label="My Active Projects" value={myActiveProjects.length} sub="Owned, In Progress" title={`${METRIC_DEFINITIONS.activeProject} Counts projects you own.`} />
-        <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Tasks Due This Week" value={tasksThisWeek.length} sub="Today through Sunday" title={METRIC_DEFINITIONS.dueThisWeek} />
+        <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Due Next 7 Business Days" value={tasksThisWeek.length} sub={`Today – ${next7Label}`} title={METRIC_DEFINITIONS.dueNext7BusinessDays} />
         <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Tasks" value={overdueTasks.length} title={METRIC_DEFINITIONS.overdueTask} />
         <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="My pending requests" value={myPendingApprovalsCount} />
         <MetricCard icon={<BarChart3 size={16} />} colors={METRIC_COLORS.teal} label="Utilization This Week" value={`${Math.round(weekUtilPct)}%`} sub={`of ${weekCapacityTotal.toFixed(1)}h capacity`} title={METRIC_DEFINITIONS.plannedUtilization} />
@@ -1497,7 +1505,7 @@ export default function MyDashboard() {
       {(overdueTasks.length > 0 || dueRestOfWeek.length > 0) && (
         <div className="dash-card">
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
-            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>Overdue &amp; Due This Week</h2>
+            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>Overdue &amp; Next 7 Business Days</h2>
             <Link to="/projects?assignee=me" style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>View all tasks</Link>
           </div>
           <div style={{ overflowX: "auto" }}>
@@ -1516,12 +1524,18 @@ export default function MyDashboard() {
                 </div>
               )}
               {overdueTasks.map((t) => renderWorkRow(t, "deadline"))}
-              {dueRestOfWeek.length > 0 && (
-                <div style={{ gridColumn: "1 / -1", padding: "12px 0 2px", fontSize: 11, fontWeight: 700, color: "var(--navy)", textTransform: "uppercase", letterSpacing: 0.3 }}>
-                  Due this week ({dueRestOfWeek.length})
+              {dueTodayInWindow.length > 0 && (
+                <div style={{ gridColumn: "1 / -1", padding: "12px 0 2px", fontSize: 11, fontWeight: 700, color: "var(--warning-text, #b45309)", textTransform: "uppercase", letterSpacing: 0.3 }}>
+                  Due today ({dueTodayInWindow.length})
                 </div>
               )}
-              {dueRestOfWeek.map((t) => renderWorkRow(t, "deadline"))}
+              {dueTodayInWindow.map((t) => renderWorkRow(t, "deadline"))}
+              {dueLaterInWindow.length > 0 && (
+                <div style={{ gridColumn: "1 / -1", padding: "12px 0 2px", fontSize: 11, fontWeight: 700, color: "var(--navy)", textTransform: "uppercase", letterSpacing: 0.3 }}>
+                  Next 7 business days ({dueLaterInWindow.length}) <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--muted)" }}>— through {next7Label}</span>
+                </div>
+              )}
+              {dueLaterInWindow.map((t) => renderWorkRow(t, "deadline"))}
             </div>
           </div>
         </div>
