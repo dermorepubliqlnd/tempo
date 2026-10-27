@@ -847,6 +847,8 @@ export default function MyDashboard() {
     }
     for (const r of myReqs) {
       if (r.status === "pending" || !recent(r.decidedAt)) continue;
+      // Approved time logs are routine (mostly auto-approved): only rejections show.
+      if (r.kind === "time" && r.status === "approved") continue;
       out.push({ key: `rq${r.key}`, at: r.decidedAt as string, tone: r.status === "approved" ? "success" : "danger", icon: r.status === "approved" ? "approved" : "rejected", title: `${r.typeLabel} ${r.statusLabel.toLowerCase()} · ${r.item}`, detail: r.decidedBy ? `by ${r.decidedBy}${r.note ? ` · "${r.note}"` : ""}` : r.note ?? "", link: r.link || "/approval-center?tab=requests" });
     }
     return out.sort((a, b) => b.at.localeCompare(a.at));
