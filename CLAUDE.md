@@ -32,7 +32,7 @@ Full detail: `TEMPO_SYSTEM_MAP.md` (written 13 Oct 2026; stack, deploy flow, rou
 
 ## 3. Database change conventions
 
-- Changes are **hand-run SQL files**: `sql/phaseNN_short_name.sql`. Supabase tracks no migrations, so these files are the only record. **Latest: phase228. Next: phase229.**
+- Changes are **hand-run SQL files**: `sql/phaseNN_short_name.sql`. Supabase tracks no migrations, so these files are the only record. **Latest: phase229. Next: phase230.**
 - Each file starts with a comment header: `-- phaseNN (YYYY-MM-DD, Sandra): what and why`.
 - Suffixes:
   - `_DRAFT`: Knowledge Base article kept hidden (`is_active = false`) until release
@@ -41,7 +41,7 @@ Full detail: `TEMPO_SYSTEM_MAP.md` (written 13 Oct 2026; stack, deploy flow, rou
 - Additive and safe-while-live by default. New behaviour is usually limited to **new-flow projects** (see below).
 - **Preview-only gating:** a rule can check the `x-tempo-channel: preview` header so it only applies on preview. Remove the check at release and note "RELEASED <date>" in the file.
 - Because preview shares the live database, test with UAT/test projects only. No uncontrolled writes to real records.
-- Knowledge Base articles live in `kb_entries`. Each release has a "What's new" article (Oct 23 release = KB-0033).
+- Knowledge Base articles live in `kb_entries`. Each release has a "What's new" article (Oct 23 release = KB-0033; Oct 28 release, task completion rules = KB-0034, phase229).
 
 ## 4. Key concepts (glossary)
 
@@ -123,7 +123,7 @@ My Dashboard `/` · Team (Executive) Dashboard · Projects & Tasks · Project Ov
 
 Details: `briefs/Tempo_Release_Oct30_Backlog.md` and `briefs/Tempo_Task_Completion_Rules_Brief.md` (with UI mockups 1–4).
 
-1. ~~Task completion rules~~ **released 27 Oct 2026 (phase228)**, see section 5. Follow-ups: KB "What's new" note (not written yet); release-note line that more dependents may shift now that late completions aren't backdated.
+1. ~~Task completion rules~~ **released 27 Oct 2026 (phase228)**, see section 5. Announced as the **October 28 Release** (KB-0034, phase229), which also covers that tasks after a late one may shift.
 2. **My Dashboard**: "Due This Week" → "Next 7 business days" (KPI card + bottom section, anchored to today, excludes awaiting validation). Utilization / Hours Logged / Missing hours stay weekly.
 3. **Bug**: Utilization This Week showed 1438% while Hours Logged showed 21.6h of 22.5h. Investigate.
 
