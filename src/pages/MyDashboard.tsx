@@ -1,6 +1,6 @@
 import { projectStageOf } from "../lib/projectStage";
 import { selfApprovedExtensionConfirm, extensionOutcomeMessage } from "../lib/autoApprovals";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Folder,
@@ -251,6 +251,7 @@ export default function MyDashboard() {
   const [ownerHistory, setOwnerHistory] = useState<OwnerHistoryRow[]>([]);
   const [assigneeHistory, setAssigneeHistory] = useState<AssigneeHistoryRow[]>([]);
   const [deletedHours, setDeletedHours] = useState<DeletedHourRow[]>([]);
+  const [showLaterTasks, setShowLaterTasks] = useState(false);
   const [outputTypes, setOutputTypes] = useState<OutputTypeRow[]>([]);
   const [monthEntries, setMonthEntries] = useState<TimeEntryRow[]>([]);
   // monthEntries now holds ~6 months (see loadAll); this-month-only view:
@@ -722,6 +723,20 @@ export default function MyDashboard() {
     .sort((a, b) => (a.current_due_date ?? "").localeCompare(b.current_due_date ?? ""));
   const dueTodayInWindow = tasksThisWeek.filter((t) => t.current_due_date?.slice(0, 10) === todayIso);
   const dueLaterInWindow = tasksThisWeek.filter((t) => t.current_due_date?.slice(0, 10) !== todayIso);
+  // 2026-10-27: the one "My Tasks" list -- every open task I can act on, once.
+  const byDue = (a: { current_due_date?: string | null }, b: { current_due_date?: string | null }) => (a.current_due_date ?? "9999").localeCompare(b.current_due_date ?? "9999");
+  const shownSoFar = new Set([...overdueTasks, ...tasksThisWeek].map((t) => t.id));
+  const restOfMine = myActionTasks.filter((t) => !shownSoFar.has(t.id) && !isPausedTask(t));
+  const inProgressLater = restOfMine.filter((t) => t.status === "In Progress" || (!!t.start_date && t.start_date.slice(0, 10) <= todayIso)).sort(byDue);
+  const laterTasks = restOfMine.filter((t) => !inProgressLater.includes(t)).sort(byDue);
+  const myTaskGroups = [
+    { key: "overdue", label: "Overdue", rows: [...overdueTasks].sort(byDue), color: "var(--danger-text)", hint: "finish it, or request an extension", collapsible: false },
+    { key: "today", label: "Due today", rows: dueTodayInWindow, color: "var(--warning-text, #b45309)", hint: "", collapsible: false },
+    { key: "next", label: "Next 7 business days", rows: dueLaterInWindow, color: "var(--navy)", hint: `through ${next7Label}`, collapsible: false },
+    { key: "progress", label: "In progress, due later", rows: inProgressLater, color: "var(--navy)", hint: "", collapsible: false },
+    { key: "later", label: "Later", rows: laterTasks, color: "var(--muted)", hint: `not started, due after ${next7Label}`, collapsible: true },
+  ];
+  const myTasksTotal = myTaskGroups.reduce((n, g) => n + g.rows.length, 0);
   // 2026-10-02 (Sandra): full-width deadline card -- overdue first, then
   // the rest of this week (today onward; past days this week are overdue).
   const dueRestOfWeek = tasksThisWeek;
@@ -1417,125 +1432,42 @@ export default function MyDashboard() {
         </Modal>
       )}
 
-      {/* 2026-09-23 (Sandra: "My Work Today ... helps employees quickly
-          see what they are expected to work on today ... complement,
-          not replace, the existing task list") -- distinct from Due
-          Today/Due This Week: schedule-active-today (start_date <=
-          today <= current_due_date), not deadline-today. Placed above
-          My Projects per her follow-up. */}
-      {myWorkTodayAll.length > 0 && (
+      {/* 2026-10-27 (Sandra: "one page where they see all their open tasks
+          which require action, overdue and due soon"): My Work Today and
+          Overdue & Next 7 Business Days merged into ONE list. Each task shows
+          once, in the group for its most urgent deadline. Tasks waiting on
+          someone else stay in What's next. */}
+      {myTasksTotal > 0 && (
         <div className="dash-card">
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
-            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>My Work Today</h2>
-            {myWorkTodayHiddenCount > 0 && (
-              <button
-                onClick={() => setShowHiddenToday((v) => !v)}
-                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, color: "var(--accent)", flexShrink: 0 }}
-              >
-                {showHiddenToday ? `Hide hidden (${myWorkTodayHiddenCount})` : `Show hidden (${myWorkTodayHiddenCount})`}
-              </button>
-            )}
-          </div>
-          {justHidden && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--text-secondary)", background: "var(--hover-bg)", borderRadius: "var(--radius-sm)", padding: "6px 10px", marginBottom: 8 }}>
-              <span>Task hidden from Today.</span>
-              <button onClick={() => unhideTaskFromToday(justHidden.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", fontWeight: 600, fontSize: 11.5, padding: 0 }}>
-                Undo
-              </button>
-            </div>
-          )}
-          {/* 2026-09-23 (Sandra, round 2: "it's ugly... task column too
-              wide... task status header overlapping the tag column, not
-              centered with the list below it... cut the hrs variance bar
-              in half") -- switched every column to a fixed pixel width
-              (no flex-grow at all -- growth is what let Task balloon)
-              inside a horizontally-scrollable wrapper. Task Status/Tag
-              headers got `whiteSpace: nowrap` -- they were wrapping onto
-              a second line at their old width, which is what made them
-              look like they were bleeding into the next column. Task/
-              Project headers went back to left-aligned (matching their
-              left-aligned, long-text data) -- centering a header over a
-              long left-aligned value is what looked off; short/numeric
-              columns stay centered, matching their data. */}
-          {/* 2026-09-23 (Sandra, round 3: "replace tagging with timing...
-              project is too wide... add a gap just to fill the white
-              space minimally") -- Tag column retired for Timing
-              (Overdue/Due soon/On track, shared taskTiming.ts logic).
-              Every column is back to a plain fixed width -- Project no
-              longer flex-grows (that's what made it balloon out with
-              nothing but blank space in it); instead a small 8px gap
-              between every column soaks up the leftover row width
-              evenly, a little at a time, rather than dumping it all
-              into one column. */}
-          {/* 2026-09-24 (Sandra: "use the horizontal space better, reduce
-              the blank area on the right") -- a real table spanning the
-              full card: Task (name + ID) and Project are the flexible
-              columns (Project widest), Dates and Hours are combined into
-              one column each, the variance reads "Xh remaining" / "Xh
-              over" instead of a signed number, and the Start/Stop + Hide
-              icon buttons sit right-aligned. UI only -- the same timer and
-              hide handlers as before. */}
-          {/* 2026-09-24 (Sandra: column spacing diagnosis) -- switched from
-              a fixed-layout <table> (where Task's 22% and Project's auto
-              width absorbed ALL extra space on wide screens, leaving big
-              empty stretches after short text) to ONE shared CSS Grid
-              template for header + rows: Task and Project are capped, a
-              flexible spacer before Actions takes any leftover width, and
-              a uniform 16px column gap does the separating. */}
-          <div style={{ overflowX: "auto" }}>
-            <div style={MWT_GRID}>
-              {["Task ID", "Task", "Status", "Timing", "Project", "Dates", "Hours (Logged / Est.)", "Remaining / Variance", "Actions"].map((h, i, arr) => (
-                <span
-                  key={`h${i}`}
-                  style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap", textAlign: i === arr.length - 1 ? "right" : "left", padding: `8px ${i === arr.length - 1 ? 0 : MWT_GAP}px 6px 0`, borderBottom: "1px solid var(--border)" }}
-                >
-                  {h}
-                </span>
-              ))}
-          {myWorkTodayVisible.length === 0 ? (
-            <p style={{ gridColumn: "1 / -1", fontSize: 12, color: "var(--muted)", padding: "10px 0" }}>Nothing left to show -- everything scheduled for today is hidden.</p>
-          ) : (
-            myWorkTodayVisible.map((t) => renderWorkRow(t, "today"))
-          )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {(overdueTasks.length > 0 || dueRestOfWeek.length > 0) && (
-        <div className="dash-card">
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
-            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>Overdue &amp; Next 7 Business Days</h2>
+            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>My Tasks ({myTasksTotal})</h2>
             <Link to="/projects?assignee=me" style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>View all tasks</Link>
           </div>
           <div style={{ overflowX: "auto" }}>
             <div style={MWT_GRID}>
               {["Task ID", "Task", "Status", "Timing", "Project", "Dates", "Hours (Logged / Est.)", "Remaining / Variance", "Actions"].map((h, i, arr) => (
                 <span
-                  key={`dh${i}`}
+                  key={`mt${i}`}
                   style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap", textAlign: i === arr.length - 1 ? "right" : "left", padding: `8px ${i === arr.length - 1 ? 0 : MWT_GAP}px 6px 0`, borderBottom: "1px solid var(--border)" }}
                 >
                   {h}
                 </span>
               ))}
-              {overdueTasks.length > 0 && (
-                <div style={{ gridColumn: "1 / -1", padding: "10px 0 2px", fontSize: 11, fontWeight: 700, color: "var(--danger-text)", textTransform: "uppercase", letterSpacing: 0.3 }}>
-                  Overdue ({overdueTasks.length}) <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--muted)" }}>— finish it, or request an extension</span>
-                </div>
+              {myTaskGroups.map((g) =>
+                g.rows.length === 0 ? null : (
+                  <Fragment key={g.key}>
+                    <div
+                      onClick={g.collapsible ? () => setShowLaterTasks((v) => !v) : undefined}
+                      style={{ gridColumn: "1 / -1", padding: "12px 0 2px", fontSize: 11, fontWeight: 700, color: g.color, textTransform: "uppercase", letterSpacing: 0.3, cursor: g.collapsible ? "pointer" : "default", display: "flex", alignItems: "center", gap: 4 }}
+                    >
+                      {g.collapsible && (showLaterTasks ? <ChevronDown size={13} /> : <ChevronRight size={13} />)}
+                      {g.label} ({g.rows.length})
+                      {g.hint && <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--muted)", marginLeft: 4 }}>— {g.hint}</span>}
+                    </div>
+                    {(!g.collapsible || showLaterTasks) && g.rows.map((t) => renderWorkRow(t, "deadline"))}
+                  </Fragment>
+                )
               )}
-              {overdueTasks.map((t) => renderWorkRow(t, "deadline"))}
-              {dueTodayInWindow.length > 0 && (
-                <div style={{ gridColumn: "1 / -1", padding: "12px 0 2px", fontSize: 11, fontWeight: 700, color: "var(--warning-text, #b45309)", textTransform: "uppercase", letterSpacing: 0.3 }}>
-                  Due today ({dueTodayInWindow.length})
-                </div>
-              )}
-              {dueTodayInWindow.map((t) => renderWorkRow(t, "deadline"))}
-              {dueLaterInWindow.length > 0 && (
-                <div style={{ gridColumn: "1 / -1", padding: "12px 0 2px", fontSize: 11, fontWeight: 700, color: "var(--navy)", textTransform: "uppercase", letterSpacing: 0.3 }}>
-                  Next 7 business days ({dueLaterInWindow.length}) <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--muted)" }}>— through {next7Label}</span>
-                </div>
-              )}
-              {dueLaterInWindow.map((t) => renderWorkRow(t, "deadline"))}
             </div>
           </div>
         </div>
