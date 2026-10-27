@@ -76,7 +76,7 @@ import { parseLocalDate, calendarDaysBetween } from "../lib/taskTiming";
 // out of sync with what the Projects table itself shows for a project.
 import { wbsStatusMetaFor } from "../lib/wbsStatus";
 import { computeReadiness, waitingOnLabel, expectedUnlockDate, isR1Project, stepKindOf, isReviewStep, workTypeNameMap, type ReadinessDep } from "../lib/taskReadiness";
-import { healthOf, actualProgress, countWorkingDays, projectCompletionDate, type ProjectRow, type TaskRow } from "./Projects";
+import { healthOf, actualProgress, countWorkingDays, projectCompletionDate, forecastEndOf, type ProjectRow, type TaskRow } from "./Projects";
 import {
   createAllocationEngine,
   dailyCapacityHours,
@@ -1677,7 +1677,7 @@ export default function MyDashboard() {
                       </div>
                       <span style={{ fontSize: 11, color: "var(--muted)", width: 32, textAlign: "right" }}>{progress === null ? "—" : `${Math.round(progress)}%`}</span>
                     </span>
-                    <span onClick={go} style={{ ...cell, paddingRight: 0, justifyContent: "flex-end", fontSize: 11.5, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{formatDate(p.end_date)}</span>
+                    <span onClick={go} style={{ ...cell, paddingRight: 0, justifyContent: "flex-end", fontSize: 11.5, color: "var(--text-secondary)", whiteSpace: "nowrap" }} title={(() => { const fe = forecastEndOf(p, tasks); return fe && p.end_date && fe !== p.end_date.slice(0, 10) ? `Current plan after approved extensions. End Date on record: ${formatDate(p.end_date)}.` : undefined; })()}>{formatDate(forecastEndOf(p, tasks))}</span>
                   </div>
                 );
               })}

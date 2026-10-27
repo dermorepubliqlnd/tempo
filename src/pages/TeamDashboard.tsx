@@ -52,7 +52,7 @@ import { supabase } from "../lib/supabaseClient";
 import { fetchAllRows } from "../lib/fetchAllRows";
 import { toISO, parseLocalDate, addDays, isWorkingDay, buildHolidaySet } from "../lib/workingDays";
 import { createAllocationEngine, dailyCapacityHours, expectedHoursForDay, isOpenTask, type UtilTaskRow, type UtilProjectRow } from "../lib/dailyAllocation";
-import { healthOf, actualProgress, projectCompletionDate, type ProjectRow, type TaskRow } from "./Projects";
+import { healthOf, actualProgress, projectCompletionDate, forecastEndOf, type ProjectRow, type TaskRow } from "./Projects";
 import { MaterialsOutputBarList, HEALTH_TONE, materialsOutputRowsFor, trainingDeliveryFor, type OutputTypeRow } from "./Dashboard";
 import {
   METRIC_DEFINITIONS,
@@ -1248,7 +1248,7 @@ export default function TeamDashboard() {
                           </span>
                         </td>
                         <td>{personName(p.owner_id)}</td>
-                        <td style={{ fontSize: 11, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{p.start_date ? formatDate(p.start_date) : "—"} – {p.end_date ? formatDate(p.end_date) : "—"}</td>
+                        <td style={{ fontSize: 11, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{p.start_date ? formatDate(p.start_date) : "—"} – {(() => { const fe = forecastEndOf(p, tasks); return fe ? formatDate(fe) : "—"; })()}</td>
                         <td style={{ fontSize: 11, color: "var(--text-secondary)" }}>{lookups.sources.find((s) => s.id === p.source_id)?.name ?? "—"}</td>
                       </tr>
                     ))}
