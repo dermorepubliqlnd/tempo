@@ -2229,7 +2229,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
             {kinds.map(({ k, n }) => {
               const meta = KIND_META[k];
               return (
-                <Link key={k} to={`/approval-center?kind=${k}`} style={cardStyle} title={`Open ${meta.pluralLabel} in Mine to approve`}>
+                <Link key={k} to={`/approval-center?kind=${k}`} style={cardStyle} title={`Open ${meta.pluralLabel} in Awaiting My Approval`}>
                   <span className={`status-pill ${meta.tone}`} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: 10, flexShrink: 0 }}>
                     {meta.icon}
                   </span>
@@ -2283,7 +2283,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
 
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14, borderBottom: "1px solid var(--border)" }}>
         {([
-          ...(hasAuthority ? [["mine", `Mine to approve (${mineCount})`]] : []),
+          ...(hasAuthority ? [["mine", `Awaiting My Approval (${mineCount})`]] : []),
           ...(hasAuthority && showTeamTab ? [["team", `Team view (${teamCount})`]] : []),
           ["requests", "My Requests"],
           ...(hasAuthority && autoOn ? [["auto", "Auto-approved"]] : []),

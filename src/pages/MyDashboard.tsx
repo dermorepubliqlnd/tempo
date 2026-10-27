@@ -252,6 +252,8 @@ export default function MyDashboard() {
   const [assigneeHistory, setAssigneeHistory] = useState<AssigneeHistoryRow[]>([]);
   const [deletedHours, setDeletedHours] = useState<DeletedHourRow[]>([]);
   const [showLaterTasks, setShowLaterTasks] = useState(false);
+  const [workTab, setWorkTab] = useState<"needs" | "next14" | "later">("needs");
+  const [reqTab, setReqTab] = useState<"pending" | "decided">("pending");
   const [outputTypes, setOutputTypes] = useState<OutputTypeRow[]>([]);
   const [monthEntries, setMonthEntries] = useState<TimeEntryRow[]>([]);
   // monthEntries now holds ~6 months (see loadAll); this-month-only view:
@@ -277,7 +279,7 @@ export default function MyDashboard() {
   const [hiddenToday, setHiddenToday] = useState<{ task_id: string; hidden_date: string }[]>([]);
   // 2026-09-23 (Sandra: lightbox for Tasks due today / Overdue tasks --
   // see AttentionPill below) -- which list is open, or null when closed.
-  const [attentionModal, setAttentionModal] = useState<"no_phase" | "due_today" | "overdue" | "ready_to_close" | "completed_open" | "work_done" | "draft_planning" | "new_assignments" | "planned" | null>(null);
+  const [attentionModal, setAttentionModal] = useState<"no_phase" | "due_today" | "overdue" | "ready_to_close" | "completed_open" | "work_done" | "draft_planning" | "new_assignments" | "planned" | "reviews" | null>(null);
   // 2026-09-23 (My Work Today "Logged" column, Sandra: "show logged
   // hours against the tasks") -- same confirmed/approved, not-archived
   // definition Projects.tsx's own Spent Hrs column uses, just scoped to
@@ -440,6 +442,8 @@ export default function MyDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.id]);
   // 2026-10-02 (Sandra): My Requests card = pending + decided in last 7 days.
+  const pendingReqs = myReqs.filter((r) => r.status === "pending");
+  const decidedReqs = myReqs.filter((r) => r.status !== "pending" && r.decidedAt && Date.now() - new Date(r.decidedAt).getTime() <= 7 * 86400000);
   const recentReqs = myReqs.filter((r) => r.status === "pending" || (r.decidedAt && Date.now() - new Date(r.decidedAt).getTime() <= 7 * 86400000));
 
   const isFullAccess = me?.access_level === "full";
@@ -572,7 +576,7 @@ export default function MyDashboard() {
 
   // 2026-10-02 (Sandra): one row renderer shared by My Work Today and the
   // full-width "Overdue & Due This Week" card (same columns + timer).
-  function renderWorkRow(t: (typeof myOpenTasks)[number], mode: "today" | "deadline") {
+  function renderWorkRow(t: (typeof myOpenTasks)[number], mode: "today" | "deadline" | "work") {
               const isHidden = mode === "today" && hiddenTodayIds.has(t.id);
               const isRunningHere = running?.task_id === t.id;
               const timerDisabled = timerBusy || (Boolean(running) && !isRunningHere);
@@ -583,6 +587,93 @@ export default function MyDashboard() {
               // Every cell carries the row's padding/border/opacity (display:contents rows have no box).
               const td: CSSProperties = { fontSize: 12, minWidth: 0, padding: `10px ${MWT_GAP}px 10px 0`, borderBottom: "1px solid var(--border)", opacity: isHidden ? 0.55 : 1, display: "flex", flexDirection: "column", justifyContent: "center" };
               const iconBtn: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: "var(--radius-sm)", border: "none", cursor: "pointer", padding: 0 };
+              const actionsCell = (
+                  <div style={{ ...td, paddingRight: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
+                    <button
+                      onClick={async () => {
+                        if (isRunningHere) {
+                          const res = await requestStop();
+                          if (res.error) alert(friendlyError("stop the timer", res.error));
+                        } else {
+                          // Weekend/holiday soft check (never blocks), checked against TODAY.
+                          const warnMsg = nonWorkingDayConfirmMessage(todayIso, holidayNames);
+                          if (warnMsg && !(await confirm({ title: "Start a timer on a day off?", message: warnMsg, confirmLabel: "Start anyway" }))) return;
+                          const res = await startTaskTimer({ id: t.id, name: t.name });
+                          if (res.error) alert(friendlyError("start the timer", res.error));
+                        }
+                      }}
+                      disabled={timerDisabled}
+                      title={isRunningHere ? "Stop timer" : running ? `Stop the timer running on "${running.task_name}" first` : "Start timer"}
+                      style={{
+                        ...iconBtn,
+                        background: isRunningHere ? "var(--danger-text)" : "var(--accent)",
+                        color: "#fff",
+                        cursor: timerDisabled ? "default" : "pointer",
+                        opacity: Boolean(running) && !isRunningHere ? 0.35 : 1,
+                      }}
+                    >
+                      {isRunningHere ? <Square size={11} fill="currentColor" /> : <Play size={11} fill="currentColor" />}
+                    </button>
+                    {mode === "today" ? (
+                      isHidden ? (
+                        <button onClick={() => unhideTaskFromToday(t.id)} title="Restore to My Work Today" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--accent)" }}>
+                          <EyeOff size={13} />
+                        </button>
+                      ) : (
+                        <button onClick={() => hideTaskFromToday(t.id, t.name)} title="Hide task for today" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--muted)" }}>
+                          <Eye size={13} />
+                        </button>
+                      )
+                    ) : pendingExtTaskIds.has(t.id) ? (
+                      <span className="status-pill gold" title="Extension request awaiting approval" style={{ fontSize: 10, marginLeft: 6, padding: "5px 10px", whiteSpace: "nowrap" }}>Extension pending</span>
+                    ) : (
+                      <button onClick={() => setExtensionTask({ id: t.id, name: t.name, current_due_date: t.current_due_date ?? todayIso })} title="Request extension" aria-label="Request extension" style={{ ...iconBtn, marginLeft: 6, background: "var(--warning-bg, #fff6e0)", border: "1px solid #f0d58c", color: "var(--warning-text, #9a6700)" }}>
+                        <CalendarClock size={13} />
+                      </button>
+                    )}
+                  </div>
+              );
+              // 2026-10-27 (dashboard refresh): compact My Work row --
+              // Task (ID + status) · Project · Due · Timing · Hours · Actions.
+              if (mode === "work") {
+                const dueIso = t.current_due_date?.slice(0, 10) ?? null;
+                const overdue = !!dueIso && dueIso < todayIso;
+                const ownerId = (t.project as { owner_id?: string | null } | null)?.owner_id;
+                const owner = ownerId ? people.find((p) => p.id === ownerId)?.name : null;
+                const wtd: CSSProperties = { ...td, padding: "8px 14px 8px 0" };
+                const clip: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+                return (
+                  <div key={t.id} style={{ display: "contents" }}>
+                    <div style={wtd}>
+                      <div style={{ ...clip, fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }} title={t.name}>{t.name}</div>
+                      <div style={{ ...clip, fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>T-{String(t.task_number).padStart(4, "0")} · {t.status ?? "Not Started"}</div>
+                    </div>
+                    <div style={{ ...wtd, color: "var(--text-secondary)" }}>
+                      <div style={clip} title={t.project?.name ?? undefined}>{t.project?.name ?? "—"}</div>
+                      {owner && <div style={{ ...clip, fontSize: 10.5, color: "var(--muted)", marginTop: 2 }} title="Project owner">{owner}</div>}
+                    </div>
+                    <div style={{ ...wtd, whiteSpace: "nowrap", color: overdue ? "var(--danger-text)" : "var(--text-secondary)", fontWeight: overdue ? 600 : 400 }}>{dueIso ? formatDate(dueIso) : "—"}</div>
+                    <div style={{ ...wtd, alignItems: "flex-start" }}>
+                      <span className={`status-pill ${timing.tone}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{timing.label}</span>
+                    </div>
+                    <div style={wtd}>
+                      <div style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                        <strong style={{ color: "var(--navy)" }}>{logged > 0 ? `${logged.toFixed(1)}h` : "0h"}</strong>
+                        <span style={{ color: "var(--muted)" }}> / {t.estimated_hours ? `${t.estimated_hours.toFixed(1)}h` : "—"}</span>
+                      </div>
+                      {variance && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                          <div style={{ flex: "1 1 60px", maxWidth: 90, height: 5, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
+                            <div style={{ width: `${Math.min(Math.max(variance.percent, 0), 100)}%`, height: "100%", borderRadius: 3, background: varianceTone === "success" ? "var(--accent)" : varianceTone === "warning" ? "var(--warning-text)" : "var(--danger-text)" }} />
+                          </div>
+                          <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{variance.percent}%</span>
+                        </div>
+                      )}
+                    </div>
+                    {actionsCell}
+                  </div>
+                );
+              }
               return (
                 <div key={t.id} style={{ display: "contents" }}>
                   <div style={{ ...td, fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap" }}>T-{String(t.task_number).padStart(4, "0")}</div>
@@ -637,50 +728,7 @@ export default function MyDashboard() {
                       <span style={{ fontSize: 11.5, color: "var(--muted)" }}>—</span>
                     )}
                   </div>
-                  <div style={{ ...td, paddingRight: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
-                    <button
-                      onClick={async () => {
-                        if (isRunningHere) {
-                          const res = await requestStop();
-                          if (res.error) alert(friendlyError("stop the timer", res.error));
-                        } else {
-                          // Weekend/holiday soft check (never blocks), checked against TODAY.
-                          const warnMsg = nonWorkingDayConfirmMessage(todayIso, holidayNames);
-                          if (warnMsg && !(await confirm({ title: "Start a timer on a day off?", message: warnMsg, confirmLabel: "Start anyway" }))) return;
-                          const res = await startTaskTimer({ id: t.id, name: t.name });
-                          if (res.error) alert(friendlyError("start the timer", res.error));
-                        }
-                      }}
-                      disabled={timerDisabled}
-                      title={isRunningHere ? "Stop timer" : running ? `Stop the timer running on "${running.task_name}" first` : "Start timer"}
-                      style={{
-                        ...iconBtn,
-                        background: isRunningHere ? "var(--danger-text)" : "var(--accent)",
-                        color: "#fff",
-                        cursor: timerDisabled ? "default" : "pointer",
-                        opacity: Boolean(running) && !isRunningHere ? 0.35 : 1,
-                      }}
-                    >
-                      {isRunningHere ? <Square size={11} fill="currentColor" /> : <Play size={11} fill="currentColor" />}
-                    </button>
-                    {mode === "today" ? (
-                      isHidden ? (
-                        <button onClick={() => unhideTaskFromToday(t.id)} title="Restore to My Work Today" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--accent)" }}>
-                          <EyeOff size={13} />
-                        </button>
-                      ) : (
-                        <button onClick={() => hideTaskFromToday(t.id, t.name)} title="Hide task for today" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--muted)" }}>
-                          <Eye size={13} />
-                        </button>
-                      )
-                    ) : pendingExtTaskIds.has(t.id) ? (
-                      <span className="status-pill gold" title="Extension request awaiting approval" style={{ fontSize: 10, marginLeft: 6, padding: "5px 10px", whiteSpace: "nowrap" }}>Extension pending</span>
-                    ) : (
-                      <button onClick={() => setExtensionTask({ id: t.id, name: t.name, current_due_date: t.current_due_date ?? todayIso })} title="Request extension" aria-label="Request extension" style={{ ...iconBtn, marginLeft: 6, background: "var(--warning-bg, #fff6e0)", border: "1px solid #f0d58c", color: "var(--warning-text, #9a6700)" }}>
-                        <CalendarClock size={13} />
-                      </button>
-                    )}
-                  </div>
+                  {actionsCell}
                 </div>
               );
   }
@@ -740,6 +788,22 @@ export default function MyDashboard() {
     { key: "later", label: "Later", rows: laterTasks, color: "var(--muted)", hint: `due after ${next14Label}, or no due date`, collapsible: true },
   ];
   const myTasksTotal = myTaskGroups.reduce((n, g) => n + g.rows.length, 0);
+  // 2026-10-27 dashboard refresh: My Work tabs by due window (Sandra's decision).
+  const myWorkTabs = [
+    { key: "needs" as const, label: "Needs Action", count: myTaskGroups[0].rows.length + myTaskGroups[1].rows.length, hint: "Overdue, plus due within the next 7 business days" },
+    { key: "next14" as const, label: "Next 2 Weeks", count: myTaskGroups[2].rows.length, hint: `Due in business days 8–14 (to ${next14Label})` },
+    { key: "later" as const, label: "Later", count: myTaskGroups[3].rows.length, hint: `Due after ${next14Label}, or no due date` },
+  ];
+  const activeWorkTab = workTab;
+  const currentWorkSections =
+    activeWorkTab === "needs"
+      ? [
+          { key: "overdue", label: "Overdue", hint: "finish it, or request an extension", color: "var(--danger-text)", rows: myTaskGroups[0].rows },
+          { key: "next7", label: myTaskGroups[0].rows.length ? "Next 7 business days" : "", hint: `today to ${next7Label}`, color: "var(--warning-text, #b45309)", rows: myTaskGroups[1].rows },
+        ]
+      : activeWorkTab === "next14"
+        ? [{ key: "next14", label: "", hint: "", color: "var(--navy)", rows: myTaskGroups[2].rows }]
+        : [{ key: "later", label: "", hint: "", color: "var(--navy)", rows: myTaskGroups[3].rows }];
   // 2026-10-02 (Sandra): full-width deadline card -- overdue first, then
   // the rest of this week (today onward; past days this week are overdue).
   const dueRestOfWeek = tasksThisWeek;
@@ -1129,20 +1193,20 @@ export default function MyDashboard() {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
+      <div className="dash-kpis">
         <MetricCard icon={<Folder size={16} />} colors={METRIC_COLORS.blue} label="My Active Projects" value={myActiveProjects.length} sub="Owned, In Progress" title={`${METRIC_DEFINITIONS.activeProject} Counts projects you own.`} />
-        <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Due Next 7 Business Days" value={tasksThisWeek.length} sub={`Today – ${next7Label}`} title={METRIC_DEFINITIONS.dueNext7BusinessDays} />
-        <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Tasks" value={overdueTasks.length} title={METRIC_DEFINITIONS.overdueTask} />
-        <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="My pending requests" value={myPendingApprovalsCount} />
+        <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Tasks Needing Action" value={tasksThisWeek.length} sub={`Due within 7 business days (to ${next7Label})`} title={METRIC_DEFINITIONS.dueNext7BusinessDays} />
+        <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Tasks" value={overdueTasks.length} sub="Past their due date" title={METRIC_DEFINITIONS.overdueTask} />
+        <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="Pending Requests" value={myPendingApprovalsCount} sub="Sent by you, awaiting approval" title="Requests you submitted that are still waiting for a decision, including finished tasks waiting for validation." />
         <MetricCard icon={<BarChart3 size={16} />} colors={METRIC_COLORS.teal} label="Utilization This Week" value={`${Math.round(weekUtilPct)}%`} sub={`of ${weekCapacityTotal.toFixed(1)}h capacity`} title={METRIC_DEFINITIONS.plannedUtilization} />
-        <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Hours Logged This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={notTrackingTime ? "Not expected to log time" : `of ${weekExpectedTotal.toFixed(1)}h expected`} title={`${LOGGED_VS_EXPECTED_LABEL}: ${weekExpectedTotal > 0 ? Math.round((weekLoggedTotal / weekExpectedTotal) * 100) : 0}% this week (Monday to Friday, today included). ${METRIC_DEFINITIONS.loggedVsExpected}`} />
+        <MetricCard icon={<Clock3 size={16} />} colors={METRIC_COLORS.blue} label="Logged Hours This Week" value={`${weekLoggedTotal.toFixed(1)}h`} sub={notTrackingTime ? "Not expected to log time" : `of ${weekExpectedTotal.toFixed(1)}h expected`} title={`${LOGGED_VS_EXPECTED_LABEL}: ${weekExpectedTotal > 0 ? Math.round((weekLoggedTotal / weekExpectedTotal) * 100) : 0}% this week (Monday to Friday, today included). ${METRIC_DEFINITIONS.loggedVsExpected}`} />
       </div>
 
       {/* 2026-10-06 (Sandra): approvers see their queue without leaving the
           dashboard -- same numbers as Approval Center > Mine to approve. */}
       {hasApprovalAuthority && <ApprovalCenter summaryOnly />}
 
-      {(pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || draftPlanningProjects.length > 0 || newAssignmentCount > 0 || plannedInvolvement.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || noPhaseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
+      {(waitingCount > 0 || pendingConfirm.length > 0 || tasksDueToday.length > 0 || overdueTasks.length > 0 || draftPlanningProjects.length > 0 || newAssignmentCount > 0 || plannedInvolvement.length > 0 || missingLogHours > 0.1 || workDoneProjects.length > 0 || readyToCloseProjects.length > 0 || noPhaseProjects.length > 0 || completedOpenProjects.length > 0 || scheduleReviewProjects.length > 0) && (
         <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "14px 20px" }}>
           <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--navy)", marginRight: 4 }}>Needs My Attention</span>
           {/* 2026-09-23 (Sandra: "Pending approvals, remove and use the
@@ -1170,6 +1234,9 @@ export default function MyDashboard() {
               }
               onClick={() => setOpenConfirmModalFor(pendingConfirm[0].id)}
             />
+          )}
+          {waitingCount > 0 && (
+            <AttentionPill tone="accent" icon={<ShieldQuestion size={12} />} value={waitingCount} label={`${waitingForYou.toReview.length ? `${waitingForYou.toReview.length} to review or approve` : ""}${waitingForYou.toReview.length && waitingForYou.sentBack.length ? " · " : ""}${waitingForYou.sentBack.length ? `${waitingForYou.sentBack.length} sent back to you` : ""}`} onClick={() => setAttentionModal("reviews")} />
           )}
           {tasksDueToday.length > 0 && (
             <AttentionPill tone="danger" icon={<Calendar size={12} />} value={tasksDueToday.length} label="Tasks due today" onClick={() => setAttentionModal("due_today")} />
@@ -1406,83 +1473,8 @@ export default function MyDashboard() {
         </Modal>
       )}
 
-      {(attentionModal === "due_today" || attentionModal === "overdue") && (
-        <Modal
-          title={attentionModal === "due_today" ? "Tasks due today" : "Overdue tasks"}
-          onClose={() => setAttentionModal(null)}
-        >
-          {(() => {
-            const rows = attentionModal === "due_today" ? tasksDueToday : overdueTasks;
-            return rows.length === 0 ? (
-              <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing here.</p>
-            ) : (
-              <>
-                <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
-                  <span style={{ flex: "0 0 64px" }}>Task ID</span>
-                  <span style={{ flex: "1 1 auto" }}>Task</span>
-                  <span style={{ flex: "0 0 140px" }}>Project</span>
-                </div>
-                {rows.map((t) => (
-                  <div key={t.id} style={{ display: "flex", alignItems: "center", padding: "7px 4px", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
-                    <span style={{ flex: "0 0 64px", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>T-{String(t.task_number).padStart(4, "0")}</span>
-                    <span style={{ flex: "1 1 auto", fontWeight: 500 }}>{t.name}</span>
-                    <span style={{ flex: "0 0 140px", color: "var(--text-secondary)" }}>{t.project?.name ?? "—"}</span>
-                  </div>
-                ))}
-              </>
-            );
-          })()}
-        </Modal>
-      )}
-
-      {/* 2026-10-27 (Sandra: "one page where they see all their open tasks
-          which require action, overdue and due soon"): My Work Today and
-          Overdue & Next 7 Business Days merged into ONE list. Each task shows
-          once, in the group for its most urgent deadline. Tasks waiting on
-          someone else stay in What's next. */}
-      {myTasksTotal > 0 && (
-        <div className="dash-card">
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
-            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>My Tasks ({myTasksTotal})</h2>
-            <Link to="/projects?assignee=me" style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>View all tasks</Link>
-          </div>
-          <div style={{ overflowX: "auto" }}>
-            <div style={MWT_GRID}>
-              {["Task ID", "Task", "Status", "Timing", "Project", "Dates", "Hours (Logged / Est.)", "Remaining / Variance", "Actions"].map((h, i, arr) => (
-                <span
-                  key={`mt${i}`}
-                  style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, whiteSpace: "nowrap", textAlign: i === arr.length - 1 ? "right" : "left", padding: `8px ${i === arr.length - 1 ? 0 : MWT_GAP}px 6px 0`, borderBottom: "1px solid var(--border)" }}
-                >
-                  {h}
-                </span>
-              ))}
-              {myTaskGroups.map((g) =>
-                g.rows.length === 0 ? null : (
-                  <Fragment key={g.key}>
-                    <div
-                      onClick={g.collapsible ? () => setShowLaterTasks((v) => !v) : undefined}
-                      style={{ gridColumn: "1 / -1", padding: "12px 0 2px", fontSize: 11, fontWeight: 700, color: g.color, textTransform: "uppercase", letterSpacing: 0.3, cursor: g.collapsible ? "pointer" : "default", display: "flex", alignItems: "center", gap: 4 }}
-                    >
-                      {g.collapsible && (showLaterTasks ? <ChevronDown size={13} /> : <ChevronRight size={13} />)}
-                      {g.label} ({g.rows.length})
-                      {g.hint && <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--muted)", marginLeft: 4 }}>— {g.hint}</span>}
-                    </div>
-                    {(!g.collapsible || showLaterTasks) && g.rows.map((t) => renderWorkRow(t, "deadline"))}
-                  </Fragment>
-                )
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 2026-10-14 (Sandra): Waiting for you -- dashboard notifications for the review workflow. */}
-      {(waitingCount > 0 || waitingForYou.withReviewer.length > 0) && (
-        <div className="dash-card">
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
-            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>Waiting for you{waitingCount > 0 ? ` (${waitingCount})` : ""}</h2>
-            <Link to="/projects" style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>Open in Projects &amp; Tasks →</Link>
-          </div>
+      {attentionModal === "reviews" && (
+        <Modal title={`Reviews and returned work (${waitingCount})`} onClose={() => setAttentionModal(null)}>
           {(() => {
             const nm = (id: string | null) => (id ? people.find((p) => p.id === id)?.name ?? "—" : "—");
             const tid = (t: TaskRow) => (t.task_number ? `T-${String(t.task_number).padStart(4, "0")}` : "—");
@@ -1517,59 +1509,41 @@ export default function MyDashboard() {
                     </div>
                   );
                 })}
-                {waitingForYou.withReviewer.length > 0 && head("With a reviewer", waitingForYou.withReviewer.length, "var(--muted)")}
-                {waitingForYou.withReviewer.slice(0, 8).map((t) => (
-                  <div key={`wr${t.id}`} style={row}>
-                    <span style={{ color: "var(--muted)" }}>{tid(t)}</span>
-                    <span style={{ ...clip, fontWeight: 600 }} title={t.name}>{t.name}</span>
-                    <span style={clip} title={projectById.get(t.project_id)?.name ?? ""}>{projectById.get(t.project_id)?.name ?? "—"}</span>
-                    <span style={{ ...clip, color: "var(--muted)" }}>In review · {nm(t.reviewer.assignee_id)} ({t.reviewer.name})</span>
+              </>
+            );
+          })()}
+        </Modal>
+      )}
+
+      {(attentionModal === "due_today" || attentionModal === "overdue") && (
+        <Modal
+          title={attentionModal === "due_today" ? "Tasks due today" : "Overdue tasks"}
+          onClose={() => setAttentionModal(null)}
+        >
+          {(() => {
+            const rows = attentionModal === "due_today" ? tasksDueToday : overdueTasks;
+            return rows.length === 0 ? (
+              <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing here.</p>
+            ) : (
+              <>
+                <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
+                  <span style={{ flex: "0 0 64px" }}>Task ID</span>
+                  <span style={{ flex: "1 1 auto" }}>Task</span>
+                  <span style={{ flex: "0 0 140px" }}>Project</span>
+                </div>
+                {rows.map((t) => (
+                  <div key={t.id} style={{ display: "flex", alignItems: "center", padding: "7px 4px", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+                    <span style={{ flex: "0 0 64px", color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>T-{String(t.task_number).padStart(4, "0")}</span>
+                    <span style={{ flex: "1 1 auto", fontWeight: 500 }}>{t.name}</span>
+                    <span style={{ flex: "0 0 140px", color: "var(--text-secondary)" }}>{t.project?.name ?? "—"}</span>
                   </div>
                 ))}
               </>
             );
           })()}
-        </div>
+        </Modal>
       )}
 
-      {/* R1 Actionable To-Do (2026-10-13): assigned to me, but waiting on
-          someone else's task. Visible so I can plan, not counted as to-do. */}
-      {myComingUp.length > 0 && (
-        <div className="dash-card">
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
-            <h2 style={{ fontSize: 13.5, margin: 0, color: "var(--navy)" }}>What's next ({myComingUp.length})</h2>
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>Waiting on someone else's task. Moves to your to-do once it's done.</span>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.6fr) auto", alignItems: "center" }}>
-            {["Task ID", "Task", "Project", "Waiting on", "Expected"].map((h, i) => (
-              <span key={`cu${i}`} style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "8px 14px 6px 0", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{h}</span>
-            ))}
-            {myComingUp.slice(0, 12).map((t) => {
-              const r = readinessById.get(t.id);
-              const who = waitingOnLabel(r, (id) => (id ? people.find((p) => p.id === id)?.name ?? null : null));
-              const exp = expectedUnlockDate(r);
-              const late = !!exp && exp < todayIso;
-              const cell: CSSProperties = { padding: "8px 14px 8px 0", borderBottom: "1px solid var(--border)", fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-              return (
-                <div key={t.id} style={{ display: "contents" }}>
-                  <span style={{ ...cell, color: "var(--muted)" }}>{t.task_number ? `T-${String(t.task_number).padStart(4, "0")}` : "—"}</span>
-                  <span style={{ ...cell, fontWeight: 600 }} title={t.name}>{t.name}</span>
-                  <span style={cell} title={t.project?.name ?? ""}>{t.project?.name ?? "—"}</span>
-                  <span style={cell} title={r?.waitingOn.map((w) => w.name).join(", ")}>{who}</span>
-                  <span style={{ ...cell, color: late ? "var(--danger-text)" : undefined, fontWeight: late ? 600 : undefined }} title={late ? "The task you're waiting on is past its due date" : undefined}>
-                    {exp ? `${formatDate(exp)}${late ? " · late" : ""}` : "—"}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          {myComingUp.length > 12 && (
-            <Link to="/projects" style={{ display: "inline-block", marginTop: 8, fontSize: 11, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}>
-              See all {myComingUp.length} in Projects &amp; Tasks → Coming Up
-            </Link>
-          )}
-        </div>
-      )}
       {extensionTask && (
         <RequestExtensionModal
           taskName={extensionTask.name}
@@ -1580,102 +1554,153 @@ export default function MyDashboard() {
         />
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)", gap: 20, alignItems: "start" }}>
-        <div>
-          {/* Hidden entirely when every project I own is closed ("all clear"). */}
-          {myProjects.length > 0 && (
-          <div className="dash-card">
-            <SectionHeader title={`My Projects (${myProjects.length})`} to="/projects?owner=me" />
-            {/* One grid for header + rows. All columns `auto`: sized to content,
-                then leftover width is added EQUALLY to every column (Sandra:
-                no single long gap after Project). Spacing via right padding,
-                not column-gap, so row borders stay continuous. */}
-            {/* 2026-10-27 (Sandra): WBS Status out; Committed End, Target End
-                (current plan after approved extensions) and +/- in working days,
-                the same as the weekly report. */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, auto)", alignItems: "center" }}>
-              {["ID", "Project", "Health", "Progress", "Committed End", "Target End", "+/-"].map((h, i) => (
-                <span key={h} title={h === "+/-" ? "Working days between the Committed End and the Target End. + = later than committed." : h === "Target End" ? "Current plan after approved extensions." : h === "Committed End" ? "The end date committed at the start." : undefined} style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: `0 ${i === 6 ? 0 : 16}px 6px 0`, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", textAlign: i === 2 || i === 6 ? "center" : i >= 4 ? "right" : "left" }}>{h}</span>
-              ))}
-              {myProjects.slice(0, 6).map((p) => {
-                const health = healthOf(p, tasks, holidayDateStrings);
-                const progress = actualProgress(p.id, tasks);
-                const closureRequested = closureRequests.some((r) => r.project_id === p.id);
-                const baselinePending = baselineRequests.some((r) => r.project_id === p.id);
-                const wbsMeta = closureRequested
-                  ? { label: "Closure Requested", hint: "Closure has been requested and is waiting for approval.", color: "var(--warning-text, #b45309)", bg: "var(--warning-bg, #fff7ed)", border: "#f3dfb8" }
-                  : wbsStatusMetaFor(p.wbs_status, baselinePending, false, null, !!p.is_operational);
-                const cell: CSSProperties = { padding: "9px 16px 9px 0", borderBottom: "1px solid var(--border)", cursor: "pointer", minWidth: 0, alignSelf: "stretch", display: "flex", alignItems: "center" };
-                const go = () => navigate(`/projects/${p.id}/wbs`);
-                return (
-                  <div key={p.id} className="dash-grid-row" style={{ display: "contents" }}>
-                    <span onClick={go} style={{ ...cell, fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap" }}>
-                      {p.project_number ? `P-${String(p.project_number).padStart(4, "0")}` : "—"}
-                    </span>
-                    <span onClick={go} style={{ ...cell, fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }} title={p.name}>
-                      <span style={{ overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", lineHeight: 1.3 }}>{p.name}</span>
-                    </span>
-                    <span onClick={go} style={{ ...cell, justifyContent: "center" }}>
-                      <span className={`status-pill ${health.tone}`} style={{ fontSize: 9.5, whiteSpace: "nowrap" }}>{health.label.toUpperCase()}</span>
-                    </span>
-                    <span onClick={go} style={{ ...cell, display: "flex", alignItems: "center", gap: 6 }}>
-                      <div style={{ flex: "0 0 60px", height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
-                        <div style={{ width: `${progress ?? 0}%`, height: "100%", background: "var(--accent)", borderRadius: 3 }} />
-                      </div>
-                      <span style={{ fontSize: 11, color: "var(--muted)", width: 32, textAlign: "right" }}>{progress === null ? "—" : `${Math.round(progress)}%`}</span>
-                    </span>
-                    {(() => {
-                      const target = forecastEndOf(p, tasks);
-                      const committedRaw = p.is_operational ? null : (p as { committed_end_date?: string | null }).committed_end_date ?? p.original_due_date ?? p.end_date;
-                      const committed = committedRaw ? committedRaw.slice(0, 10) : null;
-                      const moved = target && committed ? workingDayDelta(committed, target, holidayDateStrings) : null;
-                      const dateCell: CSSProperties = { ...cell, justifyContent: "flex-end", fontSize: 11.5, color: "var(--text-secondary)", whiteSpace: "nowrap" };
-                      return (
-                        <>
-                          <span onClick={go} style={dateCell}>{committed ? formatDate(committed) : "—"}</span>
-                          <span onClick={go} style={{ ...dateCell, color: target && moved && moved > 0 ? "var(--danger-text)" : dateCell.color }}>{target ? formatDate(target) : "—"}</span>
-                          <span onClick={go} style={{ ...cell, paddingRight: 0, justifyContent: "center", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap", color: moved === null ? "var(--muted)" : moved > 0 ? "var(--danger-text)" : "var(--success-text)" }} title={moved === null ? undefined : moved > 0 ? `${moved} working days later than committed` : moved < 0 ? `${-moved} working days ahead of committed` : "On the committed date"}>
-                            {moved === null ? "–" : moved > 0 ? `+${moved}` : moved < 0 ? `−${-moved}` : "—"}
-                          </span>
-                        </>
-                      );
-                    })()}
-                  </div>
-                );
-              })}
+      {/* 2026-10-27 dashboard refresh (briefs/Tempo_Dashboard_Refresh_Brief.md):
+          fixed-height cards; only the list area scrolls, so the page no
+          longer grows with the number of tasks or projects. */}
+      <div className="dash-main">
+        {/* ---- My Work: tabs by due window, each task in one tab ---- */}
+        <div className="dash-card dash-fixed dash-work">
+          <div className="dash-card-head">
+            <div>
+              <h2>My Work ({myTasksTotal})</h2>
+              <div className="dash-sub">Tasks that need your action, most urgent first. Waiting tasks are in What's Next.</div>
             </div>
+            <Link to="/projects?assignee=me" className="dash-link">View All Tasks →</Link>
           </div>
-          )}
-
-          <div className="dash-card" style={{ marginBottom: 0 }}>
-            <SectionHeader title="My Requests" to="/approval-center?tab=requests" small="Pending, plus anything decided in the last 7 days" />
-            {recentReqs.length === 0 ? (
-              <p style={{ fontSize: 12, color: "var(--muted)" }}>No pending or recently decided requests.</p>
+          <div className="dash-tabs" role="tablist">
+            {myWorkTabs.map((tab) => (
+              <button key={tab.key} type="button" role="tab" aria-selected={activeWorkTab === tab.key} className={activeWorkTab === tab.key ? "is-active" : undefined} onClick={() => setWorkTab(tab.key)} title={tab.hint}>
+                {tab.label} ({tab.count})
+              </button>
+            ))}
+          </div>
+          <div className="dash-scroll">
+            {currentWorkSections.every((sec) => sec.rows.length === 0) ? (
+              <p className="dash-empty">{activeWorkTab === "needs" ? "Nothing overdue or due in the next 7 business days." : "No tasks here."}</p>
             ) : (
-              <>
-                <div style={{ display: "flex", fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: "0 4px 6px", borderBottom: "1px solid var(--border)" }}>
-                  <span style={{ flex: "1 1 40%" }}>Item</span>
-                  <span style={{ flex: "1 1 25%" }}>Type</span>
-                  <span style={{ flex: "0 0 90px" }}>Date</span>
-                  <span style={{ flex: "0 0 90px", textAlign: "right" }}>Status</span>
-                </div>
-                {recentReqs.slice(0, 6).map((r) => (
-                  <Link key={r.key} to="/approval-center?tab=requests" className="dash-row" style={{ textDecoration: "none", color: "inherit", background: r.status === "rejected" ? "var(--danger-bg)" : undefined }} title={r.note ?? undefined}>
-                    <span style={{ flex: "1 1 40%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }}>{r.item}</span>
-                    <span style={{ flex: "1 1 25%", fontSize: 11.5, color: "var(--text-secondary)" }}>{r.typeLabel}</span>
-                    <span style={{ flex: "0 0 90px", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(r.decidedAt ?? r.submittedAt)}</span>
-                    <span style={{ flex: "0 0 90px", textAlign: "right" }}>
-                      <span className={`status-pill ${r.status === "pending" ? "warning" : r.status === "approved" ? "success" : "danger"}`} style={{ fontSize: 9.5 }}>{r.statusLabel.toUpperCase()}</span>
-                    </span>
-                  </Link>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(150px, 2.2fr) minmax(110px, 1.5fr) auto auto minmax(110px, 1fr) max-content", alignItems: "stretch" }}>
+                {["Task", "Project", "Due Date", "Timing", "Hours (Logged / Est.)", "Actions"].map((h, i, arr) => (
+                  <span key={`wh${i}`} className="dash-sticky-th" style={{ textAlign: i === arr.length - 1 ? "right" : "left", paddingRight: i === arr.length - 1 ? 0 : 14 }}>{h}</span>
                 ))}
-              </>
+                {currentWorkSections.map((sec) =>
+                  sec.rows.length === 0 ? null : (
+                    <Fragment key={sec.key}>
+                      {sec.label && (
+                        <div style={{ gridColumn: "1 / -1", padding: "10px 0 2px", fontSize: 10.5, fontWeight: 700, color: sec.color, textTransform: "uppercase", letterSpacing: 0.3 }}>
+                          {sec.label} ({sec.rows.length})
+                          {sec.hint && <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--muted)", marginLeft: 4 }}>— {sec.hint}</span>}
+                        </div>
+                      )}
+                      {sec.rows.map((t) => renderWorkRow(t, "work"))}
+                    </Fragment>
+                  )
+                )}
+              </div>
             )}
           </div>
         </div>
 
-        <div>
-          <div className="dash-card">
+        <div className="dash-side">
+          {/* ---- What's Next: waiting on someone else ---- */}
+          <div className="dash-card dash-fixed">
+            <div className="dash-card-head">
+              <div>
+                <h2>What's Next ({myComingUp.length + waitingForYou.withReviewer.length})</h2>
+                <div className="dash-sub">Becomes yours once the earlier work is done.</div>
+              </div>
+              <Link to="/projects?assignee=me" className="dash-link">View All →</Link>
+            </div>
+            <div className="dash-scroll">
+              {myComingUp.length + waitingForYou.withReviewer.length === 0 ? (
+                <p className="dash-empty">Nothing waiting on someone else.</p>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1.4fr) auto", alignItems: "center" }}>
+                  {["Task", "Waiting On", "Expected"].map((h, i) => (
+                    <span key={`cu${i}`} className="dash-sticky-th" style={{ paddingRight: i === 2 ? 0 : 12, textAlign: i === 2 ? "right" : "left" }}>{h}</span>
+                  ))}
+                  {myComingUp.map((t) => {
+                    const r = readinessById.get(t.id);
+                    const who = waitingOnLabel(r, (id) => (id ? people.find((p) => p.id === id)?.name ?? null : null));
+                    const exp = expectedUnlockDate(r);
+                    const late = !!exp && exp < todayIso;
+                    const cell: CSSProperties = { padding: "7px 12px 7px 0", borderBottom: "1px solid var(--border)", fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+                    return (
+                      <div key={t.id} style={{ display: "contents" }}>
+                        <span style={cell} title={`${t.name} · ${t.project?.name ?? ""}`}><strong style={{ color: "var(--navy)", fontWeight: 600 }}>{t.name}</strong><div style={{ fontSize: 10.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis" }}>{t.project?.name ?? "—"}</div></span>
+                        <span style={{ ...cell, color: "var(--text-secondary)" }} title={r?.waitingOn.map((w) => w.name).join(", ")}>{who}</span>
+                        <span style={{ ...cell, paddingRight: 0, textAlign: "right", color: late ? "var(--danger-text)" : "var(--text-secondary)", fontWeight: late ? 600 : 400 }} title={late ? "The task you're waiting on is past its due date" : undefined}>{exp ? `${formatDate(exp)}${late ? " · late" : ""}` : "—"}</span>
+                      </div>
+                    );
+                  })}
+                  {waitingForYou.withReviewer.map((t) => {
+                    const cell: CSSProperties = { padding: "7px 12px 7px 0", borderBottom: "1px solid var(--border)", fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+                    const reviewerName = t.reviewer.assignee_id ? people.find((x) => x.id === t.reviewer.assignee_id)?.name ?? "—" : "—";
+                    return (
+                      <div key={`wr${t.id}`} style={{ display: "contents" }}>
+                        <span style={cell} title={t.name}><strong style={{ color: "var(--navy)", fontWeight: 600 }}>{t.name}</strong><div style={{ fontSize: 10.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis" }}>{projectById.get(t.project_id)?.name ?? "—"}</div></span>
+                        <span style={{ ...cell, color: "var(--text-secondary)" }} title={t.reviewer.name}>In review · {reviewerName}</span>
+                        <span style={{ ...cell, paddingRight: 0, textAlign: "right", color: "var(--muted)" }}>—</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ---- My Projects: health, progress, Target End, +/- ---- */}
+          <div className="dash-card dash-fixed">
+            <div className="dash-card-head">
+              <div>
+                <h2>My Projects ({myProjects.length})</h2>
+                <div className="dash-sub">Projects you own. Target End = plan after approved extensions.</div>
+              </div>
+              <Link to="/projects?owner=me" className="dash-link">View All →</Link>
+            </div>
+            <div className="dash-scroll">
+              {myProjects.length === 0 ? (
+                <p className="dash-empty">You don't own any open projects.</p>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) auto minmax(70px, 1fr) auto auto", alignItems: "center" }}>
+                  {["Project", "Health", "Progress", "Target End", "+/-"].map((h, i) => (
+                    <span key={h} className="dash-sticky-th" title={h === "+/-" ? "Working days between the Committed End and the Target End. + = later than committed." : h === "Target End" ? "Current plan after approved extensions." : undefined} style={{ paddingRight: i === 4 ? 0 : 12, textAlign: i === 1 || i === 4 ? "center" : i === 3 ? "right" : "left" }}>{h}</span>
+                  ))}
+                  {myProjects.map((p) => {
+                    const health = healthOf(p, tasks, holidayDateStrings);
+                    const progress = actualProgress(p.id, tasks);
+                    const target = forecastEndOf(p, tasks);
+                    const committedRaw = p.is_operational ? null : (p as { committed_end_date?: string | null }).committed_end_date ?? p.original_due_date ?? p.end_date;
+                    const committed = committedRaw ? committedRaw.slice(0, 10) : null;
+                    const moved = target && committed ? workingDayDelta(committed, target, holidayDateStrings) : null;
+                    const go = () => navigate(`/projects/${p.id}/wbs`);
+                    const cell: CSSProperties = { padding: "7px 12px 7px 0", borderBottom: "1px solid var(--border)", fontSize: 12, minWidth: 0, cursor: "pointer", display: "flex", alignItems: "center" };
+                    return (
+                      <div key={p.id} className="dash-grid-row" style={{ display: "contents" }}>
+                        <span onClick={go} style={cell} title={`${p.project_number ? `P-${String(p.project_number).padStart(4, "0")} · ` : ""}${p.name}`}>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600, color: "var(--navy)" }}>{p.name}</span>
+                        </span>
+                        <span onClick={go} style={{ ...cell, justifyContent: "center" }}><span className={`status-pill ${health.tone}`} style={{ fontSize: 9.5, whiteSpace: "nowrap" }}>{health.label.toUpperCase()}</span></span>
+                        <span onClick={go} style={{ ...cell, gap: 6 }}>
+                          <span style={{ flex: "1 1 auto", height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}><span style={{ display: "block", width: `${progress ?? 0}%`, height: "100%", background: "var(--accent)", borderRadius: 3 }} /></span>
+                          <span style={{ fontSize: 11, color: "var(--muted)", width: 32, textAlign: "right" }}>{progress === null ? "—" : `${Math.round(progress)}%`}</span>
+                        </span>
+                        <span onClick={go} style={{ ...cell, justifyContent: "flex-end", whiteSpace: "nowrap", color: moved && moved > 0 ? "var(--danger-text)" : "var(--text-secondary)" }} title={committed ? `Committed End: ${formatDate(committed)}` : undefined}>{target ? formatDate(target) : "—"}</span>
+                        <span onClick={go} style={{ ...cell, paddingRight: 0, justifyContent: "center", fontWeight: 700, whiteSpace: "nowrap", color: moved === null ? "var(--muted)" : moved > 0 ? "var(--danger-text)" : "var(--success-text)" }} title={moved === null ? undefined : moved > 0 ? `${moved} working days later than committed (${formatDate(committed)})` : moved < 0 ? `${-moved} working days ahead of committed` : "On the committed date"}>
+                          {moved === null ? "–" : moved > 0 ? `+${moved}` : moved < 0 ? `−${-moved}` : "—"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ---- Workload and effort ---- */}
+      <div className="dash-row3">
+          <div className="dash-card dash-fixed">
             <SectionHeader title="My Utilization This Week" to="/utilization?person=me" small="Based on assigned work vs available capacity" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8 }}>
               {/* 2026-09-24 (Sandra: "doesn't match the Utilization page") --
@@ -1721,7 +1746,7 @@ export default function MyDashboard() {
             </div>
           </div>
 
-          <div className="dash-card">
+          <div className="dash-card dash-fixed">
             <SectionHeader title="My Logged Hours This Week" to="/hours-overview?person=me" small="Based on your actual submitted time entries" />
             {/* 2026-09-23 (Sandra: "match the My Logged Hours UI with My
                 Utilization. I like the per day borders/shape... since
@@ -1788,54 +1813,90 @@ export default function MyDashboard() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-            <div className="dash-card" style={{ marginBottom: 0 }}>
-              <SectionHeader title="Productivity" small="This Month" to="/hours-overview?person=me" />
+          <div className="dash-card dash-fixed">
+            <SectionHeader title="Effort vs Estimate" small="This Month · logged vs planned hours, by project" to="/hours-overview?person=me" />
+            <div className="dash-scroll">
               {scopedVsLoggedByProject.length === 0 ? (
-                <p style={{ fontSize: 12, color: "var(--muted)" }}>Nothing yet this month.</p>
+                <p className="dash-empty">Nothing yet this month.</p>
               ) : (
-                <div>
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto auto", alignItems: "center" }}>
+                  {["Project", "Logged", "Estimate", "Variance"].map((h, i) => (
+                    <span key={h} className="dash-sticky-th" style={{ paddingRight: i === 3 ? 0 : 12, textAlign: i === 0 ? "left" : "right" }}>{h}</span>
+                  ))}
                   {scopedVsLoggedByProject.map((r, i) => {
-                    const variance = r.logged - r.scoped;
-                    const dotColor = DOT_PALETTE[i % DOT_PALETTE.length];
+                    const diff = r.logged - r.scoped;
+                    const cell: CSSProperties = { padding: "7px 12px 7px 0", borderBottom: "1px solid var(--border)", fontSize: 11.5, whiteSpace: "nowrap", textAlign: "right" };
                     return (
-                      <div key={r.projectId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 2px", borderBottom: "1px solid var(--border)", fontSize: 11.5 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
-                        <span style={{ flex: 1, fontWeight: 600, color: "var(--navy)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
-                        <span style={{ color: "var(--text-secondary)", flexShrink: 0 }}>{r.logged.toFixed(1)}h</span>
-                        <span style={{ color: variance >= 0 ? "var(--danger-text)" : "var(--success-text)", fontWeight: 700, flexShrink: 0, minWidth: 36, textAlign: "right" }}>
-                          {variance >= 0 ? "+" : ""}
-                          {variance.toFixed(1)}
+                      <div key={r.projectId} style={{ display: "contents" }}>
+                        <span style={{ ...cell, textAlign: "left", display: "flex", alignItems: "center", gap: 8, minWidth: 0 }} title={r.name}>
+                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: DOT_PALETTE[i % DOT_PALETTE.length], flexShrink: 0 }} />
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", fontWeight: 600, color: "var(--navy)" }}>{r.name}</span>
                         </span>
+                        <span style={cell}>{r.logged.toFixed(1)}h</span>
+                        <span style={cell}>{r.scoped.toFixed(1)}h</span>
+                        <span style={{ ...cell, paddingRight: 0, fontWeight: 700, color: diff > 0 ? "var(--danger-text)" : "var(--success-text)" }}>{diff > 0 ? `${diff.toFixed(1)}h over` : `${Math.abs(diff).toFixed(1)}h remaining`}</span>
                       </div>
                     );
                   })}
                 </div>
               )}
             </div>
+          </div>
+      </div>
 
-            <div className="dash-card" style={{ marginBottom: 0 }}>
-              <SectionHeader title="Deliverables" small="This Month" to="/projects?assignee=me" />
-              {deliverables.length === 0 ? (
-                <p style={{ fontSize: 12, color: "var(--muted)" }}>None due this month.</p>
-              ) : (
-                <div>
-                  {deliverables.map((d) => (
-                    <div key={d.name} style={{ marginBottom: 10 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
-                        <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
-                        <span style={{ fontWeight: 700, color: "var(--navy)", flexShrink: 0, marginLeft: 6 }}>
-                          {d.done}/{d.total}
-                        </span>
-                      </div>
-                      <div style={{ height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
-                        <div style={{ width: `${d.total > 0 ? (d.done / d.total) * 100 : 0}%`, height: "100%", background: "var(--accent)", borderRadius: 3 }} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+      {/* ---- Activity and deliverables ---- */}
+      <div className="dash-row2">
+        <div className="dash-card dash-fixed">
+          <div className="dash-card-head">
+            <div>
+              <h2>My Requests</h2>
+              <div className="dash-sub">Requests you sent: waiting for a decision, or decided in the last 7 days.</div>
             </div>
+            <Link to="/approval-center?tab=requests" className="dash-link">View All →</Link>
+          </div>
+          <div className="dash-tabs" role="tablist">
+            {(["pending", "decided"] as const).map((k) => (
+              <button key={k} type="button" role="tab" aria-selected={reqTab === k} className={reqTab === k ? "is-active" : undefined} onClick={() => setReqTab(k)}>
+                {k === "pending" ? `Pending (${pendingReqs.length})` : `Recently Decided (${decidedReqs.length})`}
+              </button>
+            ))}
+          </div>
+          <div className="dash-scroll">
+            {(reqTab === "pending" ? pendingReqs : decidedReqs).length === 0 ? (
+              <p className="dash-empty">{reqTab === "pending" ? "You have no pending requests." : "Nothing decided in the last 7 days."}</p>
+            ) : (
+              (reqTab === "pending" ? pendingReqs : decidedReqs).map((r) => (
+                <Link key={r.key} to="/approval-center?tab=requests" className="dash-row" style={{ textDecoration: "none", color: "inherit", background: r.status === "rejected" ? "var(--danger-bg)" : undefined }} title={r.note ?? undefined}>
+                  <span style={{ flex: "1 1 40%", fontWeight: 600, color: "var(--navy)", fontSize: 12.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.item}</span>
+                  <span style={{ flex: "1 1 25%", fontSize: 11.5, color: "var(--text-secondary)" }}>{r.typeLabel}</span>
+                  <span style={{ flex: "0 0 90px", fontSize: 11.5, color: "var(--text-secondary)" }}>{formatDate(r.decidedAt ?? r.submittedAt)}</span>
+                  <span style={{ flex: "0 0 90px", textAlign: "right" }}>
+                    <span className={`status-pill ${r.status === "pending" ? "warning" : r.status === "approved" ? "success" : "danger"}`} style={{ fontSize: 9.5 }}>{r.statusLabel.toUpperCase()}</span>
+                  </span>
+                </Link>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="dash-card dash-fixed">
+          <SectionHeader title="Deliverable Progress" small="This Month · done / due, by deliverable type" to="/projects?assignee=me" />
+          <div className="dash-scroll">
+            {deliverables.length === 0 ? (
+              <p className="dash-empty">No deliverables due this month.</p>
+            ) : (
+              deliverables.map((d) => (
+                <div key={d.name} style={{ marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
+                    <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
+                    <span style={{ fontWeight: 700, color: "var(--navy)", flexShrink: 0, marginLeft: 6 }}>{d.done}/{d.total}</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 3, background: "var(--hover-bg)", overflow: "hidden" }}>
+                    <div style={{ width: `${d.total > 0 ? (d.done / d.total) * 100 : 0}%`, height: "100%", background: "var(--accent)", borderRadius: 3 }} />
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

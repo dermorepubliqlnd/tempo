@@ -197,7 +197,7 @@ export default function AutoApprovedPanel({ meId, isFullAccess, routing, personN
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{formatDate(it.at)}</td>
                     <td style={{ ...td, textAlign: "center" }}>
                       {canReverse ? (
-                        <button onClick={() => { setReversing(it); setNote(""); }} title="Reverse: send back to Mine to approve" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--accent)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 8px", cursor: "pointer" }}>
+                        <button onClick={() => { setReversing(it); setNote(""); }} title="Reverse: send back to Awaiting My Approval" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--accent)", background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "4px 8px", cursor: "pointer" }}>
                           <RotateCcw size={12} /> Reverse
                         </button>
                       ) : (
@@ -216,7 +216,7 @@ export default function AutoApprovedPanel({ meId, isFullAccess, routing, personN
           <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: "var(--radius)", padding: 20, width: 420, maxWidth: "92vw", boxShadow: "0 10px 30px rgba(0,0,0,0.18)" }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: "var(--navy)", marginBottom: 6 }}>Reverse auto-approval</div>
             <div style={{ fontSize: 12.5, color: "var(--text-secondary)", marginBottom: 10, lineHeight: 1.5 }}>
-              <strong>{reversing.label} · {reversing.title}</strong> goes back to Mine to approve for a manual decision{reversing.kind === "validation" ? " (the task stays Done)" : ""}. A reason is required.
+              <strong>{reversing.label} · {reversing.title}</strong> goes back to Awaiting My Approval for a manual decision{reversing.kind === "validation" ? " (the task stays Done)" : ""}. A reason is required.
             </div>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Why are you reversing this?" style={{ width: "100%", boxSizing: "border-box", fontSize: 12.5, padding: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
