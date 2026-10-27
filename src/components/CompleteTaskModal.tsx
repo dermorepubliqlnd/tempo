@@ -48,7 +48,7 @@ interface Props {
   /** Save and mark Done. Return an error message to keep the pop-up open. */
   /** Review steps: send the work back instead of passing it. */
   onRevision?: () => void;
-  onConfirm: (date: string, outputCount: number, types?: { workTypeId: string | null; outputTypeId: string | null }) => Promise<string | null>;
+  onConfirm: (date: string, outputCount: number, types?: { workTypeId: string | null; outputTypeId: string | null }, graceAnswer?: boolean) => Promise<string | null>;
   /** What confirming does, in plain words (e.g. "Sends it to Joseph for review."). */
   outcome?: string;
   /** Green confirmation shown in the pop-up, e.g. after time was logged. */
@@ -57,13 +57,16 @@ interface Props {
   autoDate?: boolean;
   /** One line under the title, e.g. "Confirm the work details before sending this task to … for review." */
   subtitle?: string;
+  /** phase228 (2026-10-27): completion rules for regular tasks -- which banner to show. */
+  timing?: { kind: "early" | "on_time" | "grace" | "late" | "logged_late"; due: string };
 }
 
 const label: React.CSSProperties = { fontSize: 11.5, color: "var(--muted)", fontWeight: 600 };
 const value: React.CSSProperties = { fontSize: 12.5, color: "var(--text)" };
 const input: React.CSSProperties = { fontSize: 12.5, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--border)", fontFamily: "inherit", width: "100%", boxSizing: "border-box" };
 
-export default function CompleteTaskModal({ info, initialDate, initialCount, today, actionLabel = "Mark Done", onLogTime, onCancel, onConfirm, onRevision, outcome, notice, autoDate, subtitle }: Props) {
+export default function CompleteTaskModal({ info, initialDate, initialCount, today, actionLabel = "Mark Done", onLogTime, onCancel, onConfirm, onRevision, outcome, notice, autoDate, subtitle, timing }: Props) {
+  const [graceAnswer, setGraceAnswer] = useState<boolean | null>(null);
   const te = info.typeEdit;
   const [wtId, setWtId] = useState<string>(te?.workTypeId ?? "");
   const [otId, setOtId] = useState<string>(te?.outputTypeId ?? "");
@@ -105,6 +108,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
     if (!dateOk) problems.push(date ? "Reported Completion can't be in the future." : "Enter the Reported Completion date.");
     if (countsDeliverable && !countOk) problems.push(`Enter how many ${outputTypeName ?? "outputs"} this task produced (1 or more).`);
     if (!hoursOk) problems.push(needsRevisionTime ? revWords.error : info.pendingHours > 0 ? "Your logged time is still waiting for approval. It counts once approved." : "Log your time on this task first.");
+    if (timing?.kind === "grace" && graceAnswer === null) problems.push("Choose whether the task was completed by its due date.");
     if (problems.length) {
       setError(problems.join(" "));
       return;
@@ -115,7 +119,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
       setBusy(false);
       return;
     }
-    const err = await onConfirm(autoDate ? today : date, countsDeliverable ? countNum : 0, typesChanged ? { workTypeId: wtId || null, outputTypeId: otId || null } : undefined);
+    const err = await onConfirm(autoDate ? today : date, countsDeliverable ? countNum : 0, typesChanged ? { workTypeId: wtId || null, outputTypeId: otId || null } : undefined, timing?.kind === "grace" ? graceAnswer === true : undefined);
     setBusy(false);
     if (err) setError(err);
   }
@@ -128,7 +132,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
         ? { title: "Pass QA", button: "Pass QA", icon: <ShieldCheck size={22} /> }
         : actionLabel === "Approve"
           ? { title: "Approve", button: "Approve", icon: <BadgeCheck size={22} /> }
-          : { title: "Complete task", button: "Mark Done", icon: <CircleCheck size={22} /> };
+          : { title: "Complete task", button: timing?.kind === "early" ? "Submit for validation" : timing?.kind === "grace" ? "Confirm completion" : timing ? "Mark as Done" : "Mark Done", icon: <CircleCheck size={22} /> };
   const fieldLabel: React.CSSProperties = { fontSize: 13, fontWeight: 600, color: "var(--text)" };
   const box: React.CSSProperties = { ...input, fontSize: 13.5, padding: "9px 12px", borderRadius: 8 };
   const helper: React.CSSProperties = { fontSize: 11.5, color: "var(--muted)" };
@@ -143,7 +147,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
             { label: "Task", value: <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={info.name}>{info.name}</span> },
             { label: "Due date", value: <><CalendarDays size={15} style={{ color: "var(--muted)", flexShrink: 0 }} />{info.dueDate ? formatDate(info.dueDate) : "—"}</> },
             autoDate
-              ? { label: "Completion date", value: <><CalendarDays size={15} style={{ color: "var(--muted)", flexShrink: 0 }} />{formatDate(today)}<InfoTip text="Set automatically on submission." /></> }
+              ? { label: "Completion date", value: <><CalendarDays size={15} style={{ color: "var(--muted)", flexShrink: 0 }} />{timing ? <span style={{ fontWeight: 500, color: "var(--muted)" }}>Recorded automatically</span> : formatDate(today)}<InfoTip text={timing ? "Recorded automatically by Tempo." : "Set automatically on submission."} /></> }
               : { label: "Reported completion *", value: <DateInput value={date} max={today} onChange={(e) => setDate(e.target.value)} style={{ ...input, fontWeight: 400 }} /> },
           ]}
         />
@@ -263,6 +267,50 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
           </div>
         )}
 
+        {timing && (() => {
+          // phase228 (Sandra's mock-ups 1-4).
+          const tone = timing.kind === "early" ? { bg: "#fff4e5", border: "#f5c27a", fg: "#b45309" }
+            : timing.kind === "grace" ? { bg: "#eaf3fe", border: "#9cc3f0", fg: "#1d5fa8" }
+            : timing.kind === "late" ? { bg: "#fdecec", border: "#f1b0b0", fg: "#b42318" }
+            : { bg: "#ecf8f0", border: "#a7dcb9", fg: "#15803d" };
+          const t = timing.kind === "early" ? { title: "Completed ahead of schedule", body: "This task will be sent for validation." }
+            : timing.kind === "on_time" ? { title: "Completed on time", body: "This task will be recorded as completed." }
+            : timing.kind === "grace" ? { title: "Reporting grace period", body: "You're marking this task on the next business day after the due date." }
+            : timing.kind === "late" ? { title: "Completed after due date", body: "This task will be recorded as completed late." }
+            : { title: "Logged after it happened", body: `This task was added after its due date, so it will be recorded on its due date (${formatDate(timing.due)}).` };
+          const opt = (val: boolean, text: string) => (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, border: `1px solid ${graceAnswer === val ? tone.fg : "var(--border)"}`, background: graceAnswer === val ? "#fff" : "rgba(255,255,255,.6)", cursor: "pointer", fontSize: 13 }}>
+              <input type="radio" name="grace-answer" checked={graceAnswer === val} onChange={() => { setGraceAnswer(val); setError(""); }} />
+              {text}
+            </label>
+          );
+          return (
+            <div role="status" style={{ display: "grid", gap: 8, padding: "12px 14px", borderRadius: 10, border: `1px solid ${tone.border}`, background: tone.bg, fontSize: 12.5 }}>
+              <div>
+                <strong style={{ display: "block", fontSize: 13.5, color: tone.fg }}>{t.title}</strong>
+                <span style={{ color: "var(--text-secondary)" }}>{t.body}</span>
+              </div>
+              {timing.kind === "early" && <span style={{ color: "var(--muted)", fontSize: 12 }}>ⓘ Your completion will be reviewed based on existing validation rules.</span>}
+              {timing.kind === "grace" && (
+                <>
+                  <strong style={{ fontSize: 13, color: "var(--text)" }}>Was this task completed by its due date?</strong>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {opt(true, `Yes, completed by ${formatDate(timing.due)}`)}
+                    {opt(false, "No, completed today")}
+                  </div>
+                  {graceAnswer !== null && (
+                    <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                      {graceAnswer
+                        ? <>Will be recorded as <strong>On Time</strong> · Recognized completion: {formatDate(timing.due)} · Status updated: {formatDate(today)}</>
+                        : <>Will be recorded as <strong>Late</strong> · Completed: {formatDate(today)}</>}
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })()}
+
         {typesChanged && <div style={helper}>The Work Type / Output Type change is recorded in the Audit Trail.</div>}
         {notice && !error && <div role="status" style={{ color: "var(--success-text)", background: "var(--success-bg, rgba(22,163,74,.08))", borderRadius: 6, padding: "6px 8px", fontSize: 12, fontWeight: 600 }}>✓ {notice}</div>}
         {error && <div style={{ color: "var(--danger-text)", fontSize: 12 }}>{error}</div>}
@@ -273,7 +321,7 @@ export default function CompleteTaskModal({ info, initialDate, initialCount, tod
               ↺ For Revision
             </button>
           )}
-          <button className="btn-primary" disabled={busy || !hoursOk} title={!hoursOk ? "Log your time on this task first" : undefined} onClick={() => void submit()} style={{ padding: "9px 20px", display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <button className="btn-primary" disabled={busy || !hoursOk || (timing?.kind === "grace" && graceAnswer === null)} title={!hoursOk ? "Log your time on this task first" : undefined} onClick={() => void submit()} style={{ padding: "9px 20px", display: "inline-flex", alignItems: "center", gap: 8 }}>
             {actionLabel === "Ready for Review" ? <Send size={15} /> : <CircleCheck size={15} />}
             {busy ? "Saving…" : head.button}
           </button>

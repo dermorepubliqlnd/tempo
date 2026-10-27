@@ -293,6 +293,9 @@ export interface TaskRow {
   /** phase198 (#24): 'logged_late' | 'extended' when the due date was before the task was created. */
   late_log_kind?: string | null;
   late_log_confirmed_at?: string | null;
+  /** phase228: early | on_time | grace_on_time | late | logged_late (set by the database). */
+  completion_timing?: string | null;
+  completion_grace_answer?: boolean | null;
   parent_task_id: string | null;
   name: string;
   status: string | null;
@@ -3076,7 +3079,26 @@ export default function Projects() {
     return [`Closes the task.${nextBit}`, `Marked done.${nextBit}`];
   }
 
-  async function confirmTaskDone(t: TaskRow, date: string, outputCount: number, types?: { workTypeId: string | null; outputTypeId: string | null }): Promise<string | null> {
+  // phase228 (2026-10-27, Sandra): which completion rule applies when a regular
+  // task is marked Done (the database applies the same rules and has the last word).
+  function completionTimingFor(t: TaskRow, actionLabel: string): { kind: "early" | "on_time" | "grace" | "late" | "logged_late"; due: string } | undefined {
+    if (actionLabel !== "Mark Done") return undefined; // review chain unchanged
+    const p = projects.find((x) => x.id === t.project_id);
+    if (!p || (p.wbs_status ?? "draft") === "draft" || p.wbs_status === "closed") return undefined;
+    if (hasChildren(t.id)) return undefined;
+    const due = t.current_due_date ? t.current_due_date.slice(0, 10) : null;
+    if (!due) return undefined;
+    const today = toISOWorkingDay(new Date());
+    const created = t.created_at ? toISOWorkingDay(new Date(t.created_at)) : null;
+    if (created && created >= "2026-10-13" && due < created) return { kind: "logged_late", due };
+    if (today < due) return { kind: "early", due };
+    if (today === due) return { kind: "on_time", due };
+    let d = new Date(due + "T00:00:00");
+    do { d = new Date(d.getTime() + 86400000); } while (!isWorkingDay(d, holidayDates));
+    return { kind: today <= toDateKey(d) ? "grace" : "late", due };
+  }
+
+  async function confirmTaskDone(t: TaskRow, date: string, outputCount: number, types?: { workTypeId: string | null; outputTypeId: string | null }, graceAnswer?: boolean): Promise<string | null> {
     if (ownHoursFor(timeEntries, t.id) <= 0) return "Log your time on this task first.";
     // phase189: Work Type / Output Type changed in the pop-up -> saved with an Audit Trail entry.
     if (types) {
@@ -3098,20 +3120,23 @@ export default function Projects() {
       status: "Done",
       submitted_on: new Date().toISOString(),
       submitted_by: me?.id ?? null,
+      ...(graceAnswer !== undefined ? { completion_grace_answer: graceAnswer } : {}),
     };
     const { error } = await supabase.from("tasks").update(patch).eq("id", t.id);
     if (error) return friendlyError("mark the task Done", error).message ?? "Couldn't mark the task Done.";
     const next = tasks.map((row) => (row.id === t.id ? { ...row, ...patch, work_type_id: t.work_type_id, output_type_id: t.output_type_id, ...(countsDeliverable ? { output_count: outputCount } : {}) } : row));
     setTasks(next);
+    let freshTiming: { completion_timing?: string | null; actual_completion_date?: string | null } | null = null;
     // The database fills the completion date and validation on new projects;
     // read them back so the row shows them straight away (no stale "Validate").
     {
       const { data: fresh } = await supabase
         .from("tasks")
-        .select("actual_completion_date,validated_completion_date,validated_by,validation_performed_at,validated_locked_at,auto_validated,submitted_on")
+        .select("actual_completion_date,validated_completion_date,validated_by,validation_performed_at,validated_locked_at,auto_validated,submitted_on,completion_timing,completion_grace_answer")
         .eq("id", t.id)
         .maybeSingle();
       if (fresh) setTasks((prev) => prev.map((row) => (row.id === t.id ? { ...row, ...(fresh as Partial<TaskRow>) } : row)));
+      freshTiming = (fresh as { completion_timing?: string | null; actual_completion_date?: string | null } | null) ?? null;
     }
     const action = completeDlg?.actionLabel ?? "Mark Done";
     const words = completionWords(t, action);
@@ -3119,7 +3144,15 @@ export default function Projects() {
     const title = action === "Ready for Review" ? (resubmit ? "Resubmitted for review" : "Submitted for review") : action === "Pass QA" ? "QA passed" : action === "Approve" ? "Approved" : "Marked as done";
     setCompleteDlg(null);
     setCompleteNotice("");
-    setDoneToast({ title, detail: `${t.name} · ${words[1]}`, tone: "ok" });
+    // phase228: toast from mock-ups 1-4.
+    const kind = action === "Mark Done" ? freshTiming?.completion_timing ?? null : null;
+    const recDate = freshTiming?.actual_completion_date ? formatDate(freshTiming.actual_completion_date) : formatDate(toISOWorkingDay(new Date()));
+    if (kind === "early") setDoneToast({ title: "Sent for validation", detail: `${t.name} · Completed ahead of schedule. It will be reviewed in the Approval Center.`, tone: "ok" });
+    else if (kind === "on_time") setDoneToast({ title: "Task completed", detail: `${t.name} · Recorded as On Time · ${recDate}`, tone: "ok" });
+    else if (kind === "grace_on_time") setDoneToast({ title: "Task completed", detail: `${t.name} · Recorded as On Time (grace period) · Due: ${formatDate(t.current_due_date)} · Updated: ${formatDate(toISOWorkingDay(new Date()))}`, tone: "ok" });
+    else if (kind === "late") setDoneToast({ title: "Task completed", detail: `${t.name} · Recorded as Late · ${recDate}`, tone: "warn" });
+    else if (kind === "logged_late") setDoneToast({ title: "Task completed", detail: `${t.name} · Recorded on its due date · ${recDate}`, tone: "ok" });
+    else setDoneToast({ title, detail: `${t.name} · ${words[1]}`, tone: "ok" });
     await recomputeAncestorStatus(t.id, next);
     return null;
   }
@@ -5402,7 +5435,8 @@ export default function Projects() {
               </span>
             );
           }
-          const editable = canEditTask(t) && !isTaskLocked(t);
+          // phase228 (2026-10-27): the completion date is recorded by Tempo -- display only.
+          const editable = false && canEditTask(t) && !isTaskLocked(t);
           // 2026-09-22 (Sandra: tag Actual Completion Date first, then
           // Status auto-changes to Done): this field is no longer gated
           // behind Status already being Done -- it's the trigger now, so
@@ -7649,9 +7683,10 @@ export default function Projects() {
             actionLabel={completeDlg.actionLabel}
             onLogTime={() => setCompleteLogTime(true)}
             onCancel={() => { setCompleteDlg(null); setCompleteNotice(""); }}
-            onConfirm={(date, count, types) => confirmTaskDone(ct, date, count, types)}
+            onConfirm={(date, count, types, grace) => confirmTaskDone(ct, date, count, types, grace)}
+            timing={completionTimingFor(ct, completeDlg.actionLabel)}
             outcome={completionWords(ct, completeDlg.actionLabel)[0]}
-            autoDate={r1ProjectIds.has(ct.project_id)}
+            autoDate
             subtitle={(() => {
               const w = completionWords(ct, completeDlg.actionLabel)[0];
               if (completeDlg.actionLabel === "Ready for Review") {
