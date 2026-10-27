@@ -447,8 +447,10 @@ const TASK_OPEN_STATUSES = ["Not Started", "In Progress"];
 function scopeToTaskFilters(scope: TaskScope): Partial<TableView> {
   switch (scope) {
     case "my_open":
-      // R1 (2026-10-13): My Open Tasks = only tasks I can act on now.
-      return { filterPersonIds: ["me"], filterStatuses: TASK_OPEN_STATUSES, filterProjectOwnerIds: [], filterFlags: ["action_needed"] };
+      // 2026-10-27 (Sandra): My Open Tasks = every open task of mine again --
+      // "Coming Up (Waiting on Others)" is merged in; the Next action column
+      // already says Ready or Waiting on...
+      return { filterPersonIds: ["me"], filterStatuses: TASK_OPEN_STATUSES, filterProjectOwnerIds: [], filterFlags: [] };
     case "my_coming_up":
       return { filterPersonIds: ["me"], filterStatuses: TASK_OPEN_STATUSES, filterProjectOwnerIds: [], filterFlags: ["waiting"] };
     case "owner_needs_link":
@@ -640,14 +642,14 @@ function taskSystemView(
 // saved value still equal to one of these was never customized.
 const TASK_SYSTEM_RETIRED_DEFAULTS: Record<string, Partial<Record<keyof TableView, unknown[]>>> = {
   system_tasks_owner_open: { groupBy: ["assignee"], sorts: [[{ key: "current_due_date", direction: "asc" }]] },
+  // 2026-10-27: the R1 "action needed only" filter is retired on the My views.
+  system_tasks_my_open: { filterFlags: [["action_needed"]] },
+  system_tasks_my_by_project: { filterFlags: [["action_needed"]] },
+  system_tasks_my_calendar: { filterFlags: [["action_needed"]] },
 };
 
 const TASK_SYSTEM_VIEWS: TableView[] = [
   taskSystemView("system_tasks_my_open", "My Open Tasks", "my_open", "my", TASK_MY_VISIBLE, { groupBy: "due_window", isDefault: true }),
-  // R1 (2026-10-13): companion to My Open Tasks -- assigned to me but still
-  // waiting on someone else's task. Shown whenever My Open Tasks is allowed
-  // for the role (no app_roles change needed).
-  taskSystemView("system_tasks_my_coming_up", "Coming Up (Waiting on Others)", "my_coming_up", "my", TASK_MY_VISIBLE, { groupBy: "project" }),
   taskSystemView("system_tasks_my_by_project", "My Tasks by Project", "my_open", "my", TASK_MY_VISIBLE, { groupBy: "project" }),
   taskSystemView("system_tasks_my_calendar", "My Task Calendar", "my_open", "my", TASK_MY_VISIBLE, { viewType: "calendar" }),
   taskSystemView("system_tasks_my_done", "My Completed Tasks", "my_done", "my", TASK_DONE_VISIBLE, { groupBy: "validation" }),
