@@ -25,6 +25,11 @@ import {
   TrendingUp,
   Sparkles,
   Info,
+  Undo2,
+  CalendarRange,
+  UserPlus,
+  BadgeCheck,
+  XCircle,
 } from "lucide-react";
 import { tierOf, displayPct, UTIL_LEGEND } from "../lib/utilizationBands";
 import { type PauseProjectInfo } from "../lib/pause";
@@ -252,7 +257,9 @@ export default function MyDashboard() {
   const [assigneeHistory, setAssigneeHistory] = useState<AssigneeHistoryRow[]>([]);
   const [deletedHours, setDeletedHours] = useState<DeletedHourRow[]>([]);
   const [showLaterTasks, setShowLaterTasks] = useState(false);
-  const [workTab, setWorkTab] = useState<"needs" | "next14" | "later">("needs");
+  const [workTab, setWorkTab] = useState<"needs" | "next14" | "later" | "waiting">("needs");
+  // 2026-10-27: late hand-off shifts (phase226) for the Recent Updates feed.
+  const [recentShifts, setRecentShifts] = useState<{ task_id: string; source_task_name: string | null; previous_due: string; new_due: string; created_at: string }[]>([]);
   const [reqTab, setReqTab] = useState<"pending" | "decided">("pending");
   const [outputTypes, setOutputTypes] = useState<OutputTypeRow[]>([]);
   const [monthEntries, setMonthEntries] = useState<TimeEntryRow[]>([]);
@@ -402,6 +409,12 @@ export default function MyDashboard() {
       for (const e of data) if (!m.has(e.task_id)) m.set(e.task_id, e);
       setLastReturn(m);
     });
+    supabase
+      .from("task_schedule_shifts")
+      .select("task_id,source_task_name,previous_due,new_due,created_at")
+      .gte("created_at", new Date(Date.now() - 7 * 86400000).toISOString())
+      .order("created_at", { ascending: false })
+      .then(({ data }) => setRecentShifts((data as typeof recentShifts) ?? []));
     setHolidays((holidayData as HolidayRow[]) ?? []);
     setAvailability((availabilityData as AvailabilityRow[]) ?? []);
     const historicalLockingEnabled = (settingsData as { historical_locking_enabled?: boolean } | null)?.historical_locking_enabled ?? false;
@@ -793,6 +806,7 @@ export default function MyDashboard() {
     { key: "needs" as const, label: "Needs Action", count: myTaskGroups[0].rows.length + myTaskGroups[1].rows.length, hint: "Overdue, plus due within the next 7 business days" },
     { key: "next14" as const, label: "Next 2 Weeks", count: myTaskGroups[2].rows.length, hint: `Due in business days 8–14 (to ${next14Label})` },
     { key: "later" as const, label: "Later", count: myTaskGroups[3].rows.length, hint: `Due after ${next14Label}, or no due date` },
+    { key: "waiting" as const, label: "Waiting", count: myComingUp.length + waitingForYou.withReviewer.length, hint: "Waiting on someone else's task, or with a reviewer. Can't be started yet." },
   ];
   const activeWorkTab = workTab;
   const currentWorkSections =
@@ -803,7 +817,40 @@ export default function MyDashboard() {
         ]
       : activeWorkTab === "next14"
         ? [{ key: "next14", label: "", hint: "", color: "var(--navy)", rows: myTaskGroups[2].rows }]
-        : [{ key: "later", label: "", hint: "", color: "var(--navy)", rows: myTaskGroups[3].rows }];
+        : activeWorkTab === "later"
+          ? [{ key: "later", label: "", hint: "", color: "var(--navy)", rows: myTaskGroups[3].rows }]
+          : [];
+  // 2026-10-27 (Sandra, option C): Recent Updates -- last 7 days, about my work.
+  type UpdateItem = { key: string; at: string; tone: "warning" | "accent" | "success" | "danger"; icon: "back" | "shift" | "assign" | "approved" | "rejected"; title: string; detail: string; link: string };
+  const recentUpdates: UpdateItem[] = (() => {
+    if (!me) return [];
+    const since = Date.now() - 7 * 86400000;
+    const recent = (iso: string | null | undefined) => !!iso && new Date(iso).getTime() >= since;
+    const taskById = new Map(tasks.map((t) => [t.id, t]));
+    const nm = (id: string | null | undefined) => (id ? people.find((p) => p.id === id)?.name ?? "Someone" : "Someone");
+    const out: UpdateItem[] = [];
+    lastReturn.forEach((ev, taskId) => {
+      const t = taskById.get(taskId);
+      if (!t || t.assignee_id !== me.id || !recent(ev.created_at)) return;
+      out.push({ key: `rb${taskId}`, at: ev.created_at, tone: "warning", icon: "back", title: `Sent back for revision · ${t.name}`, detail: `${nm(ev.actor_id)}${ev.comment ? `: "${ev.comment}"` : ""}`, link: "/projects?assignee=me" });
+    });
+    for (const sh of recentShifts) {
+      const t = taskById.get(sh.task_id);
+      if (!t || t.assignee_id !== me.id) continue;
+      out.push({ key: `sh${sh.task_id}${sh.created_at}`, at: sh.created_at, tone: "accent", icon: "shift", title: `Due date shifted · ${t.name}`, detail: `${formatDate(sh.previous_due)} → ${formatDate(sh.new_due)}, because ${sh.source_task_name ?? "the task before it"} finished late`, link: "/projects?assignee=me" });
+    }
+    for (const h of assigneeHistory) {
+      if (h.person_id !== me.id || !recent(h.effective_from)) continue;
+      const t = taskById.get(h.task_id);
+      if (!t || t.created_by === me.id || t.status === "Done" || t.status === "Cancelled") continue;
+      out.push({ key: `as${h.task_id}${h.effective_from}`, at: h.effective_from, tone: "accent", icon: "assign", title: `Assigned to you · ${t.name}`, detail: projectById.get(t.project_id)?.name ?? "", link: "/projects?assignee=me" });
+    }
+    for (const r of myReqs) {
+      if (r.status === "pending" || !recent(r.decidedAt)) continue;
+      out.push({ key: `rq${r.key}`, at: r.decidedAt as string, tone: r.status === "approved" ? "success" : "danger", icon: r.status === "approved" ? "approved" : "rejected", title: `${r.typeLabel} ${r.statusLabel.toLowerCase()} · ${r.item}`, detail: r.decidedBy ? `by ${r.decidedBy}${r.note ? ` · "${r.note}"` : ""}` : r.note ?? "", link: r.link || "/approval-center?tab=requests" });
+    }
+    return out.sort((a, b) => b.at.localeCompare(a.at));
+  })();
   // 2026-10-02 (Sandra): full-width deadline card -- overdue first, then
   // the rest of this week (today onward; past days this week are overdue).
   const dueRestOfWeek = tasksThisWeek;
@@ -1563,7 +1610,7 @@ export default function MyDashboard() {
           <div className="dash-card-head">
             <div>
               <h2>My Work ({myTasksTotal})</h2>
-              <div className="dash-sub">Tasks that need your action, most urgent first. Waiting tasks are in What's Next.</div>
+              <div className="dash-sub">All your open tasks, most urgent first. Tasks you can't start yet are under Waiting.</div>
             </div>
             <Link to="/projects?assignee=me" className="dash-link">View All Tasks →</Link>
           </div>
@@ -1575,7 +1622,66 @@ export default function MyDashboard() {
             ))}
           </div>
           <div className="dash-scroll">
-            {currentWorkSections.every((sec) => sec.rows.length === 0) ? (
+            {activeWorkTab === "waiting" ? (
+              myComingUp.length + waitingForYou.withReviewer.length === 0 ? (
+                <p className="dash-empty">Nothing waiting on someone else.</p>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(150px, 2.2fr) minmax(110px, 1.5fr) auto auto minmax(140px, 1.6fr)", alignItems: "stretch" }}>
+                  {["Task", "Project", "Due Date", "Timing", "Waiting On"].map((h, i) => (
+                    <span key={`wt${i}`} className="dash-sticky-th" style={{ paddingRight: i === 4 ? 0 : 14 }}>{h}</span>
+                  ))}
+                  {(() => {
+                    const cell: CSSProperties = { padding: "8px 14px 8px 0", borderBottom: "1px solid var(--border)", fontSize: 12, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" };
+                    const clip: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+                    const label = (text: string, n: number) => (
+                      <div style={{ gridColumn: "1 / -1", padding: "10px 0 2px", fontSize: 10.5, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3 }}>{text} ({n})</div>
+                    );
+                    return (
+                      <>
+                        {myComingUp.length > 0 && waitingForYou.withReviewer.length > 0 && label("Waiting to start", myComingUp.length)}
+                        {myComingUp.map((t) => {
+                          const r = readinessById.get(t.id);
+                          const who = waitingOnLabel(r, (id) => (id ? people.find((p) => p.id === id)?.name ?? null : null));
+                          const exp = expectedUnlockDate(r);
+                          const late = !!exp && exp < todayIso;
+                          return (
+                            <div key={`w${t.id}`} style={{ display: "contents" }}>
+                              <div style={cell}>
+                                <div style={{ ...clip, fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }} title={t.name}>{t.name}</div>
+                                <div style={{ ...clip, fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>T-{String(t.task_number).padStart(4, "0")} · {t.status ?? "Not Started"}</div>
+                              </div>
+                              <div style={{ ...cell, color: "var(--text-secondary)" }}><div style={clip} title={t.project?.name ?? undefined}>{t.project?.name ?? "—"}</div></div>
+                              <div style={{ ...cell, whiteSpace: "nowrap", color: "var(--text-secondary)" }}>{t.current_due_date ? formatDate(t.current_due_date) : "—"}</div>
+                              <div style={{ ...cell, alignItems: "flex-start" }}><span className="status-pill neutral" style={{ fontSize: 9, whiteSpace: "nowrap" }} title="Can't be started yet">Waiting</span></div>
+                              <div style={{ ...cell, paddingRight: 0 }}>
+                                <div style={{ ...clip, color: "var(--text-secondary)" }} title={r?.waitingOn.map((w) => w.name).join(", ")}>{who || "—"}</div>
+                                {exp && <div style={{ fontSize: 10.5, marginTop: 2, color: late ? "var(--danger-text)" : "var(--muted)", fontWeight: late ? 600 : 400 }}>Expected {formatDate(exp)}{late ? " · late" : ""}</div>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {waitingForYou.withReviewer.length > 0 && label("With a reviewer", waitingForYou.withReviewer.length)}
+                        {waitingForYou.withReviewer.map((t) => {
+                          const reviewerName = t.reviewer.assignee_id ? people.find((x) => x.id === t.reviewer.assignee_id)?.name ?? "—" : "—";
+                          return (
+                            <div key={`wr${t.id}`} style={{ display: "contents" }}>
+                              <div style={cell}>
+                                <div style={{ ...clip, fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }} title={t.name}>{t.name}</div>
+                                <div style={{ ...clip, fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>T-{String(t.task_number).padStart(4, "0")} · Submitted</div>
+                              </div>
+                              <div style={{ ...cell, color: "var(--text-secondary)" }}><div style={clip}>{projectById.get(t.project_id)?.name ?? "—"}</div></div>
+                              <div style={{ ...cell, whiteSpace: "nowrap", color: "var(--text-secondary)" }}>{t.current_due_date ? formatDate(t.current_due_date) : "—"}</div>
+                              <div style={{ ...cell, alignItems: "flex-start" }}><span className="status-pill neutral" style={{ fontSize: 9, whiteSpace: "nowrap" }}>In review</span></div>
+                              <div style={{ ...cell, paddingRight: 0 }}><div style={{ ...clip, color: "var(--text-secondary)" }} title={t.reviewer.name}>{reviewerName} · {t.reviewer.name}</div></div>
+                            </div>
+                          );
+                        })}
+                      </>
+                    );
+                  })()}
+                </div>
+              )
+            ) : currentWorkSections.every((sec) => sec.rows.length === 0) ? (
               <p className="dash-empty">{activeWorkTab === "needs" ? "Nothing overdue or due in the next 7 business days." : "No tasks here."}</p>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "minmax(150px, 2.2fr) minmax(110px, 1.5fr) auto auto minmax(110px, 1fr) max-content", alignItems: "stretch" }}>
@@ -1601,49 +1707,33 @@ export default function MyDashboard() {
         </div>
 
         <div className="dash-side">
-          {/* ---- What's Next: waiting on someone else ---- */}
+          {/* ---- Recent Updates (Sandra, option C): what changed on my work in the last 7 days ---- */}
           <div className="dash-card dash-fixed">
             <div className="dash-card-head">
               <div>
-                <h2>What's Next ({myComingUp.length + waitingForYou.withReviewer.length})</h2>
-                <div className="dash-sub">Becomes yours once the earlier work is done.</div>
+                <h2>Recent Updates ({recentUpdates.length})</h2>
+                <div className="dash-sub">What changed on your work in the last 7 days.</div>
               </div>
-              <Link to="/projects?assignee=me" className="dash-link">View All →</Link>
+              <Link to="/projects?assignee=me" className="dash-link">View All Tasks →</Link>
             </div>
             <div className="dash-scroll">
-              {myComingUp.length + waitingForYou.withReviewer.length === 0 ? (
-                <p className="dash-empty">Nothing waiting on someone else.</p>
+              {recentUpdates.length === 0 ? (
+                <p className="dash-empty">No changes to your work in the last 7 days.</p>
               ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1.4fr) auto", alignItems: "center" }}>
-                  {["Task", "Waiting On", "Expected"].map((h, i) => (
-                    <span key={`cu${i}`} className="dash-sticky-th" style={{ paddingRight: i === 2 ? 0 : 12, textAlign: i === 2 ? "right" : "left" }}>{h}</span>
-                  ))}
-                  {myComingUp.map((t) => {
-                    const r = readinessById.get(t.id);
-                    const who = waitingOnLabel(r, (id) => (id ? people.find((p) => p.id === id)?.name ?? null : null));
-                    const exp = expectedUnlockDate(r);
-                    const late = !!exp && exp < todayIso;
-                    const cell: CSSProperties = { padding: "7px 12px 7px 0", borderBottom: "1px solid var(--border)", fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-                    return (
-                      <div key={t.id} style={{ display: "contents" }}>
-                        <span style={cell} title={`${t.name} · ${t.project?.name ?? ""}`}><strong style={{ color: "var(--navy)", fontWeight: 600 }}>{t.name}</strong><div style={{ fontSize: 10.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis" }}>{t.project?.name ?? "—"}</div></span>
-                        <span style={{ ...cell, color: "var(--text-secondary)" }} title={r?.waitingOn.map((w) => w.name).join(", ")}>{who}</span>
-                        <span style={{ ...cell, paddingRight: 0, textAlign: "right", color: late ? "var(--danger-text)" : "var(--text-secondary)", fontWeight: late ? 600 : 400 }} title={late ? "The task you're waiting on is past its due date" : undefined}>{exp ? `${formatDate(exp)}${late ? " · late" : ""}` : "—"}</span>
-                      </div>
-                    );
-                  })}
-                  {waitingForYou.withReviewer.map((t) => {
-                    const cell: CSSProperties = { padding: "7px 12px 7px 0", borderBottom: "1px solid var(--border)", fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-                    const reviewerName = t.reviewer.assignee_id ? people.find((x) => x.id === t.reviewer.assignee_id)?.name ?? "—" : "—";
-                    return (
-                      <div key={`wr${t.id}`} style={{ display: "contents" }}>
-                        <span style={cell} title={t.name}><strong style={{ color: "var(--navy)", fontWeight: 600 }}>{t.name}</strong><div style={{ fontSize: 10.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis" }}>{projectById.get(t.project_id)?.name ?? "—"}</div></span>
-                        <span style={{ ...cell, color: "var(--text-secondary)" }} title={t.reviewer.name}>In review · {reviewerName}</span>
-                        <span style={{ ...cell, paddingRight: 0, textAlign: "right", color: "var(--muted)" }}>—</span>
-                      </div>
-                    );
-                  })}
-                </div>
+                recentUpdates.map((u) => {
+                  const Icon = u.icon === "back" ? Undo2 : u.icon === "shift" ? CalendarRange : u.icon === "assign" ? UserPlus : u.icon === "approved" ? BadgeCheck : XCircle;
+                  const fg = u.tone === "warning" ? "var(--warning-text, #b45309)" : u.tone === "success" ? "var(--success-text)" : u.tone === "danger" ? "var(--danger-text)" : "var(--accent)";
+                  return (
+                    <Link key={u.key} to={u.link} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "8px 2px", borderBottom: "1px solid var(--border)", textDecoration: "none", color: "inherit" }}>
+                      <Icon size={15} style={{ color: fg, flexShrink: 0, marginTop: 2 }} />
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--navy)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={u.title}>{u.title}</span>
+                        {u.detail && <span style={{ display: "block", fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={u.detail}>{u.detail}</span>}
+                      </span>
+                      <span style={{ fontSize: 10.5, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0 }}>{formatDate(u.at.slice(0, 10))}</span>
+                    </Link>
+                  );
+                })
               )}
             </div>
           </div>
