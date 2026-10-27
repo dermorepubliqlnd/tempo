@@ -2,7 +2,7 @@
 
 Read this first in every Tempo session. It explains how Tempo is built, the rules currently live, how releases work, and what's parked. **Keep it current** (see "Maintaining this file" at the bottom).
 
-Last updated: 27 Oct 2026, end of day (completion rules, dashboard My Tasks, Tasks views, utilization fix; phase230)
+Last updated: 27 Oct 2026, end of day (completion rules, My Dashboard refresh live, Tasks views, utilization fix, KB-0034 + KB sweep; phase231). Follow-up email to the team about the 28 Oct release was drafted for Sandra to send on 28 Oct.
 
 ---
 
