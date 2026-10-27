@@ -32,7 +32,7 @@ Full detail: `TEMPO_SYSTEM_MAP.md` (written 13 Oct 2026; stack, deploy flow, rou
 
 ## 3. Database change conventions
 
-- Changes are **hand-run SQL files**: `sql/phaseNN_short_name.sql`. Supabase tracks no migrations, so these files are the only record. **Latest: phase230. Next: phase231.**
+- Changes are **hand-run SQL files**: `sql/phaseNN_short_name.sql`. Supabase tracks no migrations, so these files are the only record. **Latest: phase231. Next: phase232.**
 - Each file starts with a comment header: `-- phaseNN (YYYY-MM-DD, Sandra): what and why`.
 - Suffixes:
   - `_DRAFT`: Knowledge Base article kept hidden (`is_active = false`) until release
