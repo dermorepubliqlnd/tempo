@@ -42,7 +42,7 @@ import { useApprovalAuthority } from "../lib/useApprovalAuthority";
 import { useConfirm } from "../lib/useConfirm";
 import { friendlyError } from "../lib/prompts";
 import { formatDate } from "../lib/formatDate";
-import { buildHolidaySet, buildHolidayNameMap, nonWorkingDayConfirmMessage } from "../lib/workingDays";
+import { buildHolidaySet, buildHolidayNameMap, nonWorkingDayConfirmMessage, workingDayDelta } from "../lib/workingDays";
 import { loggedHoursTier, LOGGED_HOURS_LEGEND } from "../lib/loggedHoursBands";
 // Same tier->icon mapping as Utilization.tsx's TIER_ICONS.
 const UTIL_TIER_ICON: Record<string, typeof Minus> = {
@@ -1641,9 +1641,12 @@ export default function MyDashboard() {
                 then leftover width is added EQUALLY to every column (Sandra:
                 no single long gap after Project). Spacing via right padding,
                 not column-gap, so row borders stay continuous. */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(6, auto)", alignItems: "center" }}>
-              {["ID", "Project", "WBS Status", "Health", "Progress", "End Date"].map((h, i) => (
-                <span key={h} style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: `0 ${i === 5 ? 0 : 16}px 6px 0`, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", textAlign: i === 3 ? "center" : i === 5 ? "right" : "left" }}>{h}</span>
+            {/* 2026-10-27 (Sandra): WBS Status out; Committed End, Target End
+                (current plan after approved extensions) and +/- in working days,
+                the same as the weekly report. */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, auto)", alignItems: "center" }}>
+              {["ID", "Project", "Health", "Progress", "Committed End", "Target End", "+/-"].map((h, i) => (
+                <span key={h} title={h === "+/-" ? "Working days between the Committed End and the Target End. + = later than committed." : h === "Target End" ? "Current plan after approved extensions." : h === "Committed End" ? "The end date committed at the start." : undefined} style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.3, padding: `0 ${i === 6 ? 0 : 16}px 6px 0`, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", textAlign: i === 2 || i === 6 ? "center" : i >= 4 ? "right" : "left" }}>{h}</span>
               ))}
               {myProjects.slice(0, 6).map((p) => {
                 const health = healthOf(p, tasks, holidayDateStrings);
@@ -1663,11 +1666,6 @@ export default function MyDashboard() {
                     <span onClick={go} style={{ ...cell, fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }} title={p.name}>
                       <span style={{ overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", lineHeight: 1.3 }}>{p.name}</span>
                     </span>
-                    <span onClick={go} style={cell}>
-                      <span title={wbsMeta?.hint} style={{ display: "inline-block", padding: "1px 7px", fontSize: 10.5, fontWeight: 500, whiteSpace: "nowrap", borderRadius: "var(--radius-btn)", border: `1px solid ${wbsMeta?.border ?? "var(--border)"}`, background: wbsMeta?.bg ?? "var(--surface)", color: wbsMeta?.color ?? "var(--text-secondary)" }}>
-                        {wbsMeta?.label ?? p.wbs_status}
-                      </span>
-                    </span>
                     <span onClick={go} style={{ ...cell, justifyContent: "center" }}>
                       <span className={`status-pill ${health.tone}`} style={{ fontSize: 9.5, whiteSpace: "nowrap" }}>{health.label.toUpperCase()}</span>
                     </span>
@@ -1677,7 +1675,22 @@ export default function MyDashboard() {
                       </div>
                       <span style={{ fontSize: 11, color: "var(--muted)", width: 32, textAlign: "right" }}>{progress === null ? "—" : `${Math.round(progress)}%`}</span>
                     </span>
-                    <span onClick={go} style={{ ...cell, paddingRight: 0, justifyContent: "flex-end", fontSize: 11.5, color: "var(--text-secondary)", whiteSpace: "nowrap" }} title={(() => { const fe = forecastEndOf(p, tasks); return fe && p.end_date && fe !== p.end_date.slice(0, 10) ? `Current plan after approved extensions. End Date on record: ${formatDate(p.end_date)}.` : undefined; })()}>{formatDate(forecastEndOf(p, tasks))}</span>
+                    {(() => {
+                      const target = forecastEndOf(p, tasks);
+                      const committedRaw = p.is_operational ? null : (p as { committed_end_date?: string | null }).committed_end_date ?? p.original_due_date ?? p.end_date;
+                      const committed = committedRaw ? committedRaw.slice(0, 10) : null;
+                      const moved = target && committed ? workingDayDelta(committed, target, holidayDateStrings) : null;
+                      const dateCell: CSSProperties = { ...cell, justifyContent: "flex-end", fontSize: 11.5, color: "var(--text-secondary)", whiteSpace: "nowrap" };
+                      return (
+                        <>
+                          <span onClick={go} style={dateCell}>{committed ? formatDate(committed) : "—"}</span>
+                          <span onClick={go} style={{ ...dateCell, color: target && moved && moved > 0 ? "var(--danger-text)" : dateCell.color }}>{target ? formatDate(target) : "—"}</span>
+                          <span onClick={go} style={{ ...cell, paddingRight: 0, justifyContent: "center", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap", color: moved === null ? "var(--muted)" : moved > 0 ? "var(--danger-text)" : "var(--success-text)" }} title={moved === null ? undefined : moved > 0 ? `${moved} working days later than committed` : moved < 0 ? `${-moved} working days ahead of committed` : "On the committed date"}>
+                            {moved === null ? "–" : moved > 0 ? `+${moved}` : moved < 0 ? `−${-moved}` : "—"}
+                          </span>
+                        </>
+                      );
+                    })()}
                   </div>
                 );
               })}
