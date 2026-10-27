@@ -724,17 +724,20 @@ export default function MyDashboard() {
   const dueTodayInWindow = tasksThisWeek.filter((t) => t.current_due_date?.slice(0, 10) === todayIso);
   const dueLaterInWindow = tasksThisWeek.filter((t) => t.current_due_date?.slice(0, 10) !== todayIso);
   // 2026-10-27: the one "My Tasks" list -- every open task I can act on, once.
+  // Sandra: Overdue -> Next 7 business days -> Next 2 weeks (business days
+  // 8-14) -> Later (beyond that, or no due date; collapsed).
   const byDue = (a: { current_due_date?: string | null }, b: { current_due_date?: string | null }) => (a.current_due_date ?? "9999").localeCompare(b.current_due_date ?? "9999");
+  const next14 = nextBusinessDaysWindow(new Date(), holidayDateStrings, 14);
+  const next14Label = new Date(next14.end + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const shownSoFar = new Set([...overdueTasks, ...tasksThisWeek].map((t) => t.id));
   const restOfMine = myActionTasks.filter((t) => !shownSoFar.has(t.id) && !isPausedTask(t));
-  const inProgressLater = restOfMine.filter((t) => t.status === "In Progress" || (!!t.start_date && t.start_date.slice(0, 10) <= todayIso)).sort(byDue);
-  const laterTasks = restOfMine.filter((t) => !inProgressLater.includes(t)).sort(byDue);
+  const inNext2Weeks = restOfMine.filter((t) => { const d = t.current_due_date?.slice(0, 10); return !!d && d > next7.end && d <= next14.end; }).sort(byDue);
+  const laterTasks = restOfMine.filter((t) => !inNext2Weeks.includes(t)).sort(byDue);
   const myTaskGroups = [
     { key: "overdue", label: "Overdue", rows: [...overdueTasks].sort(byDue), color: "var(--danger-text)", hint: "finish it, or request an extension", collapsible: false },
-    { key: "today", label: "Due today", rows: dueTodayInWindow, color: "var(--warning-text, #b45309)", hint: "", collapsible: false },
-    { key: "next", label: "Next 7 business days", rows: dueLaterInWindow, color: "var(--navy)", hint: `through ${next7Label}`, collapsible: false },
-    { key: "progress", label: "In progress, due later", rows: inProgressLater, color: "var(--navy)", hint: "", collapsible: false },
-    { key: "later", label: "Later", rows: laterTasks, color: "var(--muted)", hint: `not started, due after ${next7Label}`, collapsible: true },
+    { key: "next7", label: "Next 7 business days", rows: tasksThisWeek, color: "var(--warning-text, #b45309)", hint: `today through ${next7Label}`, collapsible: false },
+    { key: "next14", label: "Next 2 weeks", rows: inNext2Weeks, color: "var(--navy)", hint: `through ${next14Label}`, collapsible: false },
+    { key: "later", label: "Later", rows: laterTasks, color: "var(--muted)", hint: `due after ${next14Label}, or no due date`, collapsible: true },
   ];
   const myTasksTotal = myTaskGroups.reduce((n, g) => n + g.rows.length, 0);
   // 2026-10-02 (Sandra): full-width deadline card -- overdue first, then
