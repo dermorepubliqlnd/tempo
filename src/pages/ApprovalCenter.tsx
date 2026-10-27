@@ -2274,7 +2274,7 @@ export default function ApprovalCenter({ summaryOnly = false }: { summaryOnly?: 
             {covering.map((d) => (
               <div key={d.id} style={banner}>
                 <UserCheck size={14} style={{ color: "var(--accent)" }} />
-                You're covering approvals for <strong style={{ color: "var(--navy)" }}>{personName(d.delegator_id)}</strong> until {formatDate(d.end_date)} — tagged "Acting for" in Mine to approve.
+                You're covering approvals for <strong style={{ color: "var(--navy)" }}>{personName(d.delegator_id)}</strong> until {formatDate(d.end_date)} — tagged "Acting for" in Awaiting My Approval.
               </div>
             ))}
           </>

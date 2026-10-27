@@ -144,7 +144,7 @@ export default function AutoApprovedPanel({ meId, isFullAccess, routing, personN
   return (
     <div>
       <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: -4, marginBottom: 12, lineHeight: 1.5 }}>
-        Items approved automatically in the last 7 days. Time logs and task validations can be reversed within 7 days; they go back to <strong>Mine to approve</strong>. Extensions can't be undone.
+        Items approved automatically in the last 7 days. Time logs and task validations can be reversed within 7 days; they go back to <strong>Awaiting My Approval</strong>. Extensions can't be undone.
       </p>
       {isFullAccess && (
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-secondary)", marginBottom: 10 }}>
