@@ -32,7 +32,7 @@ Full detail: `TEMPO_SYSTEM_MAP.md` (written 13 Oct 2026; stack, deploy flow, rou
 
 ## 3. Database change conventions
 
-- Changes are **hand-run SQL files**: `sql/phaseNN_short_name.sql`. Supabase tracks no migrations, so these files are the only record. **Latest: phase229. Next: phase230.**
+- Changes are **hand-run SQL files**: `sql/phaseNN_short_name.sql`. Supabase tracks no migrations, so these files are the only record. **Latest: phase230. Next: phase231.**
 - Each file starts with a comment header: `-- phaseNN (YYYY-MM-DD, Sandra): what and why`.
 - Suffixes:
   - `_DRAFT`: Knowledge Base article kept hidden (`is_active = false`) until release
@@ -107,6 +107,12 @@ Full detail: `TEMPO_SYSTEM_MAP.md` (written 13 Oct 2026; stack, deploy flow, rou
 - Normal projects: only the owner, owner's direct supervisor or Full Access can add tasks or change a task's plan. Assignees keep execution updates (status, completion, outputs, notes).
 - Ongoing containers: anyone can add a task for themselves (or their manager on their behalf); the assignee can edit their own task's dates until the due date passes.
 
+### Utilization history of deleted work (phase230)
+
+- `deleted_person_day_hours` keeps the planned hours of deleted tasks on past days so utilization history survives (`archive_task_utilization`).
+- **Manual permanent delete** from the Archive (`purge_archive_items`) no longer keeps that history: it means "it never happened" (test data, mistakes). The 90-day auto-expiry (`purge_expired_archive`) still keeps it.
+- 27 Oct clean-up: removed 7–23 Oct rows for Sandra, Nikki, Joseph and Princess (UAT test projects, ≈645h), which caused "Utilization This Week 1438%". Fritzie, Gemmabelle and Khim rows kept.
+
 ### Time and approvals
 
 - Auto-approval: entry under 2h, within 2 working days, within the 5h weekly allowance. Top of the reporting line is auto-approved.
@@ -117,7 +123,7 @@ Full detail: `TEMPO_SYSTEM_MAP.md` (written 13 Oct 2026; stack, deploy flow, rou
 
 My Dashboard `/` · Team (Executive) Dashboard · Projects & Tasks · Project Overview · WBS Planning `/projects/:id/wbs` · Audit Trail · Time Tracking · Approval Center · Utilization · Productivity `/hours-overview` · Time Off & Holidays · Knowledge Base · Archive · Feedback · User Management `/admin` · Reports (L&D Weekly Report pptx) · Site Settings.
 
-**My Dashboard (as of 23 Oct):** KPI cards (Active Projects, Tasks Due This Week, Overdue Tasks, My pending requests, Utilization This Week, Hours Logged This Week) · Awaiting My Approval · Needs My Attention chips · My Work Today · Overdue & Due This Week.
+**My Dashboard (as of 27 Oct):** KPI cards (Active Projects, **Due Next 7 Business Days** "Today – [date]", Overdue Tasks, My pending requests, Utilization This Week, Hours Logged This Week) · Awaiting My Approval · Needs My Attention chips · My Work Today · **Overdue & Next 7 Business Days** (groups: Overdue · Due today · Next 7 business days). The window is today plus business days until 7 are covered (today counts; weekends and holidays skipped) via `nextBusinessDaysWindow` / `isDueBetween` in `lib/metrics.ts`, sorted by due date; Done tasks (incl. awaiting validation) are excluded. Utilization / Hours Logged / Missing hours stay weekly.
 
 **Project end dates (27 Oct):** every screen shows the **Target End** = `forecastEndOf()` in `Projects.tsx` (the later of `end_date` and the latest live task due date, i.e. the plan after approved extensions and shifts). The commitment stays in `committed_end_date` (fallback `original_due_date`, then `end_date`). My Dashboard "My Projects" columns: ID · Project · Health · Progress · Committed End · Target End · +/- (working days, `workingDayDelta`, same as the weekly report). Team Dashboard date range also uses the Target End.
 
@@ -126,8 +132,9 @@ My Dashboard `/` · Team (Executive) Dashboard · Projects & Tasks · Project Ov
 Details: `briefs/Tempo_Release_Oct30_Backlog.md` and `briefs/Tempo_Task_Completion_Rules_Brief.md` (with UI mockups 1–4).
 
 1. ~~Task completion rules~~ **released 27 Oct 2026 (phase228)**, see section 5. Announced as the **October 28 Release** (KB-0034, phase229), which also covers that tasks after a late one may shift.
-2. **My Dashboard**: "Due This Week" → "Next 7 business days" (KPI card + bottom section, anchored to today, excludes awaiting validation). Utilization / Hours Logged / Missing hours stay weekly.
-3. **Bug**: Utilization This Week showed 1438% while Hours Logged showed 21.6h of 22.5h. Investigate.
+2. ~~My Dashboard "Next 7 business days"~~ **released 27 Oct** (see section 6).
+3. ~~Bug: Utilization This Week 1438%~~ **fixed 27 Oct (phase230)**, see section 5.
+4. **On preview, waiting for Sandra's go:** Tasks system views: "Coming Up (Waiting on Others)" removed and merged into **My Open Tasks**, which shows all my open tasks again (Next action column shows Ready / Waiting on…). The R1 `action_needed` filter is retired on My Open Tasks, My Tasks by Project and My Task Calendar (`TASK_SYSTEM_RETIRED_DEFAULTS`).
 
 ## 8. Folder layout
 
