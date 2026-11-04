@@ -516,9 +516,13 @@ export function patchChartXml(xml: string, p: ChartPatch): string {
   let ser = -1;
   // Each <c:ser> has exactly one <c:dLbls> (pptxgenjs writes it when showValue is on);
   // dPt must sit right before dLbls, custom dLbl entries go first inside it.
-  return xml.replace(/<c:ser>|<c:dLbls>/g, (m) => {
-    if (m === "<c:ser>") { ser++; return m; }
-    if (ser < 0) return m;
+  // 2026-11-04: only patch dLbls INSIDE a <c:ser>. The chart-level <c:dLbls> after the last
+  // series must not get dPt (PowerPoint rejects the file: Oct 26–30 report, red "Next week" bar).
+  let inSer = false;
+  return xml.replace(/<c:ser>|<\/c:ser>|<c:dLbls>/g, (m) => {
+    if (m === "<c:ser>") { ser++; inSer = true; return m; }
+    if (m === "</c:ser>") { inSer = false; return m; }
+    if (!inSer) return m;
     let pre = "";
     for (const pc of p.pointColors ?? []) if (pc.ser === ser) pre += `<c:dPt><c:idx val="${pc.idx}"/><c:invertIfNegative val="0"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="${pc.color}"/></a:solidFill></c:spPr></c:dPt>`;
     let inner = "";
