@@ -2,7 +2,7 @@
 
 Read this first in every Tempo session. It explains how Tempo is built, the rules currently live, how releases work, and what's parked. **Keep it current** (see "Maintaining this file" at the bottom).
 
-Last updated: 27 Oct 2026, end of day (completion rules, My Dashboard refresh live, Tasks views, utilization fix, KB-0034 + KB sweep; phase231). Follow-up email to the team about the 28 Oct release was drafted for Sandra to send on 28 Oct.
+Last updated: 11 Nov 2026 (My Work Complete action built for preview, not pushed yet; no SQL; see section 7 item 7). Previous: 10 Nov (weekly report pptx fix LIVE, commit 5d975ca). Before that: 30 Oct (KB clean-up LIVE: 34 → 19 articles; phase232 + phase232b). Before that: 27 Oct (completion rules, My Dashboard refresh, Tasks views, utilization fix, KB-0034 + KB sweep; phase231).
 
 ---
 
@@ -32,7 +32,7 @@ Full detail: `TEMPO_SYSTEM_MAP.md` (written 13 Oct 2026; stack, deploy flow, rou
 
 ## 3. Database change conventions
 
-- Changes are **hand-run SQL files**: `sql/phaseNN_short_name.sql`. Supabase tracks no migrations, so these files are the only record. **Latest: phase231. Next: phase232.**
+- Changes are **hand-run SQL files**: `sql/phaseNN_short_name.sql`. Supabase tracks no migrations, so these files are the only record. **Latest: phase232b (run 30 Oct). Next: phase233.**
 - Each file starts with a comment header: `-- phaseNN (YYYY-MM-DD, Sandra): what and why`.
 - Suffixes:
   - `_DRAFT`: Knowledge Base article kept hidden (`is_active = false`) until release
@@ -41,7 +41,10 @@ Full detail: `TEMPO_SYSTEM_MAP.md` (written 13 Oct 2026; stack, deploy flow, rou
 - Additive and safe-while-live by default. New behaviour is usually limited to **new-flow projects** (see below).
 - **Preview-only gating:** a rule can check the `x-tempo-channel: preview` header so it only applies on preview. Remove the check at release and note "RELEASED <date>" in the file.
 - Because preview shares the live database, test with UAT/test projects only. No uncontrolled writes to real records.
-- Knowledge Base articles live in `kb_entries`. Each release has a "What's new" article (Oct 23 release = KB-0033; Oct 28 release, task completion rules = KB-0034, phase229).
+- Knowledge Base articles live in `kb_entries`. Each release has a "What's new" article (Oct 23 release = KB-0033; Oct 28 release, task completion rules = KB-0034, phase229). Writing standard: `briefs/Knowledge_Base_Framework.md` (target ≈ 18–19 articles; merge or retire before adding).
+- Titles are unique per KB topic (`kb_entries_category_title_key`), so a draft of an existing article needs a different title (" (draft)").
+- KB numbers come from a sequence that never rolls back: dry runs that insert articles use up numbers (KB-0035 to 0037 were used up this way on 30 Oct). Draft copies of existing articles use 900 + the article number to avoid this.
+- Running SQL from the browser: on the Supabase dashboard tab, Claude reads the file into the page with a file input and posts it to the dashboard's own query endpoint (no SQL editor typing).
 
 ## 4. Key concepts (glossary)
 
@@ -113,6 +116,12 @@ Full detail: `TEMPO_SYSTEM_MAP.md` (written 13 Oct 2026; stack, deploy flow, rou
 - **Manual permanent delete** from the Archive (`purge_archive_items`) no longer keeps that history: it means "it never happened" (test data, mistakes). The 90-day auto-expiry (`purge_expired_archive`) still keeps it.
 - 27 Oct clean-up: removed 7–23 Oct rows for Sandra, Nikki, Joseph and Princess (UAT test projects, ≈645h), which caused "Utilization This Week 1438%". Fritzie, Gemmabelle and Khim rows kept.
 
+### Weekly report (pptx) fix (live 10 Nov 2026, commit 5d975ca)
+
+- Bug: when a role's **Next week** planned utilization was over 100% (red bar on Team Utilization), `patchChartXml` in `src/lib/weeklyReport/deck.ts` also inserted the red `<c:dPt>` before the chart-level `<c:dLbls>` after the last series. PowerPoint rejected the file ("found a problem with content", Repair does nothing). Hit the 26–30 Oct and 2–6 Nov reports.
+- Fix: only patch `<c:dLbls>` inside a `<c:ser>`. Patch copy: `briefs/fix_weekly_report_red_bar_2026-11-04.patch`.
+- Debug tip: unzip the pptx and validate `ppt/charts/*.xml` against `dml-chart.xsd` (pptx skill schemas). The usual pptxgenjs `axId`/`varyColors` order errors are harmless; any other error is the suspect.
+
 ### Time and approvals
 
 - Auto-approval: entry under 2h, within 2 working days, within the 5h weekly allowance. Top of the reporting line is auto-approved.
@@ -141,13 +150,16 @@ Details: `briefs/Tempo_Release_Oct30_Backlog.md` and `briefs/Tempo_Task_Completi
 2. ~~My Dashboard "Next 7 business days"~~ **released 27 Oct** (see section 6).
 3. ~~Bug: Utilization This Week 1438%~~ **fixed 27 Oct (phase230)**, see section 5.
 6. **Released 27 Oct (Sandra's go, ahead of Friday): My Dashboard refresh** (`briefs/Tempo_Dashboard_Refresh_Brief.md`, commits fd0362b + b332a24). Fixed-height cards with internal scrolling (`.dash-kpis/.dash-main/.dash-side/.dash-row3/.dash-row2/.dash-fixed/.dash-scroll` in `index.css`); My Work tabs Needs Action · Next 2 Weeks · Later · **Waiting** (can't start yet: grey Waiting pill, no timer, "waiting on" + expected date; plus "With a reviewer"); right column = **Recent Updates** (last 7 days about my work: sent back for revision, due date shifted, assigned to me, requests decided; approved time logs skipped) over My Projects (Target End, +/-). What's Next card removed (merged into the Waiting tab); Effort vs Estimate; My Requests tabs; Deliverable Progress; "Waiting for you" folded into a Needs My Attention pill; "Mine to approve" → "Awaiting My Approval" in Approval Center. Terminology change log is in the brief.
+7. **In progress (11 Nov 2026): My Work "Complete" action.** Sandra chose "cover everything" (incl. QA / Sign-Off with For Revision). Built as a code-only change, no SQL. The completion flow moved out of `Projects.tsx` into shared code that both pages use: `src/lib/taskCompletion.ts` (hand-off rules, completion banner, parent status) and `src/components/TaskCompletionFlow.tsx` (Complete task pop-up, Request Revision, Log time inside both, `DoneToast`). My Work rows (mode `work`) get a green ✓ button next to the timer; it is greyed out while the task waits on earlier work; tooltip = Mark Done / Ready for Review / Resubmit / Pass QA / Approve. The flow loads fresh time entries and review events for the task when it opens; it also counts time still waiting for approval, so the pop-up's "waiting for approval" message now actually shows. Known small difference: on My Work, the parent's rolled-up Status is saved directly (Projects & Tasks goes through `updateTask`). Commit on branch `tempo-preview` (local commit 95f7751, patch copy `briefs/my_work_complete_action_2026-11-11.patch`). **Not pushed yet: needs the GitHub key.** After the push: Sandra tests on preview with a UAT project, then merge to `main` on a Friday with her go.
 5. **Still open (no release date):**
    - Job aid / Project Lifecycle guide (`guides/`, `public/guides/project-lifecycle.html`): add the Include/Skip scoping prompt, "Shifted" dates, completion rules, Review time before For Revision, My Tasks grouping.
-   - KB wording sweep: KB 6, 7, 10, 15, 32 still say older projects use a typed completion date. Align with KB-0034.
+   - ~~KB clean-up~~ **LIVE 30 Oct 2026 (Sandra's go; phase232 + phase232b).** KB is now **19 articles**: 2, 3, 4, 5 Logging & Correcting Time, 6 Project Stages: Draft to Closed, 7 Completing & Validating Tasks, 10, 11, 14, 15, 16, 18, 22, 23, 25, 26, 32, 34, **38 My Dashboard** (new). Retired (`is_active = false`, still in History): 1, 8, 9, 12, 13, 17, 19, 20, 21, 24, 27, 28, 29, 30, 31, 33. Pinned: 4, 7, 10, 14, 34, 38. Draft copies KB-0903…0932 are in the Archive (auto-purge in 90 days). Plan: `briefs/Tempo_KB_Cleanup_Plan.md`. Next "What's new" article: pin it and unpin KB-0034. Small follow-up: KB-0010's first line contains a `[[link]]`, which shows as raw text in the card snippet on KB Home; reword that line.
+   - Backlog (Sandra, 30 Oct): KB "Was this helpful? Yes / No" + optional comment, and article view counts. Today pins are global (Full Access); users can't star or rate. Needs a new table + app code.
    - UAT checklist (Docs artifact f1e83ef3-…, node 7807d35b-ad28): add everything released after 23 Oct. UAT round-2 results (sections B, D, E) never came back.
    - `TEMPO_SYSTEM_MAP.md` is from 13 Oct; refresh after the Oct 30 release.
+   - Repo copy of CLAUDE.md is still the 27 Oct version (main = 5d975ca); sync it at the next push.
    - **GitHub access key for Claude's pushes expires 20 Nov 2026.** Sandra creates a new fine-grained token (repo `tempo`, Contents read/write) and pastes it in chat. Deploys themselves don't use it. Never write the key into any file: the repo is public.
-   - Backlog: KB clean-up (32 → ~18 articles), "First submitted" report column, revision notes history, 3 older tasks with mismatched Output Types, follow up the 12 unassigned open tasks.
+   - Backlog: "First submitted" report column, revision notes history, 3 older tasks with mismatched Output Types, follow up the 12 unassigned open tasks.
    - Parked by Sandra (decided not to build): review clock pause during For Revision (planned durations already include revision rounds; doers request extensions); automatic "wait for Scope Sign-Off" on Design tasks (link manually when needed).
 4. **Released 27 Oct:** Tasks system views: "Coming Up (Waiting on Others)" removed and merged into **My Open Tasks**, which shows all my open tasks again (Next action column shows Ready / Waiting on…). The R1 `action_needed` filter is retired on My Open Tasks, My Tasks by Project and My Task Calendar (`TASK_SYSTEM_RETIRED_DEFAULTS`).
 
@@ -156,7 +168,7 @@ Details: `briefs/Tempo_Release_Oct30_Backlog.md` and `briefs/Tempo_Task_Completi
 | Folder / file | Contents |
 |---|---|
 | `CLAUDE.md`, `TEMPO_SYSTEM_MAP.md` | This file and the full system map |
-| `sql/` | All phase SQL files (phase183 onward) + `uat_setup_oct15.sql`. **Save new phase files here** and also commit each one to the repo's `supabase/` folder (synced up to phase230 on 27 Oct 2026). **Public repo:** in test/dry-run scripts use a placeholder like `<test-user-id>` instead of real user IDs. GitGuardian flagged `request.jwt.claims` + Sandra's user ID on 27 Oct (incident #39151564): a false positive, no secret, but avoid it going forward |
+| `sql/` | All phase SQL files (phase183 onward) + `uat_setup_oct15.sql`. **Save new phase files here** and also commit each one to the repo's `supabase/` folder (synced up to phase230 on 27 Oct 2026; phase231–232 not yet committed: the 30 Oct session had no GitHub key). **Public repo:** in test/dry-run scripts use a placeholder like `<test-user-id>` instead of real user IDs. GitGuardian flagged `request.jwt.claims` + Sandra's user ID on 27 Oct (incident #39151564): a false positive, no secret, but avoid it going forward |
 | `briefs/` | Upcoming release briefs, backlog, mockups, governance brief. **Save new briefs here** |
 | `guides/` | User-facing guides (Workflow Job Aid, Project Lifecycle Guide) |
 | `test-steps/` | Past release test steps |
