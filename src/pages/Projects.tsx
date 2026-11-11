@@ -19,14 +19,22 @@ import ViewTabs from "../components/ViewTabs";
 import { ViewLayoutSwitch } from "../components/ViewLayoutSwitch";
 import ViewSettingsMenu, { ViewFilterPills } from "../components/ViewSettingsMenu";
 import Modal from "../components/Modal";
-import { DialogHeader, SummaryBand } from "../components/DialogHeader";
 import { PauseProjectModal, ScheduleReviewModal } from "../components/PauseProjectModals";
 import { timingWithPause, type TimingResult } from "../lib/pause";
 import { METRIC_DEFINITIONS, isActiveProject, isOverdueProject, isOverdueTask, isDueThisWeek } from "../lib/metrics";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import LogTimeModal from "../components/LogTimeModal";
 import { selfAndTeamBelow } from "../lib/teamBelow";
-import CompleteTaskModal from "../components/CompleteTaskModal";
+import TaskCompletionFlow, { type CompletionRequest } from "../components/TaskCompletionFlow";
+import {
+  canReturnFrom as libCanReturnFrom,
+  deriveParentStatus as libDeriveParentStatus,
+  isHandoffTask as libIsHandoffTask,
+  isLeafTask as libIsLeafTask,
+  returnableFor as libReturnableFor,
+  reviewersOf as libReviewersOf,
+  reviewStepKind as libReviewStepKind,
+} from "../lib/taskCompletion";
 import { fetchStagePhaseRules, type StagePhaseRules } from "../components/StagePhaseRules";
 import { PROJECT_STAGES, PROJECT_STAGE_TONES, PROJECT_STAGE_HINTS, projectStageOf, normalizeStageFilter } from "../lib/projectStage";
 import NotesSidebar from "../components/NotesSidebar";
@@ -78,7 +86,7 @@ interface DeletedSpentHourRow {
 }
 import { useTimeTracking } from "../lib/TimeTrackingContext";
 import { CATEGORY_ICON_LIBRARY, CATEGORY_TONE_ICON_COLOR } from "../lib/categoryIcons";
-import { Play, Square, Info, PencilLine, Send } from "lucide-react";
+import { Play, Square, Info } from "lucide-react";
 import { isLifecycleProject, lifecycleLabelForProjectPhase } from "../lib/lifecycle";
 import { computeReadiness, waitingOnLabel, expectedUnlockDate, needsDependencyLink, isR1Project, stepKindOf, isReviewStep, workTypeNameMap, type ReadinessDep } from "../lib/taskReadiness";
 import {
@@ -1547,11 +1555,6 @@ export default function Projects() {
   // phase226: why a due date was shifted (latest late hand-off per task).
   const [shiftByTask, setShiftByTask] = useState<Map<string, { source_task_name: string | null; days_late: number | null; previous_due: string; new_due: string }>>(new Map());
   const [lastReturnByTask, setLastReturnByTask] = useState<Map<string, ReturnEvent>>(new Map());
-  const [returnDialog, setReturnDialog] = useState<{ reviewTaskId: string; reviewName: string; candidates: { id: string; name: string }[] } | null>(null);
-  const [returnTarget, setReturnTarget] = useState<string>("");
-  const [returnComment, setReturnComment] = useState("");
-  const [returnBusy, setReturnBusy] = useState(false);
-  const [returnError, setReturnError] = useState("");
   const [people, setPeople] = useState<PersonOption[]>([]);
   const assigneePicker = useAssigneePicker(people);
   // phase190b: who this person may assign when adding a task to an ongoing container.
@@ -1724,12 +1727,8 @@ export default function Projects() {
   const [hoursBreakdownTaskId, setHoursBreakdownTaskId] = useState<string | null>(null);
   // 2026-09-24 (phase110): "Log follow-up time" on a Done task.
   // 2026-10-14 (Sandra): Complete task pop-up (see markTaskDone).
-  const [completeDlg, setCompleteDlg] = useState<{ taskId: string; date: string; actionLabel: string } | null>(null);
-  const [completeLogTime, setCompleteLogTime] = useState(false);
-  // 2026-10-23 (Sandra): For Revision also needs the reviewer's time logged first.
-  const [returnLogTime, setReturnLogTime] = useState(false);
-  // 2026-10-22 (Sandra): say what happened -- time saved, work handed over.
-  const [completeNotice, setCompleteNotice] = useState("");
+  // 2026-11-11: Complete task / Request Revision run in the shared TaskCompletionFlow.
+  const [completionReq, setCompletionReq] = useState<CompletionRequest | null>(null);
   // 2026-10-22 (Sandra): every hand-off confirms itself -- title + who has it now.
   const [doneToast, setDoneToast] = useState<{ title: string; detail: string; tone: "ok" | "warn" } | null>(null);
   useEffect(() => {
@@ -2044,30 +2043,15 @@ export default function Projects() {
     [tasks, taskDeps, r1ProjectIds, wtNames]
   );
   const isWaitingTask = (t: TaskRow) => readinessById.get(t.id)?.state === "waiting";
+  // 2026-11-11: hand-off rules shared with My Work (lib/taskCompletion.ts).
+  const completionCtx = useMemo(() => ({ tasks, deps: taskDeps, r1ProjectIds, wtNames }), [tasks, taskDeps, r1ProjectIds, wtNames]);
   // phase188: finished tasks this task depends on -- what a reviewer can return.
   // 2026-10-22 (Sandra): For Revision goes back to the person who did the work.
   // From a sign-off, walk back past review steps to the work itself (the review
   // steps in between reopen in the database and check the revised work again).
-  const returnableFor = (t: TaskRow): TaskRow[] => {
-    const out: TaskRow[] = [];
-    const seen = new Set<string>();
-    const walk = (id: string, depth: number) => {
-      for (const d of taskDeps.filter((x) => x.task_id === id)) {
-        const up = tasks.find((x) => x.id === d.depends_on_task_id);
-        if (!up || up.is_archived || seen.has(up.id)) continue;
-        seen.add(up.id);
-        if (isReviewStep(up, wtNames) && depth < 5) walk(up.id, depth + 1);
-        else if (up.status === "Done") out.push(up);
-      }
-    };
-    walk(t.id, 0);
-    return out;
-  };
+  const returnableFor = (t: TaskRow): TaskRow[] => libReturnableFor(t, completionCtx);
   const canReturnFrom = (t: TaskRow) =>
-    statusGroupOf(TASK_STATUS_GROUPED, t.status) !== "complete" &&
-    statusGroupOf(TASK_STATUS_GROUPED, t.status) !== "cancelled" &&
-    (t.assignee_id === me?.id || me?.access_level === "full" || projects.find((p) => p.id === t.project_id)?.owner_id === me?.id) &&
-    returnableFor(t).length > 0;
+    libCanReturnFrom(t, completionCtx, me, projects, (st) => statusGroupOf(TASK_STATUS_GROUPED, st) === "complete" || statusGroupOf(TASK_STATUS_GROUPED, st) === "cancelled");
   // R2.2 #3 (2026-10-14, Sandra): explicit hand-off buttons on today's tasks.
   // A work task whose finish unlocks a review / QA / sign-off task gets
   // "Ready for Review"; the review task gets "Pass QA" or "Approve" (plus
@@ -2075,17 +2059,12 @@ export default function Projects() {
   // and Output Count checks still apply. New (R1) projects only.
   const canActOnTask = (t: TaskRow) =>
     t.assignee_id === me?.id || me?.access_level === "full" || projects.find((p) => p.id === t.project_id)?.owner_id === me?.id;
-  const isLeafTask = (t: TaskRow) => !tasks.some((x) => x.parent_task_id === t.id && !x.is_archived);
+  const isLeafTask = (t: TaskRow) => libIsLeafTask(t, completionCtx);
   /** Open review tasks that wait on this task. */
-  const reviewersOf = (t: TaskRow) =>
-    taskDeps
-      .filter((d) => d.depends_on_task_id === t.id)
-      .map((d) => tasks.find((x) => x.id === d.task_id))
-      .filter((x): x is TaskRow => !!x && !x.is_archived && x.status !== "Cancelled" && isReviewStep(x, wtNames));
+  const reviewersOf = (t: TaskRow) => libReviewersOf(t, completionCtx);
   /** "qa" | "approve" when this task is itself a review step with a Depends-on link. */
-  const reviewStepKind = (t: TaskRow) =>
-    r1ProjectIds.has(t.project_id) && isLeafTask(t) && taskDeps.some((d) => d.task_id === t.id) ? stepKindOf(t, wtNames) : null;
-  const isHandoffTask = (t: TaskRow) => r1ProjectIds.has(t.project_id) && isLeafTask(t) && !reviewStepKind(t) && reviewersOf(t).length > 0;
+  const reviewStepKind = (t: TaskRow) => libReviewStepKind(t, completionCtx);
+  const isHandoffTask = (t: TaskRow) => libIsHandoffTask(t, completionCtx);
   const handoffToday = () => toISOWorkingDay(new Date());
   // 2026-10-14 (Sandra: "someone can re-open a done and signed-off task"):
   // on new projects a finished hand-off only goes back through For Revision.
@@ -2113,32 +2092,7 @@ export default function Projects() {
     return null;
   }
   function openReturnDialog(t: TaskRow) {
-    const c = returnableFor(t).map((x) => ({ id: x.id, name: x.name }));
-    setReturnDialog({ reviewTaskId: t.id, reviewName: t.name, candidates: c });
-    setReturnTarget(c[0]?.id ?? "");
-    setReturnComment("");
-    setReturnError("");
-  }
-  async function submitReturn() {
-    if (!returnDialog) return;
-    if (!returnComment.trim()) {
-      setReturnError("Add a comment so the owner knows what to change.");
-      return;
-    }
-    setReturnBusy(true);
-    const { error } = await supabase.rpc("r2_return_task", { p_review_task_id: returnDialog.reviewTaskId, p_work_task_id: returnTarget, p_comment: returnComment.trim() });
-    setReturnBusy(false);
-    if (error) {
-      setReturnError(friendlyError("send the task for revision", error).message ?? "Couldn't send the task for revision.");
-      return;
-    }
-    {
-      const wt = tasks.find((x) => x.id === returnTarget);
-      const who = personName(wt?.assignee_id);
-      setDoneToast({ title: "Sent back for revision", detail: `${wt?.name ?? "The work"} is back with ${who ?? "its owner"}, with your comment.`, tone: "warn" });
-    }
-    setReturnDialog(null);
-    loadAll();
+    setCompletionReq({ kind: "revision", taskId: t.id });
   }
   const needsLink = (t: TaskRow) => r1ProjectIds.has(t.project_id) && needsDependencyLink(t, taskDeps, tasks.some((x) => x.parent_task_id === t.id && !x.is_archived), wtNames);
   const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? "—";
@@ -2798,11 +2752,7 @@ export default function Projects() {
   // nothing left driving it toward Done) -- an edge case with no real
   // data yet, flagged for Sandra to confirm if it comes up.
   function deriveParentStatus(childStatuses: (string | null)[]): "Not Started" | "In Progress" | "Done" {
-    const relevant = childStatuses.filter((s) => s !== "Cancelled");
-    if (relevant.length === 0) return "Not Started";
-    if (relevant.every((s) => s === "Done")) return "Done";
-    if (relevant.every((s) => !s || s === "Not Started")) return "Not Started";
-    return "In Progress";
+    return libDeriveParentStatus(childStatuses);
   }
 
   // Walks up from a just-changed task to its parent (and grandparent, if
@@ -3041,122 +2991,9 @@ export default function Projects() {
   async function markTaskDone(t: TaskRow, v: string, _fromBoard = false, handoff: "review" | "qa" | "approve" | null = null): Promise<void> {
     // 2026-10-14 (Sandra: Done from the Status dropdown skipped the review
     // decision): on new projects, any route into Done on a hand-off task
-    // becomes that hand-off -- a review step decides Pass QA / Approve or
-    // For Revision; a work task with a review after it is Ready for Review.
-    if (!handoff) handoff = reviewStepKind(t) ?? (isHandoffTask(t) ? "review" : null);
-    const rd = readinessById.get(t.id);
-    if (r1ProjectIds.has(t.project_id) && rd && rd.waitingOn.length > 0) {
-      await alert({ title: "Waiting on earlier work", message: `This can be finished once these are done: ${rd.waitingOn.map((w) => w.name).join(", ")}.` });
-      return;
-    }
-    const actionLabel = handoff === "review" ? "Ready for Review" : handoff === "qa" ? "Pass QA" : handoff === "approve" ? "Approve" : "Mark Done";
-    setCompleteDlg({ taskId: t.id, date: v, actionLabel });
-  }
-
-  function personName(id: string | null | undefined) {
-    return id ? people.find((p) => p.id === id)?.name ?? null : null;
-  }
-  function nextOpenAfter(t: TaskRow) {
-    return taskDeps
-      .filter((d) => d.depends_on_task_id === t.id)
-      .map((d) => tasks.find((x) => x.id === d.task_id))
-      .find((x): x is TaskRow => !!x && !x.is_archived && x.status !== "Done" && x.status !== "Cancelled");
-  }
-  /** Plain words for what finishing this task does: [before, after]. */
-  function completionWords(t: TaskRow, actionLabel: string): [string, string] {
-    if (actionLabel === "Ready for Review") {
-      // After a sign-off sent it back, the earlier review is already Done --
-      // name the first check that is still open (the approver).
-      let rv: TaskRow | undefined = reviewersOf(t)[0];
-      for (let i = 0; i < 5 && rv && rv.status === "Done"; i++) rv = reviewersOf(rv)[0] ?? rv;
-      if (rv && rv.status === "Done") rv = reviewersOf(t)[0];
-      const who = personName(rv?.assignee_id);
-      return [who ? `Sends your work to ${who} for review.` : "Sends your work for review.", who ? `Sent to ${who} for review.` : "Sent for review."];
-    }
-    const nx = nextOpenAfter(t);
-    const nxWho = personName(nx?.assignee_id);
-    const nextBit = nx ? ` Next: ${nx.name}${nxWho ? ` (${nxWho})` : ""}.` : "";
-    if (actionLabel === "Pass QA") return [`Passes QA.${nextBit}`, `QA passed.${nextBit}`];
-    if (actionLabel === "Approve") return [`Approves the work.${nextBit}`, `Approved.${nextBit}`];
-    return [`Closes the task.${nextBit}`, `Marked done.${nextBit}`];
-  }
-
-  // phase228 (2026-10-27, Sandra): which completion rule applies when a regular
-  // task is marked Done (the database applies the same rules and has the last word).
-  function completionTimingFor(t: TaskRow, actionLabel: string): { kind: "early" | "on_time" | "grace" | "late" | "logged_late"; due: string } | undefined {
-    if (actionLabel !== "Mark Done") return undefined; // review chain unchanged
-    const p = projects.find((x) => x.id === t.project_id);
-    if (!p || (p.wbs_status ?? "draft") === "draft" || p.wbs_status === "closed") return undefined;
-    if (hasChildren(t.id)) return undefined;
-    const due = t.current_due_date ? t.current_due_date.slice(0, 10) : null;
-    if (!due) return undefined;
-    const today = toISOWorkingDay(new Date());
-    const created = t.created_at ? toISOWorkingDay(new Date(t.created_at)) : null;
-    if (created && created >= "2026-10-13" && due < created) return { kind: "logged_late", due };
-    if (today < due) return { kind: "early", due };
-    if (today === due) return { kind: "on_time", due };
-    let d = new Date(due + "T00:00:00");
-    do { d = new Date(d.getTime() + 86400000); } while (!isWorkingDay(d, holidayDates));
-    return { kind: today <= toDateKey(d) ? "grace" : "late", due };
-  }
-
-  async function confirmTaskDone(t: TaskRow, date: string, outputCount: number, types?: { workTypeId: string | null; outputTypeId: string | null }, graceAnswer?: boolean): Promise<string | null> {
-    if (ownHoursFor(timeEntries, t.id) <= 0) return "Log your time on this task first.";
-    // phase189: Work Type / Output Type changed in the pop-up -> saved with an Audit Trail entry.
-    if (types) {
-      const { error } = await supabase.rpc("set_task_types_at_completion", { p_task_id: t.id, p_work_type_id: types.workTypeId, p_output_type_id: types.outputTypeId });
-      if (error) return friendlyError("change the Work Type / Output Type", error).message ?? "Couldn't change the Work Type / Output Type.";
-      t = { ...t, work_type_id: types.workTypeId, output_type_id: types.outputTypeId };
-      const changed = t;
-      setTasks((prev) => prev.map((row) => (row.id === changed.id ? { ...row, work_type_id: changed.work_type_id, output_type_id: changed.output_type_id } : row)));
-    }
-    const outType = outputTypes.find((o) => o.id === t.output_type_id);
-    const countsDeliverable = !!outType && outType.counts_deliverable !== false;
-    if (countsDeliverable && (t.output_count ?? null) !== outputCount) {
-      const { error } = await supabase.from("tasks").update({ output_count: outputCount }).eq("id", t.id);
-      if (error) return friendlyError("save the Output Count", error).message ?? "Couldn't save the Output Count.";
-      setTasks((prev) => prev.map((row) => (row.id === t.id ? { ...row, output_count: outputCount } : row)));
-    }
-    const patch: Partial<TaskRow> = {
-      actual_completion_date: date,
-      status: "Done",
-      submitted_on: new Date().toISOString(),
-      submitted_by: me?.id ?? null,
-      ...(graceAnswer !== undefined ? { completion_grace_answer: graceAnswer } : {}),
-    };
-    const { error } = await supabase.from("tasks").update(patch).eq("id", t.id);
-    if (error) return friendlyError("mark the task Done", error).message ?? "Couldn't mark the task Done.";
-    const next = tasks.map((row) => (row.id === t.id ? { ...row, ...patch, work_type_id: t.work_type_id, output_type_id: t.output_type_id, ...(countsDeliverable ? { output_count: outputCount } : {}) } : row));
-    setTasks(next);
-    let freshTiming: { completion_timing?: string | null; actual_completion_date?: string | null } | null = null;
-    // The database fills the completion date and validation on new projects;
-    // read them back so the row shows them straight away (no stale "Validate").
-    {
-      const { data: fresh } = await supabase
-        .from("tasks")
-        .select("actual_completion_date,validated_completion_date,validated_by,validation_performed_at,validated_locked_at,auto_validated,submitted_on,completion_timing,completion_grace_answer")
-        .eq("id", t.id)
-        .maybeSingle();
-      if (fresh) setTasks((prev) => prev.map((row) => (row.id === t.id ? { ...row, ...(fresh as Partial<TaskRow>) } : row)));
-      freshTiming = (fresh as { completion_timing?: string | null; actual_completion_date?: string | null } | null) ?? null;
-    }
-    const action = completeDlg?.actionLabel ?? "Mark Done";
-    const words = completionWords(t, action);
-    const resubmit = action === "Ready for Review" && (t.revision_count ?? 0) > 0;
-    const title = action === "Ready for Review" ? (resubmit ? "Resubmitted for review" : "Submitted for review") : action === "Pass QA" ? "QA passed" : action === "Approve" ? "Approved" : "Marked as done";
-    setCompleteDlg(null);
-    setCompleteNotice("");
-    // phase228: toast from mock-ups 1-4.
-    const kind = action === "Mark Done" ? freshTiming?.completion_timing ?? null : null;
-    const recDate = freshTiming?.actual_completion_date ? formatDate(freshTiming.actual_completion_date) : formatDate(toISOWorkingDay(new Date()));
-    if (kind === "early") setDoneToast({ title: "Sent for validation", detail: `${t.name} · Completed ahead of schedule. It will be reviewed in the Approval Center.`, tone: "ok" });
-    else if (kind === "on_time") setDoneToast({ title: "Task completed", detail: `${t.name} · Recorded as On Time · ${recDate}`, tone: "ok" });
-    else if (kind === "grace_on_time") setDoneToast({ title: "Task completed", detail: `${t.name} · Recorded as On Time (grace period) · Due: ${formatDate(t.current_due_date)} · Updated: ${formatDate(toISOWorkingDay(new Date()))}`, tone: "ok" });
-    else if (kind === "late") setDoneToast({ title: "Task completed", detail: `${t.name} · Recorded as Late · ${recDate}`, tone: "warn" });
-    else if (kind === "logged_late") setDoneToast({ title: "Task completed", detail: `${t.name} · Recorded on its due date · ${recDate}`, tone: "ok" });
-    else setDoneToast({ title, detail: `${t.name} · ${words[1]}`, tone: "ok" });
-    await recomputeAncestorStatus(t.id, next);
-    return null;
+    // becomes that hand-off. 2026-11-11: decided in the shared
+    // TaskCompletionFlow (lib/taskCompletion.ts), same as My Work.
+    setCompletionReq({ kind: "complete", taskId: t.id, handoff, initialDate: v });
   }
 
   async function bulkUpdateTasks(patch: Partial<TaskRow>) {
@@ -6777,79 +6614,6 @@ export default function Projects() {
           }}
         />
       )}
-      {returnDialog && (() => {
-        const target = returnDialog.candidates.find((c) => c.id === returnTarget) ?? returnDialog.candidates[0];
-        const MAX = 500;
-        const rvTask = tasks.find((x) => x.id === returnDialog.reviewTaskId);
-        const reSince = reReviewSince.get(returnDialog.reviewTaskId);
-        const reviewMins = timeEntries
-          .filter((e) => e.task_id === returnDialog.reviewTaskId && !e.is_archived && (!reSince || e.created_at > reSince))
-          .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
-        const needsReviewTime = !!rvTask && r1ProjectIds.has(rvTask.project_id) && reviewMins <= 0;
-        return (
-          <Modal title="Request Revision" hideHeader onClose={() => (returnBusy ? undefined : setReturnDialog(null))} width={600}>
-            <div style={{ display: "grid", gap: 18, padding: "4px 4px 0" }}>
-              {/* 2026-10-23 (Sandra's mock-up) */}
-              <DialogHeader
-                icon={<PencilLine size={22} />}
-                title="Request Revision"
-                subtitle="Return this task to the assignee for changes. Once updated and resubmitted, it will return to you for review."
-                onClose={returnBusy ? undefined : () => setReturnDialog(null)}
-              />
-              <SummaryBand
-                items={[
-                  {
-                    label: "Task",
-                    value:
-                      returnDialog.candidates.length > 1 ? (
-                        <select value={returnTarget} onChange={(e) => setReturnTarget(e.target.value)} style={{ fontSize: 13, padding: "4px 6px", borderRadius: 6, border: "1px solid var(--border)", maxWidth: "100%" }}>
-                          {returnDialog.candidates.map((c) => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={target?.name}>{target?.name ?? "—"}</span>
-                      ),
-                  },
-                  { label: "Current stage", value: <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={returnDialog.reviewName}>{returnDialog.reviewName}</span> },
-                ]}
-              />
-              <label style={{ display: "grid", gap: 6 }}>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text)" }}>Revision instructions <span style={{ color: "var(--danger-text)" }}>*</span></span>
-                <textarea
-                  value={returnComment}
-                  maxLength={MAX}
-                  onChange={(e) => { setReturnComment(e.target.value.slice(0, MAX)); if (returnError) setReturnError(""); }}
-                  rows={4}
-                  placeholder="Scenario 2 doesn't follow the SOP sequence. Please swap steps 3 and 4."
-                  style={{ width: "100%", boxSizing: "border-box", fontFamily: "inherit", fontSize: 13.5, padding: "10px 12px", borderRadius: 8, border: "1px solid #9cc3f0", resize: "vertical" }}
-                />
-                <span style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 11.5, color: "var(--muted)" }}>
-                  <span>Describe what needs to be corrected so the assignee can take action.</span>
-                  <span style={{ flexShrink: 0 }}>{returnComment.length}/{MAX}</span>
-                </span>
-              </label>
-              {needsReviewTime && (
-                <div role="alert" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--warning-border, #f3d48b)", background: "var(--warning-bg, #fff8e6)", fontSize: 12.5 }}>
-                  <span aria-hidden="true" style={{ flexShrink: 0, width: 26, height: 26, borderRadius: "50%", display: "grid", placeItems: "center", background: "#f59e0b", color: "#fff", fontWeight: 800, fontSize: 15 }}>!</span>
-                  <span style={{ flex: 1, minWidth: 200, display: "grid", gap: 2 }}>
-                    <strong style={{ fontSize: 13.5, color: "var(--text)" }}>Review time required</strong>
-                    <span style={{ color: "var(--text-secondary)" }}>{reSince ? "Log the time you spent reviewing the resubmitted work before sending it back." : "Log the time you spent reviewing before sending it back."}</span>
-                  </span>
-                  <button type="button" className="btn-secondary" onClick={() => setReturnLogTime(true)} style={{ padding: "7px 16px", fontSize: 12.5, background: "#fff" }}>Log time</button>
-                </div>
-              )}
-              {returnError && <div style={{ color: "var(--danger-text)", fontSize: 12 }}>{returnError}</div>}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-                <button className="btn-secondary" disabled={returnBusy} onClick={() => setReturnDialog(null)} style={{ padding: "9px 20px" }}>Cancel</button>
-                <button className="btn-primary" disabled={returnBusy || !returnComment.trim() || needsReviewTime} onClick={() => void submitReturn()} style={{ padding: "9px 20px", display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <Send size={15} /> {returnBusy ? "Sending…" : "Request Revision"}
-                </button>
-              </div>
-            </div>
-          </Modal>
-        );
-      })()}
       <CancelTaskDialog
         open={Boolean(cancelTaskDialog)}
         taskLabel={cancelTaskDialog?.label ?? ""}
@@ -7649,97 +7413,21 @@ export default function Projects() {
           <button type="button" onClick={() => setDoneToast(null)} aria-label="Close" style={{ border: "none", background: "transparent", color: "#6d8198", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 2, width: "auto" }}>×</button>
         </div>
       )}
-      {completeDlg && (() => {
-        const ct = tasks.find((x) => x.id === completeDlg.taskId);
-        if (!ct) return null;
-        const ot = outputTypes.find((o) => o.id === ct.output_type_id);
-        const pendingMin = timeEntries
-          .filter((e) => e.task_id === ct.id && !e.is_archived && (e.status === "pending_confirm" || e.status === "pending_approval"))
-          .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
-        return (
-          <CompleteTaskModal
-            key={ct.id}
-            info={{
-              name: ct.name,
-              dueDate: ct.current_due_date,
-              workTypeName: workTypes.find((w) => w.id === ct.work_type_id)?.name ?? null,
-              outputTypeName: ot?.name ?? null,
-              countsDeliverable: !!ot && ot.counts_deliverable !== false,
-              estimatedHours: ct.estimated_hours,
-              loggedHours: ownHoursFor(timeEntries, ct.id),
-              pendingHours: Math.round((pendingMin / 60) * 100) / 100,
-              revisionRole: !(r1ProjectIds.has(ct.project_id) && (ct.revision_count ?? 0) > 0 && lastReturnByTask.get(ct.id)) && r1ProjectIds.has(ct.project_id) && reReviewSince.has(ct.id) ? "review" : "doer",
-              revisionHours: (() => {
-                const ret = r1ProjectIds.has(ct.project_id) && (ct.revision_count ?? 0) > 0 ? lastReturnByTask.get(ct.id) : undefined;
-                const reSince = !ret && r1ProjectIds.has(ct.project_id) ? reReviewSince.get(ct.id) : undefined;
-                if (reSince) {
-                  const mins = timeEntries
-                    .filter((e) => e.task_id === ct.id && !e.is_archived && e.created_at > reSince)
-                    .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
-                  return Math.round((mins / 60) * 100) / 100;
-                }
-                if (!ret?.created_at) return null;
-                const mins = timeEntries
-                  .filter((e) => e.task_id === ct.id && !e.is_archived && e.created_at > ret.created_at)
-                  .reduce((sum, e) => sum + (e.duration_minutes ?? 0), 0);
-                return Math.round((mins / 60) * 100) / 100;
-              })(),
-              typeEdit: {
-                workTypeId: ct.work_type_id,
-                outputTypeId: ct.output_type_id,
-                workTypes,
-                outputTypes,
-                links: typeLinks,
-              },
-            }}
-            initialDate={completeDlg.date}
-            initialCount={ct.output_count}
-            today={toISOWorkingDay(new Date())}
-            actionLabel={completeDlg.actionLabel}
-            onLogTime={() => setCompleteLogTime(true)}
-            onCancel={() => { setCompleteDlg(null); setCompleteNotice(""); }}
-            onConfirm={(date, count, types, grace) => confirmTaskDone(ct, date, count, types, grace)}
-            timing={completionTimingFor(ct, completeDlg.actionLabel)}
-            outcome={completionWords(ct, completeDlg.actionLabel)[0]}
-            autoDate
-            subtitle={(() => {
-              const w = completionWords(ct, completeDlg.actionLabel)[0];
-              if (completeDlg.actionLabel === "Ready for Review") {
-                const who = /to (.+) for review/.exec(w)?.[1];
-                return `Confirm the work details before sending this task to ${who ?? "the reviewer"} for review.`;
-              }
-              return `Confirm the details. ${w}`;
-            })()}
-            notice={completeNotice}
-            onRevision={reviewStepKind(ct) && canReturnFrom(ct) ? () => { setCompleteDlg(null); openReturnDialog(ct); } : undefined}
-          />
-        );
-      })()}
-      {returnDialog && returnLogTime && me && (
-        <LogTimeModal
-          personId={me.id}
-          isFullAccess={me.access_level === "full"}
-          presetTaskId={returnDialog.reviewTaskId}
-          onClose={() => setReturnLogTime(false)}
-          onSaved={() => {
-            setReturnLogTime(false);
-            loadAll();
-          }}
-        />
-      )}
-      {completeDlg && completeLogTime && me && (
-        <LogTimeModal
-          personId={me.id}
-          isFullAccess={me.access_level === "full"}
-          presetTaskId={completeDlg.taskId}
-          onClose={() => setCompleteLogTime(false)}
-          onSaved={() => {
-            setCompleteLogTime(false);
-            setCompleteNotice(`Time logged. Now click ${completeDlg.actionLabel} to finish.`);
-            loadAll();
-          }}
-        />
-      )}
+      {/* 2026-11-11: the shared completion flow (also used by My Work on My Dashboard). */}
+      <TaskCompletionFlow
+        request={completionReq}
+        tasks={tasks}
+        deps={taskDeps}
+        projects={projects}
+        people={people}
+        me={me}
+        isClosedStatus={(s) => statusGroupOf(TASK_STATUS_GROUPED, s) === "complete" || statusGroupOf(TASK_STATUS_GROUPED, s) === "cancelled"}
+        updateParent={(id, patch) => updateTask(id, patch)}
+        onTaskUpdated={(id, fields) => setTasks((prev) => prev.map((row) => (row.id === id ? { ...row, ...fields } : row)))}
+        onChanged={() => loadAll()}
+        onToast={setDoneToast}
+        onClose={() => setCompletionReq(null)}
+      />
 
       {/* 2026-10-08 (Sandra, item H): the shared Log time form, pre-set to
           this Done task, so it logs as follow-up (same checks as everywhere). */}

@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   Calendar,
   Play,
+  Check,
   CalendarClock,
   Square,
   Eye,
@@ -40,6 +41,8 @@ import Modal from "../components/Modal";
 import LogTimeModal, { type LogTimeMode } from "../components/LogTimeModal";
 import ApprovalCenter from "./ApprovalCenter";
 import RequestExtensionModal from "../components/RequestExtensionModal";
+import TaskCompletionFlow, { DoneToast, type CompletionRequest, type DoneToastData } from "../components/TaskCompletionFlow";
+import { actionLabelFor, handoffFor } from "../lib/taskCompletion";
 import { loadMyRequests, type MyRequestRow } from "../lib/myRequests";
 import NonProjectTimerQuickStart from "../components/NonProjectTimerQuickStart";
 import { useSession } from "../lib/useSession";
@@ -273,6 +276,10 @@ export default function MyDashboard() {
   const [extensions, setExtensions] = useState<ExtensionRow[]>([]);
   const [myReqs, setMyReqs] = useState<MyRequestRow[]>([]);
   const [extensionTask, setExtensionTask] = useState<{ id: string; name: string; current_due_date: string } | null>(null);
+  // 2026-11-11 (Sandra): Complete action on My Work -- the same Complete task
+  // pop-up and rules as Projects & Tasks (components/TaskCompletionFlow).
+  const [completionReq, setCompletionReq] = useState<CompletionRequest | null>(null);
+  const [doneToast, setDoneToast] = useState<DoneToastData | null>(null);
   const [pendingTimeEntries, setPendingTimeEntries] = useState<PendingTimeEntryRow[]>([]);
   const [baselineRequests, setBaselineRequests] = useState<BaselineRow[]>([]);
   const [closureRequests, setClosureRequests] = useState<ClosureRow[]>([]);
@@ -310,8 +317,8 @@ export default function MyDashboard() {
   }, [weekOffset]);
   const weekDays = useMemo(() => Array.from({ length: 5 }, (_, i) => addDays(weekStart, i)), [weekStart]);
 
-  async function loadAll() {
-    setLoading(true);
+  async function loadAll(quiet = false) {
+    if (!quiet) setLoading(true);
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
@@ -627,6 +634,32 @@ export default function MyDashboard() {
                     >
                       {isRunningHere ? <Square size={11} fill="currentColor" /> : <Play size={11} fill="currentColor" />}
                     </button>
+                    {mode === "work" && (() => {
+                      // Same hand-off as Projects & Tasks: Mark Done / Ready for Review / Pass QA / Approve.
+                      const r1 = new Set(projects.filter((p) => isR1Project(p)).map((p) => p.id));
+                      const ctx = { tasks, deps: taskDeps, r1ProjectIds: r1, wtNames };
+                      const h = handoffFor(t, ctx);
+                      const resubmit = h === "review" && (t.revision_count ?? 0) > 0 && t.status === "In Progress" && lastReturn.has(t.id);
+                      const label = resubmit ? "Resubmit" : actionLabelFor(h);
+                      const waitingOn = r1.has(t.project_id) ? readinessById.get(t.id)?.waitingOn ?? [] : [];
+                      const blocked = waitingOn.length > 0;
+                      const tip = blocked
+                        ? `Can't be finished yet. Waiting on: ${waitingOn.map((w) => w.name).join(", ")}`
+                        : h === "qa" || h === "approve"
+                          ? `${label} or send For Revision`
+                          : label;
+                      return (
+                        <button
+                          onClick={() => setCompletionReq({ kind: "complete", taskId: t.id })}
+                          disabled={blocked || !wtNames}
+                          title={tip}
+                          aria-label={tip}
+                          style={{ ...iconBtn, marginLeft: 6, background: blocked ? "var(--hover-bg)" : "var(--success-bg, #e7f6ee)", border: `1px solid ${blocked ? "var(--border)" : "#9fd9b9"}`, color: blocked ? "var(--muted)" : "var(--success-text, #157347)", cursor: blocked ? "default" : "pointer" }}
+                        >
+                          <Check size={14} strokeWidth={2.75} />
+                        </button>
+                      );
+                    })()}
                     {mode === "today" ? (
                       isHidden ? (
                         <button onClick={() => unhideTaskFromToday(t.id)} title="Restore to My Work Today" style={{ ...iconBtn, marginLeft: 6, background: "none", border: "1px solid var(--border)", color: "var(--accent)" }}>
@@ -1994,6 +2027,19 @@ export default function MyDashboard() {
       </div>
 
       {confirmDialog}
+      <TaskCompletionFlow
+        request={completionReq}
+        tasks={tasks}
+        deps={taskDeps}
+        projects={projects}
+        people={people}
+        me={me}
+        onTaskUpdated={(id, fields) => setTasks((prev) => prev.map((row) => (row.id === id ? { ...row, ...fields } : row)))}
+        onChanged={() => void loadAll(true)}
+        onToast={(toast) => { setDoneToast(toast); void loadAll(true); }}
+        onClose={() => setCompletionReq(null)}
+      />
+      <DoneToast toast={doneToast} onClose={() => setDoneToast(null)} />
       {logTimeMode && (
         <LogTimeModal
           personId={me.id}
