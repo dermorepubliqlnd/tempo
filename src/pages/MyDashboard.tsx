@@ -539,6 +539,43 @@ export default function MyDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me, projects, myOpenTasks, taskDeps, tasks, lastReturn, readinessById, myParentIds, wtNames]);
   const waitingCount = waitingForYou.toReview.length + waitingForYou.sentBack.length;
+  // ---- Your Turn (2026-11-20, Sandra): work that has reached me, whatever its due date ----
+  // New-flow projects only (same as readiness). A task is my turn when:
+  //   - it was sent back to me For Revision, or
+  //   - it had earlier steps (Depends-on links) and all of them are now finished,
+  //     with at least one Done (QA / Sign-Off hand-offs and ordinary next steps alike).
+  // Tasks with no earlier steps are never "handed over", so they stay date-based.
+  // Shown first in Needs Action, oldest hand-off first; each task in one place only.
+  const yourTurn = useMemo(() => {
+    const out = new Map<string, { kind: "review" | "approve" | "back" | "next"; by: string | null; at: string | null }>();
+    if (!me) return out;
+    const r1 = new Set(projects.filter((p) => isR1Project(p)).map((p) => p.id));
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const doneAt = (x: TaskRow) => {
+      const r = x as { submitted_on?: string | null; actual_completion_date?: string | null; updated_at?: string | null };
+      return r.submitted_on ?? r.actual_completion_date ?? r.updated_at ?? null;
+    };
+    for (const t of myActionTasks) {
+      if (!r1.has(t.project_id) || (t.project as PauseProjectInfo | null)?.status === "Paused") continue;
+      const ret = lastReturn.get(t.id);
+      if ((t.revision_count ?? 0) > 0 && t.status === "In Progress" && ret) {
+        out.set(t.id, { kind: "back", by: ret.actor_id, at: ret.created_at });
+        continue;
+      }
+      if ((readinessById.get(t.id)?.waitingOn.length ?? 0) > 0) continue;
+      const preds = taskDeps
+        .filter((d) => d.task_id === t.id)
+        .map((d) => byId.get(d.depends_on_task_id))
+        .filter((x): x is TaskRow => !!x && !x.is_archived);
+      if (preds.length === 0 || preds.some((x) => x.status !== "Done" && x.status !== "Cancelled")) continue;
+      const done = preds.filter((x) => x.status === "Done").sort((x, y) => (doneAt(y) ?? "").localeCompare(doneAt(x) ?? ""));
+      if (!done.length) continue;
+      const kind = stepKindOf(t, wtNames);
+      out.set(t.id, { kind: kind === "approve" ? "approve" : kind === "qa" ? "review" : "next", by: done[0].assignee_id, at: doneAt(done[0]) });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, projects, tasks, taskDeps, lastReturn, readinessById, wtNames, myOpenTasks]);
   const overdueTasks = myActionTasks.filter((t) => isOverdueTask(t, t.project, todayIso, myParentIds.has(t.id)));
   const isPausedTask = (t: { project?: unknown }) => (t.project as PauseProjectInfo | null)?.status === "Paused";
   const tasksDueToday = myActionTasks.filter((t) => hasConfirmedBaseline(t) && t.current_due_date && t.current_due_date.slice(0, 10) === todayIso);
@@ -693,6 +730,19 @@ export default function MyDashboard() {
                     <div style={wtd}>
                       <div style={{ ...clip, fontWeight: 600, color: "var(--navy)", fontSize: 12.5 }} title={t.name}>{t.name}</div>
                       <div style={{ ...clip, fontSize: 10.5, color: "var(--muted)", marginTop: 2 }}>T-{String(t.task_number).padStart(4, "0")} · {t.status ?? "Not Started"}</div>
+                      {(() => {
+                        const yt = yourTurn.get(t.id);
+                        if (!yt) return null;
+                        const who = yt.by ? people.find((p) => p.id === yt.by)?.name ?? null : null;
+                        const what = yt.kind === "approve" ? "Ready for your sign-off" : yt.kind === "review" ? "Ready for your review" : yt.kind === "back" ? "Sent back to you" : t.status === "In Progress" ? "Handed to you" : "Ready to start";
+                        const when = yt.at ? formatDate(yt.at.slice(0, 10)) : null;
+                        const text = [what, [who && (yt.kind === "back" ? `by ${who}` : `from ${who}`), when].filter(Boolean).join(" · ")].filter(Boolean).join(" · ");
+                        return (
+                          <div style={{ ...clip, marginTop: 3 }} title={text}>
+                            <span className={`status-pill ${yt.kind === "back" ? "gold" : "accent"}`} style={{ fontSize: 9, whiteSpace: "nowrap" }}>{text}</span>
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div style={{ ...wtd, color: "var(--text-secondary)" }}>
                       <div style={clip} title={t.project?.name ?? undefined}>{t.project?.name ?? "—"}</div>
@@ -823,20 +873,29 @@ export default function MyDashboard() {
   const byDue = (a: { current_due_date?: string | null }, b: { current_due_date?: string | null }) => (a.current_due_date ?? "9999").localeCompare(b.current_due_date ?? "9999");
   const next14 = nextBusinessDaysWindow(new Date(), holidayDateStrings, 14);
   const next14Label = new Date(next14.end + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const shownSoFar = new Set([...overdueTasks, ...tasksThisWeek].map((t) => t.id));
+  const yourTurnRows = myActionTasks
+    .filter((t) => yourTurn.has(t.id))
+    .sort((a, b) => (yourTurn.get(a.id)?.at ?? "9999").localeCompare(yourTurn.get(b.id)?.at ?? "9999") || byDue(a, b));
+  const notYourTurn = (t: { id: string }) => !yourTurn.has(t.id);
+  const overdueNotMine = overdueTasks.filter(notYourTurn);
+  const next7NotMine = tasksThisWeek.filter(notYourTurn);
+  // KPI: due in 7 business days, plus my-turn tasks that aren't overdue (overdue has its own KPI).
+  const overdueIds = new Set(overdueTasks.map((t) => t.id));
+  const tasksNeedingActionCount = new Set([...tasksThisWeek.map((t) => t.id), ...yourTurnRows.filter((t) => !overdueIds.has(t.id)).map((t) => t.id)]).size;
+  const shownSoFar = new Set([...overdueTasks, ...tasksThisWeek, ...yourTurnRows].map((t) => t.id));
   const restOfMine = myActionTasks.filter((t) => !shownSoFar.has(t.id) && !isPausedTask(t));
   const inNext2Weeks = restOfMine.filter((t) => { const d = t.current_due_date?.slice(0, 10); return !!d && d > next7.end && d <= next14.end; }).sort(byDue);
   const laterTasks = restOfMine.filter((t) => !inNext2Weeks.includes(t)).sort(byDue);
   const myTaskGroups = [
-    { key: "overdue", label: "Overdue", rows: [...overdueTasks].sort(byDue), color: "var(--danger-text)", hint: "finish it, or request an extension", collapsible: false },
-    { key: "next7", label: "Next 7 business days", rows: tasksThisWeek, color: "var(--warning-text, #b45309)", hint: `today through ${next7Label}`, collapsible: false },
+    { key: "overdue", label: "Overdue", rows: [...overdueNotMine].sort(byDue), color: "var(--danger-text)", hint: "finish it, or request an extension", collapsible: false },
+    { key: "next7", label: "Next 7 business days", rows: next7NotMine, color: "var(--warning-text, #b45309)", hint: `today through ${next7Label}`, collapsible: false },
     { key: "next14", label: "Next 2 weeks", rows: inNext2Weeks, color: "var(--navy)", hint: `through ${next14Label}`, collapsible: false },
     { key: "later", label: "Later", rows: laterTasks, color: "var(--muted)", hint: `due after ${next14Label}, or no due date`, collapsible: true },
   ];
-  const myTasksTotal = myTaskGroups.reduce((n, g) => n + g.rows.length, 0);
+  const myTasksTotal = yourTurnRows.length + myTaskGroups.reduce((n, g) => n + g.rows.length, 0);
   // 2026-10-27 dashboard refresh: My Work tabs by due window (Sandra's decision).
   const myWorkTabs = [
-    { key: "needs" as const, label: "Needs Action", count: myTaskGroups[0].rows.length + myTaskGroups[1].rows.length, hint: "Overdue, plus due within the next 7 business days" },
+    { key: "needs" as const, label: "Needs Action", count: yourTurnRows.length + myTaskGroups[0].rows.length + myTaskGroups[1].rows.length, hint: "Your turn (handed to you or sent back, any due date), overdue, and due within the next 7 business days" },
     { key: "next14" as const, label: "Next 2 Weeks", count: myTaskGroups[2].rows.length, hint: `Due in business days 8–14 (to ${next14Label})` },
     { key: "later" as const, label: "Later", count: myTaskGroups[3].rows.length, hint: `Due after ${next14Label}, or no due date` },
     { key: "waiting" as const, label: "Waiting", count: myComingUp.length + waitingForYou.withReviewer.length, hint: "Waiting on someone else's task, or with a reviewer. Can't be started yet." },
@@ -845,8 +904,9 @@ export default function MyDashboard() {
   const currentWorkSections =
     activeWorkTab === "needs"
       ? [
+          { key: "yourturn", label: "Your Turn", hint: "handed to you or sent back to you, oldest first", color: "var(--accent)", rows: yourTurnRows },
           { key: "overdue", label: "Overdue", hint: "finish it, or request an extension", color: "var(--danger-text)", rows: myTaskGroups[0].rows },
-          { key: "next7", label: myTaskGroups[0].rows.length ? "Next 7 business days" : "", hint: `today to ${next7Label}`, color: "var(--warning-text, #b45309)", rows: myTaskGroups[1].rows },
+          { key: "next7", label: myTaskGroups[0].rows.length || yourTurnRows.length ? "Next 7 business days" : "", hint: `today to ${next7Label}`, color: "var(--warning-text, #b45309)", rows: myTaskGroups[1].rows },
         ]
       : activeWorkTab === "next14"
         ? [{ key: "next14", label: "", hint: "", color: "var(--navy)", rows: myTaskGroups[2].rows }]
@@ -1277,7 +1337,7 @@ export default function MyDashboard() {
 
       <div className="dash-kpis">
         <MetricCard icon={<Folder size={16} />} colors={METRIC_COLORS.blue} label="My Active Projects" value={myActiveProjects.length} sub="Owned, In Progress" title={`${METRIC_DEFINITIONS.activeProject} Counts projects you own.`} />
-        <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Tasks Needing Action" value={tasksThisWeek.length} sub={`Due within 7 business days (to ${next7Label})`} title={METRIC_DEFINITIONS.dueNext7BusinessDays} />
+        <MetricCard icon={<CheckCircle2 size={16} />} colors={METRIC_COLORS.green} label="Tasks Needing Action" value={tasksNeedingActionCount} sub={`Your turn, or due within 7 business days (to ${next7Label})`} title={`${METRIC_DEFINITIONS.dueNext7BusinessDays} Also counts tasks that are your turn (handed to you or sent back to you), whatever their due date, unless they're overdue.`} />
         <MetricCard icon={<AlertTriangle size={16} />} colors={METRIC_COLORS.red} label="Overdue Tasks" value={overdueTasks.length} sub="Past their due date" title={METRIC_DEFINITIONS.overdueTask} />
         <MetricCard icon={<ShieldQuestion size={16} />} colors={METRIC_COLORS.purple} label="Pending Requests" value={myPendingApprovalsCount} sub="Sent by you, awaiting approval" title="Requests you submitted that are still waiting for a decision, including finished tasks waiting for validation." />
         <MetricCard icon={<BarChart3 size={16} />} colors={METRIC_COLORS.teal} label="Utilization This Week" value={`${Math.round(weekUtilPct)}%`} sub={`of ${weekCapacityTotal.toFixed(1)}h capacity`} title={METRIC_DEFINITIONS.plannedUtilization} />
@@ -1645,7 +1705,7 @@ export default function MyDashboard() {
           <div className="dash-card-head">
             <div>
               <h2>My Work ({myTasksTotal})</h2>
-              <div className="dash-sub">All your open tasks, most urgent first. Tasks you can't start yet are under Waiting.</div>
+              <div className="dash-sub">All your open tasks. Work handed to you shows first under Your Turn; tasks you can't start yet are under Waiting.</div>
             </div>
             <Link to="/projects?assignee=me" className="dash-link">View All Tasks →</Link>
           </div>
@@ -1717,7 +1777,7 @@ export default function MyDashboard() {
                 </div>
               )
             ) : currentWorkSections.every((sec) => sec.rows.length === 0) ? (
-              <p className="dash-empty">{activeWorkTab === "needs" ? "Nothing overdue or due in the next 7 business days." : "No tasks here."}</p>
+              <p className="dash-empty">{activeWorkTab === "needs" ? "Nothing is your turn, overdue or due in the next 7 business days." : "No tasks here."}</p>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "minmax(150px, 2.2fr) minmax(110px, 1.5fr) auto auto minmax(110px, 1fr) max-content", alignItems: "stretch" }}>
                 {["Task", "Project", "Due Date", "Timing", "Hours (Logged / Est.)", "Actions"].map((h, i, arr) => (
