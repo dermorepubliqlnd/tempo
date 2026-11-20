@@ -3921,7 +3921,12 @@ export default function WbsPlanning() {
       if (t && me && project && !manager) {
         const planKeys = ["name", "start_date", "start_date_full", "start_date_standard", "original_due_date", "current_due_date", "estimated_hours", "assignee_id", "parent_task_id", "project_id"];
         const msg = project.is_operational
-          ? (t.assignee_id === me.id ? null : "You can only edit your own sessions in this project.")
+          ? (t.assignee_id !== me.id
+              ? "You can only edit your own sessions in this project."
+              : "assignee_id" in patch && patch.assignee_id !== me.id
+                // 2026-11-20 (Sandra): backstop for the locked Assignee cell (phase197 tasks_update).
+                ? "On ongoing projects, only the project owner, their supervisor or Full Access can assign a task to someone else. Ask the project owner to reassign it."
+                : null)
           : t.assignee_id !== me.id
             ? "Only the project owner, their supervisor or Full Access can edit this task."
             : Object.keys(patch).some((k) => planKeys.includes(k))
@@ -4522,6 +4527,13 @@ export default function WbsPlanning() {
   // database lets add tasks (tasks_insert, phase190b): Full Access, the
   // project owner, or anyone on an ongoing container.
   const canAddTasks = isFullAccess || project.owner_id === me?.id || !!project.is_operational || (!!me && people.find((p) => p.id === project.owner_id)?.reports_to === me.id);
+  // 2026-11-20 (Sandra, Nikki's P-0095 report): on ongoing containers the database
+  // (tasks_update, phase197) only lets the owner, the owner's supervisor or Full Access
+  // move a task to someone else. Lock the Assignee cell for everyone else instead of
+  // letting them pick a name that is refused at Save.
+  const canReassignTasks = isFullAccess || project.owner_id === me?.id || (!!me && people.find((p) => p.id === project.owner_id)?.reports_to === me.id);
+  const assigneeLocked = !!project.is_operational && !canReassignTasks;
+  const assigneeLockedTip = `On ongoing projects, only the project owner${project.owner_id ? " (" + (people.find((p) => p.id === project.owner_id)?.name ?? "") + ")" : ""}, their supervisor or Full Access can assign a task to someone else.`;
 
   // Project Information completeness (2026-10-13).
   const basicsMissing = [!project.name?.trim() || project.name === "Untitled" ? "Project Name" : null, !project.owner_id ? "Owner" : null, !project.start_date ? "Start Date" : null].filter((x): x is string => !!x);
@@ -9047,7 +9059,7 @@ export default function WbsPlanning() {
                       </td>
                       )}
                       {colOn("assignee") && (
-                      <td className={rowEditable && !isParent ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("assignee", true, rowLocked)}>
+                      <td className={rowEditable && !isParent && !assigneeLocked ? "wbs-editable-cell" : "wbs-readonly-cell"} style={wbsColStickyStyle("assignee", true, rowLocked)} title={!isParent && assigneeLocked ? assigneeLockedTip : undefined}>
                         {isParent ? (
                           (() => {
                             const { multiple } = parentAssigneeState(t.id);
@@ -9073,7 +9085,7 @@ export default function WbsPlanning() {
                         ) : (
                           <InlineSelect
                             value={assignee?.name ?? ""}
-                            editable={rowEditable}
+                            editable={rowEditable && !assigneeLocked}
                             searchable
                             // phase126k: after Start Project an assignee can be changed, never removed.
                             allowEmpty={project?.wbs_status === "draft" || !t.assignee_id}
