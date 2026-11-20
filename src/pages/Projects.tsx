@@ -24,7 +24,6 @@ import { timingWithPause, type TimingResult } from "../lib/pause";
 import { METRIC_DEFINITIONS, isActiveProject, isOverdueProject, isOverdueTask, isDueThisWeek } from "../lib/metrics";
 import RequestExtensionModal from "../components/RequestExtensionModal";
 import LogTimeModal from "../components/LogTimeModal";
-import { selfAndTeamBelow } from "../lib/teamBelow";
 import TaskCompletionFlow, { type CompletionRequest } from "../components/TaskCompletionFlow";
 import {
   canReturnFrom as libCanReturnFrom,
@@ -1558,10 +1557,10 @@ export default function Projects() {
   const [people, setPeople] = useState<PersonOption[]>([]);
   const assigneePicker = useAssigneePicker(people);
   // phase190b: who this person may assign when adding a task to an ongoing container.
-  function containerPickOpts(projectId: string): { allowedIds?: string[]; note?: string } | undefined {
-    const pr = projects.find((p) => p.id === projectId);
-    if (!pr || !me || !pr.is_operational || me.access_level === "full" || pr.owner_id === me.id) return undefined;
-    return { allowedIds: selfAndTeamBelow(me.id, chainPeople), note: "On ongoing projects you can add tasks for yourself and the people in your team." };
+  // 2026-11-20 (Sandra): anyone may add a task for any active person on an ongoing
+  // project (phase237 tasks_insert), so the picker is no longer narrowed.
+  function containerPickOpts(_projectId: string): { allowedIds?: string[]; note?: string } | undefined {
+    return undefined;
   }
   const startDatePrompt = useProjectStartDatePrompt();
   // Work Types (Phase 12, 2026-08-20) -- fetched unfiltered (all rows,
