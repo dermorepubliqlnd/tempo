@@ -1,4 +1,3 @@
-import { selfAndTeamBelow } from "../lib/teamBelow";
 import { projectStageOf } from "../lib/projectStage";
 import { useAssigneePicker } from "../components/AssigneePicker";
 import Modal from "../components/Modal";
@@ -653,9 +652,11 @@ export default function WbsPlanning() {
   const assigneePicker = useAssigneePicker(people.filter((p) => p.is_active));
   // phase190b: on ongoing containers, non-owners without Full Access can add
   // tasks for themselves and the people below them in the reporting line.
+  // 2026-11-20 (Sandra): "allow everyone for ongoing projects to add tasks for their
+  // peers" -- anyone may now add a task for any active person (phase237 tasks_insert),
+  // so the add-task picker is no longer narrowed. Kept as a hook for future limits.
   function containerPickOpts(): { allowedIds?: string[]; note?: string } | undefined {
-    if (!project || !me || !project.is_operational || isFullAccess || project.owner_id === me.id) return undefined;
-    return { allowedIds: selfAndTeamBelow(me.id, people.map((p) => ({ id: p.id, reports_to: p.reports_to ?? null }))), note: "On ongoing projects you can add tasks for yourself and the people in your team." };
+    return undefined;
   }
   const startDatePrompt = useProjectStartDatePrompt();
   // Work Types (Phase 12, 2026-08-20) -- fetched unfiltered (all rows) so
