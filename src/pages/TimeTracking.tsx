@@ -1407,31 +1407,56 @@ export default function TimeTracking() {
   // search), oldest to newest. Same CSV-opens-in-Excel pattern as
   // Productivity/Materials Output; BOM so names like "Velena" with an
   // enye render correctly in Excel. Duration is whole minutes (Sandra 2026-10-01) so it sums.
-  function exportMyTimeCsv() {
+  // 2026-11-24 (Sandra: "put an option in the team time and all time to
+  // extract reports same as what's available in my time ... only those
+  // who have admin access and direct reports"). The same two exports now
+  // also run on Team Time (people under me, hasTeam) and All Time (Full
+  // Access, isFullAccessPage). canExportScope re-checks both so a saved
+  // scope pref can't open the button for someone who shouldn't have it.
+  // Outside My Time every row starts with Person, the daily summary is
+  // grouped per person too, and rows are sorted by person, then date.
+  const canExportScope = scope === "mine" || (scope === "team" && hasTeam) || (scope === "all" && isFullAccessPage);
+  const exportWithPerson = scope !== "mine";
+  const exportFilePrefix = scope === "mine" ? "my_time" : scope === "team" ? "team_time" : "all_time";
+  function exportPersonName(row: EntryRow): string {
+    return row.person?.name ?? personName(row.person_id);
+  }
+  function finalizedForExport(): EntryRow[] {
     // 2026-10-01 (Sandra: "only approved and confirmed logs") -- both
-    // exports now carry finalized logs only; pending/rejected never export.
-    const rows = filteredEntries
+    // exports carry finalized logs only; pending/rejected never export.
+    return filteredEntries
       .filter((e) => e.status === "approved" || e.status === "confirmed")
-      .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime())
-      .map((row) => {
-        const isNonProject = Boolean(row.activity_type_id);
-        const taskIdLabel = row.task?.task_number
-          ? `T-${String(row.task.task_number).padStart(4, "0")}`
-          : row.non_project_entry_number
-          ? `NP-${String(row.non_project_entry_number).padStart(4, "0")}`
-          : "";
-        return [
-          timeLogId(row.entry_number),
-          taskIdLabel,
-          isNonProject ? "Non-project" : "Project",
-          isNonProject ? "Non-project" : row.task?.project?.name ?? "",
-          isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "",
-          toDateInputValue(new Date(row.started_at)),
-          Math.round(row.duration_minutes ?? 0),
-          row.reason_notes?.trim() || row.reason_category || "",
-        ];
+      .sort((a, b) => {
+        if (exportWithPerson) {
+          const byName = exportPersonName(a).localeCompare(exportPersonName(b));
+          if (byName !== 0) return byName;
+        }
+        return new Date(a.started_at).getTime() - new Date(b.started_at).getTime();
       });
-    downloadMyTimeCsv(toCsv(["Log ID", "Task ID", "Type", "Project", "Task", "Date", "Duration (min)", "Details"], rows), `my_time_detailed_${kpiRangeStart}_to_${kpiRangeEnd}.csv`);
+  }
+
+  function exportMyTimeCsv() {
+    const rows = finalizedForExport().map((row) => {
+      const isNonProject = Boolean(row.activity_type_id);
+      const taskIdLabel = row.task?.task_number
+        ? `T-${String(row.task.task_number).padStart(4, "0")}`
+        : row.non_project_entry_number
+        ? `NP-${String(row.non_project_entry_number).padStart(4, "0")}`
+        : "";
+      const cells = [
+        timeLogId(row.entry_number),
+        taskIdLabel,
+        isNonProject ? "Non-project" : "Project",
+        isNonProject ? "Non-project" : row.task?.project?.name ?? "",
+        isNonProject ? row.activity_type?.name ?? "Non-project" : row.task?.name ?? "",
+        toDateInputValue(new Date(row.started_at)),
+        Math.round(row.duration_minutes ?? 0),
+        row.reason_notes?.trim() || row.reason_category || "",
+      ];
+      return exportWithPerson ? [exportPersonName(row), ...cells] : cells;
+    });
+    const header = ["Log ID", "Task ID", "Type", "Project", "Task", "Date", "Duration (min)", "Details"];
+    downloadMyTimeCsv(toCsv(exportWithPerson ? ["Person", ...header] : header, rows), `${exportFilePrefix}_detailed_${kpiRangeStart}_to_${kpiRangeEnd}.csv`);
   }
 
   function downloadMyTimeCsv(csvBody: string, filename: string) {
@@ -1452,18 +1477,18 @@ export default function TimeTracking() {
   // distinct details joined with "; " in chronological order. Rows
   // ordered by date, then by each group's first start time.
   function exportMyTimeDailySummaryCsv() {
-    const finalized = filteredEntries
-      .filter((e) => e.status === "approved" || e.status === "confirmed")
-      .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime());
-    type Group = { date: string; type: string; project: string; task: string; minutes: number; details: string[]; firstStart: number };
+    const finalized = finalizedForExport();
+    type Group = { person: string; date: string; type: string; project: string; task: string; minutes: number; details: string[]; firstStart: number };
     const groups = new Map<string, Group>();
     for (const row of finalized) {
       const date = toDateInputValue(new Date(row.started_at));
       const isNonProject = Boolean(row.activity_type_id);
-      const key = `${date}|${isNonProject ? `np:${row.activity_type_id}` : `t:${row.task_id}`}`;
+      // Outside My Time the same task on the same day stays one row PER PERSON.
+      const key = `${exportWithPerson ? `${row.person_id}|` : ""}${date}|${isNonProject ? `np:${row.activity_type_id}` : `t:${row.task_id}`}`;
       let g = groups.get(key);
       if (!g) {
         g = {
+          person: exportPersonName(row),
           date,
           type: isNonProject ? "Non-project" : "Project",
           project: isNonProject ? "Non-project" : row.task?.project?.name ?? "",
@@ -1479,9 +1504,16 @@ export default function TimeTracking() {
       if (d && !g.details.some((x) => x.toLowerCase() === d.toLowerCase())) g.details.push(d);
     }
     const rows = [...groups.values()]
-      .sort((a, b) => (a.date === b.date ? a.firstStart - b.firstStart : a.date < b.date ? -1 : 1))
-      .map((g) => [g.date, g.type, g.project, g.task, Math.round(g.minutes), g.details.join("; ")]);
-    downloadMyTimeCsv(toCsv(["Date", "Type", "Project", "Task", "Duration (min)", "Details"], rows), `my_time_daily_summary_${kpiRangeStart}_to_${kpiRangeEnd}.csv`);
+      .sort((a, b) => {
+        if (exportWithPerson && a.person !== b.person) return a.person.localeCompare(b.person);
+        return a.date === b.date ? a.firstStart - b.firstStart : a.date < b.date ? -1 : 1;
+      })
+      .map((g) => {
+        const cells = [g.date, g.type, g.project, g.task, Math.round(g.minutes), g.details.join("; ")];
+        return exportWithPerson ? [g.person, ...cells] : cells;
+      });
+    const header = ["Date", "Type", "Project", "Task", "Duration (min)", "Details"];
+    downloadMyTimeCsv(toCsv(exportWithPerson ? ["Person", ...header] : header, rows), `${exportFilePrefix}_daily_summary_${kpiRangeStart}_to_${kpiRangeEnd}.csv`);
   }
 
   // 2026-09-23 (Sandra: "task ID as the first column and immovable...
@@ -2392,7 +2424,7 @@ export default function TimeTracking() {
             <h2 style={{ margin: 0, fontSize: 13 }}>
               {scope === "mine" ? "My entries" : scope === "team" ? "Team entries" : "All entries"} ({filteredEntries.length})
             </h2>
-            {scope === "mine" && filteredEntries.length > 0 && (
+            {canExportScope && filteredEntries.length > 0 && (
               <div ref={exportMenuRef} style={{ marginLeft: "auto", position: "relative" }}>
                 <button
                   onClick={() => setExportMenuOpen((v) => !v)}
